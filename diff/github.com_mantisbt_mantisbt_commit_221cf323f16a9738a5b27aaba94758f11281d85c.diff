@@ -1,0 +1,28 @@
+From 221cf323f16a9738a5b27aaba94758f11281d85c Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Sat, 12 Sep 2020 12:20:49 +0200
+Subject: [PATCH] Fix XSS in Custom Field regex pattern validation
+
+Improper escaping of the custom field definition's Regular Expression
+allowed an attacker to inject HTML into the page (CVE-2020-25288).
+
+Credits to d3vpoo1 (https://gitlab.com/jrckmcsb) for the finding.
+
+Fixes #27275
+---
+ core/cfdefs/cfdef_standard.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/cfdefs/cfdef_standard.php b/core/cfdefs/cfdef_standard.php
+index 5653cdf78f..039c1c86ca 100644
+--- a/core/cfdefs/cfdef_standard.php
++++ b/core/cfdefs/cfdef_standard.php
+@@ -467,7 +467,7 @@ function cfdef_input_textbox( array $p_field_def, $p_custom_field_value, $p_requ
+ 		if( substr( $t_cf_regex, -1 ) != '$' ) {
+ 			$t_cf_regex .= '.*';
+ 		}
+-		echo ' pattern="' . $t_cf_regex . '"';
++		echo ' pattern="' . string_attribute( $t_cf_regex ) . '"';
+ 	}
+ 	echo ' value="' . string_attribute( $p_custom_field_value ) .'" />';
+ }

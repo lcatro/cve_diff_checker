@@ -1,0 +1,26 @@
+From f61c57bd425878be108ec787f4d96390579fb83e Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 28 Apr 2021 12:57:00 -0700
+Subject: [PATCH] Prevent division by 0
+
+PiperOrigin-RevId: 370966645
+Change-Id: I831bfd96c7eb77b02d7ebb744335f59f6e5728cb
+---
+ tensorflow/lite/kernels/embedding_lookup.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/embedding_lookup.cc b/tensorflow/lite/kernels/embedding_lookup.cc
+index d865f69eb9bd3..092868d5a6a74 100644
+--- a/tensorflow/lite/kernels/embedding_lookup.cc
++++ b/tensorflow/lite/kernels/embedding_lookup.cc
+@@ -71,6 +71,10 @@ TfLiteStatus EvalSimple(TfLiteContext* context, TfLiteNode* node,
+                         const TfLiteTensor* lookup, const TfLiteTensor* value,
+                         TfLiteTensor* output) {
+   const int row_size = SizeOfDimension(value, 0);
++  if (row_size == 0) {
++    // Propagate empty tensor if input is empty
++    return kTfLiteOk;
++  }
+   const int row_bytes = value->bytes / row_size;
+ 
+   char* output_raw = GetTensorData<char>(output);

@@ -1,0 +1,71 @@
+From b21ca8355a57286a1e6df96984b3a4c57679a463 Mon Sep 17 00:00:00 2001
+From: Ghazi Triki <ghazi.triki@riadvice.tn>
+Date: Sat, 25 Apr 2020 19:51:17 +0300
+Subject: [PATCH] Return 404 error when the file download is not allowed.
+
+---
+ .../bigbluebutton/api/RecordingService.java   | 24 ++++++++++++++++---
+ .../controllers/PresentationController.groovy |  4 +++-
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/bbb-common-web/src/main/java/org/bigbluebutton/api/RecordingService.java b/bbb-common-web/src/main/java/org/bigbluebutton/api/RecordingService.java
+index 69c86878aa5..172c1a9be63 100755
+--- a/bbb-common-web/src/main/java/org/bigbluebutton/api/RecordingService.java
++++ b/bbb-common-web/src/main/java/org/bigbluebutton/api/RecordingService.java
+@@ -88,10 +88,28 @@ public void processMakePresentationDownloadableMsg(MakePresentationDownloadableM
+     }
+ 
+     public File getDownloadablePresentationFile(String meetingId, String presId, String presFilename) {
+-    	log.info("Find downloadable presentation for meetingId={} presId={} filename={}", meetingId, presId, presFilename);
+-
++        log.info("Find downloadable presentation for meetingId={} presId={} filename={}", meetingId, presId,
++                presFilename);
+         File presDir = Util.getPresentationDir(presentationBaseDir, meetingId, presId);
+-        return new File(presDir.getAbsolutePath() + File.separatorChar + presFilename);
++        // Build file to presFilename
++        // Get canonicalPath and make sure it starts with
++        // /var/bigbluebutton/<meetingid-pattern>
++        // If so return file, if not return null
++        File presFile = new File(presDir.getAbsolutePath() + File.separatorChar + presFilename);
++        try {
++            String presFileCanonical = presFile.getCanonicalPath();
++            log.debug("Requested presentation name file full path {}",presFileCanonical);
++            if (presFileCanonical.startsWith(presentationBaseDir)) {
++                return presFile;
++            }
++        } catch (IOException e) {
++            log.error("Exception getting canonical path for {}.\n{}", presFilename, e);
++            return null;
++        }
++
++        log.error("Cannot find file for {}.", presFilename);
++
++        return null;
+     }
+ 
+     public void kickOffRecordingChapterBreak(String meetingId, Long timestamp) {
+diff --git a/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy b/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
+index 1dec8656173..5f7fd2b81ba 100755
+--- a/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
++++ b/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
+@@ -297,7 +297,7 @@ class PresentationController {
+     InputStream is = null;
+     try {
+       def pres = meetingService.getDownloadablePresentationFile(meetingId, presId, presFilename)
+-      if (pres.exists()) {
++      if (pres != null && pres.exists()) {
+         log.debug "Controller: Sending pdf reply for $presFilename"
+ 
+         def bytes = pres.readBytes()
+@@ -311,9 +311,11 @@ class PresentationController {
+         response.outputStream << bytes;
+       } else {
+         log.warn "$pres does not exist."
++		response.status = 404
+       }
+     } catch (IOException e) {
+       log.error("Error reading file.\n" + e.getMessage());
++	  response.status = 404
+     }
+   }
+ 

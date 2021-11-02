@@ -1,0 +1,48 @@
+From 9e08718ee904046f8b2294ef6ac79e8a75a451e3 Mon Sep 17 00:00:00 2001
+From: Nicolas Giard <github@ngpixel.com>
+Date: Sat, 13 Jun 2020 21:43:21 -0400
+Subject: [PATCH] Merge pull request from GHSA-9jgg-4xj2-vjjj
+
+---
+ server/modules/rendering/html-core/renderer.js | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/server/modules/rendering/html-core/renderer.js b/server/modules/rendering/html-core/renderer.js
+index f080d39676..a1f3690ff0 100644
+--- a/server/modules/rendering/html-core/renderer.js
++++ b/server/modules/rendering/html-core/renderer.js
+@@ -4,6 +4,8 @@ const uslug = require('uslug')
+ const pageHelper = require('../../../helpers/page')
+ const URL = require('url').URL
+ 
++const mustacheRegExp = /(\{|&#x7b;?){2}(.+?)(\}|&#x7d;?){2}/i
++
+ /* global WIKI */
+ 
+ module.exports = {
+@@ -230,6 +232,16 @@ module.exports = {
+       headers.push(headerSlug)
+     })
+ 
++    // --------------------------------
++    // Wrap root text nodes
++    // --------------------------------
++
++    $('body').contents().toArray().forEach(item => {
++      if (item.type === 'text' && item.parent.name === 'body') {
++        $(item).wrap('<div></div>')
++      }
++    })
++
+     // --------------------------------
+     // Escape mustache expresions
+     // --------------------------------
+@@ -239,7 +251,7 @@ module.exports = {
+       list.forEach(item => {
+         if (item.type === 'text') {
+           const rawText = $(item).text()
+-          if (rawText.indexOf('{{') >= 0 && rawText.indexOf('}}') > 1) {
++          if (mustacheRegExp.test(rawText)) {
+             $(item).parent().attr('v-pre', true)
+           }
+         } else {

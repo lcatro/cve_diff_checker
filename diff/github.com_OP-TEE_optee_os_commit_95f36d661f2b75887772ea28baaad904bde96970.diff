@@ -1,0 +1,51 @@
+From 95f36d661f2b75887772ea28baaad904bde96970 Mon Sep 17 00:00:00 2001
+From: Jens Wiklander <jens.wiklander@linaro.org>
+Date: Mon, 19 Nov 2018 13:34:23 +0100
+Subject: [PATCH] core: tee_mmu_check_access_rights() check all pages
+
+Prior to this patch tee_mmu_check_access_rights() checks an address in
+each page of a supplied range. If both the start and length of that
+range is unaligned the last page in the range is sometimes not checked.
+With this patch the first address of each page in the range is checked
+to simplify the logic of checking each page and the range and also to
+cover the last page under all circumstances.
+
+Fixes: OP-TEE-2018-0005: "tee_mmu_check_access_rights does not check
+final page of TA buffer"
+
+Signed-off-by: Jens Wiklander <jens.wiklander@linaro.org>
+Tested-by: Joakim Bech <joakim.bech@linaro.org> (QEMU v7, v8)
+Reviewed-by: Joakim Bech <joakim.bech@linaro.org>
+Reported-by: Riscure <inforequest@riscure.com>
+Reported-by: Alyssa Milburn <a.a.milburn@vu.nl>
+Acked-by: Etienne Carriere <etienne.carriere@linaro.org>
+---
+ core/arch/arm/mm/tee_mmu.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/core/arch/arm/mm/tee_mmu.c b/core/arch/arm/mm/tee_mmu.c
+index 8de6c8db10b..4bc2aba5ce6 100644
+--- a/core/arch/arm/mm/tee_mmu.c
++++ b/core/arch/arm/mm/tee_mmu.c
+@@ -757,10 +757,11 @@ TEE_Result tee_mmu_check_access_rights(const struct user_ta_ctx *utc,
+ 				       size_t len)
+ {
+ 	uaddr_t a;
++	uaddr_t end_addr = 0;
+ 	size_t addr_incr = MIN(CORE_MMU_USER_CODE_SIZE,
+ 			       CORE_MMU_USER_PARAM_SIZE);
+ 
+-	if (ADD_OVERFLOW(uaddr, len, &a))
++	if (ADD_OVERFLOW(uaddr, len, &end_addr))
+ 		return TEE_ERROR_ACCESS_DENIED;
+ 
+ 	if ((flags & TEE_MEMORY_ACCESS_NONSECURE) &&
+@@ -775,7 +776,7 @@ TEE_Result tee_mmu_check_access_rights(const struct user_ta_ctx *utc,
+ 	   !tee_mmu_is_vbuf_inside_ta_private(utc, (void *)uaddr, len))
+ 		return TEE_ERROR_ACCESS_DENIED;
+ 
+-	for (a = uaddr; a < (uaddr + len); a += addr_incr) {
++	for (a = ROUNDDOWN(uaddr, addr_incr); a < end_addr; a += addr_incr) {
+ 		uint32_t attr;
+ 		TEE_Result res;
+ 

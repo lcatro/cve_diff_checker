@@ -1,0 +1,40 @@
+From f8c6eb67cd9da09ee20248fec6ab742069635e47 Mon Sep 17 00:00:00 2001
+From: Jo-Philipp Wich <jo@mein.io>
+Date: Wed, 9 Oct 2019 09:55:44 +0200
+Subject: [PATCH] luci-base: fix CSRF prevention for arcombine targets
+
+The dispatcher failed to propagate the child target post security
+requirements to the arcombine() dispatch target so far - fix this
+by recursively testing the post security requirements.
+
+Signed-off-by: Jo-Philipp Wich <jo@mein.io>
+---
+ modules/luci-base/luasrc/dispatcher.lua | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/modules/luci-base/luasrc/dispatcher.lua b/modules/luci-base/luasrc/dispatcher.lua
+index e8106b741d5..f571144566f 100644
+--- a/modules/luci-base/luasrc/dispatcher.lua
++++ b/modules/luci-base/luasrc/dispatcher.lua
+@@ -149,7 +149,11 @@ function httpdispatch(request, prefix)
+ 	--context._disable_memtrace()
+ end
+ 
+-local function require_post_security(target)
++local function require_post_security(target, args)
++	if type(target) == "table" and target.type == "arcombine" and type(target.targets) == "table" then
++		return require_post_security((type(args) == "table" and #args > 0) and target.targets[2] or target.targets[1], args)
++	end
++
+ 	if type(target) == "table" then
+ 		if type(target.post) == "table" then
+ 			local param_name, required_val, request_val
+@@ -470,7 +474,7 @@ function dispatch(request)
+ 		return
+ 	end
+ 
+-	if c and require_post_security(c.target) then
++	if c and require_post_security(c.target, args) then
+ 		if not test_post_security(c) then
+ 			return
+ 		end

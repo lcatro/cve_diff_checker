@@ -1,0 +1,24 @@
+From 55edae0226409de25e59922807cb09acb45731a2 Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Thu, 7 Jun 2018 16:17:00 +0900
+Subject: [PATCH] Allow `Object#clone` to copy frozen status only; fix #4036
+
+Copying all flags from the original object may overwrite the clone's
+flags e.g. the embedded flag.
+---
+ src/kernel.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/kernel.c b/src/kernel.c
+index f378004cb5..bbe6e8bb75 100644
+--- a/src/kernel.c
++++ b/src/kernel.c
+@@ -348,7 +348,7 @@ mrb_obj_clone(mrb_state *mrb, mrb_value self)
+   mrb_field_write_barrier(mrb, (struct RBasic*)p, (struct RBasic*)p->c);
+   clone = mrb_obj_value(p);
+   init_copy(mrb, clone, self);
+-  p->flags = mrb_obj_ptr(self)->flags;
++  p->flags |= mrb_obj_ptr(self)->flags & MRB_FLAG_IS_FROZEN;
+ 
+   return clone;
+ }

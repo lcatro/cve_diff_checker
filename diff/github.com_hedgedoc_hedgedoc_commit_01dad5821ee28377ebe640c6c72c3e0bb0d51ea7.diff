@@ -1,0 +1,88 @@
+From 4a0216096a6aa1ebba9d8b0ada067c73ffa1513f Mon Sep 17 00:00:00 2001
+From: David Mehren <git@herrmehren.de>
+Date: Sun, 9 May 2021 15:25:59 +0200
+Subject: [PATCH 1/2] Escape custom Open Graph tags
+
+HedgeDoc allows to specify custom Open Graph tags using the
+`opengraph` key in the YAML metadata of a note.
+
+These are rendered into the HTML delivered to clients using `ejs` and
+its `<%-` tag. This outputs the variable unescaped into the template
+and therefore allows to inject arbitrary strings,
+including `<script>` tags.
+
+This commit changes the template to use ejs's `<%=` tag instead,
+which automatically escapes the variables content,
+thereby mitigating the XSS vector.
+
+See also https://github.com/hedgedoc/hedgedoc/security/advisories/GHSA-gjg7-4j2h-94fq
+
+Co-authored-by: Christoph (Sheogorath) Kern <sheogorath@shivering-isles.com>
+Signed-off-by: David Mehren <git@herrmehren.de>
+---
+ public/views/hedgedoc/head.ejs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/public/views/hedgedoc/head.ejs b/public/views/hedgedoc/head.ejs
+index 446687953..419d5dcc7 100644
+--- a/public/views/hedgedoc/head.ejs
++++ b/public/views/hedgedoc/head.ejs
+@@ -7,7 +7,7 @@
+ <%- include('../includes/favicon') %>
+ <% for (var og in opengraph) { %>
+ <% if (opengraph.hasOwnProperty(og) && opengraph[og].trim() !== '') { %>
+-<meta property="og:<%- og %>" content="<%- opengraph[og] %>">
++<meta property="og:<%= og %>" content="<%= opengraph[og] %>">
+ <% }} if (!opengraph.hasOwnProperty('image')) { %>
+ <meta property="og:image" content="<%- serverURL %>/icons/android-chrome-512x512.png">
+ <meta property="og:image:alt" content="HedgeDoc logo">
+
+From f552b14e11761a73237b3b3834827dde151b8b28 Mon Sep 17 00:00:00 2001
+From: David Mehren <git@herrmehren.de>
+Date: Sun, 9 May 2021 15:35:06 +0200
+Subject: [PATCH 2/2] Sanitize username and photo URL
+
+HedgeDoc displays the username and user photo at various places
+by rendering the respective variables into an `ejs` template.
+As the values are user-provided or generated from user-provided data,
+it may be possible to inject unwanted HTML.
+
+This commit sanitizes the username and photo URL by passing them
+through the `xss` library.
+
+Co-authored-by: Christoph (Sheogorath) Kern <sheogorath@shivering-isles.com>
+Signed-off-by: David Mehren <git@herrmehren.de>
+---
+ lib/models/user.js | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/lib/models/user.js b/lib/models/user.js
+index 383be1a72..d79530039 100644
+--- a/lib/models/user.js
++++ b/lib/models/user.js
+@@ -2,6 +2,7 @@
+ // external modules
+ const Sequelize = require('sequelize')
+ const scrypt = require('scrypt-kdf')
++const filterXSS = require('xss')
+ 
+ // core
+ const logger = require('../logger')
+@@ -74,7 +75,7 @@ module.exports = function (sequelize, DataTypes) {
+     }
+     if (profile) {
+       profile = {
+-        name: profile.displayName || profile.username,
++        name: filterXSS(profile.displayName || profile.username),
+         photo: User.parsePhotoByProfile(profile),
+         biggerphoto: User.parsePhotoByProfile(profile, true)
+       }
+@@ -135,7 +136,7 @@ module.exports = function (sequelize, DataTypes) {
+         photo = generateAvatarURL(profile.username)
+         break
+     }
+-    return photo
++    return filterXSS(photo)
+   }
+   User.parseProfileByEmail = function (email) {
+     return {

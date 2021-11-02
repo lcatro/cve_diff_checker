@@ -1,0 +1,33 @@
+From 7afd55c42ad80d01a339197a2d8b5461d214edaf Mon Sep 17 00:00:00 2001
+From: Jeremy Clarke <geckojsc@gmail.com>
+Date: Mon, 13 Apr 2020 23:53:51 +0100
+Subject: [PATCH] Fix use-after-free in PlayerGeneric destructor
+
+---
+ src/milkyplay/PlayerGeneric.cpp | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/milkyplay/PlayerGeneric.cpp b/src/milkyplay/PlayerGeneric.cpp
+index 8df2c134..59f7cba3 100644
+--- a/src/milkyplay/PlayerGeneric.cpp
++++ b/src/milkyplay/PlayerGeneric.cpp
+@@ -202,15 +202,16 @@ PlayerGeneric::PlayerGeneric(mp_sint32 frequency, AudioDriverInterface* audioDri
+ 	
+ PlayerGeneric::~PlayerGeneric()
+ {
+-	if (mixer)
+-		delete mixer;
+ 
+ 	if (player)
+ 	{
+-		if (mixer->isActive() && !mixer->isDeviceRemoved(player))
++		if (mixer && mixer->isActive() && !mixer->isDeviceRemoved(player))
+ 			mixer->removeDevice(player);
+ 		delete player;
+ 	}
++	
++	if (mixer)
++		delete mixer;
+ 
+ 	delete[] audioDriverName;
+ 	

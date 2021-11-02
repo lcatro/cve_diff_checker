@@ -1,0 +1,27 @@
+From ba6822bd7b7324ba201a28b2f278c29a98edbef2 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 28 Apr 2021 16:06:54 -0700
+Subject: [PATCH] Fix OOB issue with `tf.raw_ops.SparseSparseMinimum`.
+
+PiperOrigin-RevId: 371005787
+Change-Id: Ib686ccc077836e8b980b8b5a03936d36a8ecaf71
+---
+ tensorflow/core/kernels/sparse_sparse_binary_op_shared.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/sparse_sparse_binary_op_shared.cc b/tensorflow/core/kernels/sparse_sparse_binary_op_shared.cc
+index 43dc9ae70cd62..9fe42e05d879e 100644
+--- a/tensorflow/core/kernels/sparse_sparse_binary_op_shared.cc
++++ b/tensorflow/core/kernels/sparse_sparse_binary_op_shared.cc
+@@ -180,6 +180,11 @@ class SparseSparseBinaryOpShared : public OpKernel {
+                                           " for dimension ", i));
+     }
+ 
++    OP_REQUIRES(
++        ctx, a_indices_t->dim_size(1) == b_indices_t->dim_size(1),
++        errors::InvalidArgument(
++            "Indices' dimensions do not match: got ", a_indices_t->dim_size(1),
++            " and ", b_indices_t->dim_size(1), " for the second dimension."));
+     const int num_dims = a_indices_t->dim_size(1);
+     const auto a_indices_mat = a_indices_t->matrix<int64>();
+     const auto b_indices_mat = b_indices_t->matrix<int64>();

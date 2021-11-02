@@ -1,0 +1,32 @@
+From eebb96c2830d48597d055d247c0e9aebaea94cd5 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 13 Apr 2021 14:18:51 -0700
+Subject: [PATCH] Fix an invalid address vulnerability in
+ `tf.raw_ops.RaggedBincount`.
+
+PiperOrigin-RevId: 368293153
+Change-Id: I4b4e493d3fd05e7dc55a55de3a041a80a4f275c3
+---
+ tensorflow/core/kernels/bincount_op.cc | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/tensorflow/core/kernels/bincount_op.cc b/tensorflow/core/kernels/bincount_op.cc
+index 35911ee5d5540..258266ab29d33 100644
+--- a/tensorflow/core/kernels/bincount_op.cc
++++ b/tensorflow/core/kernels/bincount_op.cc
+@@ -420,6 +420,15 @@ class RaggedBincountOp : public OpKernel {
+     int num_values = values.size();
+     int batch_idx = 0;
+ 
++    OP_REQUIRES(ctx, splits(0) == 0,
++                errors::InvalidArgument("Splits must start with 0, not with ",
++                                        splits(0)));
++
++    OP_REQUIRES(ctx, splits(num_rows) == num_values,
++                errors::InvalidArgument(
++                    "Splits must end with the number of values, got ",
++                    splits(num_rows), " instead of ", num_values));
++
+     Tensor* out_t;
+     OP_REQUIRES_OK(
+         ctx, ctx->allocate_output(0, TensorShape({num_rows, size}), &out_t));

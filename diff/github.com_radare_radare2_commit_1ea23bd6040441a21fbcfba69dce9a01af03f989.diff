@@ -1,0 +1,106 @@
+From 1ea23bd6040441a21fbcfba69dce9a01af03f989 Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Mon, 20 Feb 2017 12:08:06 +0100
+Subject: [PATCH] Fix #6816 - null deref in r_read_*
+
+---
+ doc/uncrustify.cfg      |  2 +-
+ libr/bin/p/bin_dex.c    |  2 +-
+ libr/include/r_endian.h | 19 +++++++++++++++++++
+ 3 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/doc/uncrustify.cfg b/doc/uncrustify.cfg
+index df31ff1f09b..42810ad098b 100644
+--- a/doc/uncrustify.cfg
++++ b/doc/uncrustify.cfg
+@@ -483,7 +483,7 @@ nl_before_block_comment         = 0
+ nl_before_c_comment             = 0
+ nl_before_cpp_comment           = 0
+ nl_after_multiline_comment      = false
+-nl_after_label_colon            = force
++nl_after_label_colon            = true
+ nl_after_struct                 = 0
+ nl_before_class                 = 0
+ nl_after_class                  = 0
+diff --git a/libr/bin/p/bin_dex.c b/libr/bin/p/bin_dex.c
+index 2923ba73287..601b28a5d71 100644
+--- a/libr/bin/p/bin_dex.c
++++ b/libr/bin/p/bin_dex.c
+@@ -1322,7 +1322,7 @@ static void parse_class(RBinFile *binfile, RBinDexObj *bin, RBinDexClass *c,
+ 	    c->interfaces_offset <
+ 		    bin->header.data_offset + bin->header.data_size) {
+ 		p = r_buf_get_at (binfile->buf, c->interfaces_offset, NULL);
+-		int types_list_size = r_read_le32(p);
++		int types_list_size = r_read_le32 (p);
+ 		if (types_list_size < 0 || types_list_size >= bin->header.types_size ) {
+ 			return;
+ 		}
+diff --git a/libr/include/r_endian.h b/libr/include/r_endian.h
+index 855f9e0dcd1..1a2afc603aa 100644
+--- a/libr/include/r_endian.h
++++ b/libr/include/r_endian.h
+@@ -8,6 +8,9 @@ extern "C" {
+ /* Endian agnostic functions working on single byte. */
+ 
+ static inline ut8 r_read_ble8(const void *src) {
++	if (!src) {
++		return UT8_MAX;
++	}
+ 	return *(ut8 *)src;
+ }
+ 
+@@ -114,6 +117,9 @@ static inline void r_write_at_be64(void *dest, ut64 val, size_t offset) {
+ /* Little Endian functions. */
+ 
+ static inline ut8 r_read_le8(const void *src) {
++	if (!src) {
++		return UT8_MAX;
++	}
+ 	return r_read_ble8 (src);
+ }
+ 
+@@ -130,11 +136,17 @@ static inline void r_write_at_le8(void *dest, ut8 val, size_t offset) {
+ }
+ 
+ static inline ut16 r_read_le16(const void *src) {
++	if (!src) {
++		return UT16_MAX;
++	}
+ 	const ut8 *s = (const ut8*)src;
+ 	return (((ut16)s[1]) << 8) | (((ut16)s[0]) << 0);
+ }
+ 
+ static inline ut16 r_read_at_le16(const void *src, size_t offset) {
++	if (!src) {
++		return UT16_MAX;
++	}
+ 	const ut8 *s = (const ut8*)src + offset;
+ 	return r_read_le16 (s);
+ }
+@@ -157,12 +169,18 @@ static inline void r_write_le24(void *_dest, ut32 val) {
+ }
+ 
+ static inline ut32 r_read_le32(const void *src) {
++	if (!src) {
++		return UT32_MAX;
++	}
+ 	const ut8 *s = (const ut8*)src;
+ 	return (((ut32)s[3]) << 24) | (((ut32)s[2]) << 16) |
+ 		(((ut32)s[1]) << 8) | (((ut32)s[0]) << 0);
+ }
+ 
+ static inline ut32 r_read_at_le32(const void *src, size_t offset) {
++	if (!src) {
++		return UT32_MAX;
++	}
+ 	const ut8 *s = (const ut8*)src + offset;
+ 	return r_read_le32 (s);
+ }
+@@ -426,6 +444,7 @@ static inline int UT8_SUB(ut8 *r, ut8 a, ut8 b) {
+ 	}
+ 	return 1;
+ }
++
+ #ifdef __cplusplus
+ }
+ #endif

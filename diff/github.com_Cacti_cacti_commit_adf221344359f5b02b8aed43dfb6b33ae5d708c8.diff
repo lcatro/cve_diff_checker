@@ -1,0 +1,45 @@
+From adf221344359f5b02b8aed43dfb6b33ae5d708c8 Mon Sep 17 00:00:00 2001
+From: cigamit <jimmy@sqmail.org>
+Date: Sat, 12 Oct 2019 14:56:43 -0500
+Subject: [PATCH] Resoving Issue #3026
+
+Unsafe deserialization in of selected objects in Cacti
+---
+ lib/functions.php | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/lib/functions.php b/lib/functions.php
+index d087bcad9..d944238b9 100644
+--- a/lib/functions.php
++++ b/lib/functions.php
+@@ -3100,15 +3100,22 @@ function sanitize_cdef($cdef) {
+  */
+ function sanitize_unserialize_selected_items($items) {
+ 	if ($items != '') {
+-		$items = unserialize(stripslashes($items));
+-
+-		if (is_array($items)) {
+-			foreach ($items as $item) {
+-				if (is_array($item)) {
+-					return false;
+-				} elseif (!is_numeric($item) && ($item != '')) {
+-					return false;
++		$unstripped = stripslashes($items);
++
++		// validate that sanitized string is correctly formatted
++		if (preg_match('/^a:[0-9]+:{/', $unstripped) && !preg_match('/(^|;|{|})O:\+?[0-9]+:"/', $unstripped)) {
++			$items = unserialize($unstripped);
++
++			if (is_array($items)) {
++				foreach ($items as $item) {
++					if (is_array($item)) {
++						return false;
++					} elseif (!is_numeric($item) && ($item != '')) {
++						return false;
++					}
+ 				}
++			} else {
++				return false;
+ 			}
+ 		} else {
+ 			return false;

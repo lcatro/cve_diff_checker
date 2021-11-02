@@ -1,0 +1,48 @@
+From 3241473d8213e9551cef4ed0e8ac4645cfbd10c4 Mon Sep 17 00:00:00 2001
+From: Mark Hamstra <hello@markhamstra.com>
+Date: Tue, 1 May 2018 23:57:45 +0200
+Subject: [PATCH] Fix some minor XSS issues reported in ticket #69
+
+---
+ .../security/user/getrecentlyeditedresources.class.php          | 1 +
+ core/model/modx/processors/system/menu/getnodes.class.php       | 1 +
+ core/model/modx/processors/system/settings/getlist.class.php    | 2 ++
+ 3 files changed, 4 insertions(+)
+
+diff --git a/core/model/modx/processors/security/user/getrecentlyeditedresources.class.php b/core/model/modx/processors/security/user/getrecentlyeditedresources.class.php
+index 4167075b5bf..7caa497e834 100644
+--- a/core/model/modx/processors/security/user/getrecentlyeditedresources.class.php
++++ b/core/model/modx/processors/security/user/getrecentlyeditedresources.class.php
+@@ -72,6 +72,7 @@ public function prepareRow(xPDOObject $object) {
+         if (!$object->checkPolicy('view')) return array();
+ 
+         $resourceArray = $object->get(array('id','pagetitle','description','published','deleted', 'context_key'));
++        $resourceArray['pagetitle'] = htmlspecialchars($resourceArray['pagetitle'], ENT_QUOTES, 'UTF-8');
+         $resourceArray['menu'] = array();
+         $resourceArray['menu'][] = array(
+             'text' => $this->modx->lexicon('resource_view'),
+diff --git a/core/model/modx/processors/system/menu/getnodes.class.php b/core/model/modx/processors/system/menu/getnodes.class.php
+index 1829c0d3b5c..f169fa3b642 100644
+--- a/core/model/modx/processors/system/menu/getnodes.class.php
++++ b/core/model/modx/processors/system/menu/getnodes.class.php
+@@ -60,6 +60,7 @@ public function prepareRow(xPDOObject $object) {
+         }
+         $text = $this->modx->lexicon($object->get('text'));
+         $desc = $this->modx->lexicon($object->get('description'));
++        $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+ 
+         $objectArray = array(
+             'text' => $text.($controller != '' ? ' <i>('.$namespace.':'.$controller.')</i>' : ''),
+diff --git a/core/model/modx/processors/system/settings/getlist.class.php b/core/model/modx/processors/system/settings/getlist.class.php
+index 0ba3b1f3304..ba00e485e0c 100644
+--- a/core/model/modx/processors/system/settings/getlist.class.php
++++ b/core/model/modx/processors/system/settings/getlist.class.php
+@@ -126,6 +126,8 @@ public function prepareRow(xPDOObject $object) {
+         } else {
+             $settingArray['name'] = $settingArray['name_trans'];
+         }
++        $settingArray['key'] = htmlspecialchars($settingArray['key'], ENT_QUOTES, 'UTF-8');
++        $settingArray['name_trans'] = htmlspecialchars($settingArray['name_trans'], ENT_QUOTES, 'UTF-8');
+ 
+         $settingArray['oldkey'] = $settingArray['key'];
+ 

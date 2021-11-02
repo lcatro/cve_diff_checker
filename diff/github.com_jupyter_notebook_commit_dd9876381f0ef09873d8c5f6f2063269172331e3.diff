@@ -1,0 +1,43 @@
+From dd9876381f0ef09873d8c5f6f2063269172331e3 Mon Sep 17 00:00:00 2001
+From: Matthias Bussonnier <bussonniermatthias@gmail.com>
+Date: Fri, 21 Aug 2015 17:58:12 +0200
+Subject: [PATCH] Fix XSS reported on Security list
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+No CVE-ID yet
+
+August 18, 2015
+-----
+Reported to Quantopian by Juan Broullón <thebrowfc@gmail.com>...
+
+If you create a new folder in the iPython file browser and set
+Javascript code as its name the code injected will be executed. So, if I
+create a folder called "><img src=x onerror=alert(document.cookie)> and
+then I access to it, the cookies will be prompted.
+
+The XSS code is also executed if you access a link pointing directly at
+the folder.
+
+  jik
+------
+---
+ notebook/notebookapp.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/notebook/notebookapp.py b/notebook/notebookapp.py
+index 81b417e65a..40ef43ac4c 100644
+--- a/notebook/notebookapp.py
++++ b/notebook/notebookapp.py
+@@ -160,7 +160,9 @@ def init_settings(self, ipython_app, kernel_manager, contents_manager,
+             _template_path = (_template_path,)
+         template_path = [os.path.expanduser(path) for path in _template_path]
+ 
+-        jenv_opt = jinja_env_options if jinja_env_options else {}
++        jenv_opt = {"autoescape": True}
++        jenv_opt.update(jinja_env_options if jinja_env_options else {})
++
+         env = Environment(loader=FileSystemLoader(template_path), **jenv_opt)
+         
+         sys_info = get_sys_info()

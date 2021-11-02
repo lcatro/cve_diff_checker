@@ -1,0 +1,30 @@
+From 299f804acbb95a612ab7c504d25ab908aa59ae93 Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Tue, 21 Jul 2020 17:22:45 -0700
+Subject: [PATCH] Fix vulnerability in enc_untrusted_recvfrom
+
+Change recvfrom memcpy to check for received_buffer size to avoid
+copying extra buffer.
+
+This issue was reported by Qinkun Bao, Zhaofeng Chen, Mingshen Sun, and
+Kang Li from Baidu Security.
+
+PiperOrigin-RevId: 322476299
+Change-Id: I3606ff9ec51ec7cc4312c7555c645a2fc6e09b21
+---
+ asylo/platform/host_call/trusted/host_calls.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/asylo/platform/host_call/trusted/host_calls.cc b/asylo/platform/host_call/trusted/host_calls.cc
+index 87fdca24a..6e37ebf00 100644
+--- a/asylo/platform/host_call/trusted/host_calls.cc
++++ b/asylo/platform/host_call/trusted/host_calls.cc
+@@ -982,7 +982,7 @@ ssize_t enc_untrusted_recvfrom(int sockfd, void *buf, size_t len, int flags,
+   }
+ 
+   auto buffer_received = output.next();
+-  memcpy(buf, buffer_received.data(), len);
++  memcpy(buf, buffer_received.data(), std::min(len, buffer_received.size()));
+ 
+   // If |src_addr| is not NULL, and the underlying protocol provides the source
+   // address, this source address is filled in. When |src_addr| is NULL, nothing

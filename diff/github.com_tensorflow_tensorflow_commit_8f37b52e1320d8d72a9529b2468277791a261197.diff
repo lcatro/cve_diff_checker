@@ -1,0 +1,102 @@
+From 8f37b52e1320d8d72a9529b2468277791a261197 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Mon, 19 Apr 2021 13:46:32 -0700
+Subject: [PATCH] Validate some shape requirements for `Conv3DBackpropFilter*`
+ and `Conv3DBackpropInput*` ops.
+
+Older versions of Eigen might otherwise crash / produce OOB read on specially crafted inputs.
+
+PiperOrigin-RevId: 369293977
+Change-Id: I58f51445a93936d7cf8e616f75de17677df36718
+---
+ tensorflow/core/kernels/conv_grad_ops_3d.cc | 56 +++++++++++++++++++++
+ 1 file changed, 56 insertions(+)
+
+diff --git a/tensorflow/core/kernels/conv_grad_ops_3d.cc b/tensorflow/core/kernels/conv_grad_ops_3d.cc
+index f736a12fb1ca3..8c72d01578d6d 100644
+--- a/tensorflow/core/kernels/conv_grad_ops_3d.cc
++++ b/tensorflow/core/kernels/conv_grad_ops_3d.cc
+@@ -239,6 +239,20 @@ class Conv3DBackpropInputOp : public OpKernel {
+       input_shape = context->input(0).shape();
+     }
+ 
++    OP_REQUIRES(
++        context, input_shape.dim_size(4) == filter_shape.dim_size(3),
++        errors::InvalidArgument("input and filter_sizes must have the same "
++                                "number of channels. Got ",
++                                input_shape.dim_size(4), " for input and ",
++                                filter_shape.dim_size(3), " for filter_sizes"));
++    OP_REQUIRES(
++        context, out_backprop_shape.dim_size(4) == filter_shape.dim_size(4),
++        errors::InvalidArgument("out_backprop and filter_sizes must have the "
++                                "same number of channels. Got ",
++                                out_backprop_shape.dim_size(4),
++                                " for out_backprop and ",
++                                filter_shape.dim_size(4), " for filter_sizes"));
++
+     ConvBackpropDimensions dims;
+     OP_REQUIRES_OK(context, ConvBackpropComputeDimensions(
+                                 "Conv3DBackpropInputOp", /*num_spatial_dims=*/3,
+@@ -346,6 +360,20 @@ class Conv3DCustomBackpropInputOp : public OpKernel {
+       input_shape = context->input(0).shape();
+     }
+ 
++    OP_REQUIRES(
++        context, input_shape.dim_size(4) == filter_shape.dim_size(3),
++        errors::InvalidArgument("input and filter_sizes must have the same "
++                                "number of channels. Got ",
++                                input_shape.dim_size(4), " for input and ",
++                                filter_shape.dim_size(3), " for filter_sizes"));
++    OP_REQUIRES(
++        context, out_backprop_shape.dim_size(4) == filter_shape.dim_size(4),
++        errors::InvalidArgument("out_backprop and filter_sizes must have the "
++                                "same number of channels. Got ",
++                                out_backprop_shape.dim_size(4),
++                                " for out_backprop and ",
++                                filter_shape.dim_size(4), " for filter_sizes"));
++
+     ConvBackpropDimensions dims;
+     OP_REQUIRES_OK(context, ConvBackpropComputeDimensions(
+                                 "Conv3DBackpropInputOp", /*num_spatial_dims=*/3,
+@@ -696,6 +724,20 @@ class Conv3DBackpropFilterOp : public OpKernel {
+       filter_shape = context->input(1).shape();
+     }
+ 
++    OP_REQUIRES(
++        context, input_shape.dim_size(4) == filter_shape.dim_size(3),
++        errors::InvalidArgument("input and filter_sizes must have the same "
++                                "number of channels. Got ",
++                                input_shape.dim_size(4), " for input and ",
++                                filter_shape.dim_size(3), " for filter_sizes"));
++    OP_REQUIRES(
++        context, out_backprop_shape.dim_size(4) == filter_shape.dim_size(4),
++        errors::InvalidArgument("out_backprop and filter_sizes must have the "
++                                "same number of channels. Got ",
++                                out_backprop_shape.dim_size(4),
++                                " for out_backprop and ",
++                                filter_shape.dim_size(4), " for filter_sizes"));
++
+     ConvBackpropDimensions dims;
+     OP_REQUIRES_OK(context,
+                    ConvBackpropComputeDimensions(
+@@ -808,6 +850,20 @@ class Conv3DCustomBackpropFilterOp : public OpKernel {
+       filter_shape = context->input(1).shape();
+     }
+ 
++    OP_REQUIRES(
++        context, input_shape.dim_size(4) == filter_shape.dim_size(3),
++        errors::InvalidArgument("input and filter_sizes must have the same "
++                                "number of channels. Got ",
++                                input_shape.dim_size(4), " for input and ",
++                                filter_shape.dim_size(3), " for filter_sizes"));
++    OP_REQUIRES(
++        context, out_backprop_shape.dim_size(4) == filter_shape.dim_size(4),
++        errors::InvalidArgument("out_backprop and filter_sizes must have the "
++                                "same number of channels. Got ",
++                                out_backprop_shape.dim_size(4),
++                                " for out_backprop and ",
++                                filter_shape.dim_size(4), " for filter_sizes"));
++
+     ConvBackpropDimensions dims;
+     OP_REQUIRES_OK(context,
+                    ConvBackpropComputeDimensions(

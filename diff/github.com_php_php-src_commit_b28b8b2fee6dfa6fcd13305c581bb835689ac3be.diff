@@ -1,0 +1,68 @@
+From b28b8b2fee6dfa6fcd13305c581bb835689ac3be Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Fri, 30 Dec 2016 15:57:24 -0800
+Subject: [PATCH] Fix bug #73768 - Memory corruption when loading hostile phar
+
+---
+ ext/phar/phar.c              |   3 +--
+ ext/phar/tests/bug73768.phar | Bin 0 -> 219 bytes
+ ext/phar/tests/bug73768.phpt |  16 ++++++++++++++++
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+ create mode 100644 ext/phar/tests/bug73768.phar
+ create mode 100644 ext/phar/tests/bug73768.phpt
+
+diff --git a/ext/phar/phar.c b/ext/phar/phar.c
+index 532b4c3169ac..158f41739dce 100644
+--- a/ext/phar/phar.c
++++ b/ext/phar/phar.c
+@@ -981,7 +981,6 @@ static int phar_parse_pharfile(php_stream *fp, char *fname, int fname_len, char
+ 		/* if the alias is stored we enforce it (implicit overrides explicit) */
+ 		if (alias && alias_len && (alias_len != (int)tmp_len || strncmp(alias, buffer, tmp_len)))
+ 		{
+-			buffer[tmp_len] = '\0';
+ 			php_stream_close(fp);
+ 
+ 			if (signature) {
+@@ -989,7 +988,7 @@ static int phar_parse_pharfile(php_stream *fp, char *fname, int fname_len, char
+ 			}
+ 
+ 			if (error) {
+-				spprintf(error, 0, "cannot load phar \"%s\" with implicit alias \"%s\" under different alias \"%s\"", fname, buffer, alias);
++				spprintf(error, 0, "cannot load phar \"%s\" with implicit alias \"%.*s\" under different alias \"%s\"", fname, tmp_len, buffer, alias);
+ 			}
+ 
+ 			efree(savebuf);
+diff --git a/ext/phar/tests/bug73768.phar b/ext/phar/tests/bug73768.phar
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f429c2365058b70b8f5c8202a4e40982a7874ce
+GIT binary patch
+literal 219
+zcma!#_i*$HiFfw*4e<1F4bsrGR<O6@<vPH?z`zK^|Nn#NO+Xe1a078_MPhD2PO4r(
+zMnOK1d!RTZ0!$lA90e%>0ULXuBv)#3M!telMruw@zCw9^QBF!so)VY69hU+eP>0DC
+bskFrMnm;Gk+K#BDNdh_RLGE^U@^u0LJAy2)
+
+literal 0
+HcmV?d00001
+
+diff --git a/ext/phar/tests/bug73768.phpt b/ext/phar/tests/bug73768.phpt
+new file mode 100644
+index 000000000000..37a4da0253ac
+--- /dev/null
++++ b/ext/phar/tests/bug73768.phpt
+@@ -0,0 +1,16 @@
++--TEST--
++Phar: PHP bug #73768: Memory corruption when loading hostile phar
++--SKIPIF--
++<?php if (!extension_loaded("phar")) die("skip"); ?>
++--FILE--
++<?php
++chdir(__DIR__);
++try {
++$p = Phar::LoadPhar('bug73768.phar', 'alias.phar');
++echo "OK\n";
++} catch(PharException $e) {
++	echo $e->getMessage();
++}
++?>
++--EXPECTF--
++cannot load phar "%sbug73768.phar" with implicit alias "" under different alias "alias.phar"

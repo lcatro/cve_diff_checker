@@ -1,0 +1,42 @@
+From a1fb68b9ab2f6721b10ccc572b825bda450d603e Mon Sep 17 00:00:00 2001
+From: Andrew Arnott <andrewarnott@gmail.com>
+Date: Fri, 7 Feb 2020 16:29:15 -0700
+Subject: [PATCH] Fix `MessagePackSecurity.GetEqualityComparer<object>` to not
+ return null
+
+Fixes #810
+---
+ src/MessagePack/MessagePackSecurity.cs              | 1 +
+ tests/MessagePack.Tests/MessagePackSecurityTests.cs | 7 +++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/src/MessagePack/MessagePackSecurity.cs b/src/MessagePack/MessagePackSecurity.cs
+index a635399ab..26374a413 100644
+--- a/src/MessagePack/MessagePackSecurity.cs
++++ b/src/MessagePack/MessagePackSecurity.cs
+@@ -56,6 +56,7 @@ private MessagePackSecurity()
+         /// </summary>
+         /// <param name="copyFrom">The template to copy from.</param>
+         protected MessagePackSecurity(MessagePackSecurity copyFrom)
++            : this()
+         {
+             if (copyFrom is null)
+             {
+diff --git a/tests/MessagePack.Tests/MessagePackSecurityTests.cs b/tests/MessagePack.Tests/MessagePackSecurityTests.cs
+index 37c04744f..0684e54e9 100644
+--- a/tests/MessagePack.Tests/MessagePackSecurityTests.cs
++++ b/tests/MessagePack.Tests/MessagePackSecurityTests.cs
+@@ -125,6 +125,13 @@ public void EqualityComparer_ObjectFallback()
+         Assert.NotEqual(eq.GetHashCode(o), eq.GetHashCode(new object()));
+     }
+ 
++    [Fact]
++    public void EqualityComparer_ObjectFallback_AfterCopyCtor()
++    {
++        var security = MessagePackSecurity.UntrustedData.WithMaximumObjectGraphDepth(15);
++        Assert.NotNull(security.GetEqualityComparer<object>());
++    }
++
+     /// <summary>
+     /// Verifies that arbitrary other types not known to be hash safe will be rejected.
+     /// </summary>

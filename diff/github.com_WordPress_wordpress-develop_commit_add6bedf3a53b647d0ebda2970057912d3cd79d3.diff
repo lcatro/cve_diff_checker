@@ -1,0 +1,80 @@
+From add6bedf3a53b647d0ebda2970057912d3cd79d3 Mon Sep 17 00:00:00 2001
+From: Jonathan Desrosiers <desrosj@git.wordpress.org>
+Date: Thu, 29 Oct 2020 17:58:49 +0000
+Subject: [PATCH] External Libraries: Disable deserialization in
+ Requests_Utility_FilteredIterator
+
+Props xknown, peterwilsoncc, desrosj, dd32, whyisjake.
+Merges [49373] to trunk.
+
+git-svn-id: https://develop.svn.wordpress.org/trunk@49382 602fd350-edb4-49c9-b593-d223f7449a82
+---
+ .../Requests/Utility/FilteredIterator.php     | 16 ++++++++++
+ tests/phpunit/tests/functions.php             | 29 +++++++++++++++++++
+ 2 files changed, 45 insertions(+)
+
+diff --git a/src/wp-includes/Requests/Utility/FilteredIterator.php b/src/wp-includes/Requests/Utility/FilteredIterator.php
+index 76a29e72287..0e279449323 100644
+--- a/src/wp-includes/Requests/Utility/FilteredIterator.php
++++ b/src/wp-includes/Requests/Utility/FilteredIterator.php
+@@ -42,4 +42,20 @@ public function current() {
+ 		$value = call_user_func($this->callback, $value);
+ 		return $value;
+ 	}
++
++	/**
++	 * @inheritdoc
++	 */
++	public function unserialize( $serialized ) {
++	}
++
++	/**
++	 * @inheritdoc
++	 */
++	public function __unserialize( $serialized ) { // phpcs:ignore PHPCompatibility.FunctionNameRestrictions.ReservedFunctionNames.MethodDoubleUnderscore,PHPCompatibility.FunctionNameRestrictions.NewMagicMethods.__unserializeFound
++	}
++
++	public function __wakeup() { // phpcs:ignore PHPCompatibility.FunctionNameRestrictions.ReservedFunctionNames.MethodDoubleUnderscore,PHPCompatibility.FunctionNameRestrictions.NewMagicMethods.__wakeupFound
++		unset( $this->callback );
++	}
+ }
+diff --git a/tests/phpunit/tests/functions.php b/tests/phpunit/tests/functions.php
+index ffd533ebecd..4301214358a 100644
+--- a/tests/phpunit/tests/functions.php
++++ b/tests/phpunit/tests/functions.php
+@@ -269,6 +269,35 @@ function test_is_serialized( $value, $expected ) {
+ 		$this->assertSame( $expected, is_serialized( $value ) );
+ 	}
+ 
++	/**
++	 * @dataProvider data_serialize_deserialize_objects
++	 */
++	function test_deserialize_request_utility_filtered_iterator_objects( $value ) {
++		$serialized = maybe_serialize( $value );
++		if ( get_class( $value ) === 'Requests_Utility_FilteredIterator' ) {
++			$new_value = unserialize( $serialized );
++			if ( version_compare( PHP_VERSION, '5.3', '>=' ) ) {
++				$property = ( new ReflectionClass( 'Requests_Utility_FilteredIterator' ) )->getProperty( 'callback' );
++				$property->setAccessible( true );
++				$callback_value = $property->getValue( $new_value );
++				$this->assertSame( null, $callback_value );
++			} else {
++				$current_item = @$new_value->current(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
++				$this->assertSame( null, $current_item );
++			}
++		} else {
++			$this->assertEquals( $value->count(), unserialize( $serialized )->count() );
++		}
++	}
++
++	function data_serialize_deserialize_objects() {
++		return array(
++			array( new Requests_Utility_FilteredIterator( array( 1 ), 'md5' ) ),
++			array( new Requests_Utility_FilteredIterator( array( 1, 2 ), 'sha1' ) ),
++			array( new ArrayIterator( array( 1, 2, 3 ) ) ),
++		);
++	}
++
+ 	function data_is_serialized() {
+ 		return array(
+ 			array( serialize( null ), true ),

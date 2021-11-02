@@ -1,0 +1,85 @@
+From 07dbcc3d9644b18e05c1776db2a57fe04d780965 Mon Sep 17 00:00:00 2001
+From: Jeffrey Walton <noloader@gmail.com>
+Date: Wed, 10 May 2017 18:17:12 -0400
+Subject: [PATCH] Add Inflator::BadDistanceErr exception (Issue 414) The
+ improved validation and excpetion clears the Address Sanitizer and Undefined
+ Behavior Sanitizer findings
+
+---
+ validat1.cpp | 6 +++---
+ zinflate.cpp | 8 +++++++-
+ zinflate.h   | 4 ++++
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/validat1.cpp b/validat1.cpp
+index cd8655b49..e81a46c67 100644
+--- a/validat1.cpp
++++ b/validat1.cpp
+@@ -623,7 +623,7 @@ bool TestRandomPool()
+ 			std::cout << "FAILED:";
+ 		else
+ 			std::cout << "passed:";
+-		std::cout << "  GenerateWord32 and Crop\n";	
++		std::cout << "  GenerateWord32 and Crop\n";
+ 	}
+ 
+ #if !defined(NO_OS_DEPENDENCE)
+@@ -711,7 +711,7 @@ bool TestRandomPool()
+ 			std::cout << "FAILED:";
+ 		else
+ 			std::cout << "passed:";
+-		std::cout << "  GenerateWord32 and Crop\n";	
++		std::cout << "  GenerateWord32 and Crop\n";
+ 	}
+ #endif
+ 
+@@ -808,7 +808,7 @@ bool TestAutoSeededX917()
+ 		std::cout << "FAILED:";
+ 	else
+ 		std::cout << "passed:";
+-	std::cout << "  GenerateWord32 and Crop\n";	
++	std::cout << "  GenerateWord32 and Crop\n";
+ 
+ 	std::cout.flush();
+ 	return pass;
+diff --git a/zinflate.cpp b/zinflate.cpp
+index 624317715..ee15c9458 100644
+--- a/zinflate.cpp
++++ b/zinflate.cpp
+@@ -552,12 +552,18 @@ bool Inflator::DecodeBody()
+ 		case DISTANCE_BITS:
+ 					// TODO: this surfaced during fuzzing. What do we do???
+ 					CRYPTOPP_ASSERT(m_distance < COUNTOF(distanceExtraBits));
+-					bits = (m_distance >= COUNTOF(distanceExtraBits)) ? distanceExtraBits[29] : distanceExtraBits[m_distance];
++					if (m_distance >= COUNTOF(distanceExtraBits))
++						throw BadDistanceErr();
++					bits = distanceExtraBits[m_distance];
+ 					if (!m_reader.FillBuffer(bits))
+ 					{
+ 						m_nextDecode = DISTANCE_BITS;
+ 						break;
+ 					}
++					// TODO: this surfaced during fuzzing. What do we do???
++					CRYPTOPP_ASSERT(m_distance < COUNTOF(distanceStarts));
++					if (m_distance >= COUNTOF(distanceStarts))
++						throw BadDistanceErr();
+ 					m_distance = m_reader.GetBits(bits) + distanceStarts[m_distance];
+ 					OutputPast(m_literal, m_distance);
+ 				}
+diff --git a/zinflate.h b/zinflate.h
+index b0879cef5..0767d4f95 100644
+--- a/zinflate.h
++++ b/zinflate.h
+@@ -98,8 +98,12 @@ class Inflator : public AutoSignaling<Filter>
+ 		Err(ErrorType e, const std::string &s)
+ 			: Exception(e, s) {}
+ 	};
++	//! \brief Exception thrown when a truncated stream is encountered
+ 	class UnexpectedEndErr : public Err {public: UnexpectedEndErr() : Err(INVALID_DATA_FORMAT, "Inflator: unexpected end of compressed block") {}};
++	//! \brief Exception thrown when a bad block is encountered
+ 	class BadBlockErr : public Err {public: BadBlockErr() : Err(INVALID_DATA_FORMAT, "Inflator: error in compressed block") {}};
++	//! \brief Exception thrown when an invalid distance is encountered
++	class BadDistanceErr : public Err {public: BadDistanceErr() : Err(INVALID_DATA_FORMAT, "Inflator: error in bit distance") {}};
+ 
+ 	//! \brief RFC 1951 Decompressor
+ 	//! \param attachment the filter's attached transformation

@@ -1,0 +1,47 @@
+From 76b10187c38634a29d6780f99f6dcd796191073b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Tue, 26 Jan 2016 15:00:19 +0100
+Subject: [PATCH] Fallback to default collation connection
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If user supplied wrong string we should gracefully fallback.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ libraries/DatabaseInterface.class.php | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/libraries/DatabaseInterface.class.php b/libraries/DatabaseInterface.class.php
+index 7af15599cdc..6678fcc2a32 100644
+--- a/libraries/DatabaseInterface.class.php
++++ b/libraries/DatabaseInterface.class.php
+@@ -1812,13 +1812,26 @@ public function postConnect($link)
+                         5
+                     );
+                 }
+-                $this->query(
++                $result = $this->tryQuery(
+                     "SET collation_connection = '"
+                     . PMA_Util::sqlAddSlashes($GLOBALS['collation_connection'])
+                     . "';",
+                     $link,
+                     self::QUERY_STORE
+                 );
++                if ($result === false) {
++                    trigger_error(
++                        __('Failed to set configured collation connection!'),
++                        E_USER_WARNING
++                    );
++                    $this->query(
++                        "SET collation_connection = '"
++                        . PMA_Util::sqlAddSlashes($default_collation)
++                        . "';",
++                        $link,
++                        self::QUERY_STORE
++                    );
++                }
+             } else {
+                 $this->query(
+                     "SET NAMES '$default_charset' COLLATE '$default_collation';",

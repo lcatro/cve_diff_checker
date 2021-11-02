@@ -1,0 +1,62 @@
+From 1b0a09f08c3cdfe2e69647bd02f97c1367a5b5f8 Mon Sep 17 00:00:00 2001
+From: Juarez Rudsatz <juarezr@gmail.com>
+Date: Mon, 5 Oct 2020 19:42:56 -0300
+Subject: [PATCH] allow using a custom/restricted xml parser
+
+---
+ petl/io/xml.py | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/petl/io/xml.py b/petl/io/xml.py
+index 983d9f6d..b63287c9 100644
+--- a/petl/io/xml.py
++++ b/petl/io/xml.py
+@@ -133,6 +133,9 @@ def fromxml(source, *args, **kwargs):
+     or list of paths can be provided, e.g.,
+     ``fromxml('example.html', './/tr', ('th', 'td'))``.
+ 
++    Optionally a custom parser can be provided, e.g.,
++    ``etl.fromxml('example1.xml', 'tr', 'td', parser=my_parser)``.
++
+     """
+ 
+     source = read_source_from_arg(source)
+@@ -162,14 +165,15 @@ def __init__(self, source, *args, **kwargs):
+         else:
+             assert False, 'bad parameters'
+         self.missing = kwargs.get('missing', None)
++        self.user_parser = kwargs.get('parser', None)
+ 
+     def __iter__(self):
+         vmatch = self.vmatch
+         vdict = self.vdict
+ 
+         with self.source.open('rb') as xmlf:
+-
+-            tree = etree.parse(xmlf)
++            parser2 = _create_xml_parser(self.user_parser)
++            tree = etree.parse(xmlf, parser=parser2)
+             if not hasattr(tree, 'iterfind'):
+                 # Python 2.6 compatibility
+                 tree.iterfind = tree.findall
+@@ -219,6 +223,20 @@ def __iter__(self):
+                                 for f in flds)
+ 
+ 
++def _create_xml_parser(user_parser):
++    if user_parser is not None:
++        return user_parser
++    try:
++        # Default lxml parser.
++        # This will throw an error if parser is not set and lxml could not be imported
++        # because Python's built XML parser doesn't like the `resolve_entities` kwarg.
++        # return etree.XMLParser(resolve_entities=False)
++        return etree.XMLParser(resolve_entities=False)
++    except TypeError:
++        # lxml not available
++        return None
++
++
+ def element_text_getter(missing):
+     def _get(v):
+         if len(v) > 1:

@@ -1,0 +1,56 @@
+From 88409e2a94dd3b40ff81d08bf6d92f486d036b24 Mon Sep 17 00:00:00 2001
+From: Moritz Bunkus <moritz@bunkus.org>
+Date: Tue, 20 Oct 2015 14:53:44 +0200
+Subject: [PATCH] EbmlMaster: propagate upper level element after infinite
+ sized one correctly
+
+When the parser encountered a deeply nested element with an infinite
+size then a following element of an upper level was not propagated
+correctly. Instead the element with the infinite size was added into the
+EBML element tree a second time resulting in memory access after freeing
+it and multiple attempts to free the same memory address during
+destruction.
+
+Fixes the issue reported as Cisco TALOS-CAN-0037.
+---
+ ChangeLog          | 8 ++++++++
+ src/EbmlMaster.cpp | 8 ++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index 3fb53d4..154d3d9 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,5 +1,13 @@
+ 2015-10-20  Moritz Bunkus  <moritz@bunkus.org>
+ 
++        * EbmlMaster::Read(): When the parser encountered a deeply nested
++        element with an infinite size then a following element of an upper
++        level was not propagated correctly. Instead the element with the
++        infinite size was added into the EBML element tree a second time
++        resulting in memory access after freeing it and multiple attempts
++        to free the same memory address during destruction. Fixes the
++        issue reported as Cisco TALOS-CAN-0037.
++
+         * EbmlElement::ReadCodedSizeValue(): Fixed an invalid memory
+         access. When reading a EBML variable length integer value a read
+         access beyond the end of the available buffer was possible if
+diff --git a/src/EbmlMaster.cpp b/src/EbmlMaster.cpp
+index 9f2d6b9..8537ac3 100644
+--- a/src/EbmlMaster.cpp
++++ b/src/EbmlMaster.cpp
+@@ -454,6 +454,14 @@ void EbmlMaster::Read(EbmlStream & inDataStream, const EbmlSemanticContext & sCo
+         } else {
+           if (DeleteElement)
+             delete ElementLevelA;
++
++          if (UpperEltFound) {
++            --UpperEltFound;
++            if (UpperEltFound > 0 || MaxSizeToRead <= 0)
++              goto processCrc;
++            ElementLevelA = FoundElt;
++          }
++
+           break;
+         }
+       }

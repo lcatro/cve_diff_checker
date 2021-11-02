@@ -1,0 +1,37 @@
+From acca96a135a4d2a028ba9b636886af99c0915379 Mon Sep 17 00:00:00 2001
+From: Petr Lautrbach <plautrba@redhat.com>
+Date: Fri, 23 Sep 2016 19:24:16 +0200
+Subject: [PATCH] sandbox: create a new session for sandboxed processes
+
+It helps to prevent sandboxed processes to inject arbitrary commands
+into the parent.
+
+Signed-off-by: Petr Lautrbach <plautrba@redhat.com>
+---
+ policycoreutils/sandbox/sandbox | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/policycoreutils/sandbox/sandbox b/policycoreutils/sandbox/sandbox
+index 9cc13c278..07c340cc4 100644
+--- a/policycoreutils/sandbox/sandbox
++++ b/policycoreutils/sandbox/sandbox
+@@ -471,10 +471,15 @@ sandbox [-h] [-l level ] [-[X|M] [-H homedir] [-T tempdir]] [-I includefile ] [-
+                     cmds += ["--"] + self.__paths
+                 return subprocess.Popen(cmds).wait()
+ 
+-            selinux.setexeccon(self.__execcon)
+-            rc = subprocess.Popen(self.__cmds).wait()
+-            selinux.setexeccon(None)
+-            return rc
++            pid = os.fork()
++            if pid == 0:
++                rc = os.setsid()
++                if rc:
++                    return rc
++                selinux.setexeccon(self.__execcon)
++                os.execv(self.__cmds[0], self.__cmds)
++            rc = os.waitpid(pid, 0)
++            return os.WEXITSTATUS(rc[1])
+ 
+         finally:
+             for i in self.__paths:

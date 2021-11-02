@@ -1,0 +1,316 @@
+From 3c937f75ba5853ada175542d5c4849fb95eb64cd Mon Sep 17 00:00:00 2001
+From: andryyy <andre.peters@debinux.de>
+Date: Sun, 7 May 2017 13:38:31 +0200
+Subject: [PATCH] Add OWASP CSRF Protector, add more secure session handling
+
+---
+ data/web/inc/lib/composer.json                |  3 +-
+ data/web/inc/lib/composer.lock                | 42 +++++++++++++-
+ .../lib/vendor/composer/autoload_classmap.php |  8 +++
+ .../lib/vendor/composer/autoload_static.php   |  8 +++
+ .../inc/lib/vendor/composer/installed.json    | 38 ++++++++++++
+ .../inc/lib/vendor/owasp/csrf-protector-php   |  1 +
+ data/web/inc/prerequisites.inc.php            | 35 ++++++-----
+ data/web/inc/sessions.inc.php                 | 58 +++++++++++++++++++
+ data/web/inc/vars.inc.php                     |  2 +
+ 9 files changed, 174 insertions(+), 21 deletions(-)
+ create mode 160000 data/web/inc/lib/vendor/owasp/csrf-protector-php
+ create mode 100644 data/web/inc/sessions.inc.php
+
+diff --git a/data/web/inc/lib/composer.json b/data/web/inc/lib/composer.json
+index d811958b53..7adb5ca098 100644
+--- a/data/web/inc/lib/composer.json
++++ b/data/web/inc/lib/composer.json
+@@ -1,6 +1,7 @@
+ {
+     "require": {
+         "robthree/twofactorauth": "^1.6",
+-        "yubico/u2flib-server": "^1.0"
++        "yubico/u2flib-server": "^1.0",
++        "owasp/csrf-protector-php": "dev-master"
+     }
+ }
+diff --git a/data/web/inc/lib/composer.lock b/data/web/inc/lib/composer.lock
+index 692521d2cb..d0f94fc4a8 100644
+--- a/data/web/inc/lib/composer.lock
++++ b/data/web/inc/lib/composer.lock
+@@ -4,8 +4,44 @@
+         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#composer-lock-the-lock-file",
+         "This file is @generated automatically"
+     ],
+-    "content-hash": "5652a086b6d277d72d7ae0341e517b1e",
++    "content-hash": "413fc63dc6c7815f0a175217bccb490a",
+     "packages": [
++        {
++            "name": "owasp/csrf-protector-php",
++            "version": "dev-master",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/mebjas/CSRF-Protector-PHP.git",
++                "reference": "aec0d6966992363a7192b2ae9fb0a9643e8fa26b"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/mebjas/CSRF-Protector-PHP/zipball/aec0d6966992363a7192b2ae9fb0a9643e8fa26b",
++                "reference": "aec0d6966992363a7192b2ae9fb0a9643e8fa26b",
++                "shasum": ""
++            },
++            "require-dev": {
++                "satooshi/php-coveralls": "~1.0"
++            },
++            "type": "library",
++            "autoload": {
++                "classmap": [
++                    "libs/csrf/"
++                ]
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "APACHE"
++            ],
++            "description": "CSRF protector php, a standalone php library for csrf mitigation in web applications. Easy to integrate in any php web app.",
++            "homepage": "https://github.com/mebjas/CSRF-Protector-PHP",
++            "keywords": [
++                "csrf",
++                "owasp",
++                "security"
++            ],
++            "time": "2017-04-12 05:47:07"
++        },
+         {
+             "name": "robthree/twofactorauth",
+             "version": "1.6",
+@@ -92,7 +128,9 @@
+     "packages-dev": [],
+     "aliases": [],
+     "minimum-stability": "stable",
+-    "stability-flags": [],
++    "stability-flags": {
++        "owasp/csrf-protector-php": 20
++    },
+     "prefer-stable": false,
+     "prefer-lowest": false,
+     "platform": [],
+diff --git a/data/web/inc/lib/vendor/composer/autoload_classmap.php b/data/web/inc/lib/vendor/composer/autoload_classmap.php
+index 44393069fe..b62afd4e21 100644
+--- a/data/web/inc/lib/vendor/composer/autoload_classmap.php
++++ b/data/web/inc/lib/vendor/composer/autoload_classmap.php
+@@ -6,6 +6,14 @@
+ $baseDir = dirname($vendorDir);
+ 
+ return array(
++    'alreadyInitializedException' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'baseJSFileNotFoundExceptio' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'configFileNotFoundException' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'csrfProtector' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'incompleteConfigurationException' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'jsFileNotFoundException' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'logDirectoryNotFoundException' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++    'logFileWriteError' => $vendorDir . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
+     'u2flib_server\\Error' => $vendorDir . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+     'u2flib_server\\RegisterRequest' => $vendorDir . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+     'u2flib_server\\Registration' => $vendorDir . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+diff --git a/data/web/inc/lib/vendor/composer/autoload_static.php b/data/web/inc/lib/vendor/composer/autoload_static.php
+index 5e2dabab16..d6d6268543 100644
+--- a/data/web/inc/lib/vendor/composer/autoload_static.php
++++ b/data/web/inc/lib/vendor/composer/autoload_static.php
+@@ -21,6 +21,14 @@ class ComposerStaticInit873464e4bd965a3168f133248b1b218b
+     );
+ 
+     public static $classMap = array (
++        'alreadyInitializedException' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'baseJSFileNotFoundExceptio' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'configFileNotFoundException' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'csrfProtector' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'incompleteConfigurationException' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'jsFileNotFoundException' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'logDirectoryNotFoundException' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
++        'logFileWriteError' => __DIR__ . '/..' . '/owasp/csrf-protector-php/libs/csrf/csrfprotector.php',
+         'u2flib_server\\Error' => __DIR__ . '/..' . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+         'u2flib_server\\RegisterRequest' => __DIR__ . '/..' . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+         'u2flib_server\\Registration' => __DIR__ . '/..' . '/yubico/u2flib-server/src/u2flib_server/U2F.php',
+diff --git a/data/web/inc/lib/vendor/composer/installed.json b/data/web/inc/lib/vendor/composer/installed.json
+index bbe76d824f..fa07bcd470 100644
+--- a/data/web/inc/lib/vendor/composer/installed.json
++++ b/data/web/inc/lib/vendor/composer/installed.json
+@@ -84,5 +84,43 @@
+         ],
+         "description": "Library for U2F implementation",
+         "homepage": "https://developers.yubico.com/php-u2flib-server"
++    },
++    {
++        "name": "owasp/csrf-protector-php",
++        "version": "dev-master",
++        "version_normalized": "9999999-dev",
++        "source": {
++            "type": "git",
++            "url": "https://github.com/mebjas/CSRF-Protector-PHP.git",
++            "reference": "aec0d6966992363a7192b2ae9fb0a9643e8fa26b"
++        },
++        "dist": {
++            "type": "zip",
++            "url": "https://api.github.com/repos/mebjas/CSRF-Protector-PHP/zipball/aec0d6966992363a7192b2ae9fb0a9643e8fa26b",
++            "reference": "aec0d6966992363a7192b2ae9fb0a9643e8fa26b",
++            "shasum": ""
++        },
++        "require-dev": {
++            "satooshi/php-coveralls": "~1.0"
++        },
++        "time": "2017-04-12T05:47:07+00:00",
++        "type": "library",
++        "installation-source": "source",
++        "autoload": {
++            "classmap": [
++                "libs/csrf/"
++            ]
++        },
++        "notification-url": "https://packagist.org/downloads/",
++        "license": [
++            "APACHE"
++        ],
++        "description": "CSRF protector php, a standalone php library for csrf mitigation in web applications. Easy to integrate in any php web app.",
++        "homepage": "https://github.com/mebjas/CSRF-Protector-PHP",
++        "keywords": [
++            "csrf",
++            "owasp",
++            "security"
++        ]
+     }
+ ]
+diff --git a/data/web/inc/lib/vendor/owasp/csrf-protector-php b/data/web/inc/lib/vendor/owasp/csrf-protector-php
+new file mode 160000
+index 0000000000..aec0d69669
+--- /dev/null
++++ b/data/web/inc/lib/vendor/owasp/csrf-protector-php
+@@ -0,0 +1 @@
++Subproject commit aec0d6966992363a7192b2ae9fb0a9643e8fa26b
+diff --git a/data/web/inc/prerequisites.inc.php b/data/web/inc/prerequisites.inc.php
+index 76ed81eef2..902b46aff0 100644
+--- a/data/web/inc/prerequisites.inc.php
++++ b/data/web/inc/prerequisites.inc.php
+@@ -1,20 +1,5 @@
+ <?php
+-//ini_set("session.cookie_secure", 1);
+-//ini_set("session.cookie_httponly", 1);
+-session_start();
+-if (isset($_POST["logout"])) {
+-  if (isset($_SESSION["dual-login"])) {
+-    $_SESSION["mailcow_cc_username"] = $_SESSION["dual-login"]["username"];
+-    $_SESSION["mailcow_cc_role"] = $_SESSION["dual-login"]["role"];
+-    unset($_SESSION["dual-login"]);
+-  }
+-  else {
+-    session_unset();
+-    session_destroy();
+-    session_write_close();
+-    setcookie(session_name(),'',0,'/');
+-  }
+-}
++require_once 'inc/sessions.inc.php';
+ 
+ require_once 'inc/vars.inc.php';
+ if (file_exists('./inc/vars.local.inc.php')) {
+@@ -24,11 +9,25 @@
+ // Yubi OTP API
+ require_once 'inc/lib/Yubico.php';
+ 
+-// U2F API + T/HOTP API
++// Autoload composer
+ require_once 'inc/lib/vendor/autoload.php';
+-$u2f = new u2flib_server\U2F('https://' . $_SERVER['SERVER_NAME']);
++
++// U2F API + T/HOTP API
++$u2f = new u2flib_server\U2F('https://' . $_SERVER['HTTP_HOST']);
+ $tfa = new RobThree\Auth\TwoFactorAuth('mailcow UI');
+ 
++// OWASP CSRF Protector
++$csrfProtector = new csrfProtector;
++class mailcowCsrfProtector extends csrfprotector {
++  public static function logCSRFattack() {
++    $_SESSION['return'] = array(
++      'type' => 'danger',
++      'msg' => 'CSRF violation'
++    );
++  }
++}
++mailcowCsrfProtector::init();
++
+ // Redis
+ $redis = new Redis();
+ $redis->connect('redis-mailcow', 6379);
+diff --git a/data/web/inc/sessions.inc.php b/data/web/inc/sessions.inc.php
+new file mode 100644
+index 0000000000..e6beb4853b
+--- /dev/null
++++ b/data/web/inc/sessions.inc.php
+@@ -0,0 +1,58 @@
++<?php
++// Start session
++ini_set("session.cookie_httponly", 1);
++if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && 
++  strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) == "https") {
++  ini_set("session.cookie_secure", 1);
++  $IS_HTTPS = true;
++}
++elseif (isset($_SERVER['HTTPS'])) {
++  ini_set("session.cookie_secure", 1);
++  $IS_HTTPS = true;
++}
++else {
++  $IS_HTTPS = false;
++}
++session_set_cookie_params($GLOBALS['SESSION_LIFETIME'], '/', $_SERVER['SERVER_NAME'], $IS_HTTPS, true);
++session_start();
++
++// Handle logouts
++if (isset($_POST["logout"])) {
++  if (isset($_SESSION["dual-login"])) {
++    $_SESSION["mailcow_cc_username"] = $_SESSION["dual-login"]["username"];
++    $_SESSION["mailcow_cc_role"] = $_SESSION["dual-login"]["role"];
++    unset($_SESSION["dual-login"]);
++  }
++  else {
++    session_regenerate_id(true);
++    session_unset();
++    session_destroy();
++    session_write_close();
++    header("Location: /");
++  }
++}
++
++// Set session IP and UA
++if (!isset($_SESSION['SESS_REMOTE_IP'])) {
++  $_SESSION['SESS_REMOTE_IP'] = $_SERVER['REMOTE_ADDR'];
++}
++if (!isset($_SESSION['SESS_REMOTE_UA'])) {
++  $_SESSION['SESS_REMOTE_UA'] = $_SERVER['HTTP_USER_AGENT'];
++}
++
++// Check session
++function session_check() {
++  if (!isset($_SESSION['SESS_REMOTE_IP']) || !isset($_SESSION['SESS_REMOTE_UA'])) {
++    return false;
++  }
++  if ($_SESSION['SESS_REMOTE_IP'] != $_SERVER['REMOTE_ADDR']) {
++    return false;
++  }
++  if ($_SESSION['SESS_REMOTE_UA'] != $_SERVER['HTTP_USER_AGENT']) {
++    return false;
++  }
++  return true;
++}
++if (isset($_SESSION['mailcow_cc_role']) && session_check() === false) {
++  exit("Invalid session");
++}
+diff --git a/data/web/inc/vars.inc.php b/data/web/inc/vars.inc.php
+index 6666d58c86..faef565d75 100644
+--- a/data/web/inc/vars.inc.php
++++ b/data/web/inc/vars.inc.php
+@@ -53,5 +53,7 @@
+ // Rows until pagination begins
+ $PAGINATION_SIZE = 10;
+ 
++// Session lifetime in seconds
++$SESSION_LIFETIME = 3600;
+ 
+ ?>

@@ -1,0 +1,151 @@
+From 0cb1b8a434b599b8d636db029aadb757c24e39d6 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 23 Aug 2017 19:26:37 -0700
+Subject: [PATCH] CVE-2017-13688/OLSR: Do bounds checks before we fetch data.
+
+While we're at it, clean up some other bounds checks, so we check that
+we have a complete IPv4 message header if it's IPv4 and a complete IPv6
+message header if it's IPv6.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add tests using the capture files supplied by the reporter(s).
+---
+ print-olsr.c           |  21 ++++++++++++---------
+ tests/TESTLIST         |   2 ++
+ tests/olsr-oobr-1.out  |  16 ++++++++++++++++
+ tests/olsr-oobr-1.pcap | Bin 0 -> 332 bytes
+ tests/olsr-oobr-2.out  |   3 +++
+ tests/olsr-oobr-2.pcap | Bin 0 -> 152 bytes
+ 6 files changed, 33 insertions(+), 9 deletions(-)
+ create mode 100644 tests/olsr-oobr-1.out
+ create mode 100644 tests/olsr-oobr-1.pcap
+ create mode 100644 tests/olsr-oobr-2.out
+ create mode 100644 tests/olsr-oobr-2.pcap
+
+diff --git a/print-olsr.c b/print-olsr.c
+index 05e74bb84..e67988dfd 100644
+--- a/print-olsr.c
++++ b/print-olsr.c
+@@ -359,10 +359,9 @@ olsr_print(netdissect_options *ndo,
+         } msgptr;
+         int msg_len_valid = 0;
+ 
+-        ND_TCHECK2(*tptr, sizeof(struct olsr_msg4));
+-
+         if (is_ipv6)
+         {
++            ND_TCHECK2(*tptr, sizeof(struct olsr_msg6));
+             msgptr.v6 = (const struct olsr_msg6 *) tptr;
+             msg_type = msgptr.v6->msg_type;
+             msg_len = EXTRACT_16BITS(msgptr.v6->msg_len);
+@@ -393,6 +392,7 @@ olsr_print(netdissect_options *ndo,
+         }
+         else /* (!is_ipv6) */
+         {
++            ND_TCHECK2(*tptr, sizeof(struct olsr_msg4));
+             msgptr.v4 = (const struct olsr_msg4 *) tptr;
+             msg_type = msgptr.v4->msg_type;
+             msg_len = EXTRACT_16BITS(msgptr.v4->msg_len);
+@@ -616,22 +616,25 @@ olsr_print(netdissect_options *ndo,
+ 
+         case OLSR_NAMESERVICE_MSG:
+         {
+-            u_int name_entries = EXTRACT_16BITS(msg_data+2);
+-            u_int addr_size = 4;
+-            int name_entries_valid = 0;
++            u_int name_entries;
++            u_int addr_size;
++            int name_entries_valid;
+             u_int i;
+ 
++            if (msg_tlen < 4)
++                goto trunc;
++            ND_TCHECK2(*msg_data, 4);
++
++            name_entries = EXTRACT_16BITS(msg_data+2);
++            addr_size = 4;
+             if (is_ipv6)
+                 addr_size = 16;
+ 
++            name_entries_valid = 0;
+             if ((name_entries > 0)
+                     && ((name_entries * (4 + addr_size)) <= msg_tlen))
+                 name_entries_valid = 1;
+ 
+-            if (msg_tlen < 4)
+-                goto trunc;
+-            ND_TCHECK2(*msg_data, 4);
+-
+             ND_PRINT((ndo, "\n\t  Version %u, Entries %u%s",
+                    EXTRACT_16BITS(msg_data),
+                    name_entries, (name_entries_valid == 0) ? " (invalid)" : ""));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5866b2858..7437ce763 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -575,6 +575,8 @@ lldp_8023_mtu-oobr	lldp_8023_mtu-oobr.pcap	lldp_8023_mtu-oobr.out	-v -c1
+ bgp_vpn_rt-oobr	bgp_vpn_rt-oobr.pcap	bgp_vpn_rt-oobr.out	-v -c1
+ cfm_sender_id-oobr	cfm_sender_id-oobr.pcap	cfm_sender_id-oobr.out	-v -c1
+ isis-extd-isreach-oobr	isis-extd-isreach-oobr.pcap	isis-extd-isreach-oobr.out -v -c4
++olsr-oobr-1		olsr-oobr-1.pcap		olsr-oobr-1.out	-v
++olsr-oobr-2		olsr-oobr-2.pcap		olsr-oobr-2.out	-v
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/olsr-oobr-1.out b/tests/olsr-oobr-1.out
+new file mode 100644
+index 000000000..1da231890
+--- /dev/null
++++ b/tests/olsr-oobr-1.out
+@@ -0,0 +1,16 @@
++IP truncated-ip - 2315 bytes missing! (tos 0x0, ttl 18, id 4111, offset 0, flags [+, DF, rsvd], proto UDP (17), length 5373, bad cksum 8e7f (->9764)!)
++    15.251.128.192.698 > 193.192.186.0.122: OLSRv4, seq 0x0800, length 2056
++	Nameservice Message (0x82), originator 126.198.193.192, ttl 26, hop 145
++	  vtime 0.062s, msg-seq 0x0008, length 127[|olsr]
++IP truncated-ip - 2315 bytes missing! (tos 0x0, ttl 18, id 4111, offset 0, flags [+, DF, rsvd], proto UDP (17), length 5373, bad cksum 8e7f (->975f)!)
++    16.0.128.192.698 > 193.192.186.0.122: OLSRv4, seq 0x0400, length 512
++	Powerinfo Message (0x80), originator 0.1.0.0, ttl 255, hop 255
++	  vtime 0.500s, msg-seq 0x0000, length 9216 (invalid)
++IP truncated-ip - 2315 bytes missing! (tos 0x0, ttl 18, id 4111, offset 0, flags [+, DF, rsvd], proto UDP (17), length 5373, bad cksum 8e7f (->9764)!)
++    15.251.128.192.698 > 193.192.186.0.122: OLSRv4, seq 0x0800, length 2056
++	Nameservice Message (0x82), originator 126.198.193.192, ttl 26, hop 145
++	  vtime 0.062s, msg-seq 0x0008, length 100[|olsr]
++IP truncated-ip - 2315 bytes missing! (tos 0x0, ttl 18, id 4111, offset 0, flags [+, DF, rsvd], proto UDP (17), length 5373, bad cksum 8e7f (->975f)!)
++    16.0.128.192.698 > 193.192.186.0.122: OLSRv4, seq 0x0800, length 2056
++	Nameservice Message (0x82), originator 126.198.193.192, ttl 26, hop 145
++	  vtime 0.062s, msg-seq 0x5c50, length 185[|olsr]
+diff --git a/tests/olsr-oobr-1.pcap b/tests/olsr-oobr-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..2abfe3e779ed8e7a2ef9ebdce1b7c362ff6f2397
+GIT binary patch
+literal 332
+zcmca|c+)~A1{MYwumv(0fjIC{1D6;h69<UTzyriSELl72jvPE7HIadX!IeSeuK@o8
+z1|h+|dj8)H2M!+C#lW<Sp^E=M2M91UF)-BE9fK?WE1(QgON3zp49JE-oYugs0(R5?
+h|6qz@m!+V%%m(B#2EyJ%bs5~7J0XU}1b7Cx0sth(TZ{kz
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/olsr-oobr-2.out b/tests/olsr-oobr-2.out
+new file mode 100644
+index 000000000..c2d4a8fe3
+--- /dev/null
++++ b/tests/olsr-oobr-2.out
+@@ -0,0 +1,3 @@
++[|ether]
++[|ether]
++IP6 (flowlabel 0x06400, hlim 0, next-header UDP (17) payload length: 5401) 0:24::1e:a0a:141e.698 > 38fd:7f49:eaff:ffff:2025:7373:7562:2573.2: OLSRv6, seq 0x0201, length 5393[|olsr]
+diff --git a/tests/olsr-oobr-2.pcap b/tests/olsr-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ccd79cbd5c7fb277e9db7d277736a076c81d3d7
+GIT binary patch
+literal 152
+zcmca|c+)~A1{MZ}M+{&P2qYPSn797_|NjgE5J84-VA_F!0f@lh|NoEDF=EUO3;{r{
+z8H4EmhJy!oF|cs#(e#{B+IBaAA%#IyQV^t61+1QdL5_<{M9$)Gz2_^S!3wIy#idEA
+d#Z0>xnEL7k7#f(E82`Gw-Occ%0j&J<PXLV=C(r-@
+
+literal 0
+HcmV?d00001
+

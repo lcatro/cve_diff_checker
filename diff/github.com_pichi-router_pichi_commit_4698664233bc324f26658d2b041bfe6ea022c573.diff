@@ -1,0 +1,68 @@
+From 641e9f7997bc882627fef2910b440d38e883c256 Mon Sep 17 00:00:00 2001
+From: Pichi <pichi@elude.in>
+Date: Wed, 18 Mar 2020 18:22:05 -1000
+Subject: [PATCH 1/2] Fix the insecure bug not verifying remote host name for
+ TLS egress
+
+- Verify nothing if 'insecure' field is true
+- Verify only with the CA file if it's specified
+- Otherwise, verify according to RFC 2818
+---
+ src/net/asio.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/net/asio.cpp b/src/net/asio.cpp
+index cc6da2d..710e82a 100644
+--- a/src/net/asio.cpp
++++ b/src/net/asio.cpp
+@@ -38,6 +38,7 @@
+ 
+ #ifdef ENABLE_TLS
+ #include <boost/asio/ssl/context.hpp>
++#include <boost/asio/ssl/rfc2818_verification.hpp>
+ #include <boost/asio/ssl/stream.hpp>
+ #endif // ENABLE_TLS
+ 
+@@ -67,11 +68,15 @@ static auto createTlsContext(api::EgressVO const& vo)
+   auto ctx = ssl::context{ssl::context::tls_client};
+   if (*vo.insecure_) {
+     ctx.set_verify_mode(ssl::context::verify_none);
++    return ctx;
+   }
++
++  ctx.set_verify_mode(ssl::context::verify_peer);
++  if (vo.caFile_.has_value())
++    ctx.load_verify_file(*vo.caFile_);
+   else {
+-    ctx.set_verify_mode(ssl::context::verify_peer);
+     ctx.set_default_verify_paths();
+-    if (vo.caFile_.has_value()) ctx.load_verify_file(*vo.caFile_);
++    ctx.set_verify_callback(ssl::rfc2818_verification{*vo.host_});
+   }
+   return ctx;
+ }
+
+From 7d890a7332c56575b81fadb1a897b482289b80c2 Mon Sep 17 00:00:00 2001
+From: Pichi <pichi@elude.in>
+Date: Sat, 21 Mar 2020 13:09:46 -0700
+Subject: [PATCH 2/2] Fix building failure caused by missing Crypt32.lib on
+ windows
+
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 352c5fc..9556733 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -22,6 +22,9 @@ if (ENABLE_TLS)
+   find_package(OpenSSL REQUIRED)
+   include_directories(${OPENSSL_INCLUDE_DIR})
+   link_libraries(${OPENSSL_LIBRARIES})
++  if (WIN32 AND STATIC_LINK)
++    link_libraries(crypt32)
++  endif (WIN32 AND STATIC_LINK)
+ endif (ENABLE_TLS)
+ 
+ include(Configure)

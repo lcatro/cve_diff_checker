@@ -1,0 +1,24 @@
+From 26eb323554ffccd173e8a79a8c05c15b685ae4d1 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 21 Apr 2021 13:03:47 -0700
+Subject: [PATCH] Fix null CHECK issue with `tf.raw_ops.EncodePng`.
+
+PiperOrigin-RevId: 369717714
+Change-Id: I24136cd99c20b8466671f4f93b670ef6f6dd1250
+---
+ tensorflow/core/kernels/image/encode_png_op.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/image/encode_png_op.cc b/tensorflow/core/kernels/image/encode_png_op.cc
+index 8dbe1d377df5c..09bcdbe5e3db0 100644
+--- a/tensorflow/core/kernels/image/encode_png_op.cc
++++ b/tensorflow/core/kernels/image/encode_png_op.cc
+@@ -54,6 +54,8 @@ class EncodePngOp : public OpKernel {
+     OP_REQUIRES(context, image.dims() == 3,
+                 errors::InvalidArgument("image must be 3-dimensional",
+                                         image.shape().DebugString()));
++    OP_REQUIRES(context, image.NumElements() > 0,
++                errors::Internal("Invalid image provided."));
+     OP_REQUIRES(
+         context,
+         FastBoundsCheck(image.NumElements(), std::numeric_limits<int32>::max()),

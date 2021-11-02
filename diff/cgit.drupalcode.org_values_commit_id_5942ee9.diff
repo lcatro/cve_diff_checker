@@ -1,0 +1,135 @@
+diff --git a/README.txt b/README.txt
+old mode 100755
+new mode 100644
+index 8c233b2c9d1fca1ebc6d6ccdd28108a8ab1269d8..6ff319502f15e6b29d1e2faa4501bdf02aa76122
+--- a/README.txt
++++ b/README.txt
+@@ -23,7 +23,8 @@ able to define the value-label pair for each option.
+ Dependencies
+ ============
+ This module can be used by itself. However, exporting capabilities are provided
+-by enabling the Chaos tools suite module (ctools).
++by enabling the Chaos tools suite module (ctools). In order to import ctools
++exports, users must have the "Use CTools importer" trusted permission.
+ 
+ To do
+ =====
+diff --git a/values.module b/values.module
+index 21bc8a6964f41927a274e562e7d7d305015524a3..6430fda737fc030e832739ea6cedc62c8e4b267a 100644
+--- a/values.module
++++ b/values.module
+@@ -465,39 +465,53 @@ function values_export($value_set, $indent = '') {
+  */
+ function values_import_form($form, &$form_state) {
+   drupal_set_message(t('Importing a value list with a conflicting name will override it.'), 'warning');
+-  $form['import_type'] = array(
+-    '#type' => 'radios',
+-    '#title' => t('Import Type'),
+-    '#description' => t('Choose an import type. Import a previously exported value set, or import a flat list of values in a textarea.'),
+-    '#options' => array(
+-      'ctools' => 'Ctools Export',
+-      'values' => 'Flat List',
+-    ),
+-    '#default_value' => 'ctools',
+-  );
+-  $form['import'] = array(
+-    '#type' => 'textarea',
+-    '#title' => t('Import data'),
+-    '#description' => t('Copy the text from an previously exported value list and paste it here.'),
+-    '#default_value' => isset($form_state['values']['import']) ? $form_state['values']['import'] : '',
+-    '#rows' => 10,
+-    '#states' => array(
+-      'visible' => array(
+-        ':input[name="import_type"]' => array('value' => 'ctools'),
++
++  // If the user has the ctools import permission, we allow them to a ctools
++  // export (raw php code that will be eval'd)
++  if (module_exists('ctools') && user_access('use ctools import')) {
++
++    $form['import_type'] = array(
++      '#type' => 'radios',
++      '#title' => t('Import Type'),
++      '#description' => t('Choose an import type. Import a previously exported value set, or import a flat list of values in a textarea.'),
++      '#options' => array(
++        'ctools' => 'Ctools Export',
++        'values' => 'Flat List',
+       ),
+-    ),
+-  );
++      '#default_value' => 'ctools',
++    );
++
++    $form['import'] = array(
++      '#type' => 'textarea',
++      '#title' => t('Import data'),
++      '#description' => t('Copy the text from an previously exported value list and paste it here.'),
++      '#default_value' => isset($form_state['values']['import']) ? $form_state['values']['import'] : '',
++      '#rows' => 10,
++      '#states' => array(
++        'visible' => array(
++          ':input[name="import_type"]' => array('value' => 'ctools'),
++        ),
++      ),
++    );
++
++  }
++
+   $form['import_values'] = array(
+     '#type' => 'fieldset',
+     '#title' => t('Import Values'),
+     '#description' => 'Import a new value set as a flat set of key|value pairs. Useful for migrating from allowed values lists to value sets.',
+     '#collapsible' => FALSE,
+-    '#states' => array(
++  );
++
++  // Add a state for import type toggle if ctools import is also an option
++  if (module_exists('ctools') && user_access('use ctools import')) {
++    $form['import_values']['#states'] = array(
+       'visible' => array(
+         ':input[name="import_type"]' => array('value' => 'values'),
+       ),
+-    ),
+-  );
++    );
++  }
++
+   $form['import_values']['title'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Value set name'),
+@@ -505,6 +519,7 @@ function values_import_form($form, &$form_state) {
+     '#default_value' => '',
+     '#weight' => -10,
+   );
++
+   $form['import_values']['name'] = array(
+     '#type' => 'machine_name',
+     '#default_value' => '',
+@@ -516,6 +531,7 @@ function values_import_form($form, &$form_state) {
+       'exists' => '_values_name_exists',
+     ),
+   );
++
+   $form['import_values']['description'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Description'),
+@@ -523,6 +539,7 @@ function values_import_form($form, &$form_state) {
+     '#default_value' => isset($value_set->description) ? $value_set->description : '',
+     '#weight' => -8.5,
+   );
++
+   // Wrapper for values
+   $form['import_values']['values'] = array(
+     '#type' => 'textarea',
+@@ -531,10 +548,12 @@ function values_import_form($form, &$form_state) {
+     '#default_value' => '',
+     '#rows' => 10,
+   );
++
+   $form['submit'] = array(
+     '#type' => 'submit',
+     '#value' => t('Import'),
+   );
++
+   return $form;
+ }
+ 

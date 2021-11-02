@@ -1,0 +1,33 @@
+From c1a0b3b2809b21b4df8c1efbc803aff700e262c3 Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Sat, 8 Feb 2020 09:35:37 +0100
+Subject: [PATCH] fix: [security] brutefoce protection rules tightened
+
+- as reported by Dawid Czarnecki
+---
+ app/Model/Bruteforce.php | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/app/Model/Bruteforce.php b/app/Model/Bruteforce.php
+index 98b891f4b7..c1e8356f7e 100644
+--- a/app/Model/Bruteforce.php
++++ b/app/Model/Bruteforce.php
+@@ -49,11 +49,14 @@ public function isBlacklisted($ip, $username)
+         // first remove old expired rows
+         $this->clean();
+         // count
+-        $params = array('conditions' => array(
+-                        'Bruteforce.ip' => $ip,
+-                        'Bruteforce.username' => $username),);
++        $params = array(
++            'conditions' => array(
++            'Bruteforce.ip' => $ip,
++            'LOWER(Bruteforce.username)' => trim(strtolower($username)))
++        );
+         $count = $this->find('count', $params);
+-        if ($count >= Configure::read('SecureAuth.amount')) {
++        $amount = Configure::check('SecureAuth.amount') ? Configure::read('SecureAuth.amount') : 5;
++        if ($count >= $amount) {
+             return true;
+         } else {
+             return false;

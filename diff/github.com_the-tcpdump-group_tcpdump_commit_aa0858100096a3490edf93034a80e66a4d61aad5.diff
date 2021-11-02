@@ -1,0 +1,68 @@
+From aa0858100096a3490edf93034a80e66a4d61aad5 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Fri, 4 Aug 2017 17:15:07 +0100
+Subject: [PATCH] CVE-2017-13049/Rx: add a missing bounds check for Ubik
+
+One of the case blocks in ubik_print() didn't check bounds before
+fetching 32 bits of packet data and could overread past the captured
+packet data by that amount.
+
+This fixes a buffer over-read discovered by Henri Salo from Nixu
+Corporation.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-rx.c              |   1 +
+ tests/TESTLIST          |   3 +++
+ tests/rx_ubik-oobr.out  |   1 +
+ tests/rx_ubik-oobr.pcap | Bin 0 -> 329 bytes
+ 4 files changed, 5 insertions(+)
+ create mode 100644 tests/rx_ubik-oobr.out
+ create mode 100644 tests/rx_ubik-oobr.pcap
+
+diff --git a/print-rx.c b/print-rx.c
+index 9df6b6aee..741d3043d 100644
+--- a/print-rx.c
++++ b/print-rx.c
+@@ -2577,6 +2577,7 @@ ubik_print(netdissect_options *ndo,
+ 			INTOUT();
+ 			ND_PRINT((ndo, " length"));
+ 			INTOUT();
++			ND_TCHECK_32BITS(bp);
+ 			temp = EXTRACT_32BITS(bp);
+ 			bp += sizeof(int32_t);
+ 			tok2str(ubik_lock_types, "type %d", temp);
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 63e7eee00..08cb0d9ac 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -573,6 +573,9 @@ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+ mptcp-dss-oobr		mptcp-dss-oobr.pcap		mptcp-dss-oobr.out	-v
+ icmp6_nodeinfo_oobr	icmp6_nodeinfo_oobr.pcap	icmp6_nodeinfo_oobr.out
+ 
++# bad packets from Henri Salo
++rx_ubik-oobr		rx_ubik-oobr.pcap		rx_ubik-oobr.out -c1
++
+ # RTP tests
+ # fuzzed pcap
+ rtp-seg-fault-1  rtp-seg-fault-1.pcap  rtp-seg-fault-1.out  -v -T rtp
+diff --git a/tests/rx_ubik-oobr.out b/tests/rx_ubik-oobr.out
+new file mode 100644
+index 000000000..f192432d4
+--- /dev/null
++++ b/tests/rx_ubik-oobr.out
+@@ -0,0 +1 @@
++IP truncated-ip - 2598 bytes missing! 222.241.104.198.3503 > 131.63.241.146.7002:  rx data pt ubik call disk-lock tid 50266112.32382 file 2122216448 pos 545160708 length 1087685554 [|ubik] (2632)
+diff --git a/tests/rx_ubik-oobr.pcap b/tests/rx_ubik-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..69caac9013e92c24114f0e553e3183f77cf6e2d7
+GIT binary patch
+literal 329
+zcmca|c+)~A1{MYe24@L|049bwAd3-*6&O+&*nl*M?*qjD!GMvGk(ZH?gTeJFSBioM
+z1H&Idh7b2XW*lp_|2T<vy>!$^n<pUcU*vrmL>m78e-G5iD96ai07N+quKzzXF!(7k
+z{RfIN)B!;WgF;;$i^G+}n?NE!5DUam%lH@=9sq3vTgJeU0&)u2GWN`40t`4UYY;)V
+q?9@}|<i`#U-LL+yXJAk*W=N@GqLSx;hCK|cEvYJH|HH7J_Xz-Rykr^x
+
+literal 0
+HcmV?d00001
+

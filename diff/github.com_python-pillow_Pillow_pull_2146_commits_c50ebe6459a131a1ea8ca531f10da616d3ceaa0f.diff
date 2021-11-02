@@ -1,0 +1,77 @@
+From c50ebe6459a131a1ea8ca531f10da616d3ceaa0f Mon Sep 17 00:00:00 2001
+From: wiredfool <eric-github@soroos.net>
+Date: Thu, 29 Sep 2016 07:05:00 -0700
+Subject: [PATCH] Map.c overflow fixes
+
+---
+ Tests/images/l2rgb_read.bmp | Bin 0 -> 57 bytes
+ Tests/test_map.py           |  25 +++++++++++++++++++++++++
+ map.c                       |  10 ++++++++++
+ 3 files changed, 35 insertions(+)
+ create mode 100644 Tests/images/l2rgb_read.bmp
+ create mode 100644 Tests/test_map.py
+
+diff --git a/Tests/images/l2rgb_read.bmp b/Tests/images/l2rgb_read.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..838e3226b07aa7214876e6fed83681b61c743a68
+GIT binary patch
+literal 57
+kcmZ?rHGqNt|LZjv7#M(D1_Ln70wlqFm<j_%C?7}x06=mH3IG5A
+
+literal 0
+HcmV?d00001
+
+diff --git a/Tests/test_map.py b/Tests/test_map.py
+new file mode 100644
+index 00000000000..235bfadbc7f
+--- /dev/null
++++ b/Tests/test_map.py
+@@ -0,0 +1,25 @@
++from helper import PillowTestCase, unittest
++
++from PIL import Image
++
++class TestMap(PillowTestCase):
++    def test_overflow(self):
++        # There is the potential to overflow comparisons in map.c
++        # if there are > SIZE_MAX bytes in the image or if
++        # the file encodes an offset that makes
++        # (offset + size(bytes)) > SIZE_MAX
++
++        # Note that this image triggers the decompression bomb warning:
++        max_pixels = Image.MAX_IMAGE_PIXELS
++        Image.MAX_IMAGE_PIXELS = None
++
++        # This image hits the offset test.
++        im = Image.open('Tests/images/l2rgb_read.bmp')
++        with self.assertRaises((ValueError, MemoryError)):
++            im.load()
++
++        Image.MAX_IMAGE_PIXELS = max_pixels
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/map.c b/map.c
+index 7309a7bd735..3637ee86a0a 100644
+--- a/map.c
++++ b/map.c
+@@ -342,8 +342,18 @@ PyImaging_MapBuffer(PyObject* self, PyObject* args)
+             stride = xsize * 4;
+     }
+ 
++    if (ysize > INT_MAX / stride) {
++        PyErr_SetString(PyExc_MemoryError, "Integer overflow in ysize");
++        return NULL;
++    }
++
+     size = (Py_ssize_t) ysize * stride;
+ 
++    if (offset > SIZE_MAX - size) {
++        PyErr_SetString(PyExc_MemoryError, "Integer overflow in offset");
++        return NULL;
++    }        
++
+     /* check buffer size */
+     if (PyImaging_GetBuffer(target, &view) < 0)
+         return NULL;

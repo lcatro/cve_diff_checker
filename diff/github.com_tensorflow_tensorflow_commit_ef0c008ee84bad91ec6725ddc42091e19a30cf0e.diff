@@ -1,0 +1,26 @@
+From ef0c008ee84bad91ec6725ddc42091e19a30cf0e Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Wed, 5 May 2021 08:16:13 -0700
+Subject: [PATCH] Fix out of bound read in requantization_range_op.cc
+
+PiperOrigin-RevId: 372129031
+Change-Id: Ie684ab98a3840c5186ead3eafffc0e0ed0e8030d
+---
+ tensorflow/core/kernels/requantization_range_op.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/kernels/requantization_range_op.cc b/tensorflow/core/kernels/requantization_range_op.cc
+index cc6e891a6b352..f6e217499d198 100644
+--- a/tensorflow/core/kernels/requantization_range_op.cc
++++ b/tensorflow/core/kernels/requantization_range_op.cc
+@@ -46,6 +46,10 @@ class RequantizationRangeOp : public OpKernel {
+ 
+   void Compute(OpKernelContext* ctx) override {
+     const Tensor& input = ctx->input(0);
++    OP_REQUIRES(ctx, ctx->input(1).NumElements() > 0,
++                errors::InvalidArgument("Input min must not be empty."));
++    OP_REQUIRES(ctx, ctx->input(2).NumElements() > 0,
++                errors::InvalidArgument("Input max must not be empty."));
+     const float input_min_float = ctx->input(1).flat<float>()(0);
+     const float input_max_float = ctx->input(2).flat<float>()(0);
+     Tensor* output_min = nullptr;

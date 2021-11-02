@@ -1,0 +1,157 @@
+From 9d946fa173acadcff7c80171d9b1186fab2e8daf Mon Sep 17 00:00:00 2001
+From: eyalitki <eyal.itkin@hotmail.com>
+Date: Mon, 29 Aug 2016 22:07:50 +0300
+Subject: [PATCH] 2nd round security fixes
+
+Some more security fixes after a second round of examination.
+---
+ mactelnet.c  | 21 ++++++++++++++-------
+ mactelnetd.c | 15 ++++++++++-----
+ protocol.c   | 10 ++++++----
+ 3 files changed, 30 insertions(+), 16 deletions(-)
+
+diff --git a/mactelnet.c b/mactelnet.c
+index 4d222ff..4b44e5a 100644
+--- a/mactelnet.c
++++ b/mactelnet.c
+@@ -96,7 +96,7 @@ static char autologin_path[255];
+ 
+ static int keepalive_counter = 0;
+ 
+-static unsigned char pass_salt[17];
++static unsigned char pass_salt[16];
+ static char username[MT_MNDP_MAX_STRING_SIZE];
+ static char password[MT_MNDP_MAX_STRING_SIZE];
+ static char nonpriv_username[MT_MNDP_MAX_STRING_SIZE];
+@@ -212,7 +212,7 @@ static void send_auth(char *username, char *password) {
+ 	char *terminal = getenv("TERM");
+ 	char md5data[100];
+ 	unsigned char md5sum[17];
+-	int plen;
++	int plen, act_pass_len;
+ 	md5_state_t state;
+ 
+ #if defined(__linux__) && defined(_POSIX_MEMLOCK_RANGE)
+@@ -220,15 +220,18 @@ static void send_auth(char *username, char *password) {
+ 	mlock(md5sum, sizeof(md5data));
+ #endif
+ 
++	/* calculate the actual password's length */
++	act_pass_len = strnlen(password, 82);
++
+ 	/* Concat string of 0 + password + pass_salt */
+ 	md5data[0] = 0;
+-	strncpy(md5data + 1, password, 82);
+-	md5data[83] = '\0';
+-	memcpy(md5data + 1 + strlen(password), pass_salt, 16);
++	memcpy(md5data + 1, password, act_pass_len);
++	/* in case that password is long, calculate only using the used-up parts */
++	memcpy(md5data + 1 + act_pass_len, pass_salt, 16);
+ 
+ 	/* Generate md5 sum of md5data with a leading 0 */
+ 	md5_init(&state);
+-	md5_append(&state, (const md5_byte_t *)md5data, strlen(password) + 17);
++	md5_append(&state, (const md5_byte_t *)md5data, 1 + act_pass_len + 16);
+ 	md5_finish(&state, (md5_byte_t *)md5sum + 1);
+ 	md5sum[0] = 0;
+ 
+@@ -312,7 +315,11 @@ static int handle_packet(unsigned char *data, int data_len) {
+ 
+ 			/* If we receive pass_salt, transmit auth data back */
+ 			if (cpkt.cptype == MT_CPTYPE_PASSSALT) {
+-				memcpy(pass_salt, cpkt.data, cpkt.length);
++				/* check validity, server sends exactly 16 bytes */
++				if (cpkt.length != 16) {
++					fprintf(stderr, _("Invalid salt length: %d (instead of 16) received from server %s\n"), cpkt.length, ether_ntoa((struct ether_addr *)dstmac));
++				}
++				memcpy(pass_salt, cpkt.data, 16);
+ 				send_auth(username, password);
+ 			}
+ 
+diff --git a/mactelnetd.c b/mactelnetd.c
+index 82d7fd3..c7307a5 100644
+--- a/mactelnetd.c
++++ b/mactelnetd.c
+@@ -407,6 +407,7 @@ static void user_login(struct mt_connection *curconn, struct mt_mactelnet_hdr *p
+ 	char md5data[100];
+ 	struct mt_credentials *user;
+ 	char *slavename;
++	int act_pass_len;
+ 
+ 	/* Reparse user file before each login */
+ 	read_userfile();
+@@ -421,14 +422,18 @@ static void user_login(struct mt_connection *curconn, struct mt_mactelnet_hdr *p
+ 		}
+ #endif
+ 
++		/* calculate the password's actual length */
++		act_pass_len = strlen(user->password);
++		act_pass_len = act_pass_len <= 82 ? act_pass_len : 82;
++
+ 		/* Concat string of 0 + password + pass_salt */
+ 		md5data[0] = 0;
+-		strncpy(md5data + 1, user->password, 82);
+-		memcpy(md5data + 1 + strlen(user->password), curconn->pass_salt, 16);
++		memcpy(md5data + 1, user->password, act_pass_len);
++		memcpy(md5data + 1 + act_pass_len, curconn->pass_salt, 16);
+ 
+ 		/* Generate md5 sum of md5data with a leading 0 */
+ 		md5_init(&state);
+-		md5_append(&state, (const md5_byte_t *)md5data, strlen(user->password) + 17);
++		md5_append(&state, (const md5_byte_t *)md5data, 1 + act_pass_len + 16);
+ 		md5_finish(&state, (md5_byte_t *)md5sum + 1);
+ 		md5sum[0] = 0;
+ 
+@@ -635,7 +640,7 @@ static void handle_data_packet(struct mt_connection *curconn, struct mt_mactelne
+ 			memcpy(curconn->terminal_type, cpkt.data, act_size = (cpkt.length > 30 - 1 ? 30 - 1 : cpkt.length));
+ 			curconn->terminal_type[act_size] = 0;
+ 
+-		} else if (cpkt.cptype == MT_CPTYPE_PASSWORD) {
++		} else if (cpkt.cptype == MT_CPTYPE_PASSWORD && cpkt.length == 17) {
+ 
+ #if defined(__linux__) && defined(_POSIX_MEMLOCK_RANGE)
+ 			mlock(curconn->trypassword, 17);
+@@ -651,7 +656,7 @@ static void handle_data_packet(struct mt_connection *curconn, struct mt_mactelne
+ 			}
+ 
+ 		} else {
+-			syslog(LOG_WARNING, _("(%d) Unhandeled control packet type: %d"), curconn->seskey, cpkt.cptype);
++			syslog(LOG_WARNING, _("(%d) Unhandeled control packet type: %d, length: %d"), curconn->seskey, cpkt.cptype, cpkt.length);
+ 		}
+ 
+ 		/* Parse next control packet */
+diff --git a/protocol.c b/protocol.c
+index 6299675..39a2151 100644
+--- a/protocol.c
++++ b/protocol.c
+@@ -84,8 +84,9 @@ int add_control_packet(struct mt_packet *packet, enum mt_cptype cptype, void *cp
+ 	unsigned char *data = packet->data + packet->size;
+ 	unsigned int act_size = data_len + (cptype == MT_CPTYPE_PLAINDATA ? 0 : MT_CPHEADER_LEN);
+ 
+-	/* Something is really wrong. Packets should never become over 1500 bytes */
+-	if (packet->size + act_size > MT_PACKET_LEN) {
++	/* Something is really wrong. Packets should never become over 1500 bytes,
++       perform an Integer-Overflow safe check */
++	if (act_size > MT_PACKET_LEN - packet->size) {
+ 		fprintf(stderr, _("add_control_packet: ERROR, too large packet. Exceeds %d bytes\n"), MT_PACKET_LEN);
+ 		return -1;
+ 		//exit(1);
+@@ -149,7 +150,8 @@ int init_pongpacket(struct mt_packet *packet, unsigned char *srcmac, unsigned ch
+ }
+ 
+ int add_packetdata(struct mt_packet *packet, unsigned char *data, unsigned short length) {
+-	if (packet->size + length > MT_PACKET_LEN) {
++	/* Integer-Overflow safe check */
++	if (length > MT_PACKET_LEN - packet->size) {
+ 		fprintf(stderr, _("add_control_packet: ERROR, too large packet. Exceeds %d bytes\n"), MT_PACKET_LEN);
+ 		return -1;
+ 	}
+@@ -272,7 +274,7 @@ int mndp_add_attribute(struct mt_packet *packet, enum mt_mndp_attrtype attrtype,
+ 	unsigned short len = data_len;
+ 
+ 	/* Something is really wrong. Packets should never become over 1500 bytes */
+-	if (packet->size + 4 + data_len > MT_PACKET_LEN) {
++	if (data_len > MT_PACKET_LEN - 4 - packet->size) {
+ 		fprintf(stderr, _("mndp_add_attribute: ERROR, too large packet. Exceeds %d bytes\n"), MT_PACKET_LEN);
+ 		return -1;
+ 	}

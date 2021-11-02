@@ -1,0 +1,164 @@
+From bd4e697ebd6c8457efa8f28f6831fc929b88a014 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Fri, 11 Aug 2017 13:39:02 +0100
+Subject: [PATCH] CVE-2017-13053/BGP: fix VPN route target bounds checks
+
+decode_rt_routing_info() didn't check bounds before fetching 4 octets of
+the origin AS field and could over-read the input buffer, put it right.
+
+It also fetched the varying number of octets of the route target field
+from 4 octets lower than the correct offset, put it right.
+
+It also used the same temporary buffer explicitly through as_printf()
+and implicitly through bgp_vpn_rd_print() so the end result of snprintf()
+was not what was originally intended.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-bgp.c                |  22 ++++++++++++++++---
+ tests/TESTLIST             |   1 +
+ tests/bgp_vpn_rt-oobr.out  |  43 +++++++++++++++++++++++++++++++++++++
+ tests/bgp_vpn_rt-oobr.pcap | Bin 0 -> 5092 bytes
+ 4 files changed, 63 insertions(+), 3 deletions(-)
+ create mode 100644 tests/bgp_vpn_rt-oobr.out
+ create mode 100644 tests/bgp_vpn_rt-oobr.pcap
+
+diff --git a/print-bgp.c b/print-bgp.c
+index ced54c3dd..611454055 100644
+--- a/print-bgp.c
++++ b/print-bgp.c
+@@ -761,11 +761,18 @@ decode_rt_routing_info(netdissect_options *ndo,
+ {
+ 	uint8_t route_target[8];
+ 	u_int plen;
++	char asbuf[sizeof(astostr)]; /* bgp_vpn_rd_print() overwrites astostr */
+ 
++	/* NLRI "prefix length" from RFC 2858 Section 4. */
+ 	ND_TCHECK(pptr[0]);
+ 	plen = pptr[0];   /* get prefix length */
+ 
++	/* NLRI "prefix" (ibid), valid lengths are { 0, 32, 33, ..., 96 } bits.
++	 * RFC 4684 Section 4 defines the layout of "origin AS" and "route
++	 * target" fields inside the "prefix" depending on its length.
++	 */
+ 	if (0 == plen) {
++		/* Without "origin AS", without "route target". */
+ 		snprintf(buf, buflen, "default route target");
+ 		return 1;
+ 	}
+@@ -773,20 +780,29 @@ decode_rt_routing_info(netdissect_options *ndo,
+ 	if (32 > plen)
+ 		return -1;
+ 
++	/* With at least "origin AS", possibly with "route target". */
++	ND_TCHECK_32BITS(pptr + 1);
++	as_printf(ndo, asbuf, sizeof(asbuf), EXTRACT_32BITS(pptr + 1));
++
+         plen-=32; /* adjust prefix length */
+ 
+ 	if (64 < plen)
+ 		return -1;
+ 
++	/* From now on (plen + 7) / 8 evaluates to { 0, 1, 2, ..., 8 }
++	 * and gives the number of octets in the variable-length "route
++	 * target" field inside this NLRI "prefix". Look for it.
++	 */
+ 	memset(&route_target, 0, sizeof(route_target));
+-	ND_TCHECK2(pptr[1], (plen + 7) / 8);
+-	memcpy(&route_target, &pptr[1], (plen + 7) / 8);
++	ND_TCHECK2(pptr[5], (plen + 7) / 8);
++	memcpy(&route_target, &pptr[5], (plen + 7) / 8);
++	/* Which specification says to do this? */
+ 	if (plen % 8) {
+ 		((u_char *)&route_target)[(plen + 7) / 8 - 1] &=
+ 			((0xff00 >> (plen % 8)) & 0xff);
+ 	}
+ 	snprintf(buf, buflen, "origin AS: %s, route target %s",
+-	    as_printf(ndo, astostr, sizeof(astostr), EXTRACT_32BITS(pptr+1)),
++	    asbuf,
+ 	    bgp_vpn_rd_print(ndo, (u_char *)&route_target));
+ 
+ 	return 5 + (plen + 7) / 8;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index eb0839e0c..d770f5ccf 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -572,6 +572,7 @@ rsvp_uni-oobr-2	rsvp_uni-oobr-2.pcap	rsvp_uni-oobr-2.out	-v -c1
+ rsvp_uni-oobr-3	rsvp_uni-oobr-3.pcap	rsvp_uni-oobr-3.out	-v -c3
+ rpki-rtr-oob		rpki-rtr-oob.pcap	rpki-rtr-oob.out	-v -c1
+ lldp_8023_mtu-oobr	lldp_8023_mtu-oobr.pcap	lldp_8023_mtu-oobr.out	-v -c1
++bgp_vpn_rt-oobr	bgp_vpn_rt-oobr.pcap	bgp_vpn_rt-oobr.out	-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/bgp_vpn_rt-oobr.out b/tests/bgp_vpn_rt-oobr.out
+new file mode 100644
+index 000000000..b41596267
+--- /dev/null
++++ b/tests/bgp_vpn_rt-oobr.out
+@@ -0,0 +1,43 @@
++IP (tos 0xc, ttl 254, id 21263, offset 0, flags [rsvd], proto TCP (6), length 60165, bad cksum 8e15 (->9eb8)!)
++    241.0.128.19.179 > 239.8.0.1.0: Flags [none], seq 2146695561:2146755682, win 56026, options [unknown-161,eol], length 60121: BGP
++	Update Message (2), length: 45
++	  Withdrawn routes: 3 bytes
++	  Attribute Set (128), length: 7, Flags [OTPE+f]: 
++	    Origin AS: 0
++	      Multi-Protocol Unreach NLRI (15), length: 227, Flags [T+6]: 
++	    AFI: IPv6 (2), SAFI: Multicast VPN (5)
++	      Route-Type: Source-Active (5), length: 5, RD: unknown RD format, Group bogus address length 127
++	      Route-Type: Unknown (142), length: 142
++	      Route-Type: Unknown (0), length: 0
++	      Route-Type: Unknown (33), length: 0
++	      Route-Type: Unknown (0), length: 0[|BGP] [|BGP]
++	Update Message (2), length: 45[|BGP] [|BGP]
++	Update Message (2), length: 45
++	  Withdrawn routes: 3 bytes
++	  Attribute Set (128), length: 7, Flags [OTPE+f]: 
++	    Origin AS: 0
++	      Multi-Protocol Reach NLRI (14), length: 227, Flags [T+6]: 
++	    AFI: IPv4 (1), vendor specific SAFI: Route Target Routing Information (132)
++	    nexthop: invalid len, nh-length: 1, no SNPA
++	      origin AS: 0, route target 0:0 (= 0.0.0.0)
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target
++	      default route target[|BGP]
+diff --git a/tests/bgp_vpn_rt-oobr.pcap b/tests/bgp_vpn_rt-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..69d5b960664ec2be34c4e2e857ac4ad44a5c7b12
+GIT binary patch
+literal 5092
+zcmca|c+)~A1{MYeaRCMp_z%R4KrCg%%O%Fl#8AY=z+lF}z<Gt|fBpae3`Y+zG%V#{
+zaOHW;8qD9o@Q<xe^dm!q@OuuRrp*it^`C!sGB7suB{1B&rE*($F3@PM|7d_gmx+P-
+z<NtYwH~nv5U<cXh#{ZasiItVL4+@Ai=06j}sOm<9QGAaX7_aE#vlv}<3nPOA$Q3w&
+zB2F3FO8ox-jE=uxI~<6&=^gP(39AG~-6u%8Agq?^D(GQxJ(XPj|0e^35I-Tq>Or{+
+z0)7C47RH9s%YpR&&uD^}+&}30FqIGx2_hhmLs}Gv_y`gPWl7?}8Vscd7$T?w3aDK2
+zdH+dD*tp8*VO~^{AG}y}juw?z0);4{2BK79D*FDP0o=5JHYhL>E2fS?FT#!2g`jpB
+z3@E`E$TX-1Arc^)MWmJyt;|0lIK<J-4I>P|4Ok3O+6epyHkhdg{!!1Up=OdaMGhty
+zaQ}f_CA>BW;*}j-lK8zsLWx6>xBd^mHfte80YaQ+2ZjdX6w*l5b7IW}Rpi8~rJK6{
+z5Aj*`AEg|C)u-g>!Dq|RmJ>pCzC0|B|C2mQ@&7TZQB>hw!7$|;vFT74P3to>K2~lD
+PR#DmrLYv0_fz4t7c-iUO
+
+literal 0
+HcmV?d00001
+

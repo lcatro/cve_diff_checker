@@ -1,0 +1,48 @@
+From 983faa94f161df3623ecd371d3696a1b3f91c15f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Thu, 25 Feb 2016 11:30:14 +0100
+Subject: [PATCH] Fix XSS in database structure page
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Forward ported commit 90df124797175688a63be0d0a311210e92f09895
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ .../database/structure/sortable_header.phtml   | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/templates/database/structure/sortable_header.phtml b/templates/database/structure/sortable_header.phtml
+index d3cec6fd63e..044647158d5 100644
+--- a/templates/database/structure/sortable_header.phtml
++++ b/templates/database/structure/sortable_header.phtml
+@@ -51,16 +51,20 @@ if ($requested_sort == $sort) {
+ }
+ $_url_params = array(
+     'db' => $_REQUEST['db'],
++    'pos' => 0, // We set the position back to 0 every time they sort.
++    'sort' => $sort,
++    'sort_order' => $future_sort_order,
+ );
+-$url = 'db_structure.php' . PMA_URL_getCommon($_url_params);
+-// We set the position back to 0 every time they sort.
+-$url .= "&amp;pos=0&amp;sort=$sort&amp;sort_order=$future_sort_order";
+-if (! empty($_REQUEST['tbl_type'])) {
+-    $url .= "&amp;tbl_type=" . $_REQUEST['tbl_type'];
++
++if (PMA_isValid($_REQUEST['tbl_type'], array('view', 'table'))) {
++     $_url_params['tbl_type'] = $_REQUEST['tbl_type'];
+ }
+ if (! empty($_REQUEST['tbl_group'])) {
+-    $url .= "&amp;tbl_group=" . $_REQUEST['tbl_group'];
++    $_url_params['tbl_group'] = $_REQUEST['tbl_group'];
+ }
++
++$url = 'db_structure.php' . PMA_URL_getCommon($_url_params);
++
+ echo PMA_Util::linkOrButton(
+     $url, $title . $order_img, $order_link_params
+-);
+\ No newline at end of file
++);

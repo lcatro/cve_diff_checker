@@ -1,0 +1,62 @@
+From 427fbed55d3154d96ecfc1c7784d49eaa3c04161 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Maur=C3=ADcio=20Meneghini=20Fauth?= <mauricio@fauth.dev>
+Date: Wed, 18 Sep 2019 22:40:32 -0300
+Subject: [PATCH] Require POST method to delete servers in Setup
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Maurício Meneghini Fauth <mauricio@fauth.dev>
+---
+ setup/frames/index.inc.php   |  5 +++--
+ setup/frames/servers.inc.php |  2 +-
+ setup/scripts.js             | 10 ++++++++++
+ 3 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/setup/frames/index.inc.php b/setup/frames/index.inc.php
+index 6d8db1a48c8..f3c369b4815 100644
+--- a/setup/frames/index.inc.php
++++ b/setup/frames/index.inc.php
+@@ -156,8 +156,9 @@
+         echo '<a href="' , Url::getCommon(array('page' => 'servers', 'mode' => 'edit', 'id' => $id)), '">'
+             , __('Edit') , '</a>';
+         echo ' | ';
+-        echo '<a href="' , Url::getCommon(array('page' => 'servers', 'mode' => 'remove', 'id' => $id)), '">'
+-            , __('Delete') , '</a>';
++        echo '<a class="delete-server" href="' . Url::getCommon(array('page' => 'servers', 'mode' => 'remove', 'id' => $id));
++        echo '" data-post="' . Url::getCommon(array('token' => $_SESSION[' PMA_token ']), '') . '">';
++        echo __('Delete') . '</a>';
+         echo '</small>';
+         echo '</td>';
+         echo '</tr>';
+diff --git a/setup/frames/servers.inc.php b/setup/frames/servers.inc.php
+index 1cb690a077d..74ed7b5674a 100644
+--- a/setup/frames/servers.inc.php
++++ b/setup/frames/servers.inc.php
+@@ -27,7 +27,7 @@
+     $page_title = __('Edit server')
+         . ' ' . $id
+         . ' <small>(' . htmlspecialchars($cf->getServerDSN($id)) . ')</small>';
+-} elseif ($mode == 'remove' && $server_exists) {
++} elseif ($mode == 'remove' && $server_exists && $_SERVER['REQUEST_METHOD'] == 'POST') {
+     $cf->removeServer($id);
+     header('Location: index.php' . Url::getCommonRaw());
+     exit;
+diff --git a/setup/scripts.js b/setup/scripts.js
+index 09f4baa5f04..6a2f5b99c21 100644
+--- a/setup/scripts.js
++++ b/setup/scripts.js
+@@ -216,3 +216,13 @@ $(function () {
+ //
+ // END: User preferences allow/disallow UI
+ // ------------------------------------------------------------------
++
++$(function () {
++    $('.delete-server').on('click', function (e) {
++        e.preventDefault();
++        var $this = $(this);
++        $.post($this.attr('href'), $this.attr('data-post'), function () {
++            window.location.replace('index.php');
++        });
++    });
++});

@@ -1,0 +1,125 @@
+From 331530a4076c69bbd2e3214db6ccbe834fb75640 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sun, 6 Aug 2017 20:54:42 +0100
+Subject: [PATCH] CVE-2017-13047/ES-IS: put an existing bounds check right
+
+The bounds check in esis_print() tested one pointer at the beginning of
+a loop that incremented another, make the trivial fix. While at it, make
+the function print a standard marker when it detects truncated data and
+update some existing ES-IS tests respectively.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-isoclns.c               |   4 ++--
+ tests/TESTLIST                |   1 +
+ tests/esis_opt_prot-oobr.out  |   5 +++++
+ tests/esis_opt_prot-oobr.pcap | Bin 0 -> 76 bytes
+ tests/esis_snpa_asan-3.out    |   2 +-
+ tests/esis_snpa_asan-4.out    |   4 ++--
+ tests/esis_snpa_asan-5.out    |   2 +-
+ 7 files changed, 12 insertions(+), 6 deletions(-)
+ create mode 100644 tests/esis_opt_prot-oobr.out
+ create mode 100644 tests/esis_opt_prot-oobr.pcap
+
+diff --git a/print-isoclns.c b/print-isoclns.c
+index 628550284..06ad90641 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -1334,7 +1334,7 @@ esis_print(netdissect_options *ndo,
+ 
+             case ESIS_OPTION_PROTOCOLS:
+                 while (opli>0) {
+-                    ND_TCHECK(*pptr);
++                    ND_TCHECK(*tptr);
+                     ND_PRINT((ndo, "%s (0x%02x)",
+                            tok2str(nlpid_values,
+                                    "unknown",
+@@ -1367,7 +1367,7 @@ esis_print(netdissect_options *ndo,
+             pptr += opli;
+         }
+ trunc:
+-	return;
++        ND_PRINT((ndo, "[|esis]"));
+ }
+ 
+ static void
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index d80395177..62e705bf3 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -566,6 +566,7 @@ vqp-oobr		vqp-oobr.pcap			vqp-oobr.out		-v -c1
+ bgp_pmsi_tunnel-oobr	bgp_pmsi_tunnel-oobr.pcap	bgp_pmsi_tunnel-oobr.out -v -c1
+ bgp_mvpn_6_and_7	bgp_mvpn_6_and_7.pcap		bgp_mvpn_6_and_7.out	-v -c1
+ rsvp_fast_reroute-oobr	rsvp_fast_reroute-oobr.pcap	rsvp_fast_reroute-oobr.out -v -c1
++esis_opt_prot-oobr	esis_opt_prot-oobr.pcap		esis_opt_prot-oobr.out	-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/esis_opt_prot-oobr.out b/tests/esis_opt_prot-oobr.out
+new file mode 100644
+index 000000000..359eb0fa7
+--- /dev/null
++++ b/tests/esis_opt_prot-oobr.out
+@@ -0,0 +1,5 @@
++ES-IS, length 33559803
++	redirect (6), v: 1, checksum: 0x00c6 (unverified), holding time: 2303s, length indicator: 54
++	  00.8e
++	  SNPA (length: 0): <empty>
++	  Protocols supported Option #129, length 11, value: CLNP (0x81), [|esis]
+diff --git a/tests/esis_opt_prot-oobr.pcap b/tests/esis_opt_prot-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c50cb67eca7abd05558225bc5bebfe647b760fae
+GIT binary patch
+literal 76
+zcmca|c+)~A1{MY&;1l@I&>#k6WB{?lwurnZaxx4`AQ@2xCZ;?8{_!`NF*2la{AW1E
+Y#L&mU(8%4$$iT?lz`($v3R1-Y0K?-DLjV8(
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/esis_snpa_asan-3.out b/tests/esis_snpa_asan-3.out
+index 5e6a14d1d..109d25919 100644
+--- a/tests/esis_snpa_asan-3.out
++++ b/tests/esis_snpa_asan-3.out
+@@ -4,4 +4,4 @@ UI 22! ES-IS, length 65565
+ UI 22! ES-IS, length 2650865693
+ 	redirect (6), v: 1, checksum: 0x0300 (incorrect should be 0xbce5), holding time: 21480s, length indicator: 17
+ 	  ec.ff00.00
+-	  SNPA (length: 0): <empty>
++	  SNPA (length: 0): <empty>[|esis]
+diff --git a/tests/esis_snpa_asan-4.out b/tests/esis_snpa_asan-4.out
+index 249b248bf..10a52d46f 100644
+--- a/tests/esis_snpa_asan-4.out
++++ b/tests/esis_snpa_asan-4.out
+@@ -7,7 +7,7 @@ UI 22! ES-IS, length 65565
+ 	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x44ec), holding time: 21315s, length indicator: 16
+ 	  02.0400
+ 	  SNPA (length: 0): <empty>
+-	  Unknown Option #0, length 0, value: 
++	  Unknown Option #0, length 0, value: [|esis]
+ UI 32! ES-IS, length 65565
+ 	ESH (2), v: 1, checksum: 0x70a1 (incorrect should be 0xfb4e), holding time: 21315s, length indicator: 17
+ 	  Number of Source Addresses: 2
+@@ -17,5 +17,5 @@ UI 22! ES-IS, length 4244701213
+ 	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x36fe), holding time: 21315s, length indicator: 17
+ 	  isonsap_string: illegal length
+ 	  SNPA (length: 0): <empty>
+-	  NET (length: 4) 00.0000.00
++	  NET (length: 4) 00.0000.00[|esis]
+ Q.922, invalid address
+diff --git a/tests/esis_snpa_asan-5.out b/tests/esis_snpa_asan-5.out
+index bd8c30dd2..527214cb3 100644
+--- a/tests/esis_snpa_asan-5.out
++++ b/tests/esis_snpa_asan-5.out
+@@ -3,7 +3,7 @@ UI 22! ES-IS, length 65565
+ 	  Number of Source Addresses: 3
+ 	  NET (length: 0): isonsap_string: illegal length
+ 	  NET (length: 4): ec.ff00.00
+-	  NET (length: 0): isonsap_string: illegal length
++	  NET (length: 0): isonsap_string: illegal length[|esis]
+ UI 22! ES-IS, length 65565
+ 	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x3ff0), holding time: 21315s, length indicator: 17
+ 	  04

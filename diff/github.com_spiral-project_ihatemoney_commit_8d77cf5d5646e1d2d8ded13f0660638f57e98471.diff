@@ -1,0 +1,45 @@
+From 8d77cf5d5646e1d2d8ded13f0660638f57e98471 Mon Sep 17 00:00:00 2001
+From: Baptiste Jonglez <git@bitsofnetworks.org>
+Date: Fri, 17 Jul 2020 17:43:33 +0200
+Subject: [PATCH] Fix unauthorized access and modification of project data
+ (CVE-2020-15120)
+
+An authenticated member of one project can modify and delete members of
+another project, without knowledge of this other project's private
+code. This can be further exploited to access all bills of another project
+without knowledge of this other project's private code.
+
+With the default configuration, anybody is allowed to create a new
+project. An attacker can create a new project and then use it to become
+authenticated and exploit this flaw. As such, the exposure is similar to
+an unauthenticated attack, because it is trivial to become authenticated.
+
+This issue was caused by a wrong database queries in PersonQuery.
+
+For more details, see https://github.com/spiral-project/ihatemoney/security/advisories/GHSA-67j9-c52g-w2q9
+---
+ ihatemoney/models.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ihatemoney/models.py b/ihatemoney/models.py
+index fe7b5196d..5691c75ed 100644
+--- a/ihatemoney/models.py
++++ b/ihatemoney/models.py
+@@ -380,7 +380,7 @@ class PersonQuery(BaseQuery):
+         def get_by_name(self, name, project):
+             return (
+                 Person.query.filter(Person.name == name)
+-                .filter(Project.id == project.id)
++                .filter(Person.project_id == project.id)
+                 .one()
+             )
+ 
+@@ -389,7 +389,7 @@ def get(self, id, project=None):
+                 project = g.project
+             return (
+                 Person.query.filter(Person.id == id)
+-                .filter(Project.id == project.id)
++                .filter(Person.project_id == project.id)
+                 .one()
+             )
+ 

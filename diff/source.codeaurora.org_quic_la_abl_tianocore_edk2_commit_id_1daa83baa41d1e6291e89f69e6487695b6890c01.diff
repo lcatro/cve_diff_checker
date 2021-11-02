@@ -1,0 +1,47 @@
+From 1daa83baa41d1e6291e89f69e6487695b6890c01 Mon Sep 17 00:00:00 2001
+From: Vijay Kumar Pendoti <vpendo@codeaurora.org>
+Date: Fri, 14 Jul 2017 20:08:08 +0530
+Subject: QcomModulePkg: Add Max number of images check in meta_img
+
+ABL reads the number of images present in the meta_img
+during the runtime, added max number of images check to
+avoid buffer writes.
+
+Change-Id: I22d20ec142a3e70028836709765a90660bb96bef
+---
+ QcomModulePkg/Library/FastbootLib/FastbootCmds.c | 4 ++++
+ QcomModulePkg/Library/FastbootLib/MetaFormat.h   | 3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+index cd93870..e0ca5dd 100644
+--- a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
++++ b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+@@ -851,6 +851,10 @@ HandleMetaImgFlash(
+ 	meta_header = (meta_header_t *) Image;
+ 	img_header_entry = (img_header_entry_t *) (Image + sizeof(meta_header_t));
+ 	images = meta_header->img_hdr_sz / sizeof(img_header_entry_t);
++	if (images > MAX_IMAGES_IN_METAIMG) {
++		DEBUG((EFI_D_ERROR, "Error: Number of images(%u)in meta_image are greater than expected\n", images));
++		return EFI_INVALID_PARAMETER;
++	}
+ 
+ 	if (CHECK_ADD64((UINT64)Image, Size)) {
+ 		DEBUG((EFI_D_ERROR, "Integer overflow detected in %d, %a\n", __LINE__, __FUNCTION__));
+diff --git a/QcomModulePkg/Library/FastbootLib/MetaFormat.h b/QcomModulePkg/Library/FastbootLib/MetaFormat.h
+index 77422bc..60fede8 100644
+--- a/QcomModulePkg/Library/FastbootLib/MetaFormat.h
++++ b/QcomModulePkg/Library/FastbootLib/MetaFormat.h
+@@ -31,6 +31,9 @@
+ #define _META_FORMAT_H_
+ 
+ #define META_HEADER_MAGIC  0xce1ad63c
++/*Keeping the maximum number of images supported to 32 for future expansion*/
++/*Refer device/qcom/common/meta_image/meta_image.c file for reference*/
++#define MAX_IMAGES_IN_METAIMG 32
+ 
+ typedef struct meta_header {
+   UINT32       magic;		    /* 0xce1ad63c */
+-- 
+cgit v1.1
+

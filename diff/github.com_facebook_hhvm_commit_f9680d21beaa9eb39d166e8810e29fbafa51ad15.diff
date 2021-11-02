@@ -1,0 +1,61 @@
+From f9680d21beaa9eb39d166e8810e29fbafa51ad15 Mon Sep 17 00:00:00 2001
+From: Dhaval Kapil <dhavalkapil@fb.com>
+Date: Tue, 3 Sep 2019 17:14:12 -0700
+Subject: [PATCH] exif_scan_JPEG_header: Added length check to prevent
+ information leak
+
+Summary:
+'exif_process_SOFn' assumes that the JPEG header has at least 6 length. On providing a length < 6, this leads to an out of bounds heap read.
+
+Fixes CVE-2019-11926
+
+Reviewed By: fredemmott
+
+Differential Revision: D16927050
+
+fbshipit-source-id: 76c4b7c95acbb7852b0435298613d559d94e7270
+---
+ hphp/runtime/ext/gd/ext_gd.cpp                 | 4 ++++
+ hphp/test/slow/ext_gd/exifreaddata.php         | 8 ++++++++
+ hphp/test/slow/ext_gd/exifreaddata.php.expectf | 2 ++
+ 3 files changed, 14 insertions(+)
+ create mode 100644 hphp/test/slow/ext_gd/exifreaddata.php
+ create mode 100644 hphp/test/slow/ext_gd/exifreaddata.php.expectf
+
+diff --git a/hphp/runtime/ext/gd/ext_gd.cpp b/hphp/runtime/ext/gd/ext_gd.cpp
+index 3ff392a41c6a..96db385c0a42 100644
+--- a/hphp/runtime/ext/gd/ext_gd.cpp
++++ b/hphp/runtime/ext/gd/ext_gd.cpp
+@@ -7117,6 +7117,10 @@ static int exif_scan_JPEG_header(image_info_type *ImageInfo) {
+       case M_SOF13:
+       case M_SOF14:
+       case M_SOF15:
++        if ((itemlen - 2) < 6) {
++          return 0;
++        }
++
+         exif_process_SOFn(Data, marker, &sof_info);
+         ImageInfo->Width  = sof_info.width;
+         ImageInfo->Height = sof_info.height;
+diff --git a/hphp/test/slow/ext_gd/exifreaddata.php b/hphp/test/slow/ext_gd/exifreaddata.php
+new file mode 100644
+index 000000000000..e51c9e83da1b
+--- /dev/null
++++ b/hphp/test/slow/ext_gd/exifreaddata.php
+@@ -0,0 +1,8 @@
++<?hh
++
++<<__EntryPoint>>
++function main_exifreaddata() {
++  $jpeg = "\xff\xd8\xc9\x00\x03\x04\x03\xf8";
++  $data_stream = "data://text/plain;base64," . base64_encode($jpeg);
++  var_dump(exif_read_data($data_stream));
++}
+diff --git a/hphp/test/slow/ext_gd/exifreaddata.php.expectf b/hphp/test/slow/ext_gd/exifreaddata.php.expectf
+new file mode 100644
+index 000000000000..34519709efb4
+--- /dev/null
++++ b/hphp/test/slow/ext_gd/exifreaddata.php.expectf
+@@ -0,0 +1,2 @@
++Warning: Invalid JPEG file in %s/ext_gd/exifreaddata.php on line 7
++bool(false)

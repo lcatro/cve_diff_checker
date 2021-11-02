@@ -1,0 +1,27 @@
+From c95a43dc92695464be11c8a51811aaa9761546e6 Mon Sep 17 00:00:00 2001
+From: Kuang-che Wu <kcwu@google.com>
+Date: Tue, 30 Aug 2016 08:32:00 +0800
+Subject: [PATCH] Fix potential heap buffer corruption due to Strgrow
+
+If Str.length = 5 and area_size = 6, the result of Strgrow is still
+area_size = 6. For such case, Strcat_char and Strinsert_char will
+overflow one byte.
+---
+ Str.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Str.c b/Str.c
+index 70e9957..d34129f 100644
+--- a/Str.c
++++ b/Str.c
+@@ -232,8 +232,8 @@ Strgrow(Str x)
+ {
+     char *old = x->ptr;
+     int newlen;
+-    newlen = x->length * 6 / 5;
+-    if (newlen == x->length)
++    newlen = x->area_size * 6 / 5;
++    if (newlen == x->area_size)
+ 	newlen += 2;
+     x->ptr = GC_MALLOC_ATOMIC(newlen);
+     x->area_size = newlen;

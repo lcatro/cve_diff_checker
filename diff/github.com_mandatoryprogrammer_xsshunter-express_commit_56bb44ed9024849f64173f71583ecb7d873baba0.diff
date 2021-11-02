@@ -1,0 +1,32 @@
+From 56bb44ed9024849f64173f71583ecb7d873baba0 Mon Sep 17 00:00:00 2001
+From: "Matthew Bryant (mandatory)" <matt@refinery.io>
+Date: Thu, 16 Sep 2021 22:43:16 -0700
+Subject: [PATCH] Better path checking
+
+---
+ api.js | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/api.js b/api.js
+index cb48bf5..c2544ee 100644
+--- a/api.js
++++ b/api.js
+@@ -94,9 +94,17 @@ async function set_up_api_server(app) {
+             constants.API_BASE_PATH + 'settings',
+         ];
+ 
++        // Check if the path being accessed required authentication
++        var requires_authentication = false;
++        AUTHENTICATION_REQUIRED_ROUTES.map(authenticated_route => {
++            if(req.path.toLowerCase().startsWith(authenticated_route)) {
++                requires_authentication = true;
++            }
++        });
++
+         // If the route is not one of the authentication required routes
+         // then we can allow it through.
+-        if(!AUTHENTICATION_REQUIRED_ROUTES.includes(req.path)) {
++        if(!requires_authentication) {
+             next();
+             return;
+         }

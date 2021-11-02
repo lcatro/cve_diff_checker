@@ -1,0 +1,30 @@
+From 09e0c6076466b4383da7fa4e13f714311109945a Mon Sep 17 00:00:00 2001
+From: Lars Kanis <lars@greiz-reinsdorf.de>
+Date: Fri, 1 Jun 2018 22:31:40 +0200
+Subject: [PATCH] Don't search in hardcoded paths on Windows
+
+Native Windows apps don't use "/usr" path to store system dlls.
+It's even more harm than good to search through these directories,
+since they are used in Cygwin and it can lead to accidentaly loading
+Cygwin DLLs into native Windows apps.
+
+Hardcoded paths are disabled for MINGW and MSWIN environments only.
+They are still present on Cygwin and MSYS2, because these POSIX-API
+based environments don't use LoadLibrary() but dl_open() to load DLLs.
+---
+ lib/ffi/library.rb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/ffi/library.rb b/lib/ffi/library.rb
+index 200ce7a9..f14bcad5 100644
+--- a/lib/ffi/library.rb
++++ b/lib/ffi/library.rb
+@@ -125,7 +125,7 @@ def ffi_lib(*names)
+                 retry
+               else
+                 # TODO better library lookup logic
+-                unless libname.start_with?("/")
++                unless libname.start_with?("/") || FFI::Platform.windows?
+                   path = ['/usr/lib/','/usr/local/lib/'].find do |pth|
+                     File.exist?(pth + libname)
+                   end

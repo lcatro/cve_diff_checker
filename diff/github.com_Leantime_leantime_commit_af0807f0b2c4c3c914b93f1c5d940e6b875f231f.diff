@@ -1,0 +1,73 @@
+From 23aa023e3574b33c89788737b3381caf5f4629e6 Mon Sep 17 00:00:00 2001
+From: Jacob Jensen <jacob.jensen@gpsinsight.com>
+Date: Thu, 26 Mar 2020 21:22:56 -0700
+Subject: [PATCH] fix: use PDO injection for IN clause for tickets query for
+ users filter
+
+---
+ src/core/class.db.php                         | 24 +++++++++++++++++++
+ .../tickets/repositories/class.tickets.php    | 10 +++++++-
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/class.db.php b/src/core/class.db.php
+index 16d73ae9..d39fe62b 100644
+--- a/src/core/class.db.php
++++ b/src/core/class.db.php
+@@ -259,4 +259,28 @@ public function hasResults()
+         
+     }
+ 
++    /**
++     * This function will generate a pdo binding string (":editors0,:editors1,:editors2,:editors3") to be used in a PDO
++     * query that uses the IN() clause, to assist in proper PDO array bindings to avoid SQL injection.
++     *
++     * A counted for loop is user rather than foreach with a key to avoid issues if the array passed has any
++     * arbitrary keys
++     *
++     * @param $name string
++     * @param $count int
++     * @return string
++     */
++    public static function arrayToPdoBindingString($name, $count)
++    {
++        $bindingStatement = "";
++        for ($i = 0; $i < $count; $i++) {
++            $bindingStatement .= ":" . $name . $i;
++            if ($i != $count-1) {
++                $bindingStatement .= ",";
++            }
++        }
++
++        return $bindingStatement;
++    }
++
+ }
+diff --git a/src/domain/tickets/repositories/class.tickets.php b/src/domain/tickets/repositories/class.tickets.php
+index 38a90c77..0892286e 100644
+--- a/src/domain/tickets/repositories/class.tickets.php
++++ b/src/domain/tickets/repositories/class.tickets.php
+@@ -806,8 +806,10 @@ public function getAllBySearchCriteria($searchCriteria, $sort='standard')
+                 $query .= " AND zp_tickets.projectId = :projectId";
+             }
+ 
++
+             if($searchCriteria["users"]  != "") {
+-                $query .= " AND zp_tickets.editorId IN(".strip_tags($searchCriteria["users"]).")";
++                $editorIdIn = core\db::arrayToPdoBindingString("users", count(explode(",", $searchCriteria["users"])));
++                $query .= " AND zp_tickets.editorId IN(" . $editorIdIn. ")";
+             }
+ 
+             if($searchCriteria["milestone"]  != "") {
+@@ -867,6 +869,12 @@ public function getAllBySearchCriteria($searchCriteria, $sort='standard')
+                 $stmn->bindValue(':searchType', $searchCriteria["type"], PDO::PARAM_STR);
+             }
+ 
++            if($searchCriteria["users"]  != "") {
++                foreach(explode(",", $searchCriteria["users"]) as $key => $user) {
++                    $stmn->bindValue(":users" . $key, $user, PDO::PARAM_STR);
++                }
++            }
++
+             if($searchCriteria["term"]  != "") {
+                 $termWild = "%".$searchCriteria["term"]."%";
+                 $stmn->bindValue(':termWild', $termWild, PDO::PARAM_STR);

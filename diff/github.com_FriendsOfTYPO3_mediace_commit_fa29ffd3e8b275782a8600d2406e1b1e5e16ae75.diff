@@ -1,0 +1,32 @@
+From fa29ffd3e8b275782a8600d2406e1b1e5e16ae75 Mon Sep 17 00:00:00 2001
+From: Oliver Hader <oliver@typo3.org>
+Date: Mon, 29 Jun 2020 15:39:55 +0200
+Subject: [PATCH] [SECURITY] Restrict file validation hash generation
+
+Security-References: CVE-2020-15086
+---
+ Resources/PHP/ValidateHashEID.php | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/Resources/PHP/ValidateHashEID.php b/Resources/PHP/ValidateHashEID.php
+index e2ee58b..71f1481 100644
+--- a/Resources/PHP/ValidateHashEID.php
++++ b/Resources/PHP/ValidateHashEID.php
+@@ -14,10 +14,15 @@
+ 
+ call_user_func(function() {
+     $value = \TYPO3\CMS\Core\Utility\GeneralUtility::_GET('value');
+-    $addition = \TYPO3\CMS\Core\Utility\GeneralUtility::_GET('addition');
+     $scope = \TYPO3\CMS\Core\Utility\GeneralUtility::_GET('scope');
+ 
+-    $content = \TYPO3\CMS\Core\Utility\GeneralUtility::hmac($value, $addition);
++    if (!is_string($value) || empty($value)) {
++        \TYPO3\CMS\Core\Utility\HttpUtility::setResponseCodeAndExit(
++            \TYPO3\CMS\Core\Utility\HttpUtility::HTTP_STATUS_400
++        );
++    }
++
++    $content = \TYPO3\CMS\Core\Utility\GeneralUtility::hmac($value, 'flashvars');
+ 
+     if ($scope === 'flashvars') {
+         header('Content-type: application/x-www-form-urlencoded');

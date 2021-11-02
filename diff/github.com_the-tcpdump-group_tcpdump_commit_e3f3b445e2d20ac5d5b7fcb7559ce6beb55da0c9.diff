@@ -1,0 +1,91 @@
+From e3f3b445e2d20ac5d5b7fcb7559ce6beb55da0c9 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 13:38:50 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14467/BGP: Fix BGP_CAPCODE_MP.
+
+Add a bounds check and a comment to bgp_capabilities_print().
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-bgp.c                                  |   2 ++
+ tests/TESTLIST                               |   1 +
+ tests/bgp-bgp_capabilities_print-oobr-2.out  |  26 +++++++++++++++++++
+ tests/bgp-bgp_capabilities_print-oobr-2.pcap | Bin 0 -> 274 bytes
+ 4 files changed, 29 insertions(+)
+ create mode 100644 tests/bgp-bgp_capabilities_print-oobr-2.out
+ create mode 100644 tests/bgp-bgp_capabilities_print-oobr-2.pcap
+
+diff --git a/print-bgp.c b/print-bgp.c
+index 1438915a4..71bb5a76e 100644
+--- a/print-bgp.c
++++ b/print-bgp.c
+@@ -2342,6 +2342,8 @@ bgp_capabilities_print(netdissect_options *ndo,
+                 ND_TCHECK2(opt[i+2], cap_len);
+                 switch (cap_type) {
+                 case BGP_CAPCODE_MP:
++                    /* AFI (16 bits), Reserved (8 bits), SAFI (8 bits) */
++                    ND_TCHECK_8BITS(opt + i + 5);
+                     ND_PRINT((ndo, "\n\t\tAFI %s (%u), SAFI %s (%u)",
+                            tok2str(af_values, "Unknown",
+                                       EXTRACT_16BITS(opt+i+2)),
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index b77c01c8f..1ebdcda09 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -558,6 +558,7 @@ icmp-icmp_print-oobr-2 icmp-icmp_print-oobr-2.pcap icmp-icmp_print-oobr-2.out -v
+ rsvp-rsvp_obj_print-oobr rsvp-rsvp_obj_print-oobr.pcap rsvp-rsvp_obj_print-oobr.out -v -c3
+ vrrp-vrrp_print-oobr vrrp-vrrp_print-oobr.pcap vrrp-vrrp_print-oobr.out -v -c3
+ bgp-bgp_capabilities_print-oobr-1 bgp-bgp_capabilities_print-oobr-1.pcap bgp-bgp_capabilities_print-oobr-1.out -v -c1
++bgp-bgp_capabilities_print-oobr-2 bgp-bgp_capabilities_print-oobr-2.pcap bgp-bgp_capabilities_print-oobr-2.out -v -c1
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/bgp-bgp_capabilities_print-oobr-2.out b/tests/bgp-bgp_capabilities_print-oobr-2.out
+new file mode 100644
+index 000000000..21de6f9d1
+--- /dev/null
++++ b/tests/bgp-bgp_capabilities_print-oobr-2.out
+@@ -0,0 +1,26 @@
++IP (tos 0x1f,CE, ttl 254, id 38671, offset 0, flags [+, DF, rsvd], proto TCP (6), length 4135, bad cksum 200 (->1fdd)!)
++    226.219.0.0.179 > 16.233.34.0.100: Flags [SPUE], seq 347537408:347541483, win 511, urg 65535, options [eol], length 4075: BGP [|BGP]
++	Open Message (1), length: 59
++	  Version 255, my AS 65528, Holdtime 4324s, ID 144.8.32.4
++	  Optional parameters, length: 29
++	    Option Unknown (0), length: 0
++	      no decoder for option 0
++	    Option Capabilities Advertisement (2), length: 8
++	      Graceful Restart (64), length: 0
++		Restart Flags: [none], Restart Time 0s
++	      Unknown (0), length: 0
++		no decoder for Capability 0
++	      32-Bit AS Number (65), length: 4
++		 4 Byte AS 2
++	    Option Unknown (0), length: 2
++	      no decoder for option 0
++	    Option Capabilities Advertisement (2), length: 2
++	      Unknown (232), length: 3
++		no decoder for Capability 232
++		0x0000:  0207 04
++	    Option Capabilities Advertisement (2), length: 7
++	      Multiple Routes to a Destination (4), length: 0
++		no decoder for Capability 4
++	      Unknown (8), length: 0
++		no decoder for Capability 8
++	      Multiprotocol Extensions (1), length: 0[|BGP]
+diff --git a/tests/bgp-bgp_capabilities_print-oobr-2.pcap b/tests/bgp-bgp_capabilities_print-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c2e1d2e70a62bc5dfc8121882fe80e6b31a6ead
+GIT binary patch
+literal 274
+zcmca|c+)~A1{MZMMg|6kh6DHR11S)bcU~d`1NVET7eF>Y1LLXp{=Yq&b~P}I+}*l@
+zgTYl^Kz%y@1BQQWObm~1GcX9eRAOM*%#b3ooq^$5D+BNPEXMx~4FCT#2>fRd|Np;%
+zfkE}Z04vzsZHbKkp#a7JT7hnp8xv4a;7<d`dltd}Onm<tm>MKlU{=dOtWE_gVQ|>+
+z2k780Koc1ZVCKST25X=VKLnmk;80+ZWnf_9Z~$s>WC0RPAn<~jiJgUk1LWNX1_mhx
+MfxGV$elsuv0AyZdM*si-
+
+literal 0
+HcmV?d00001
+

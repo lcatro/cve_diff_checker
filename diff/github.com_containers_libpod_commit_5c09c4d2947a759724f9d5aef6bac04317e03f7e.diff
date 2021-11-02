@@ -1,0 +1,143 @@
+From a6836eae5280dafc9ce3703bd3bad5d6720ff32e Mon Sep 17 00:00:00 2001
+From: Jhon Honce <jhonce@redhat.com>
+Date: Wed, 4 Sep 2019 15:05:08 -0700
+Subject: [PATCH] Do not support wildcards on cp
+
+* symlink processing and wildcarding led to unexpected files
+  being copied
+
+Signed-off-by: Jhon Honce <jhonce@redhat.com>
+---
+ cmd/podman/cp.go        | 27 ++++++---------------------
+ test/e2e/cp_test.go     |  4 ++--
+ test/system/065-cp.bats | 17 ++++++-----------
+ 3 files changed, 14 insertions(+), 34 deletions(-)
+
+diff --git a/cmd/podman/cp.go b/cmd/podman/cp.go
+index 5e1ca83125a..661d0a5303d 100644
+--- a/cmd/podman/cp.go
++++ b/cmd/podman/cp.go
+@@ -52,7 +52,7 @@ func init() {
+ 	cpCommand.Command = _cpCommand
+ 	flags := cpCommand.Flags()
+ 	flags.BoolVar(&cpCommand.Extract, "extract", false, "Extract the tar file into the destination directory.")
+-	flags.BoolVar(&cpCommand.Pause, "pause", false, "Pause the container while copying")
++	flags.BoolVar(&cpCommand.Pause, "pause", true, "Pause the container while copying")
+ 	cpCommand.SetHelpTemplate(HelpTemplate())
+ 	cpCommand.SetUsageTemplate(UsageTemplate())
+ }
+@@ -147,7 +147,6 @@ func copyBetweenHostAndContainer(runtime *libpod.Runtime, src string, dest strin
+ 
+ 	hostOwner := idtools.IDPair{UID: int(hostUID), GID: int(hostGID)}
+ 
+-	var glob []string
+ 	if isFromHostToCtr {
+ 		if isVol, volDestName, volName := isVolumeDestName(destPath, ctr); isVol {
+ 			path, err := pathWithVolumeMount(ctr, runtime, volDestName, volName, destPath)
+@@ -209,13 +208,7 @@ func copyBetweenHostAndContainer(runtime *libpod.Runtime, src string, dest strin
+ 			srcPath = cleanedPath
+ 		}
+ 	}
+-	glob, err = filepath.Glob(srcPath)
+-	if err != nil {
+-		return errors.Wrapf(err, "invalid glob %q", srcPath)
+-	}
+-	if len(glob) == 0 {
+-		glob = append(glob, srcPath)
+-	}
++
+ 	if !filepath.IsAbs(destPath) {
+ 		dir, err := os.Getwd()
+ 		if err != nil {
+@@ -224,19 +217,11 @@ func copyBetweenHostAndContainer(runtime *libpod.Runtime, src string, dest strin
+ 		destPath = filepath.Join(dir, destPath)
+ 	}
+ 
+-	var lastError error
+-	for _, src := range glob {
+-		if src == "-" {
+-			src = os.Stdin.Name()
+-			extract = true
+-		}
+-		err := copy(src, destPath, dest, idMappingOpts, &destOwner, extract, isFromHostToCtr)
+-		if lastError != nil {
+-			logrus.Error(lastError)
+-		}
+-		lastError = err
++	if src == "-" {
++		srcPath = os.Stdin.Name()
++		extract = true
+ 	}
+-	return lastError
++	return copy(srcPath, destPath, dest, idMappingOpts, &destOwner, extract, isFromHostToCtr)
+ }
+ 
+ func getUser(mountPoint string, userspec string) (specs.User, error) {
+diff --git a/test/e2e/cp_test.go b/test/e2e/cp_test.go
+index edd9c70c655..9b0cb757ddc 100644
+--- a/test/e2e/cp_test.go
++++ b/test/e2e/cp_test.go
+@@ -223,7 +223,7 @@ var _ = Describe("Podman cp", func() {
+ 		session.WaitWithDefaultTimeout()
+ 		Expect(session.ExitCode()).To(Equal(0))
+ 
+-		session = podmanTest.Podman([]string{"cp", "testctr:testfile", "testfile1"})
++		session = podmanTest.Podman([]string{"cp", "--pause=false", "testctr:testfile", "testfile1"})
+ 		session.WaitWithDefaultTimeout()
+ 		Expect(session.ExitCode()).To(Equal(0))
+ 
+@@ -233,7 +233,7 @@ var _ = Describe("Podman cp", func() {
+ 		Expect(err).To(BeNil())
+ 		Expect(strings.Contains(string(cmdRet), "testuser")).To(BeFalse())
+ 
+-		session = podmanTest.Podman([]string{"cp", "testfile1", "testctr:testfile2"})
++		session = podmanTest.Podman([]string{"cp", "--pause=false", "testfile1", "testctr:testfile2"})
+ 		session.WaitWithDefaultTimeout()
+ 		Expect(session.ExitCode()).To(Equal(0))
+ 
+diff --git a/test/system/065-cp.bats b/test/system/065-cp.bats
+index 204065bdb37..0ca730a50b8 100644
+--- a/test/system/065-cp.bats
++++ b/test/system/065-cp.bats
+@@ -27,13 +27,8 @@ load helpers
+                "echo $rand_content1 >/tmp/$rand_filename1;
+                 echo $rand_content2 >/tmp/$rand_filename2"
+ 
+-    run_podman cp 'cpcontainer:/tmp/*' $dstdir
+-
+-    test -e $dstdir/$rand_filename1 || die "file 1 not copied from container"
+-    test -e $dstdir/$rand_filename2 || die "file 2 not copied from container"
+-
+-    is "$(<$dstdir/$rand_filename1)" "$rand_content1" "content of file 1"
+-    is "$(<$dstdir/$rand_filename2)" "$rand_content2" "content of file 2"
++    # cp no longer supports wildcarding
++    run_podman 125 cp 'cpcontainer:/tmp/*' $dstdir
+ 
+     run_podman rm cpcontainer
+ }
+@@ -150,13 +145,13 @@ load helpers
+ 
+     # Copy file from host into container, into a file named 'x'
+     # Note that the second has a trailing slash; this will trigger mkdir
+-    run_podman cp $srcdir/$rand_filename1 cpcontainer:/tmp/d1/x
++    run_podman cp --pause=false $srcdir/$rand_filename1 cpcontainer:/tmp/d1/x
+     is "$output" "" "output from podman cp 1"
+ 
+-    run_podman cp $srcdir/$rand_filename2 cpcontainer:/tmp/d2/x/
++    run_podman cp --pause=false $srcdir/$rand_filename2 cpcontainer:/tmp/d2/x/
+     is "$output" "" "output from podman cp 3"
+ 
+-    run_podman cp $srcdir/$rand_filename3 cpcontainer:/tmp/d3/x
++    run_podman cp --pause=false $srcdir/$rand_filename3 cpcontainer:/tmp/d3/x
+     is "$output" "" "output from podman cp 3"
+ 
+     # Read back.
+@@ -205,7 +200,7 @@ load helpers
+                "mkdir -p $graphroot; trap 'exit 0' 15;while :;do sleep 0.5;done"
+ 
+     # Copy from host into container.
+-    run_podman cp $srcdir/$rand_filename cpcontainer:$graphroot/$rand_filename
++    run_podman cp --pause=false $srcdir/$rand_filename cpcontainer:$graphroot/$rand_filename
+ 
+     # ls, and confirm it's there.
+     run_podman exec cpcontainer ls -l $graphroot/$rand_filename

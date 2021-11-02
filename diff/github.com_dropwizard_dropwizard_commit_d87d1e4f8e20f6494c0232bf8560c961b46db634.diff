@@ -1,0 +1,451 @@
+From d87d1e4f8e20f6494c0232bf8560c961b46db634 Mon Sep 17 00:00:00 2001
+From: Jochen Schalanda <jochen@schalanda.name>
+Date: Thu, 20 Feb 2020 02:36:40 +0100
+Subject: [PATCH] Escape EL expressions in ViolationCollector (#3157)
+
+Fixes #3153
+---
+ .../selfvalidating/ViolationCollector.java    |  80 ++++++-
+ .../validation/SelfValidationTest.java        | 208 ++++++++++--------
+ 2 files changed, 197 insertions(+), 91 deletions(-)
+
+diff --git a/dropwizard-validation/src/main/java/io/dropwizard/validation/selfvalidating/ViolationCollector.java b/dropwizard-validation/src/main/java/io/dropwizard/validation/selfvalidating/ViolationCollector.java
+index 69cf5e63db..5c0005cb7a 100644
+--- a/dropwizard-validation/src/main/java/io/dropwizard/validation/selfvalidating/ViolationCollector.java
++++ b/dropwizard-validation/src/main/java/io/dropwizard/validation/selfvalidating/ViolationCollector.java
+@@ -1,12 +1,16 @@
+ package io.dropwizard.validation.selfvalidating;
+ 
++import javax.annotation.Nullable;
+ import javax.validation.ConstraintValidatorContext;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
+ 
+ /**
+  * This class is a simple wrapper around the ConstraintValidatorContext of hibernate validation.
+  * It collects all the violations of the SelfValidation methods of an object.
+  */
+ public class ViolationCollector {
++    private static final Pattern ESCAPE_PATTERN = Pattern.compile("\\$\\{");
+ 
+     private boolean violationOccurred = false;
+     private ConstraintValidatorContext context;
+@@ -17,14 +21,80 @@ public ViolationCollector(ConstraintValidatorContext context) {
+     }
+ 
+     /**
+-     * Adds a new violation to this collector. This also sets violationOccurred to true.
++     * Adds a new violation to this collector. This also sets {@code violationOccurred} to {@code true}.
+      *
+-     * @param msg the message of the violation
++     * @param message the message of the violation (any EL expression will be escaped and not parsed)
+      */
+-    public void addViolation(String msg) {
++    public void addViolation(String message) {
+         violationOccurred = true;
+-        context.buildConstraintViolationWithTemplate(msg)
+-            .addConstraintViolation();
++        String messageTemplate = escapeEl(message);
++        context.buildConstraintViolationWithTemplate(messageTemplate)
++                .addConstraintViolation();
++    }
++
++    /**
++     * Adds a new violation to this collector. This also sets {@code violationOccurred} to {@code true}.
++     *
++     * @param propertyName the name of the property
++     * @param message      the message of the violation (any EL expression will be escaped and not parsed)
++     * @since 2.0.2
++     */
++    public void addViolation(String propertyName, String message) {
++        violationOccurred = true;
++        String messageTemplate = escapeEl(message);
++        context.buildConstraintViolationWithTemplate(messageTemplate)
++                .addPropertyNode(propertyName)
++                .addConstraintViolation();
++    }
++
++    /**
++     * Adds a new violation to this collector. This also sets {@code violationOccurred} to {@code true}.
++     *
++     * @param propertyName the name of the property with the violation
++     * @param index        the index of the element with the violation
++     * @param message      the message of the violation (any EL expression will be escaped and not parsed)
++     * @since 2.0.2
++     */
++    public void addViolation(String propertyName, Integer index, String message) {
++        violationOccurred = true;
++        String messageTemplate = escapeEl(message);
++        context.buildConstraintViolationWithTemplate(messageTemplate)
++                .addPropertyNode(propertyName)
++                .addBeanNode().inIterable().atIndex(index)
++                .addConstraintViolation();
++    }
++
++    /**
++     * Adds a new violation to this collector. This also sets {@code violationOccurred} to {@code true}.
++     *
++     * @param propertyName the name of the property with the violation
++     * @param key          the key of the element with the violation
++     * @param message      the message of the violation (any EL expression will be escaped and not parsed)
++     * @since 2.0.2
++     */
++    public void addViolation(String propertyName, String key, String message) {
++        violationOccurred = true;
++        String messageTemplate = escapeEl(message);
++        context.buildConstraintViolationWithTemplate(messageTemplate)
++                .addPropertyNode(propertyName)
++                .addBeanNode().inIterable().atKey(key)
++                .addConstraintViolation();
++    }
++
++    @Nullable
++    private String escapeEl(@Nullable String s) {
++        if (s == null || s.isEmpty()) {
++            return s;
++        }
++
++        final Matcher m = ESCAPE_PATTERN.matcher(s);
++        final StringBuffer sb = new StringBuffer(s.length() + 16);
++        while (m.find()) {
++            m.appendReplacement(sb, "\\\\\\${");
++        }
++        m.appendTail(sb);
++
++        return sb.toString();
+     }
+ 
+     /**
+diff --git a/dropwizard-validation/src/test/java/io/dropwizard/validation/SelfValidationTest.java b/dropwizard-validation/src/test/java/io/dropwizard/validation/SelfValidationTest.java
+index d3a7e79fa8..7ccf915579 100644
+--- a/dropwizard-validation/src/test/java/io/dropwizard/validation/SelfValidationTest.java
++++ b/dropwizard-validation/src/test/java/io/dropwizard/validation/SelfValidationTest.java
+@@ -1,28 +1,28 @@
+ package io.dropwizard.validation;
+ 
+-import static org.assertj.core.api.Assertions.assertThat;
+-
+-import javax.annotation.concurrent.NotThreadSafe;
+-import javax.validation.Validator;
+-
+-import org.junit.jupiter.api.AfterEach;
+-import org.junit.jupiter.api.BeforeEach;
+-import org.junit.jupiter.api.Test;
+-
+ import io.dropwizard.validation.selfvalidating.SelfValidating;
+ import io.dropwizard.validation.selfvalidating.SelfValidation;
+ import io.dropwizard.validation.selfvalidating.ViolationCollector;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
+ import uk.org.lidalia.slf4jext.Level;
+ import uk.org.lidalia.slf4jtest.LoggingEvent;
+ import uk.org.lidalia.slf4jtest.TestLoggerFactory;
+ 
++import javax.annotation.concurrent.NotThreadSafe;
++import javax.validation.Validator;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
+ @NotThreadSafe
+ public class SelfValidationTest {
+ 
+     private static final String FAILED = "failed";
+     private static final String FAILED_RESULT = " " + FAILED;
+-    
+-    @BeforeEach @AfterEach
++
++    @AfterEach
++    @BeforeEach
+     public void clearAllLoggers() {
+         //this must be a clear all because the validation runs in other threads
+         TestLoggerFactory.clearAll();
+@@ -30,35 +30,39 @@ public void clearAllLoggers() {
+ 
+     @SelfValidating
+     public static class FailingExample {
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void validateFail(ViolationCollector col) {
+             col.addViolation(FAILED);
+         }
+     }
+-    
++
+     public static class SubclassExample extends FailingExample {
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void subValidateFail(ViolationCollector col) {
+-            col.addViolation(FAILED+"subclass");
+-        } 
++            col.addViolation(FAILED + "subclass");
++        }
+     }
+ 
+     @SelfValidating
+     public static class AnnotatedSubclassExample extends FailingExample {
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void subValidateFail(ViolationCollector col) {
+-            col.addViolation(FAILED+"subclass");
+-        } 
++            col.addViolation(FAILED + "subclass");
++        }
+     }
+-    
++
+     public static class OverridingExample extends FailingExample {
+         @Override
+         public void validateFail(ViolationCollector col) {
+-        } 
++        }
+     }
+ 
+     @SelfValidating
+     public static class DirectContextExample {
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void validateFail(ViolationCollector col) {
+             col.getContext().buildConstraintViolationWithTemplate(FAILED).addConstraintViolation();
+@@ -102,19 +106,28 @@ private void validateFailPrivate(ViolationCollector col) {
+ 
+     @SelfValidating
+     public static class ComplexExample {
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void validateFail1(ViolationCollector col) {
+             col.addViolation(FAILED + "1");
+         }
+ 
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void validateFail2(ViolationCollector col) {
+-            col.addViolation(FAILED + "2");
++            col.addViolation("p2", FAILED);
+         }
+ 
++        @SuppressWarnings("unused")
+         @SelfValidation
+         public void validateFail3(ViolationCollector col) {
+-            col.addViolation(FAILED + "3");
++            col.addViolation("p", 3, FAILED);
++        }
++
++        @SuppressWarnings("unused")
++        @SelfValidation
++        public void validateFail4(ViolationCollector col) {
++            col.addViolation("p", "four", FAILED);
+         }
+ 
+         @SuppressWarnings("unused")
+@@ -127,121 +140,144 @@ public void validateCorrect(ViolationCollector col) {
+     public static class NoValidations {
+     }
+ 
++    @SelfValidating
++    public static class InjectionExample {
++        @SuppressWarnings("unused")
++        @SelfValidation
++        public void validateFail(ViolationCollector col) {
++            col.addViolation("${'value'}");
++            col.addViolation("${'property'}", "${'value'}");
++            col.addViolation("${'property'}", 1, "${'value'}");
++            col.addViolation("${'property'}", "${'key'}", "${'value'}");
++        }
++    }
++
+     private final Validator validator = BaseValidator.newValidator();
+ 
+     @Test
+-    public void failingExample() throws Exception {
++    public void failingExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new FailingExample())))
+-            .containsExactlyInAnyOrder(FAILED_RESULT);
++                .containsExactlyInAnyOrder(FAILED_RESULT);
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+-    
++
+     @Test
+-    public void subClassExample() throws Exception {
++    public void subClassExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new SubclassExample())))
+-            .containsExactlyInAnyOrder(
+-                    FAILED_RESULT,
+-                    FAILED_RESULT+"subclass"
+-            );
++                .containsExactlyInAnyOrder(
++                        FAILED_RESULT,
++                        FAILED_RESULT + "subclass"
++                );
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+-    
++
+     @Test
+-    public void annotatedSubClassExample() throws Exception {
++    public void annotatedSubClassExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new AnnotatedSubclassExample())))
+-            .containsExactlyInAnyOrder(
+-                    FAILED_RESULT,
+-                    FAILED_RESULT+"subclass"
+-            );
++                .containsExactlyInAnyOrder(
++                        FAILED_RESULT,
++                        FAILED_RESULT + "subclass"
++                );
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+-    
++
+     @Test
+-    public void overridingSubClassExample() throws Exception {
++    public void overridingSubClassExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new OverridingExample())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+ 
+     @Test
+-    public void correctExample() throws Exception {
++    public void correctExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new CorrectExample())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+ 
+     @Test
+-    public void multipleTestingOfSameClass() throws Exception {
++    public void multipleTestingOfSameClass() {
+         assertThat(ConstraintViolations.format(validator.validate(new CorrectExample())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(ConstraintViolations.format(validator.validate(new CorrectExample())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+ 
+     @Test
+-    public void testDirectContextUsage() throws Exception {
++    public void testDirectContextUsage() {
+         assertThat(ConstraintViolations.format(validator.validate(new DirectContextExample())))
+-            .containsExactlyInAnyOrder(FAILED_RESULT);
++                .containsExactlyInAnyOrder(FAILED_RESULT);
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+ 
+     @Test
+-    public void complexExample() throws Exception {
++    public void complexExample() {
+         assertThat(ConstraintViolations.format(validator.validate(new ComplexExample())))
+-            .containsExactlyInAnyOrder(
+-                FAILED_RESULT + "1",
+-                FAILED_RESULT + "2",
+-                FAILED_RESULT + "3"
+-            );
++                .containsExactly(
++                        " failed1",
++                        "p2 failed",
++                        "p[3] failed",
++                        "p[four] failed");
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .isEmpty();
++                .isEmpty();
+     }
+ 
+     @Test
+     public void invalidExample() throws Exception {
+         assertThat(ConstraintViolations.format(validator.validate(new InvalidExample())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-            .containsExactlyInAnyOrder(
+-                    new LoggingEvent(
+-                            Level.ERROR, 
+-                            "The method {} is annotated with @SelfValidation but does not have a single parameter of type {}",
+-                            InvalidExample.class.getMethod("validateFailAdditionalParameters", ViolationCollector.class, int.class),
+-                            ViolationCollector.class
+-                    ),
+-                    new LoggingEvent(
+-                            Level.ERROR, 
+-                            "The method {} is annotated with @SelfValidation but does not return void. It is ignored",
+-                            InvalidExample.class.getMethod("validateFailReturn", ViolationCollector.class)
+-                    ),
+-                    new LoggingEvent(
+-                            Level.ERROR, 
+-                            "The method {} is annotated with @SelfValidation but is not public",
+-                            InvalidExample.class.getDeclaredMethod("validateFailPrivate", ViolationCollector.class)
+-                    )
+-            );
++                .containsExactlyInAnyOrder(
++                        new LoggingEvent(
++                                Level.ERROR,
++                                "The method {} is annotated with @SelfValidation but does not have a single parameter of type {}",
++                                InvalidExample.class.getMethod("validateFailAdditionalParameters", ViolationCollector.class, int.class),
++                                ViolationCollector.class
++                        ),
++                        new LoggingEvent(
++                                Level.ERROR,
++                                "The method {} is annotated with @SelfValidation but does not return void. It is ignored",
++                                InvalidExample.class.getMethod("validateFailReturn", ViolationCollector.class)
++                        ),
++                        new LoggingEvent(
++                                Level.ERROR,
++                                "The method {} is annotated with @SelfValidation but is not public",
++                                InvalidExample.class.getDeclaredMethod("validateFailPrivate", ViolationCollector.class)
++                        )
++                );
+     }
+ 
+     @Test
+-    public void giveWarningIfNoValidationMethods() throws Exception {
++    public void giveWarningIfNoValidationMethods() {
+         assertThat(ConstraintViolations.format(validator.validate(new NoValidations())))
+-            .isEmpty();
++                .isEmpty();
+         assertThat(TestLoggerFactory.getAllLoggingEvents())
+-        .containsExactlyInAnyOrder(
+-                new LoggingEvent(
+-                        Level.WARN, 
+-                        "The class {} is annotated with @SelfValidating but contains no valid methods that are annotated with @SelfValidation",
+-                        NoValidations.class
+-                )
+-                
++                .containsExactlyInAnyOrder(
++                        new LoggingEvent(
++                                Level.WARN,
++                                "The class {} is annotated with @SelfValidating but contains no valid methods that are annotated with @SelfValidation",
++                                NoValidations.class
++                        )
++
++                );
++    }
++
++    @Test
++    public void violationMessagesAreEscaped() {
++        assertThat(ConstraintViolations.format(validator.validate(new InjectionExample()))).containsExactly(
++                " ${'value'}",
++                "${'property'} ${'value'}",
++                "${'property'}[${'key'}] ${'value'}",
++                "${'property'}[1] ${'value'}"
+         );
++        assertThat(TestLoggerFactory.getAllLoggingEvents()).isEmpty();
+     }
+ }

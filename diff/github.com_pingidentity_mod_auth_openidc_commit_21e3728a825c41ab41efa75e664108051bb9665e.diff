@@ -1,0 +1,79 @@
+From 21e3728a825c41ab41efa75e664108051bb9665e Mon Sep 17 00:00:00 2001
+From: Hans Zandbelt <hans.zandbelt@zmartzone.eu>
+Date: Mon, 20 Feb 2017 17:31:54 +0100
+Subject: [PATCH] release 2.1.6 : security fix: scrub headers for "AuthType
+ oauth20"
+
+Signed-off-by: Hans Zandbelt <hans.zandbelt@zmartzone.eu>
+---
+ ChangeLog              | 4 ++++
+ configure.ac           | 2 +-
+ src/mod_auth_openidc.c | 2 +-
+ src/mod_auth_openidc.h | 1 +
+ src/oauth.c            | 6 ++++++
+ 5 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index f296b8a9..6ffe5bf5 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,7 @@
++02/20/2017
++- security fix: scrub headers for "AuthType oauth20"
++- release 2.1.6 
++
+ 02/15/2017
+ - improve logging of session max duration and session inactivity timeout
+ - refactor so that the call to the refresh hook also resets the session inactivity timeout and passes tokens down
+diff --git a/configure.ac b/configure.ac
+index 4cc1e271..6946c851 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1,4 +1,4 @@
+-AC_INIT([mod_auth_openidc],[2.1.6rc2],[hans.zandbelt@zmartzone.eu])
++AC_INIT([mod_auth_openidc],[2.1.6],[hans.zandbelt@zmartzone.eu])
+ 
+ AC_SUBST(NAMEVER, AC_PACKAGE_TARNAME()-AC_PACKAGE_VERSION())
+ 
+diff --git a/src/mod_auth_openidc.c b/src/mod_auth_openidc.c
+index 36cbc664..f24000d4 100644
+--- a/src/mod_auth_openidc.c
++++ b/src/mod_auth_openidc.c
+@@ -132,7 +132,7 @@ static void oidc_scrub_request_headers(request_rec *r, const char *claim_prefix,
+ /*
+  * scrub all mod_auth_openidc related headers
+  */
+-static void oidc_scrub_headers(request_rec *r) {
++void oidc_scrub_headers(request_rec *r) {
+ 	oidc_cfg *cfg = ap_get_module_config(r->server->module_config,
+ 			&auth_openidc_module);
+ 
+diff --git a/src/mod_auth_openidc.h b/src/mod_auth_openidc.h
+index 79d331c5..5777ead2 100644
+--- a/src/mod_auth_openidc.h
++++ b/src/mod_auth_openidc.h
+@@ -387,6 +387,7 @@ void oidc_request_state_set(request_rec *r, const char *key, const char *value);
+ const char*oidc_request_state_get(request_rec *r, const char *key);
+ int oidc_handle_jwks(request_rec *r, oidc_cfg *c);
+ apr_byte_t oidc_post_preserve_javascript(request_rec *r, const char *location, char **javascript, char **javascript_method);
++void oidc_scrub_headers(request_rec *r);
+ 
+ // oidc_oauth
+ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c);
+diff --git a/src/oauth.c b/src/oauth.c
+index 4659ab4e..48cfd417 100644
+--- a/src/oauth.c
++++ b/src/oauth.c
+@@ -664,6 +664,12 @@ int oidc_oauth_check_userid(request_rec *r, oidc_cfg *c) {
+ 				"Could not set remote user");
+ 	}
+ 
++	/*
++	 * we're going to pass the information that we have to the application,
++	 * but first we need to scrub the headers that we're going to use for security reasons
++	 */
++	oidc_scrub_headers(r);
++
+ 	/* set the user authentication HTTP header if set and required */
+ 	char *authn_header = oidc_cfg_dir_authn_header(r);
+ 	int pass_headers = oidc_cfg_dir_pass_info_in_headers(r);

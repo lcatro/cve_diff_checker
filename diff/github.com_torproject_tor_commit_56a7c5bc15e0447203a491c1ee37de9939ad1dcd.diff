@@ -1,0 +1,48 @@
+From 56a7c5bc15e0447203a491c1ee37de9939ad1dcd Mon Sep 17 00:00:00 2001
+From: David Goulet <dgoulet@torproject.org>
+Date: Mon, 5 Jun 2017 11:11:42 -0400
+Subject: [PATCH] TROVE-2017-005: Fix assertion failure in
+ connection_edge_process_relay_cell
+
+On an hidden service rendezvous circuit, a BEGIN_DIR could be sent
+(maliciously) which would trigger a tor_assert() because
+connection_edge_process_relay_cell() thought that the circuit is an
+or_circuit_t but is an origin circuit in reality.
+
+Fixes #22494
+
+Reported-by: Roger Dingledine <arma@torproject.org>
+Signed-off-by: David Goulet <dgoulet@torproject.org>
+---
+ changes/trove-2017-005 | 7 +++++++
+ src/or/relay.c         | 3 ++-
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 changes/trove-2017-005
+
+diff --git a/changes/trove-2017-005 b/changes/trove-2017-005
+new file mode 100644
+index 00000000000..cebb013f865
+--- /dev/null
++++ b/changes/trove-2017-005
+@@ -0,0 +1,7 @@
++  o Major bugfixes (hidden service, relay, security):
++    - Fix an assertion failure caused by receiving a BEGIN_DIR cell on
++      a hidden service rendezvous circuit. Fixes bug 22494, tracked as
++      TROVE-2017-005 and CVE-2017-0376; bugfix on 0.2.2.1-alpha. Found
++      by armadev.
++
++
+diff --git a/src/or/relay.c b/src/or/relay.c
+index 7f06c6e1459..59b79f95c97 100644
+--- a/src/or/relay.c
++++ b/src/or/relay.c
+@@ -1297,7 +1297,8 @@ connection_edge_process_relay_cell(cell_t *cell, circuit_t *circ,
+                "Begin cell for known stream. Dropping.");
+         return 0;
+       }
+-      if (rh.command == RELAY_COMMAND_BEGIN_DIR) {
++      if (rh.command == RELAY_COMMAND_BEGIN_DIR &&
++          circ->purpose != CIRCUIT_PURPOSE_S_REND_JOINED) {
+         /* Assign this circuit and its app-ward OR connection a unique ID,
+          * so that we can measure download times. The local edge and dir
+          * connection will be assigned the same ID when they are created

@@ -1,0 +1,209 @@
+From 0318fa8b61bd6c837641129d585f1a73c652b1e0 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 3 Feb 2017 20:43:16 -0800
+Subject: [PATCH] CVE-2017-12900/Properly terminate all struct tok arrays.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add tests using the capture files supplied by the reporter(s).
+---
+ print-bgp.c               |   1 +
+ print-lldp.c              |   1 +
+ print-lspping.c           |   1 +
+ print-zephyr.c            |   3 +-
+ tests/TESTLIST            |   2 ++
+ tests/tok2str-oobr-1.out  |  61 ++++++++++++++++++++++++++++++++++++++
+ tests/tok2str-oobr-1.pcap | Bin 0 -> 361 bytes
+ tests/tok2str-oobr-2.out  |  19 ++++++++++++
+ tests/tok2str-oobr-2.pcap | Bin 0 -> 170 bytes
+ 9 files changed, 87 insertions(+), 1 deletion(-)
+ create mode 100644 tests/tok2str-oobr-1.out
+ create mode 100644 tests/tok2str-oobr-1.pcap
+ create mode 100644 tests/tok2str-oobr-2.out
+ create mode 100644 tests/tok2str-oobr-2.pcap
+
+diff --git a/print-bgp.c b/print-bgp.c
+index 553b66b4c..31158b939 100644
+--- a/print-bgp.c
++++ b/print-bgp.c
+@@ -900,6 +900,7 @@ static const struct tok bgp_multicast_vpn_route_type_values[] = {
+     { BGP_MULTICAST_VPN_ROUTE_TYPE_SOURCE_ACTIVE, "Source-Active"},
+     { BGP_MULTICAST_VPN_ROUTE_TYPE_SHARED_TREE_JOIN, "Shared Tree Join"},
+     { BGP_MULTICAST_VPN_ROUTE_TYPE_SOURCE_TREE_JOIN, "Source Tree Join"},
++    { 0, NULL}
+ };
+ 
+ static int
+diff --git a/print-lldp.c b/print-lldp.c
+index 9e7b2bd4c..fbafd6d5a 100644
+--- a/print-lldp.c
++++ b/print-lldp.c
+@@ -590,6 +590,7 @@ static const struct tok lldp_evb_mode_values[]={
+     { LLDP_EVB_MODE_EVB_BRIDGE, "EVB Bridge"},
+     { LLDP_EVB_MODE_EVB_STATION, "EVB Staion"},
+     { LLDP_EVB_MODE_RESERVED, "Reserved for future Standardization"},
++    { 0, NULL},
+ };
+ 
+ #define NO_OF_BITS 8
+diff --git a/print-lspping.c b/print-lspping.c
+index cc627897b..274cc68b7 100644
+--- a/print-lspping.c
++++ b/print-lspping.c
+@@ -104,6 +104,7 @@ static const struct tok lspping_return_code_values[] = {
+     { 11, "No label entry at stack-depth"},
+     { 12, "Protocol not associated with interface at FEC stack depth"},
+     { 13, "Premature termination of ping due to label stack shrinking to a single label"},
++    { 0,  NULL},
+ };
+ 
+ 
+diff --git a/print-zephyr.c b/print-zephyr.c
+index 38b0cd0c7..eb7e382bc 100644
+--- a/print-zephyr.c
++++ b/print-zephyr.c
+@@ -76,7 +76,8 @@ static const struct tok z_types[] = {
+     { Z_PACKET_SERVACK,		"serv-ack" },
+     { Z_PACKET_SERVNAK,		"serv-nak" },
+     { Z_PACKET_CLIENTACK,	"client-ack" },
+-    { Z_PACKET_STAT,		"stat" }
++    { Z_PACKET_STAT,		"stat" },
++    { 0,			NULL }
+ };
+ 
+ static char z_buf[256];
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index c44e2b75f..c18586f67 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -456,6 +456,8 @@ icmp-cksum-oobr-1	icmp-cksum-oobr-1.pcap		icmp-cksum-oobr-1.out	-vvv -e
+ icmp-cksum-oobr-2	icmp-cksum-oobr-2.pcap		icmp-cksum-oobr-2.out	-vvv -e
+ icmp-cksum-oobr-3	icmp-cksum-oobr-3.pcap		icmp-cksum-oobr-3.out	-vvv -e
+ icmp-cksum-oobr-4	icmp-cksum-oobr-4.pcap		icmp-cksum-oobr-4.out	-vvv -e
++tok2str-oobr-1		tok2str-oobr-1.pcap		tok2str-oobr-1.out	-vvv -e
++tok2str-oobr-2		tok2str-oobr-2.pcap		tok2str-oobr-2.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/tok2str-oobr-1.out b/tests/tok2str-oobr-1.out
+new file mode 100644
+index 000000000..7592f8e1a
+--- /dev/null
++++ b/tests/tok2str-oobr-1.out
+@@ -0,0 +1,61 @@
++00:0c:29:31:85:a5 > 00:0c:29:ac:b9:50, ethertype IPv4 (0x0800), length 321: (tos 0xc0, ttl 254, id 20061, offset 0, flags [none], proto TCP (6), length 307)
++    10.0.0.4.179 > 10.0.0.2.64588: Flags [P.], cksum 0x707c (incorrect -> 0x6883), seq 786752827:786753082, ack 3829861902, win 16357, options [nop,nop,TS val 6993003 ecr 4502201], length 255: BGP
++	Update Message (2), length: 100
++	  Origin (1), length: 1, Flags [T]: IGP
++	    0x0000:  00
++	  AS Path (2), length: 0, Flags [T]: empty
++	  Local Preference (5), length: 4, Flags [T]: 100
++	    0x0000:  0000 0064
++	  Extended Community (16), length: 24, Flags [OT]: 
++	    target (0x0002), Flags [none]: 1:1 (= 0.0.0.1)
++	    source-AS (0x0009), Flags [none]: AS 1
++	    unknown extd community typecode (0x010a), Flags [none]
++	      0x0000:  010a 0a00 0004 0006
++	    0x0000:  0002 0001 0000 0001 0009 0001 0000 0000
++	    0x0010:  010a 0a00 0004 0006
++	  Multi-Protocol Reach NLRI (14), length: 32, Flags [OE]: 
++	    AFI: IPv4 (1), SAFI: labeled VPN Unicast (128)
++	    nexthop: RD: 0:0 (= 0.0.0.0), 10.0.0.4, nh-length: 12, no SNPA
++	      RD: 1:1 (= 0.0.0.1), 172.16.4.0/24, label:16 (bottom)
++	    0x0000:  0001 800c 0000 0000 0000 0000 0a00 0004
++	    0x0010:  0070 0001 0100 0000 0100 0000 01ac 1004
++	Update Message (2), length: 95
++	  Origin (1), length: 1, Flags [T]: IGP
++	    0x0000:  00
++	  AS Path (2), length: 0, Flags [T]: empty
++	  Local Preference (5), length: 4, Flags [T]: 100
++	    0x0000:  0000 0064
++	  Extended Community (16), length: 8, Flags [OT]: 
++	    target (0x0002), Flags [none]: 1:1 (= 0.0.0.1)
++	    0x0000:  0002 0001 0000 0001
++	  PMSI Tunnel (22), length: 17, Flags [OT]: 
++	    Tunnel-type RSVP-TE P2MP LSP (1), Flags [none], MPLS Label 0
++	      Extended-Tunnel-ID 10.0.0.4, P2MP-ID 0x00008173
++	    0x0000:  0001 0000 000a 0000 0400 0081 730a 0000
++	    0x0010:  04
++	  Multi-Protocol Reach NLRI (14), length: 23, Flags [OE]: 
++	    AFI: IPv4 (1), SAFI: Multicast VPN (5)
++	    nexthop: 10.0.0.4, nh-length: 4
++	    8 SNPA
++	      1 bytes
++	      0 bytes
++	      0 bytes
++	      0 bytes
++	      1 bytes
++	      0 bytes
++	      0 bytes
++	      1 bytes
++	      Route-Type: Unknown (0), length: 0
++	      Route-Type: Intra-AS Segment-Leaf (4), length: 255
++	    0x0000:  0001 0504 0a00 0004 0801 0c00 0000 0100
++	    0x0010:  0000 010a 0000 04
++	Update Message (2), length: 30
++	  Multi-Protocol Unreach NLRI (15), length: 3, Flags [OE]: 
++	    AFI: IPv4 (1), SAFI: labeled VPN Unicast (128)
++	      End-of-Rib Marker (empty NLRI)
++	    0x0000:  0001 80
++	Update Message (2), length: 30
++	  Withdrawn routes: 1 bytes
++	  Unknown Attribute (0), length: 3, Flags [+f]: 
++	    no Attribute 0 decoder
++	    0x0000:  0001 05[|BGP]
+diff --git a/tests/tok2str-oobr-1.pcap b/tests/tok2str-oobr-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f28b5d39e5eb0d2dcd7d0c0eac2959418b82bd1
+GIT binary patch
+literal 361
+zcmca|c+)~A1{MYw`2U}Qff2~@f3+~kTZxgu5y$~y1|H2dI|G2EVe3*32G;|O#(uF3
+z4FA|77I85!umCX=!{$FedQYBOKXK>dYml&iT2KQtiIIbgA!|!EgUhC!|Iq+L3KP&+
+zUk64;1_vev2Ud_9QVs}608Ikf$H>45rWqKyKsGS2P2gitU|?+E0m^{^ShN6W1&{~E
+zYXn%(toY9m53<7p-3|_z9S6h&!Fs`FF*Fu~XrMjf42-NGKe2Eyf~*6Z4&q`MF9$N7
+ReF8rNGtgz&WEo+ytN=u6XY>F7
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/tok2str-oobr-2.out b/tests/tok2str-oobr-2.out
+new file mode 100644
+index 000000000..fc171e445
+--- /dev/null
++++ b/tests/tok2str-oobr-2.out
+@@ -0,0 +1,19 @@
++01:01:01:01:01:01 > 02:02:02:02:02:02, ethertype MPLS unicast (0x8847), length 130: MPLS (label 16006, exp 0, [S], ttl 255)
++	(tos 0x0, ttl 1, id 32770, offset 0, flags [DF, rsvd], proto UDP (17), length 112, options (RA), bad cksum a4cc (->a4cb)!)
++    192.168.0.1.3503 > 127.0.0.1.3503: [bad udp cksum 0x8397 -> 0x3f6d!] 
++	LSP-PINGv1, msg-type: MPLS Echo Request (1), length: 80
++	  reply-mode: Reply via an IPv4/IPv6 UDP packet (2)
++	  Return Code: unknown (65)
++	  Return Subcode: (0)
++	  Sender Handle: 0x00000023, Sequence: 1
++	  Sender Timestamp: Receiver Timestamp: no timestamp
++	  Target FEC Stack TLV (1), length: 24
++	    Unknown subTLV (17), length: 20
++	      0x0000:  0000 0001 0000 0001 c0a8 0001 c0a8 0001
++	      0x0010:  0000 2712
++	    0x0000:  0011 0014 0000 0001 0000 0001 c0a8 0001
++	    0x0010:  c0a8 0001 0000 2712
++	  Unknown TLV (268), length: 4
++	    0x0000:  0008 00c8
++	  Unknown TLV (523), length: 8
++	    0x0000:  0003 0004 c0a8 0104
+diff --git a/tests/tok2str-oobr-2.pcap b/tests/tok2str-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c2016e511c46d5832275294aad0797a76eff131e
+GIT binary patch
+literal 170
+zcmca|c+)~A1{MYwXqdprzzF1Q&Cdz|i8Vnn6BsapL5Dl@i^TtK3=9PgOa~Yk1(%#T
+zu!4cHo`HdJ3eX_l^}OpDBATazjA3MQ1R0_X#Ee%&-pMykF6aUY009$FUV=f8K?KMK
+hS;z=71B4kE)P)#%fKK9IIKjjXB$*jl4y<5g0RVN&9T@-s
+
+literal 0
+HcmV?d00001
+

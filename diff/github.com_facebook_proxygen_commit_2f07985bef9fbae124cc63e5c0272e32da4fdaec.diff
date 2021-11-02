@@ -1,0 +1,80 @@
+From 2f07985bef9fbae124cc63e5c0272e32da4fdaec Mon Sep 17 00:00:00 2001
+From: Aman Sharma <amsharma@fb.com>
+Date: Fri, 19 Jul 2019 16:38:48 -0700
+Subject: [PATCH] Fix SEGV in StructuredHeaders::decodeBase64
+
+Summary:
+The existing code can potentially cause a SEGV due to an out of bounds write.
+
+This fixes CVE-2019-11921.
+
+Reviewed By: knekritz
+
+Differential Revision: D12983120
+
+fbshipit-source-id: 1d48063595c8d518fd8afcbc941de260af7e37fd
+---
+ .../StructuredHeadersUtilities.cpp            | 35 +++++++------------
+ 1 file changed, 13 insertions(+), 22 deletions(-)
+
+diff --git a/proxygen/lib/http/structuredheaders/StructuredHeadersUtilities.cpp b/proxygen/lib/http/structuredheaders/StructuredHeadersUtilities.cpp
+index 9464f3b7c..80b591e5f 100644
+--- a/proxygen/lib/http/structuredheaders/StructuredHeadersUtilities.cpp
++++ b/proxygen/lib/http/structuredheaders/StructuredHeadersUtilities.cpp
+@@ -9,11 +9,10 @@
+  */
+ 
+ #include "StructuredHeadersUtilities.h"
+-#include <boost/archive/iterators/binary_from_base64.hpp>
+-#include <boost/archive/iterators/base64_from_binary.hpp>
+-#include <boost/archive/iterators/transform_width.hpp>
+ #include "StructuredHeadersConstants.h"
+ 
++#include "proxygen/lib/utils/Base64.h"
++
+ namespace proxygen {
+ namespace StructuredHeaders {
+ 
+@@ -107,31 +106,23 @@ std::string decodeBase64(
+ 
+   if (encoded.size() == 0) {
+     // special case, to prevent an integer overflow down below.
+-    return "";
++    return std::string();
+   }
+ 
+-  using namespace boost::archive::iterators;
+-  using b64it =
+-    transform_width<binary_from_base64<std::string::const_iterator>, 8, 6>;
+-
+-  std::string decoded = std::string(b64it(std::begin(encoded)),
+-                                    b64it(std::end(encoded)));
+-
+-  uint32_t numPadding = std::count(encoded.begin(), encoded.end(), '=');
+-  decoded.erase(decoded.end() - numPadding, decoded.end());
++  int padding = 0;
++  for (auto it = encoded.rbegin();
++       padding < 2 && it != encoded.rend() && *it == '=';
++       ++it) {
++    ++padding;
++  }
+ 
+-  return decoded;
++  return Base64::decode(encoded, padding);
+ }
+ 
+ std::string encodeBase64(const std::string& input) {
+-  using namespace boost::archive::iterators;
+-  using b64it = base64_from_binary<transform_width<const char*, 6, 8>>;
+-
+-  auto data = input.data();
+-  std::string encoded(b64it(data), b64it(data + (input.length())));
+-  encoded.append((3 - (input.length() % 3)) % 3, '=');
+-
+-  return encoded;
++  return Base64::encode(folly::ByteRange(
++                            reinterpret_cast<const uint8_t*>(input.c_str()),
++                            input.length()));
+ }
+ 
+ }

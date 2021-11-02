@@ -1,0 +1,110 @@
+From ae0ab82434509d6e75f4a2f1e1a0dd2ee3dc3681 Mon Sep 17 00:00:00 2001
+From: Tomas Winkler <tomas.winkler@intel.com>
+Date: Sun, 1 Nov 2020 21:37:50 +0200
+Subject: [PATCH] dm: virtio: check for paddr_guest2host return value
+
+paddr_guest2host can return NULL, but code paths in virtio
+are not checking the return value.
+_vq_record() initializes iov_base pointer using paddr_guest2host()
+but there is nothing in the flow that checks for NULL.
+Chane _vq_record to return -1 in case the address translation
+has failed.
+
+Tracked-On: #5452
+Signed-off-by: Tomas Winkler <tomas.winkler@intel.com>
+Acked-by: Wang, Yu1 <yu1.wang@intel.com>
+---
+ devicemodel/hw/pci/virtio/virtio.c | 37 ++++++++++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 5 deletions(-)
+
+diff --git a/devicemodel/hw/pci/virtio/virtio.c b/devicemodel/hw/pci/virtio/virtio.c
+index 0dac0c31b6..f3104db570 100644
+--- a/devicemodel/hw/pci/virtio/virtio.c
++++ b/devicemodel/hw/pci/virtio/virtio.c
+@@ -296,6 +296,8 @@ virtio_vq_init(struct virtio_base *base, uint32_t pfn)
+ 	phys = (uint64_t)pfn << VRING_PAGE_BITS;
+ 	size = vring_size(vq->qsize, VIRTIO_PCI_VRING_ALIGN);
+ 	vb = paddr_guest2host(base->dev->vmctx, phys, size);
++	if (!vb)
++		goto error;
+ 
+ 	/* First page(s) are descriptors... */
+ 	vq->desc = (struct vring_desc *)vb;
+@@ -318,6 +320,12 @@ virtio_vq_init(struct virtio_base *base, uint32_t pfn)
+ 	/* Mark queue as allocated after initialization is complete. */
+ 	mb();
+ 	vq->flags = VQ_ALLOC;
++
++	return;
++
++error:
++	vq->flags = 0;
++	pr_err("%s: vq enable failed\n", __func__);
+ }
+ 
+ /*
+@@ -382,17 +390,25 @@ virtio_vq_enable(struct virtio_base *base)
+ /*
+  * Helper inline for vq_getchain(): record the i'th "real"
+  * descriptor.
++ * Return 0 on success and -1 when i is out of range  or mapping
++ *        fails.
+  */
+-static inline void
++static inline int
+ _vq_record(int i, volatile struct vring_desc *vd, struct vmctx *ctx,
+ 	   struct iovec *iov, int n_iov, uint16_t *flags) {
+ 
++	void *host_addr;
++
+ 	if (i >= n_iov)
+-		return;
+-	iov[i].iov_base = paddr_guest2host(ctx, vd->addr, vd->len);
++		return -1;
++	host_addr = paddr_guest2host(ctx, vd->addr, vd->len);
++	if (!host_addr)
++		return -1;
++	iov[i].iov_base = host_addr;
+ 	iov[i].iov_len = vd->len;
+ 	if (flags != NULL)
+ 		flags[i] = vd->flags;
++	return 0;
+ }
+ #define	VQ_MAX_DESCRIPTORS	512	/* see below */
+ 
+@@ -495,7 +511,10 @@ vq_getchain(struct virtio_vq_info *vq, uint16_t *pidx,
+ 		}
+ 		vdir = &vq->desc[next];
+ 		if ((vdir->flags & VRING_DESC_F_INDIRECT) == 0) {
+-			_vq_record(i, vdir, ctx, iov, n_iov, flags);
++			if (_vq_record(i, vdir, ctx, iov, n_iov, flags)) {
++				pr_err("%s: mapping to host failed\r\n", name);
++				return -1;
++			}
+ 			i++;
+ 		} else if ((base->device_caps &
+ 		    (1 << VIRTIO_RING_F_INDIRECT_DESC)) == 0) {
+@@ -513,6 +532,11 @@ vq_getchain(struct virtio_vq_info *vq, uint16_t *pidx,
+ 			}
+ 			vindir = paddr_guest2host(ctx,
+ 			    vdir->addr, vdir->len);
++
++			if (!vindir) {
++				pr_err("%s cannot get host memory\r\n", name);
++				return -1;
++			}
+ 			/*
+ 			 * Indirects start at the 0th, then follow
+ 			 * their own embedded "next"s until those run
+@@ -529,7 +553,10 @@ vq_getchain(struct virtio_vq_info *vq, uint16_t *pidx,
+ 					    name);
+ 					return -1;
+ 				}
+-				_vq_record(i, vp, ctx, iov, n_iov, flags);
++				if (_vq_record(i, vp, ctx, iov, n_iov, flags)) {
++					pr_err("%s: mapping to host failed\r\n", name);
++					return -1;
++				}
+ 				if (++i > VQ_MAX_DESCRIPTORS)
+ 					goto loopy;
+ 				if ((vp->flags & VRING_DESC_F_NEXT) == 0)

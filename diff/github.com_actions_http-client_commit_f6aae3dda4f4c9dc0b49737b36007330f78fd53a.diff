@@ -1,0 +1,222 @@
+From fbd137758ab602b6980e3c12eaa5d48a64c07e6f Mon Sep 17 00:00:00 2001
+From: Bryan MacFarlane <bryanmacfarlane@github.com>
+Date: Thu, 23 Apr 2020 16:26:28 -0400
+Subject: [PATCH 1/3] fix and tests
+
+---
+ __tests__/basics.test.ts | 44 ++++++++++++++++++++++++++++++++++++++++
+ index.ts                 | 10 +++++++++
+ 2 files changed, 54 insertions(+)
+
+diff --git a/__tests__/basics.test.ts b/__tests__/basics.test.ts
+index 20e910a..785af20 100644
+--- a/__tests__/basics.test.ts
++++ b/__tests__/basics.test.ts
+@@ -179,6 +179,50 @@ describe('basics', () => {
+     done()
+   })
+ 
++  it('does not pass auth with diff hostname redirects', async done => {
++    let headers = {
++      "accept": "application/json",
++      "authorization": "shhh"
++    }
++    let res: httpm.HttpClientResponse = await _http.get(
++      'https://httpbin.org/redirect-to?url=' +
++        encodeURIComponent('https://www.httpbin.org/get'),
++        headers
++    )
++
++    expect(res.message.statusCode).toBe(200)
++    let body: string = await res.readBody()
++    let obj: any = JSON.parse(body)
++    // httpbin "fixes" the casing
++    expect(obj.headers["Authorization"]).toBeUndefined()
++    expect(obj.headers["authorization"]).toBeUndefined()
++    expect(obj.url).toBe('https://www.httpbin.org/get')
++
++    done()
++  })
++  
++  it('does not pass Auth with diff hostname redirects', async done => {
++    let headers = {
++      "Accept": "application/json",
++      "Authorization": "shhh"
++    }
++    let res: httpm.HttpClientResponse = await _http.get(
++      'https://httpbin.org/redirect-to?url=' +
++        encodeURIComponent('https://www.httpbin.org/get'),
++        headers
++    )
++
++    expect(res.message.statusCode).toBe(200)
++    let body: string = await res.readBody()
++    let obj: any = JSON.parse(body)
++    // httpbin "fixes" the casing
++    expect(obj.headers["Authorization"]).toBeUndefined()
++    expect(obj.headers["authorization"]).toBeUndefined()
++    expect(obj.url).toBe('https://www.httpbin.org/get')
++
++    done()
++  })  
++
+   it('does basic head request', async done => {
+     let res: httpm.HttpClientResponse = await _http.head(
+       'http://httpbin.org/get'
+diff --git a/index.ts b/index.ts
+index a1f5491..76465b0 100644
+--- a/index.ts
++++ b/index.ts
+@@ -386,6 +386,16 @@ export class HttpClient {
+         // which will leak the open socket.
+         await response.readBody()
+ 
++        // strip authorization header if redirected to a different hostname
++        if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
++          for(let header in headers){
++            // header names are case insensitive
++            if (header.toLowerCase() === "authorization") {
++              delete headers[header] 
++            }
++          }
++        }
++
+         // let's make the request with the new redirectUrl
+         info = this._prepareRequest(verb, parsedRedirectUrl, headers)
+         response = await this.requestRaw(info, data)
+
+From 943067fe4cc39d1edb36c04478359d56ee21adf8 Mon Sep 17 00:00:00 2001
+From: Bryan MacFarlane <bryanmacfarlane@github.com>
+Date: Thu, 23 Apr 2020 16:33:34 -0400
+Subject: [PATCH 2/3] it's pretty now and bump version
+
+---
+ __tests__/basics.test.ts | 24 ++++++++++++------------
+ index.ts                 |  6 +++---
+ package.json             |  2 +-
+ 3 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/__tests__/basics.test.ts b/__tests__/basics.test.ts
+index 785af20..fd171db 100644
+--- a/__tests__/basics.test.ts
++++ b/__tests__/basics.test.ts
+@@ -181,47 +181,47 @@ describe('basics', () => {
+ 
+   it('does not pass auth with diff hostname redirects', async done => {
+     let headers = {
+-      "accept": "application/json",
+-      "authorization": "shhh"
++      accept: 'application/json',
++      authorization: 'shhh'
+     }
+     let res: httpm.HttpClientResponse = await _http.get(
+       'https://httpbin.org/redirect-to?url=' +
+         encodeURIComponent('https://www.httpbin.org/get'),
+-        headers
++      headers
+     )
+ 
+     expect(res.message.statusCode).toBe(200)
+     let body: string = await res.readBody()
+     let obj: any = JSON.parse(body)
+     // httpbin "fixes" the casing
+-    expect(obj.headers["Authorization"]).toBeUndefined()
+-    expect(obj.headers["authorization"]).toBeUndefined()
++    expect(obj.headers['Authorization']).toBeUndefined()
++    expect(obj.headers['authorization']).toBeUndefined()
+     expect(obj.url).toBe('https://www.httpbin.org/get')
+ 
+     done()
+   })
+-  
++
+   it('does not pass Auth with diff hostname redirects', async done => {
+     let headers = {
+-      "Accept": "application/json",
+-      "Authorization": "shhh"
++      Accept: 'application/json',
++      Authorization: 'shhh'
+     }
+     let res: httpm.HttpClientResponse = await _http.get(
+       'https://httpbin.org/redirect-to?url=' +
+         encodeURIComponent('https://www.httpbin.org/get'),
+-        headers
++      headers
+     )
+ 
+     expect(res.message.statusCode).toBe(200)
+     let body: string = await res.readBody()
+     let obj: any = JSON.parse(body)
+     // httpbin "fixes" the casing
+-    expect(obj.headers["Authorization"]).toBeUndefined()
+-    expect(obj.headers["authorization"]).toBeUndefined()
++    expect(obj.headers['Authorization']).toBeUndefined()
++    expect(obj.headers['authorization']).toBeUndefined()
+     expect(obj.url).toBe('https://www.httpbin.org/get')
+ 
+     done()
+-  })  
++  })
+ 
+   it('does basic head request', async done => {
+     let res: httpm.HttpClientResponse = await _http.head(
+diff --git a/index.ts b/index.ts
+index 76465b0..e3b9854 100644
+--- a/index.ts
++++ b/index.ts
+@@ -388,10 +388,10 @@ export class HttpClient {
+ 
+         // strip authorization header if redirected to a different hostname
+         if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+-          for(let header in headers){
++          for (let header in headers) {
+             // header names are case insensitive
+-            if (header.toLowerCase() === "authorization") {
+-              delete headers[header] 
++            if (header.toLowerCase() === 'authorization') {
++              delete headers[header]
+             }
+           }
+         }
+diff --git a/package.json b/package.json
+index 49f2e08..e57d099 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@actions/http-client",
+-  "version": "1.0.7",
++  "version": "1.0.8",
+   "description": "Actions Http Client",
+   "main": "index.js",
+   "scripts": {
+
+From cde0b32926ae7938c148121d11271f4cb1f5a57f Mon Sep 17 00:00:00 2001
+From: Bryan MacFarlane <bryanmacfarlane@github.com>
+Date: Thu, 23 Apr 2020 16:50:19 -0400
+Subject: [PATCH 3/3] cr feedback
+
+---
+ __tests__/basics.test.ts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/__tests__/basics.test.ts b/__tests__/basics.test.ts
+index fd171db..70e9709 100644
+--- a/__tests__/basics.test.ts
++++ b/__tests__/basics.test.ts
+@@ -194,6 +194,7 @@ describe('basics', () => {
+     let body: string = await res.readBody()
+     let obj: any = JSON.parse(body)
+     // httpbin "fixes" the casing
++    expect(obj.headers['Accept']).toBe('application/json')
+     expect(obj.headers['Authorization']).toBeUndefined()
+     expect(obj.headers['authorization']).toBeUndefined()
+     expect(obj.url).toBe('https://www.httpbin.org/get')
+@@ -216,6 +217,7 @@ describe('basics', () => {
+     let body: string = await res.readBody()
+     let obj: any = JSON.parse(body)
+     // httpbin "fixes" the casing
++    expect(obj.headers['Accept']).toBe('application/json')
+     expect(obj.headers['Authorization']).toBeUndefined()
+     expect(obj.headers['authorization']).toBeUndefined()
+     expect(obj.url).toBe('https://www.httpbin.org/get')

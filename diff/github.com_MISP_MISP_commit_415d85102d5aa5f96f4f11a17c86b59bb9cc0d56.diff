@@ -1,0 +1,59 @@
+From 415d85102d5aa5f96f4f11a17c86b59bb9cc0d56 Mon Sep 17 00:00:00 2001
+From: Iglocska <andras.iklody@gmail.com>
+Date: Wed, 1 Jul 2015 08:38:40 +0200
+Subject: [PATCH] Security fix: Fix to a possible PHP Object injection
+
+- unserialized user input replaced with json_decode
+---
+ app/Controller/TemplatesController.php                    | 8 +++-----
+ .../Templates/populate_event_from_template_attributes.ctp | 2 +-
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/app/Controller/TemplatesController.php b/app/Controller/TemplatesController.php
+index 8117f5b883..59de353898 100644
+--- a/app/Controller/TemplatesController.php
++++ b/app/Controller/TemplatesController.php
+@@ -22,12 +22,9 @@ class TemplatesController extends AppController {
+ 
+ 	public function beforeFilter() { // TODO REMOVE
+ 		parent::beforeFilter();
+-		$this->Security->unlockedActions = array('saveElementSorting', 'populateEventFromTemplate', 'uploadFile', 'deleteTemporaryFile');
++		$this->Security->unlockedActions = array('uploadFile', 'deleteTemporaryFile');
+ 	}
+ 	
+-	public function fetchFormFromTemplate($id) {
+-		
+-	}
+ 	
+ 	public function index() {
+ 		$conditions = array();
+@@ -136,6 +133,7 @@ public function view($id) {
+ 	}
+ 	
+ 	public function add() {
++		if (!$this->userRole['perm_template']) throw new MethodNotAllowedException('You are not authorised to do that.');
+ 		if ($this->request->is('post')) {
+ 			unset($this->request->data['Template']['tagsPusher']);
+ 			$tags = $this->request->data['Template']['tags'];
+@@ -332,7 +330,7 @@ public function submitEventPopulation($template_id, $event_id) {
+ 			}
+ 			
+ 			if (isset($this->request->data['Template']['attributes'])) {
+-				$attributes = unserialize($this->request->data['Template']['attributes']);
++				$attributes = json_decode($this->request->data['Template']['attributes'], true);
+ 				$this->loadModel('Attribute');
+ 				$fails = 0;
+ 				foreach($attributes as $k => &$attribute) {
+diff --git a/app/View/Templates/populate_event_from_template_attributes.ctp b/app/View/Templates/populate_event_from_template_attributes.ctp
+index c2a44f5ca7..45a9f4a548 100644
+--- a/app/View/Templates/populate_event_from_template_attributes.ctp
++++ b/app/View/Templates/populate_event_from_template_attributes.ctp
+@@ -29,7 +29,7 @@ endforeach;?>
+ 							'id' => 'attributes',
+ 							'label' => false,
+ 							'type' => 'hidden',
+-							'value' => serialize($attributes),
++							'value' => json_encode($attributes),
+ 					));
+ 				?>
+ 			</fieldset>

@@ -1,0 +1,52 @@
+From 829c3199ba3afdecb52e0719509f3df4463be5b4 Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Tue, 19 Jan 2021 14:10:35 +0100
+Subject: [PATCH] fix: [security] XSS via galaxy cluster element values for
+ reference types could contain javascript links
+
+- ref type elements are automatically converted to links. A user would have to click a javascript: link for it to trigger, it's still too risky to keep as is
+- only urls starting with http:// and https:// are converted from here on
+
+- As reported by Patrik Kontura from ESET
+---
+ app/View/GalaxyElements/ajax/index.ctp | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/app/View/GalaxyElements/ajax/index.ctp b/app/View/GalaxyElements/ajax/index.ctp
+index de3307d622..bed9900ca6 100755
+--- a/app/View/GalaxyElements/ajax/index.ctp
++++ b/app/View/GalaxyElements/ajax/index.ctp
+@@ -7,7 +7,7 @@
+                 'before' => '$(".progress").show()',
+                 'complete' => '$(".progress").hide()',
+         ));
+-        
++
+         echo $this->Paginator->prev('&laquo; ' . __('previous'), array('tag' => 'li', 'escape' => false), null, array('tag' => 'li', 'class' => 'prev disabled', 'escape' => false, 'disabledTag' => 'span'));
+         echo $this->Paginator->numbers(array('modulus' => 20, 'separator' => '', 'tag' => 'li', 'currentClass' => 'active', 'currentTag' => 'span'));
+         echo $this->Paginator->next(__('next') . ' &raquo;', array('tag' => 'li', 'escape' => false), null, array('tag' => 'li', 'class' => 'next disabled', 'escape' => false, 'disabledTag' => 'span'));
+@@ -25,7 +25,14 @@
+ ?>
+         <tr>
+             <td class="short"><?= h($item['GalaxyElement']['key']); ?></td>
+-            <td class="short"><?php if ($item['GalaxyElement']['key'] === 'refs') {
++            <td class="short">
++            <?php if (
++                $item['GalaxyElement']['key'] === 'refs' &&
++                (
++                    substr($item['GalaxyElement']['value'], 0, 8) === 'https://' ||
++                    substr($item['GalaxyElement']['value'], 0, 7) === 'http://'
++                )
++            ) {
+                 echo '<a href="' . h($item['GalaxyElement']['value']) . '" rel="noreferrer noopener">' . h($item['GalaxyElement']['value']) . '</a>';
+             } else if ($item['GalaxyElement']['key'] === 'country') {
+                 echo $this->Icon->countryFlag($item['GalaxyElement']['value']) . ' ' . h($item['GalaxyElement']['value']);
+@@ -35,7 +42,7 @@
+             ?></td>
+         </tr>
+     <?php
+-        endforeach; 
++        endforeach;
+     ?>
+ </table>
+ <p>

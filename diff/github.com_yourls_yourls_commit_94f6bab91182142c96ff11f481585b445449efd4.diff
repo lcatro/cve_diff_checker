@@ -1,0 +1,75 @@
+From 94f6bab91182142c96ff11f481585b445449efd4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E0=BE=85=E0=BC=BB=20=C7=AC=C9=80=C4=A7=20=E0=BC=84?=
+ =?UTF-8?q?=E0=BC=86=E0=BD=89?= <ozh@ozh.org>
+Date: Thu, 9 Sep 2021 15:05:50 +0200
+Subject: [PATCH] Sanitize user input in upgrade (#3055)
+
+---
+ admin/upgrade.php              |  4 ++--
+ includes/functions-upgrade.php | 13 +++++++++++++
+ includes/version.php           |  8 ++++++++
+ 3 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/admin/upgrade.php b/admin/upgrade.php
+index cf011b9b8..81333244b 100644
+--- a/admin/upgrade.php
++++ b/admin/upgrade.php
+@@ -28,8 +28,8 @@
+ 
+ 	// From what are we upgrading?
+ 	if ( isset( $_GET['oldver'] ) && isset( $_GET['oldsql'] ) ) {
+-		$oldver = (string)( $_GET['oldver'] );
+-		$oldsql = (string)( $_GET['oldsql'] );
++		$oldver = yourls_sanitize_version($_GET['oldver']);
++		$oldsql = (intval)($_GET['oldsql']);
+ 	} else {
+ 		list( $oldver, $oldsql ) = yourls_get_current_version_from_sql();
+ 	}
+diff --git a/includes/functions-upgrade.php b/includes/functions-upgrade.php
+index 7bc8760f4..2de8e0e24 100644
+--- a/includes/functions-upgrade.php
++++ b/includes/functions-upgrade.php
+@@ -10,6 +10,19 @@
+  */
+ function yourls_upgrade( $step, $oldver, $newver, $oldsql, $newsql ) {
+ 
++    /**
++     *  Sanitize input. Two notes :
++     *  - they should already be sanitized in the caller, eg admin/upgrade.php
++     *    (but hey, let's make sure)
++     *  - some vars may not be used at the moment
++     *    (and this is ok, they are here in case a future upgrade procedure needs them)
++     */
++    $step   = intval($step);
++    $oldsql = intval($oldsql);
++    $newsql = intval($newsql);
++    $oldver = yourls_sanitize_version($oldver);
++    $newver = yourls_sanitize_version($newver);
++
+     yourls_maintenance_mode(true);
+ 
+     // special case for 1.3: the upgrade is a multi step procedure
+diff --git a/includes/version.php b/includes/version.php
+index c43391327..baa1a78d4 100644
+--- a/includes/version.php
++++ b/includes/version.php
+@@ -2,11 +2,19 @@
+ /**
+  * YOURLS version
+  *
++ * Must be one of the following :
++ *    MAJOR.MINOR (eg 1.8)
++ *    MAJOR.MINOR.PATCH (1.8.1)
++ *    MAJOR.MINOR-SOMETHING (1.8-dev)
++ *    MAJOR.MINOR.PATCH-SOMETHING (1.8.1-donotuse)
++ *
+  */
+ define( 'YOURLS_VERSION', '1.8.3-dev' );
+ 
+ /**
+  * YOURLS DB version. Increments when changes are made to the DB schema, to trigger a DB update
+  *
++ * Must be a string of an integer.
++ *
+  */
+ define( 'YOURLS_DB_VERSION', '506' );

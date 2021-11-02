@@ -1,0 +1,42 @@
+From 5388803fa6d004382f4a857056ce06d963698d9c Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Tue, 10 Oct 2017 20:49:00 +0800
+Subject: QcomModulePkg: Correct the max length of PartitionName
+
+The second parameter of StrnCpyS and StrnCats is the max length
+of the first parameter, it's not right to use the length of the
+fourth parameter.
+
+Change-Id: Ia2d1e0e05b9959703a8d4ce3d6db4394bbebd62e
+---
+ QcomModulePkg/Library/BootLib/UpdateCmdLine.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/UpdateCmdLine.c b/QcomModulePkg/Library/BootLib/UpdateCmdLine.c
+index 67608bf..41396aa 100644
+--- a/QcomModulePkg/Library/BootLib/UpdateCmdLine.c
++++ b/QcomModulePkg/Library/BootLib/UpdateCmdLine.c
+@@ -258,15 +258,16 @@ UINT32 GetSystemPath(CHAR8 **SysPath)
+ 	CHAR8 LunCharMapping[] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+ 	CHAR8 RootDevStr[BOOT_DEV_NAME_SIZE_MAX];
+ 
+-	*SysPath = AllocatePool(sizeof(char) * MAX_PATH_SIZE);
++    *SysPath = AllocateZeroPool (sizeof (CHAR8) * MAX_PATH_SIZE);
+ 	if (!*SysPath) {
+ 		DEBUG((EFI_D_ERROR, "Failed to allocated memory for System path query\n"));
+ 		return 0;
+ 	}
+ 
+-	StrnCpyS(PartitionName, StrLen((CONST CHAR16 *)L"system") + 1,
+-		(CONST CHAR16 *)L"system", StrLen((CONST CHAR16 *)L"system"));
+-	StrnCatS(PartitionName, MAX_GPT_NAME_SIZE - 1, CurSlot.Suffix, StrLen(CurSlot.Suffix));
++    StrnCpyS (PartitionName, MAX_GPT_NAME_SIZE, (CONST CHAR16 *)L"system",
++            StrLen ((CONST CHAR16 *)L"system"));
++    StrnCatS (PartitionName, MAX_GPT_NAME_SIZE, CurSlot.Suffix,
++            StrLen (CurSlot.Suffix));
+ 
+ 	Index = GetPartitionIndex(PartitionName);
+ 	if (Index == INVALID_PTN || Index >= MAX_NUM_PARTITIONS) {
+-- 
+cgit v1.1
+

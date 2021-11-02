@@ -1,0 +1,29 @@
+From 0ee827317e497f1db86ddc5080b8af461e4595ce Mon Sep 17 00:00:00 2001
+From: atutor <info@atutor.ca>
+Date: Sun, 22 Feb 2015 16:18:00 -0500
+Subject: [PATCH] 5566 check to make sure user is not being created via CRSF
+ remote form
+
+---
+ mods/_core/users/create_user.php | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/mods/_core/users/create_user.php b/mods/_core/users/create_user.php
+index 843e75cde..12745b799 100644
+--- a/mods/_core/users/create_user.php
++++ b/mods/_core/users/create_user.php
+@@ -15,6 +15,14 @@
+ define('AT_INCLUDE_PATH', '../../../include/');
+ require(AT_INCLUDE_PATH.'vitals.inc.php');
+ admin_authenticate(AT_ADMIN_PRIV_USERS);
++// Prevent remote access via CSRF: 5566
++if($_SERVER['HTTP_REFERER'] != $_SERVER['PHP_SELF']){
++    $referer_script = preg_replace('#'.$_base_href.'#', '', $_SERVER['HTTP_REFERER']);
++    if(!in_array($_pages[$referer_script], $_pages)){
++    echo "not a valid referer";
++    exit;
++    }
++}
+ 
+ if (isset($_POST['cancel'])) {
+ 	header('Location: '.AT_BASE_HREF.'mods/_core/users/users.php');

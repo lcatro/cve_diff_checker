@@ -1,0 +1,95 @@
+From 9de20c09e5a557e57159a61657ce62f1a4f578fe Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Sat, 12 Sep 2020 22:21:09 +0200
+Subject: [PATCH] Check ability to download attachments at bugnote level
+
+This prevents users authorized to download attachments but not to view
+private bugnotes, from accessing files attached to a private note via
+`file_download.php?file_id={FILE_ID}&type=bug` (CVE-2020-25781).
+
+Includes some minor code cleanup in file_get_visible_attachments():
+- use a foreach loop
+- reuse variables instead of derefenrcing array
+
+Fixes #27039
+---
+ core/file_api.php | 30 ++++++++++--------------------
+ file_download.php |  4 +++-
+ 2 files changed, 13 insertions(+), 21 deletions(-)
+
+diff --git a/core/file_api.php b/core/file_api.php
+index 63de3e4878..245b303531 100644
+--- a/core/file_api.php
++++ b/core/file_api.php
+@@ -451,31 +451,21 @@ function file_get_visible_attachments( $p_bug_id ) {
+ 
+ 	$t_preview_text_ext = config_get( 'preview_text_extensions' );
+ 	$t_preview_image_ext = config_get( 'preview_image_extensions' );
+-	$t_attachments_view_threshold = config_get( 'view_attachments_threshold' );
+ 
+ 	$t_image_previewed = false;
+-	for( $i = 0;$i < $t_attachments_count;$i++ ) {
+-		$t_row = $t_attachment_rows[$i];
++	foreach( $t_attachment_rows as $t_row ) {
+ 		$t_user_id = (int)$t_row['user_id'];
++		$t_attachment_note_id = (int)$t_row['bugnote_id'];
+ 
+-		# This covers access checks for issue attachments
+-		if( !file_can_view_bug_attachments( $p_bug_id, $t_user_id ) ) {
++		if( !file_can_view_bug_attachments( $p_bug_id, $t_user_id )
++		|| !file_can_view_bugnote_attachments( $t_attachment_note_id, $t_user_id )
++		) {
+ 			continue;
+ 		}
+ 
+-		# This covers access checks for issue note attachments
+-		$t_attachment_note_id = (int)$t_row['bugnote_id'];
+-		if( $t_attachment_note_id !== 0 ) {
+-			if( bugnote_get_field( $t_attachment_note_id, 'view_state' ) != VS_PUBLIC ) {
+-				if( !access_has_bugnote_level( $t_attachments_view_threshold, $t_attachment_note_id ) ) {
+-					continue;
+-				}
+-			}
+-		}
+-
+ 		$t_id = (int)$t_row['id'];
+ 		$t_filename = $t_row['filename'];
+-		$t_filesize = $t_row['filesize'];
++		$t_filesize = (int)$t_row['filesize'];
+ 		$t_diskfile = file_normalize_attachment_path( $t_row['diskfile'], bug_get_field( $p_bug_id, 'project_id' ) );
+ 		$t_date_added = $t_row['date_added'];
+ 
+@@ -483,14 +473,14 @@ function file_get_visible_attachments( $p_bug_id ) {
+ 		$t_attachment['id'] = $t_id;
+ 		$t_attachment['user_id'] = $t_user_id;
+ 		$t_attachment['display_name'] = file_get_display_name( $t_filename );
+-		$t_attachment['size'] = (int)$t_filesize;
++		$t_attachment['size'] = $t_filesize;
+ 		$t_attachment['date_added'] = $t_date_added;
+ 		$t_attachment['diskfile'] = $t_diskfile;
+ 		$t_attachment['file_type'] = $t_row['file_type'];
+-		$t_attachment['bugnote_id'] = (int)$t_row['bugnote_id'];
++		$t_attachment['bugnote_id'] = $t_attachment_note_id;
+ 
+-		$t_attachment['can_download'] = file_can_download_bug_attachments( $p_bug_id, (int)$t_row['user_id'] );
+-		$t_attachment['can_delete'] = file_can_delete_bug_attachments( $p_bug_id, (int)$t_row['user_id'] );
++		$t_attachment['can_download'] = file_can_download_bug_attachments( $p_bug_id, $t_user_id );
++		$t_attachment['can_delete'] = file_can_delete_bug_attachments( $p_bug_id, $t_user_id );
+ 
+ 		if( $t_attachment['can_download'] ) {
+ 			$t_attachment['download_url'] = 'file_download.php?file_id=' . $t_id . '&type=bug';
+diff --git a/file_download.php b/file_download.php
+index d423681b0f..d7404548a2 100644
+--- a/file_download.php
++++ b/file_download.php
+@@ -110,7 +110,9 @@
+ # Check access rights
+ switch( $f_type ) {
+ 	case 'bug':
+-		if( !file_can_download_bug_attachments( $v_bug_id, (int)$v_user_id ) ) {
++		if( !file_can_download_bug_attachments( $v_bug_id, $v_user_id )
++		|| !file_can_download_bugnote_attachments( $v_bugnote_id, $v_user_id )
++		) {
+ 			access_denied();
+ 		}
+ 		break;

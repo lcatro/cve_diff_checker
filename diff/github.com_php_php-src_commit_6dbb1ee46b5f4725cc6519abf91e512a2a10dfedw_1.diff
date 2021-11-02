@@ -1,0 +1,118 @@
+From 6dbb1ee46b5f4725cc6519abf91e512a2a10dfed Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Mon, 8 Aug 2016 00:49:34 -0700
+Subject: [PATCH] Fixed bug #72627: Memory Leakage In exif_process_IFD_in_TIFF
+
+---
+ ext/exif/exif.c              |   5 ++-
+ ext/exif/tests/bug72627.phpt |  71 +++++++++++++++++++++++++++++++++++
+ ext/exif/tests/bug72627.tiff | Bin 0 -> 1250 bytes
+ 3 files changed, 75 insertions(+), 1 deletion(-)
+ create mode 100644 ext/exif/tests/bug72627.phpt
+ create mode 100644 ext/exif/tests/bug72627.tiff
+
+diff --git a/ext/exif/exif.c b/ext/exif/exif.c
+index f95de3a14f19..657a2cc1f26e 100644
+--- a/ext/exif/exif.c
++++ b/ext/exif/exif.c
+@@ -3768,8 +3768,11 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo, size_t dir_offse
+ 						fgot = php_stream_read(ImageInfo->infile, ImageInfo->Thumbnail.data, ImageInfo->Thumbnail.size);
+ 						if (fgot < ImageInfo->Thumbnail.size) {
+ 							EXIF_ERRLOG_THUMBEOF(ImageInfo)
++							efree(ImageInfo->Thumbnail.data);
++							ImageInfo->Thumbnail.data = NULL;
++						} else {
++							exif_thumbnail_build(ImageInfo TSRMLS_CC);
+ 						}
+-						exif_thumbnail_build(ImageInfo TSRMLS_CC);
+ 					}
+ #ifdef EXIF_DEBUG
+ 					exif_error_docref(NULL EXIFERR_CC, ImageInfo, E_NOTICE, "Read next IFD (THUMBNAIL) done");
+diff --git a/ext/exif/tests/bug72627.phpt b/ext/exif/tests/bug72627.phpt
+new file mode 100644
+index 000000000000..bb6a1fae99a1
+--- /dev/null
++++ b/ext/exif/tests/bug72627.phpt
+@@ -0,0 +1,71 @@
++--TEST--
++Bug #72627 (Memory Leakage In exif_process_IFD_in_TIFF)
++--SKIPIF--
++<?php if (!extension_loaded('exif')) print 'skip exif extension not available';?>
++--FILE--
++<?php
++	$exif = exif_read_data(__DIR__ . '/bug72627.tiff',0,0,true);
++	var_dump($exif);
++?>
++--EXPECTF--
++Warning: exif_read_data(%s): Thumbnail goes IFD boundary or end of file reached in %sbug72627.php on line %d
++
++Warning: exif_read_data(%s): Error in TIFF: filesize(x04E2) less than start of IFD dir(x829A0004) in %sbug72627.php on line %d
++
++Warning: exif_read_data(%s): Thumbnail goes IFD boundary or end of file reached in %sbug72627.php on line %d
++array(11) {
++  ["FileName"]=>
++  string(13) "bug72627.tiff"
++  ["FileDateTime"]=>
++  int(%d)
++  ["FileSize"]=>
++  int(1250)
++  ["FileType"]=>
++  int(7)
++  ["MimeType"]=>
++  string(10) "image/tiff"
++  ["SectionsFound"]=>
++  string(30) "ANY_TAG, IFD0, THUMBNAIL, EXIF"
++  ["COMPUTED"]=>
++  array(10) {
++    ["html"]=>
++    string(24) "width="128" height="132""
++    ["Height"]=>
++    int(132)
++    ["Width"]=>
++    int(128)
++    ["IsColor"]=>
++    int(0)
++    ["ByteOrderMotorola"]=>
++    int(0)
++    ["ApertureFNumber"]=>
++    string(5) "f/1.0"
++    ["Thumbnail.FileType"]=>
++    int(2)
++    ["Thumbnail.MimeType"]=>
++    string(10) "image/jpeg"
++    ["Thumbnail.Height"]=>
++    int(132)
++    ["Thumbnail.Width"]=>
++    int(128)
++  }
++  ["XResolution"]=>
++  string(21) "1414812756/1414812756"
++  ["THUMBNAIL"]=>
++  array(5) {
++    ["ImageWidth"]=>
++    int(128)
++    ["ImageLength"]=>
++    int(132)
++    ["JPEGInterchangeFormat"]=>
++    int(1280)
++    ["JPEGInterchangeFormatLength"]=>
++    int(100)
++    ["THUMBNAIL"]=>
++    NULL
++  }
++  ["ExposureTime"]=>
++  string(21) "1414812756/1414812756"
++  ["FNumber"]=>
++  string(21) "1414812756/1414812756"
++}
+diff --git a/ext/exif/tests/bug72627.tiff b/ext/exif/tests/bug72627.tiff
+new file mode 100644
+index 0000000000000000000000000000000000000000..229190a6041926d960856267a5285d887eda49b5
+GIT binary patch
+literal 1250
+zcmebD)MDUZU|?WkkYZ$IU<9%lSQr>G+gZSDC9uq_CWwp>P-ZTa?E+*wKom1FgVi<w
+vd5lnY3y94GF@u2>XgZXg0u%><|2O{MVo39)0|*%fqaiRF0wXpA{@(-uY6E(R
+
+literal 0
+HcmV?d00001
+

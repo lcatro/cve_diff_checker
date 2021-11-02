@@ -1,0 +1,834 @@
+From 2c9b771d130a385ca1ecb337d27e88004a2fedce Mon Sep 17 00:00:00 2001
+From: dev747368 <48332326+dev747368@users.noreply.github.com>
+Date: Tue, 1 Oct 2019 14:02:18 -0400
+Subject: [PATCH 1/3] GT-3198 remove usage of java.beans.XMLDecoder/ XMLEncoder
+ #1090.
+
+Java's built-in XMLEncoder / XMLDecoder is too flexible and allows the
+XML data being decoded to execute arbitrary commands and other
+non-niceness to happen.
+
+Replace FunctionBitPatternExplorerPlugin's usage with manual
+serializing.
+---
+ .../DumpFunctionPatternInfoScript.java        |   6 +-
+ .../bitpatterns/info/ContextRegisterInfo.java |  37 ++++++
+ .../bitpatterns/info/FileBitPatternInfo.java  | 115 +++++++++++++++++
+ .../info/FileBitPatternInfoReader.java        |  15 +--
+ .../info/FunctionBitPatternInfo.java          | 103 +++++++++++++++-
+ .../bitpatterns/info/InstructionSequence.java | 116 +++++++++++++++++-
+ .../java/ghidra/util/xml/XmlUtilities.java    |  37 ++++++
+ 7 files changed, 409 insertions(+), 20 deletions(-)
+
+diff --git a/Ghidra/Features/BytePatterns/ghidra_scripts/DumpFunctionPatternInfoScript.java b/Ghidra/Features/BytePatterns/ghidra_scripts/DumpFunctionPatternInfoScript.java
+index c881aa9e83..d6ee0183db 100644
+--- a/Ghidra/Features/BytePatterns/ghidra_scripts/DumpFunctionPatternInfoScript.java
++++ b/Ghidra/Features/BytePatterns/ghidra_scripts/DumpFunctionPatternInfoScript.java
+@@ -16,7 +16,6 @@
+ //This script dumps information about byte and instructions in neighborhoods around function starts
+ //and returns to an XML file
+ //@category FunctionStartPatterns
+-import java.beans.XMLEncoder;
+ import java.io.*;
+ import java.util.List;
+ 
+@@ -118,10 +117,7 @@ protected void run() throws Exception {
+ 		File savedFile = new File(saveDir.getAbsolutePath() + File.separator +
+ 			currentProgram.getDomainFile().getPathname().replaceAll("/", "_") + "_" +
+ 			currentProgram.getExecutableMD5() + "_funcInfo.xml");
+-		try (XMLEncoder xmlEncoder =
+-			new XMLEncoder(new BufferedOutputStream(new FileOutputStream(savedFile)))) {
+-			xmlEncoder.writeObject(funcPatternList);
+-		}
++		funcPatternList.toXmlFile(savedFile);
+ 		Msg.info(this,
+ 			"Programs analyzed: " + programsAnalyzed + "; total functions: " + totalFuncs);
+ 	}
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+index 93fdbcab41..293b23428b 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+@@ -17,10 +17,15 @@
+ 
+ import java.math.BigInteger;
+ 
++import org.jdom.Element;
++
+ /**
+  * class for representing the values a specific context register assumes within a function body. 
+  */
+ public class ContextRegisterInfo {
++
++	static final String XML_ELEMENT_NAME = "ContextRegisterInfo";
++
+ 	String contextRegister;//the context register
+ 	String value;//the value it assumes (needed because a BigInteger will not serialize to xml)
+ 	BigInteger valueAsBigInteger;//the value it assumes
+@@ -133,4 +138,36 @@ public int hashCode() {
+ 		hashCode = 31 * hashCode + value.hashCode();
+ 		return hashCode;
+ 	}
++
++	/**
++	 * Creates a {@link ContextRegisterInfo} object using data in the supplied XML node.
++	 * 
++	 * @param ele xml Element
++	 * @return new {@link ContextRegisterInfo} object, never null
++	 */
++	public static ContextRegisterInfo fromXml(Element ele) {
++
++		String contextRegister = ele.getAttributeValue("contextRegister");
++		String value = ele.getAttributeValue("value");
++
++		ContextRegisterInfo result = new ContextRegisterInfo();
++		result.setContextRegister(contextRegister);
++		result.setValue(value);
++
++		return result;
++	}
++
++	/**
++	 * Converts this object into XML
++	 * 
++	 * @return new jdom Element
++	 */
++	public Element toXml() {
++
++		Element e = new Element(XML_ELEMENT_NAME);
++		e.setAttribute("contextRegister", contextRegister);
++		e.setAttribute("value", value);
++
++		return e;
++	}
+ }
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
+index 4d39c0c2f7..534791b542 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
+@@ -15,9 +15,16 @@
+  */
+ package ghidra.bitpatterns.info;
+ 
++import java.io.*;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
++import org.jdom.*;
++import org.jdom.input.SAXBuilder;
++
++import ghidra.util.Msg;
++import ghidra.util.xml.XmlUtilities;
++
+ /**
+  * An object of this class stores all the function bit pattern information for an executable.
+  * It records the number of bytes and instructions for each category (first, pre, and return), as
+@@ -27,6 +34,8 @@
+ 
+ public class FileBitPatternInfo {
+ 
++	static final String XML_ELEMENT_NAME = "FileBitPatternInfo";
++
+ 	private int numFirstBytes = 0;
+ 	private int numFirstInstructions = 0;
+ 	private int numPreBytes = 0;
+@@ -195,4 +204,110 @@ public int getNumReturnInstructions() {
+ 	public void setNumReturnInstructions(int numReturnInstructions) {
+ 		this.numReturnInstructions = numReturnInstructions;
+ 	}
++
++	/**
++	 * Converts this object into XML
++	 * 
++	 * @return new jdom {@link Element}
++	 */
++	public Element toXml() {
++		Element result = new Element(XML_ELEMENT_NAME);
++		XmlUtilities.setStringAttr(result, "ghidraURL", ghidraURL);
++		XmlUtilities.setStringAttr(result, "languageID", languageID);
++		XmlUtilities.setIntAttr(result, "numFirstBytes", numFirstBytes);
++		XmlUtilities.setIntAttr(result, "numFirstInstructions", numFirstInstructions);
++		XmlUtilities.setIntAttr(result, "numPreBytes", numPreBytes);
++		XmlUtilities.setIntAttr(result, "numPreInstructions", numPreInstructions);
++		XmlUtilities.setIntAttr(result, "numReturnBytes", numReturnBytes);
++		XmlUtilities.setIntAttr(result, "numReturnInstructions", numReturnInstructions);
++
++		Element funcBitPatternInfoListEle = new Element("funcBitPatternInfoList");
++		for (FunctionBitPatternInfo fbpi : funcBitPatternInfo) {
++			funcBitPatternInfoListEle.addContent(fbpi.toXml());
++		}
++
++		result.addContent(funcBitPatternInfoListEle);
++
++		return result;
++	}
++
++	/**
++	 * Creates a {@link FileBitPatternInfo} instance from XML.
++	 * 
++	 * @param e XML element to convert
++	 * @return new {@link FileBitPatternInfo}, never null
++	 * @throws IOException if file IO error or xml data problem
++	 */
++	public static FileBitPatternInfo fromXml(Element e) throws IOException {
++
++		String ghidraURL = e.getAttributeValue("ghidraURL");
++		String languageID = e.getAttributeValue("languageID");
++		int numFirstBytes =
++			XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numFirstBytes"));
++		int numFirstInstructions =
++			XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numFirstInstructions"));
++		int numPreBytes = XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numPreBytes"));
++		int numPreInstructions =
++			XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numPreInstructions"));
++		int numReturnBytes =
++			XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numReturnBytes"));
++		int numReturnInstructions =
++			XmlUtilities.parseInt(XmlUtilities.requireStringAttr(e, "numReturnInstructions"));
++
++		List<FunctionBitPatternInfo> funcBitPatternInfoList = new ArrayList<>();
++		Element funcBitPatternInfoListEle = e.getChild("funcBitPatternInfoList");
++		if (funcBitPatternInfoListEle != null) {
++			for (Element childElement : XmlUtilities.getChildren(funcBitPatternInfoListEle,
++				FunctionBitPatternInfo.XML_ELEMENT_NAME)) {
++				funcBitPatternInfoList.add(FunctionBitPatternInfo.fromXml(childElement));
++			}
++		}
++
++		FileBitPatternInfo result = new FileBitPatternInfo();
++		result.setFuncBitPatternInfo(funcBitPatternInfoList);
++		result.setGhidraURL(ghidraURL);
++		result.setLanguageID(languageID);
++		result.setNumFirstBytes(numFirstBytes);
++		result.setNumFirstInstructions(numFirstInstructions);
++		result.setNumPreBytes(numPreBytes);
++		result.setNumPreInstructions(numPreInstructions);
++		result.setNumReturnBytes(numReturnBytes);
++		result.setNumReturnInstructions(numReturnInstructions);
++
++		return result;
++	}
++
++	/**
++	 * Converts this object to XML and writes it to the specified file.
++	 * 
++	 * @param destFile name of xml file to create
++	 * @throws IOException if file io error
++	 */
++	public void toXmlFile(File destFile) throws IOException {
++		Element rootEle = toXml();
++		Document doc = new Document(rootEle);
++
++		XmlUtilities.writeDocToFile(doc, destFile);
++	}
++
++	/**
++	 * Creates a {@link FileBitPatternInfo} instance from a XML file.
++	 * 
++	 * @param inputFile name of xml file to read
++	 * @return new {@link FileBitPatternInfo} instance, never null
++	 * @throws IOException if file io error or xml data format problem 
++	 */
++	public static FileBitPatternInfo fromXmlFile(File inputFile) throws IOException {
++		SAXBuilder sax = XmlUtilities.createSecureSAXBuilder(false, false);
++		try (InputStream fis = new FileInputStream(inputFile)) {
++			Document doc = sax.build(fis);
++			Element rootElem = doc.getRootElement();
++			return fromXml(rootElem);
++		}
++		catch (JDOMException | IOException e) {
++			Msg.error(FileBitPatternInfo.class, "Bad file bit pattern file " + inputFile, e);
++			throw new IOException("Failed to read file bit pattern " + inputFile, e);
++		}
++
++	}
+ }
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfoReader.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfoReader.java
+index 56c2fa5f28..2b340e032c 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfoReader.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfoReader.java
+@@ -16,7 +16,6 @@
+ package ghidra.bitpatterns.info;
+ 
+ import java.awt.Component;
+-import java.beans.XMLDecoder;
+ import java.io.*;
+ import java.util.*;
+ 
+@@ -184,23 +183,19 @@ private void processXmlFile(File dataFile) {
+ 		numFiles++;
+ 
+ 		FileBitPatternInfo fileInfo = null;
+-		try (XMLDecoder xmlDecoder = new XMLDecoder(new FileInputStream(dataFile))) {
+-			fileInfo = (FileBitPatternInfo) xmlDecoder.readObject();
+-		}
+-		catch (ArrayIndexOutOfBoundsException e) {
+-			// Probably wrong type of XML file...skip
++		try {
++			fileInfo = FileBitPatternInfo.fromXmlFile(dataFile);
+ 		}
+ 		catch (IOException e) {
+-			Msg.error(this, "IOException", e);
+-		}
+-		if (fileInfo == null) {
+-			Msg.info(this, "null FileBitPatternInfo for " + dataFile);
++			Msg.error(this, "Error reading FileBitPatternInfo file " + dataFile, e);
+ 			return;
+ 		}
++
+ 		if (fileInfo.getFuncBitPatternInfo() == null) {
+ 			Msg.info(this, "fList.getFuncBitPatternInfoList null for " + dataFile);
+ 			return;
+ 		}
++
+ 		if (params == null) {
+ 			//TODO: this will set the params to the params of the first valid file
+ 			//these should agree with the parameters for all of the files
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FunctionBitPatternInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FunctionBitPatternInfo.java
+index 1134c08e77..2193671a59 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FunctionBitPatternInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FunctionBitPatternInfo.java
+@@ -18,6 +18,8 @@
+ import java.math.BigInteger;
+ import java.util.*;
+ 
++import org.jdom.Element;
++
+ import ghidra.program.model.address.Address;
+ import ghidra.program.model.address.AddressSetView;
+ import ghidra.program.model.lang.Register;
+@@ -26,15 +28,17 @@
+ import ghidra.program.model.symbol.FlowType;
+ import ghidra.program.model.symbol.RefType;
+ import ghidra.util.Msg;
++import ghidra.util.xml.XmlUtilities;
+ 
+ /**
+  * This class represents information about small neighborhoods around the start and returns of a
+  * single function
+  */
+ 
+-//@XmlRootElement
+ public class FunctionBitPatternInfo {
+ 
++	static final String XML_ELEMENT_NAME = "FunctionBitPatternInfo";
++
+ 	private InstructionSequence firstInst;
+ 	private InstructionSequence preInst;
+ 	private List<InstructionSequence> returnInst;
+@@ -59,7 +63,7 @@ private static String getBytesAsString(byte[] bytes) {
+ 	}
+ 
+ 	/**
+-	 * No-arg constructor for use by JAXB when restoring from XML
++	 * No-arg constructor
+ 	 */
+ 	public FunctionBitPatternInfo() {
+ 		returnBytes = new ArrayList<String>();
+@@ -494,4 +498,99 @@ public void setContextRegisters(List<ContextRegisterInfo> contextRegisters) {
+ 		this.contextRegisters = contextRegisters;
+ 	}
+ 
++	/**
++	 * Converts a XML element into a FunctionBitPatternInfo object.
++	 * 
++	 * @param e xml {@link Element} to convert
++	 * @return new {@link FunctionBitPatternInfo} object, never null
++	 */
++	public static FunctionBitPatternInfo fromXml(Element e) {
++		String preBytes = e.getAttributeValue("preBytes");
++		String firstBytes = e.getAttributeValue("firstBytes");
++		String address = e.getAttributeValue("address");
++
++		List<String> returnBytes = new ArrayList<>();
++		Element returnBytesListEle = e.getChild("returnBytesList");
++		if (returnBytesListEle != null) {
++			for (Element rbEle : XmlUtilities.getChildren(returnBytesListEle, "returnBytes")) {
++				returnBytes.add(rbEle.getAttributeValue("value"));
++			}
++		}
++
++		InstructionSequence firstInst = InstructionSequence.fromXml(e.getChild("firstInst"));
++		InstructionSequence preInst = InstructionSequence.fromXml(e.getChild("preInst"));
++
++		List<InstructionSequence> returnInst = new ArrayList<>();
++		Element returnInstListEle = e.getChild("returnInstList");
++		if (returnInstListEle != null) {
++			for (Element isEle : XmlUtilities.getChildren(returnInstListEle,
++				InstructionSequence.XML_ELEMENT_NAME)) {
++				returnInst.add(InstructionSequence.fromXml(isEle));
++			}
++		}
++
++		List<ContextRegisterInfo> contextRegisters = new ArrayList<>();
++		Element contextRegistersListEle = e.getChild("contextRegistersList");
++		if ( contextRegistersListEle != null ) {
++			for (Element criElement : XmlUtilities.getChildren(contextRegistersListEle,
++				ContextRegisterInfo.XML_ELEMENT_NAME)) {
++				contextRegisters.add(ContextRegisterInfo.fromXml(criElement));
++			}
++		}
++		
++		FunctionBitPatternInfo result = new FunctionBitPatternInfo();
++		result.setPreBytes(preBytes);
++		result.setFirstBytes(firstBytes);
++		result.setAddress(address);
++		result.setReturnBytes(returnBytes);
++		result.setFirstInst(firstInst);
++		result.setPreInst(preInst);
++		result.setReturnInst(returnInst);
++		result.setContextRegisters(contextRegisters);
++
++		return result;
++	}
++
++	/**
++	 * Converts this object instance into XML.
++	 * 
++	 * @return new jdom Element populated with all the datas
++	 */
++	public Element toXml() {
++		Element result = new Element(XML_ELEMENT_NAME);
++
++		XmlUtilities.setStringAttr(result, "preBytes", preBytes);
++		XmlUtilities.setStringAttr(result, "firstBytes", firstBytes);
++		XmlUtilities.setStringAttr(result, "address", address);
++		Element returnBytesListEle = new Element("returnBytesList");
++		result.addContent(returnBytesListEle);
++		for (String s : returnBytes) {
++			Element rbNode = new Element("returnBytes");
++			XmlUtilities.setStringAttr(rbNode, "value", s);
++			returnBytesListEle.addContent(rbNode);
++		}
++		if (firstInst != null) {
++			result.addContent(firstInst.toXml("firstInst"));
++		}
++		if (preInst != null) {
++			result.addContent(preInst.toXml("preInst"));
++		}
++		if (returnInst != null) {
++			Element returnInstListEle = new Element("returnInstList");
++			result.addContent(returnInstListEle);
++			for (InstructionSequence is : returnInst) {
++				returnInstListEle.addContent(is.toXml());
++			}
++		}
++		if (contextRegisters != null) {
++			Element contextRegistersListEle = new Element("contextRegistersList");
++			result.addContent(contextRegistersListEle);
++			for (ContextRegisterInfo cri : contextRegisters) {
++				contextRegistersListEle.addContent(cri.toXml());
++			}
++		}
++
++		return result;
++	}
++
+ }
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/InstructionSequence.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/InstructionSequence.java
+index 0eebf8e3df..81ae13a7cd 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/InstructionSequence.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/InstructionSequence.java
+@@ -17,6 +17,10 @@
+ 
+ import java.util.*;
+ 
++import org.jdom.Element;
++
++import ghidra.util.xml.XmlUtilities;
++
+ /**
+  * An object in this class stores a sequence of instructions along with the sizes and operands of each. 
+  * These sequences come from function starts, function returns, or immediately before function starts. 
+@@ -24,12 +28,14 @@
+ 
+ public class InstructionSequence {
+ 
++	final static String XML_ELEMENT_NAME = "InstructionSequence";
++
+ 	private String[] instructions;
+ 	private Integer[] sizes;
+ 	private String[] commaSeparatedOperands;
+ 
+ 	/**
+-	 * Default no-arg constructor for use by JAXB
++	 * Default no-arg constructor
+ 	 */
+ 	public InstructionSequence() {
+ 	}
+@@ -241,8 +247,9 @@ public String toString() {
+ 						continue;
+ 					}
+ 					for (int i = 0, numSeqs = currentSeqs.size(); i < numSeqs; ++i) {
+-						if (currentSeqs.get(i).getInstructions()[0] != null &&
+-							currentBytes.get(i).getBytes() != null) {
++						if (currentSeqs.get(i)
++							.getInstructions()[0] != null && currentBytes.get(i)
++								.getBytes() != null) {
+ 							instSeqs.add(currentSeqs.get(i));
+ 						}
+ 					}
+@@ -254,4 +261,107 @@ public String toString() {
+ 		}
+ 		return instSeqs;
+ 	}
++
++	/**
++	 * Convert this object into a XML node, using {@link #XML_ELEMENT_NAME} as the name for the node.
++	 * 
++	 * @return new XML element
++	 */
++	public Element toXml() {
++		return toXml(XML_ELEMENT_NAME);
++	}
++
++	/**
++	 * Convert this object into a XML node, using the specified name for the node.
++	 * 
++	 * @param elementName name for the new XML node
++	 * @return new XML element
++	 */
++	public Element toXml(String elementName) {
++		Element result = new Element(elementName);
++
++		Element instructionsListEle = new Element("instructions");
++		result.addContent(instructionsListEle);
++		if (instructions != null) {
++			for (String s : instructions) {
++				Element x = new Element("instruction");
++				instructionsListEle.addContent(x);
++				if (s != null) {
++					x.setAttribute("value", s);
++				}
++			}
++		}
++
++		Element sizesListEle = new Element("sizes");
++		result.addContent(sizesListEle);
++		if (sizes != null) {
++			for (Integer s : sizes) {
++				Element x = new Element("size");
++				sizesListEle.addContent(x);
++				if (s != null) {
++					XmlUtilities.setIntAttr(x, "value", s);
++				}
++			}
++		}
++
++		Element csoListEle = new Element("commaSeparatedOperands");
++		result.addContent(csoListEle);
++		if (commaSeparatedOperands != null) {
++			for (String s : commaSeparatedOperands) {
++				Element x = new Element("operands");
++				csoListEle.addContent(x);
++				if (s != null) {
++					x.setAttribute("value", s);
++				}
++			}
++		}
++
++		return result;
++	}
++
++	/**
++	 * Creates an {@link InstructionSequence} instance from a XML node.
++	 * 
++	 * @param element jdom Element to read, null ok
++	 * @return new {@link InstructionSequence} or null if element was null
++	 */
++	public static InstructionSequence fromXml(Element element) {
++		if (element == null) {
++			return null;
++		}
++
++		List<String> instructionsList = new ArrayList<>();
++		Element instructionsListEle = element.getChild("instructions");
++		if (instructionsListEle != null) {
++			for (Element instEle : XmlUtilities.getChildren(instructionsListEle, "instruction")) {
++				String val = instEle.getAttributeValue("value");
++				instructionsList.add(val);
++			}
++		}
++
++		List<Integer> sizesList = new ArrayList<>();
++		Element sizesListEle = element.getChild("sizes");
++		if (sizesListEle != null) {
++			for (Element sizeEle : XmlUtilities.getChildren(sizesListEle, "size")) {
++				String val = sizeEle.getAttributeValue("value");
++				sizesList.add(val != null ? XmlUtilities.parseInt(val) : null);
++			}
++		}
++
++		List<String> csoList = new ArrayList<>();
++		Element csoListEle = element.getChild("commaSeparatedOperands");
++		if (csoListEle != null) {
++			for (Element csoEle : XmlUtilities.getChildren(csoListEle, "operands")) {
++				String val = csoEle.getAttributeValue("value");
++				csoList.add(val);
++			}
++		}
++
++		InstructionSequence result = new InstructionSequence();
++		result.setInstructions(instructionsList.toArray(new String[instructionsList.size()]));
++		result.setCommaSeparatedOperands(csoList.toArray(new String[csoList.size()]));
++		result.setSizes(sizesList.toArray(new Integer[sizesList.size()]));
++
++		return result;
++	}
+ }
+diff --git a/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java b/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
+index 7d9e20ffe5..d85f6f95b7 100644
+--- a/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
++++ b/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
+@@ -17,6 +17,7 @@
+ 
+ import java.io.*;
+ import java.nio.charset.StandardCharsets;
++import java.util.List;
+ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
+ 
+@@ -32,6 +33,7 @@
+ import generic.jar.ResourceFile;
+ import ghidra.util.Msg;
+ import ghidra.util.NumericUtilities;
++import util.CollectionUtils;
+ 
+ /**
+  * A set of utility methods for working with XML.
+@@ -603,6 +605,41 @@ public static String requireStringAttr(Element ele, String attrName) throws IOEx
+ 		return value;
+ 	}
+ 
++	/**
++	 * Sets a string attribute on the specified element.
++	 * 
++	 * @param ele JDom element
++	 * @param attrName name of attribute
++	 * @param attrValue value of attribute, null ok
++	 */
++	public static void setStringAttr(Element ele, String attrName, String attrValue) {
++		if (attrValue != null) {
++			ele.setAttribute(attrName, attrValue);
++		}
++	}
++
++	/**
++	 * Sets an integer attribute on the specified element.
++	 * 
++	 * @param ele JDom element
++	 * @param attrName name of attribute
++	 * @param attrValue value of attribute
++	 */
++	public static void setIntAttr(Element ele, String attrName, int attrValue) {
++		ele.setAttribute(attrName, Integer.toString(attrValue));
++	}
++
++	/**
++	 * Type-safe way of getting a list of {@link Element}s from JDom.
++	 * 
++	 * @param ele the parent element
++	 * @param childName the name of the children elements to return
++	 * @return List<Element> of elements
++	 */
++	public static List<Element> getChildren(Element ele, String childName) {
++		return CollectionUtils.asList(ele.getChildren(childName), Element.class);
++	}
++
+ 	/**
+ 	 * Tests a string for characters that would cause a problem if added to an
+ 	 * xml attribute or element.
+
+From e5184277ef1d0522a839f164083979bf19a262db Mon Sep 17 00:00:00 2001
+From: dev747368 <48332326+dev747368@users.noreply.github.com>
+Date: Tue, 1 Oct 2019 16:46:04 -0400
+Subject: [PATCH 2/3] GT-3198 - fix FunctionBitPatternExplorerPlugin xml
+ handling - codereview
+
+Tweak output format, catch null value.
+---
+ .../bitpatterns/info/ContextRegisterInfo.java  |  4 +++-
+ .../bitpatterns/info/FileBitPatternInfo.java   |  2 +-
+ .../java/ghidra/util/xml/XmlUtilities.java     | 18 ++++++++++++++++++
+ 3 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+index 293b23428b..3b918786e7 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+@@ -166,7 +166,9 @@ public Element toXml() {
+ 
+ 		Element e = new Element(XML_ELEMENT_NAME);
+ 		e.setAttribute("contextRegister", contextRegister);
+-		e.setAttribute("value", value);
++		if (value != null) {
++			e.setAttribute("value", value);
++		}
+ 
+ 		return e;
+ 	}
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
+index 534791b542..3e16993995 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/FileBitPatternInfo.java
+@@ -287,7 +287,7 @@ public void toXmlFile(File destFile) throws IOException {
+ 		Element rootEle = toXml();
+ 		Document doc = new Document(rootEle);
+ 
+-		XmlUtilities.writeDocToFile(doc, destFile);
++		XmlUtilities.writePrettyDocToFile(doc, destFile);
+ 	}
+ 
+ 	/**
+diff --git a/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java b/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
+index d85f6f95b7..2f4727bc1b 100644
+--- a/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
++++ b/Ghidra/Framework/Generic/src/main/java/ghidra/util/xml/XmlUtilities.java
+@@ -27,6 +27,7 @@
+ 
+ import org.jdom.*;
+ import org.jdom.input.SAXBuilder;
++import org.jdom.output.Format;
+ import org.jdom.output.XMLOutputter;
+ import org.xml.sax.*;
+ 
+@@ -219,6 +220,23 @@ public static void writeDocToFile(Document doc, File dest) throws IOException {
+ 		}
+ 	}
+ 
++	/**
++	 * Writes a JDOM XML {@link Document} to a {@link File}, with a prettier
++	 * format than {@link #writeDocToFile(Document, File)}.
++	 * <p>
++	 * 
++	 * @param doc JDOM XML {@link Document} to write.
++	 * @param dest {@link File} to write to.
++	 * @throws IOException if error when writing file.
++	 */
++	public static void writePrettyDocToFile(Document doc, File dest) throws IOException {
++		XMLOutputter outputter = new XMLOutputter();
++		outputter.setFormat(Format.getPrettyFormat());
++		try (FileWriter fw = new FileWriter(dest)) {
++			outputter.output(doc, fw);
++		}
++	}
++
+ 	/**
+ 	 * Read a File and convert to jdom xml doc.
+ 	 * <p>
+
+From 5adfe717dbb4bcef3300be2f846a6a7182021b0b Mon Sep 17 00:00:00 2001
+From: Ryan Kurtz <ryanmkurtz@users.noreply.github.com>
+Date: Wed, 2 Oct 2019 08:50:39 -0400
+Subject: [PATCH 3/3] GT-3198: Simplifying ContextRegisterInfo representation.
+
+---
+ .../info/ContextRegisterExtent.java           |  2 +-
+ .../info/ContextRegisterFilter.java           |  2 +-
+ .../bitpatterns/info/ContextRegisterInfo.java | 34 ++++---------------
+ 3 files changed, 9 insertions(+), 29 deletions(-)
+
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterExtent.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterExtent.java
+index 2168fecd89..2249b70ecd 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterExtent.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterExtent.java
+@@ -43,7 +43,7 @@ public void addContextInfo(List<ContextRegisterInfo> contextRegisterInfo) {
+ 			return;
+ 		}
+ 		for (ContextRegisterInfo cRegInfo : contextRegisterInfo) {
+-			addRegisterAndValue(cRegInfo.getContextRegister(), cRegInfo.getValueAsBigInteger());
++			addRegisterAndValue(cRegInfo.getContextRegister(), cRegInfo.getValue());
+ 		}
+ 	}
+ 
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterFilter.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterFilter.java
+index 67d6e7a6b1..643c0613b5 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterFilter.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterFilter.java
+@@ -56,7 +56,7 @@ public void addRegAndValueToFilter(String contextRegister, BigInteger value) {
+ 	public boolean allows(List<ContextRegisterInfo> contextRegisterInfos) {
+ 		for (ContextRegisterInfo cInfo : contextRegisterInfos) {
+ 			if (contextRegisters.contains(cInfo.getContextRegister())) {
+-				if (!values.get(cInfo.getContextRegister()).equals(cInfo.getValueAsBigInteger())) {
++				if (!values.get(cInfo.getContextRegister()).equals(cInfo.getValue())) {
+ 					return false;
+ 				}
+ 			}
+diff --git a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+index 3b918786e7..cfd7ded47e 100644
+--- a/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
++++ b/Ghidra/Features/BytePatterns/src/main/java/ghidra/bitpatterns/info/ContextRegisterInfo.java
+@@ -27,8 +27,7 @@
+ 	static final String XML_ELEMENT_NAME = "ContextRegisterInfo";
+ 
+ 	String contextRegister;//the context register
+-	String value;//the value it assumes (needed because a BigInteger will not serialize to xml)
+-	BigInteger valueAsBigInteger;//the value it assumes
++	BigInteger value;//the value it assumes
+ 
+ 	/**
+ 	 * Default constructor (used by XMLEncoder)
+@@ -60,22 +59,12 @@ public void setContextRegister(String contextRegister) {
+ 		this.contextRegister = contextRegister;
+ 	}
+ 
+-	/**
+-	 * Returns the value associated with this {@link ContextRegisterInfo} object as a 
+-	 * {@link BigInteger}.
+-	 * @return
+-	 */
+-	public BigInteger getValueAsBigInteger() {
+-		return valueAsBigInteger;
+-	}
+-
+ 	/**
+ 	 * Sets the value associated with this {@link ContextRegisterInfo} object
+-	 * @param valueAsBigInteger
++	 * @param value
+ 	 */
+-	public void setValue(BigInteger valueAsBigInteger) {
+-		this.valueAsBigInteger = valueAsBigInteger;
+-		this.value = valueAsBigInteger.toString();
++	public void setValue(BigInteger value) {
++		this.value = value;
+ 
+ 	}
+ 
+@@ -84,19 +73,10 @@ public void setValue(BigInteger valueAsBigInteger) {
+ 	 * {@link String}.
+ 	 * @return
+ 	 */
+-	public String getValue() {
++	public BigInteger getValue() {
+ 		return value;
+ 	}
+ 
+-	/**
+-	 * Sets the value associated with this {@link ContextRegisterInfo} object
+-	 * @param value
+-	 */
+-	public void setValue(String value) {
+-		this.value = value;
+-		this.valueAsBigInteger = new BigInteger(value);
+-	}
+-
+ 	@Override
+ 	public String toString() {
+ 		StringBuilder sb = new StringBuilder();
+@@ -152,7 +132,7 @@ public static ContextRegisterInfo fromXml(Element ele) {
+ 
+ 		ContextRegisterInfo result = new ContextRegisterInfo();
+ 		result.setContextRegister(contextRegister);
+-		result.setValue(value);
++		result.setValue(value != null ? new BigInteger(value) : null);
+ 
+ 		return result;
+ 	}
+@@ -167,7 +147,7 @@ public Element toXml() {
+ 		Element e = new Element(XML_ELEMENT_NAME);
+ 		e.setAttribute("contextRegister", contextRegister);
+ 		if (value != null) {
+-			e.setAttribute("value", value);
++			e.setAttribute("value", value.toString());
+ 		}
+ 
+ 		return e;

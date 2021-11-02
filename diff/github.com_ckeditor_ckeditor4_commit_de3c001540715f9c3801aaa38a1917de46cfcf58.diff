@@ -1,0 +1,586 @@
+From 2e94d21f2e6c06027d46c61d30b715af8c24210e Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Tue, 3 Aug 2021 17:41:24 +0200
+Subject: [PATCH 01/12] Filter content used to restore real element.
+
+---
+ plugins/fakeobjects/plugin.js | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index a4332e75c16..294bce6e65d 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -183,17 +183,31 @@
+ 		if ( fakeElement.data( 'cke-real-node-type' ) != CKEDITOR.NODE_ELEMENT )
+ 			return null;
+ 
+-		var element = CKEDITOR.dom.element.createFromHtml( decodeURIComponent( fakeElement.data( 'cke-realelement' ) ), this.document );
++		var filter = this.activeFilter,
++			writer = new CKEDITOR.htmlParser.basicWriter(),
++			realElementHtml = decodeURIComponent( fakeElement.data( 'cke-realelement' ) ),
++			realElementFragment = CKEDITOR.htmlParser.fragment.fromHtml( realElementHtml ),
++			filteredHtml = realElementHtml,
++			realElement;
++
++		if ( filter ) {
++			filter.applyTo( realElementFragment );
++			realElementFragment.writeHtml( writer );
++
++			filteredHtml = writer.getHtml();
++		}
++
++		realElement = CKEDITOR.dom.element.createFromHtml( filteredHtml, this.document );
+ 
+ 		if ( fakeElement.data( 'cke-resizable' ) ) {
+ 			var width = fakeElement.getStyle( 'width' ),
+ 				height = fakeElement.getStyle( 'height' );
+ 
+-			width && element.setAttribute( 'width', replaceCssLength( element.getAttribute( 'width' ), width ) );
+-			height && element.setAttribute( 'height', replaceCssLength( element.getAttribute( 'height' ), height ) );
++			width && realElement.setAttribute( 'width', replaceCssLength( realElement.getAttribute( 'width' ), width ) );
++			height && realElement.setAttribute( 'height', replaceCssLength( realElement.getAttribute( 'height' ), height ) );
+ 		}
+ 
+-		return element;
++		return realElement;
+ 	};
+ 
+ } )();
+
+From 8b39a6729b109a0bdd6e8d1df96bc71e881d616b Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Tue, 3 Aug 2021 18:04:57 +0200
+Subject: [PATCH 02/12] Do double filtering.
+
+---
+ plugins/fakeobjects/plugin.js | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 294bce6e65d..c72d0d057c8 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -183,15 +183,28 @@
+ 		if ( fakeElement.data( 'cke-real-node-type' ) != CKEDITOR.NODE_ELEMENT )
+ 			return null;
+ 
+-		var filter = this.activeFilter,
++		var dataFilter = new CKEDITOR.htmlParser.filter( {
++				elements: {
++					iframe: function( element ) {
++						element.children = [];
++					}
++				}
++			} ),
++			acfFilter = this.activeFilter,
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+ 			realElementHtml = decodeURIComponent( fakeElement.data( 'cke-realelement' ) ),
+ 			realElementFragment = CKEDITOR.htmlParser.fragment.fromHtml( realElementHtml ),
+ 			filteredHtml = realElementHtml,
+ 			realElement;
+ 
+-		if ( filter ) {
+-			filter.applyTo( realElementFragment );
++		dataFilter.applyTo( realElementFragment );
++		realElementFragment.writeHtml( writer );
++
++		filteredHtml = writer.getHtml();
++
++		if ( acfFilter ) {
++			writer.reset();
++			acfFilter.applyTo( realElementFragment );
+ 			realElementFragment.writeHtml( writer );
+ 
+ 			filteredHtml = writer.getHtml();
+
+From 9c7918dc4dd8cb64cced050169664f4a38f1be6f Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Wed, 4 Aug 2021 12:05:30 +0200
+Subject: [PATCH 03/12] Remove unnecessary value assignment.
+
+---
+ plugins/fakeobjects/plugin.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index c72d0d057c8..5c01563b1b1 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -194,7 +194,7 @@
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+ 			realElementHtml = decodeURIComponent( fakeElement.data( 'cke-realelement' ) ),
+ 			realElementFragment = CKEDITOR.htmlParser.fragment.fromHtml( realElementHtml ),
+-			filteredHtml = realElementHtml,
++			filteredHtml,
+ 			realElement;
+ 
+ 		dataFilter.applyTo( realElementFragment );
+
+From 49bbfcf16c9223c2cfd80ab4590de65a1eb90f56 Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Wed, 4 Aug 2021 15:46:27 +0200
+Subject: [PATCH 04/12] Move filtering logic to dedicated function.
+
+---
+ plugins/fakeobjects/plugin.js | 48 +++++++++++++++++++----------------
+ 1 file changed, 26 insertions(+), 22 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 5c01563b1b1..1ae71d4bc37 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -183,6 +183,23 @@
+ 		if ( fakeElement.data( 'cke-real-node-type' ) != CKEDITOR.NODE_ELEMENT )
+ 			return null;
+ 
++		var realElementHtml = decodeURIComponent( fakeElement.data( 'cke-realelement' ) ),
++			filteredHtml = filterHtml( this, realElementHtml ),
++			realElement = CKEDITOR.dom.element.createFromHtml( filteredHtml, this.document );
++
++		if ( fakeElement.data( 'cke-resizable' ) ) {
++			var width = fakeElement.getStyle( 'width' ),
++				height = fakeElement.getStyle( 'height' );
++
++			width && realElement.setAttribute( 'width', replaceCssLength( realElement.getAttribute( 'width' ), width ) );
++			height && realElement.setAttribute( 'height', replaceCssLength( realElement.getAttribute( 'height' ), height ) );
++		}
++
++		return realElement;
++	};
++
++
++	function filterHtml( editor, html ) {
+ 		var dataFilter = new CKEDITOR.htmlParser.filter( {
+ 				elements: {
+ 					iframe: function( element ) {
+@@ -190,37 +207,24 @@
+ 					}
+ 				}
+ 			} ),
+-			acfFilter = this.activeFilter,
++			acfFilter = editor.activeFilter,
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+-			realElementHtml = decodeURIComponent( fakeElement.data( 'cke-realelement' ) ),
+-			realElementFragment = CKEDITOR.htmlParser.fragment.fromHtml( realElementHtml ),
+-			filteredHtml,
+-			realElement;
++			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html ),
++			filteredHtml;
+ 
+-		dataFilter.applyTo( realElementFragment );
+-		realElementFragment.writeHtml( writer );
++		dataFilter.applyTo( fragment );
++		fragment.writeHtml( writer );
+ 
+ 		filteredHtml = writer.getHtml();
+ 
+ 		if ( acfFilter ) {
+ 			writer.reset();
+-			acfFilter.applyTo( realElementFragment );
+-			realElementFragment.writeHtml( writer );
++			acfFilter.applyTo( fragment );
++			fragment.writeHtml( writer );
+ 
+ 			filteredHtml = writer.getHtml();
+ 		}
+ 
+-		realElement = CKEDITOR.dom.element.createFromHtml( filteredHtml, this.document );
+-
+-		if ( fakeElement.data( 'cke-resizable' ) ) {
+-			var width = fakeElement.getStyle( 'width' ),
+-				height = fakeElement.getStyle( 'height' );
+-
+-			width && realElement.setAttribute( 'width', replaceCssLength( realElement.getAttribute( 'width' ), width ) );
+-			height && realElement.setAttribute( 'height', replaceCssLength( realElement.getAttribute( 'height' ), height ) );
+-		}
+-
+-		return realElement;
+-	};
+-
++		return filteredHtml;
++	}
+ } )();
+
+From 6ccb48edfa8c725a4d1bb936485ae856a1c1f47f Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Wed, 4 Aug 2021 16:20:27 +0200
+Subject: [PATCH 05/12] Add filtering also for downcasting fake elements.
+
+---
+ plugins/fakeobjects/plugin.js | 52 ++++++++++++++++++-----------------
+ 1 file changed, 27 insertions(+), 25 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 1ae71d4bc37..f1206e069f4 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -27,30 +27,6 @@
+ 		return length2;
+ 	}
+ 
+-	var htmlFilterRules = {
+-		elements: {
+-			$: function( element ) {
+-				var attributes = element.attributes,
+-					realHtml = attributes && attributes[ 'data-cke-realelement' ],
+-					realFragment = realHtml && new CKEDITOR.htmlParser.fragment.fromHtml( decodeURIComponent( realHtml ) ),
+-					realElement = realFragment && realFragment.children[ 0 ];
+-
+-				// Width/height in the fake object are subjected to clone into the real element.
+-				if ( realElement && element.attributes[ 'data-cke-resizable' ] ) {
+-					var styles = new cssStyle( element ).rules,
+-						realAttrs = realElement.attributes,
+-						width = styles.width,
+-						height = styles.height;
+-
+-					width && ( realAttrs.width = replaceCssLength( realAttrs.width, width ) );
+-					height && ( realAttrs.height = replaceCssLength( realAttrs.height, height ) );
+-				}
+-
+-				return realElement;
+-			}
+-		}
+-	};
+-
+ 	CKEDITOR.plugins.add( 'fakeobjects', {
+ 		// jscs:disable maximumLineLength
+ 		lang: 'af,ar,az,bg,bn,bs,ca,cs,cy,da,de,de-ch,el,en,en-au,en-ca,en-gb,eo,es,es-mx,et,eu,fa,fi,fo,fr,fr-ca,gl,gu,he,hi,hr,hu,id,is,it,ja,ka,km,ko,ku,lt,lv,mk,mn,ms,nb,nl,no,oc,pl,pt,pt-br,ro,ru,si,sk,sl,sq,sr,sr-latn,sv,th,tr,tt,ug,uk,vi,zh,zh-cn', // %REMOVE_LINE_CORE%
+@@ -67,7 +43,7 @@
+ 				htmlFilter = dataProcessor && dataProcessor.htmlFilter;
+ 
+ 			if ( htmlFilter ) {
+-				htmlFilter.addRules( htmlFilterRules, {
++				htmlFilter.addRules( createHtmlFilterRules( editor ), {
+ 					applyToAll: true
+ 				} );
+ 			}
+@@ -198,6 +174,32 @@
+ 		return realElement;
+ 	};
+ 
++	function createHtmlFilterRules( editor ) {
++		return {
++			elements: {
++				$: function( element ) {
++					var attributes = element.attributes,
++						realHtml = attributes && attributes[ 'data-cke-realelement' ],
++						filteredRealHtml = filterHtml( editor, decodeURIComponent( realHtml ) ),
++						realFragment = realHtml && new CKEDITOR.htmlParser.fragment.fromHtml( filteredRealHtml ),
++						realElement = realFragment && realFragment.children[ 0 ];
++
++					// Width/height in the fake object are subjected to clone into the real element.
++					if ( realElement && element.attributes[ 'data-cke-resizable' ] ) {
++						var styles = new cssStyle( element ).rules,
++							realAttrs = realElement.attributes,
++							width = styles.width,
++							height = styles.height;
++
++						width && ( realAttrs.width = replaceCssLength( realAttrs.width, width ) );
++						height && ( realAttrs.height = replaceCssLength( realAttrs.height, height ) );
++					}
++
++					return realElement;
++				}
++			}
++		};
++	}
+ 
+ 	function filterHtml( editor, html ) {
+ 		var dataFilter = new CKEDITOR.htmlParser.filter( {
+
+From cf83776e5fabacea58c0f8e7e9c422a0b267f0cd Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Thu, 5 Aug 2021 15:27:43 +0200
+Subject: [PATCH 06/12] Simplify filtering function.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-authored-by: Jacek Bogdański <jacekbogd@gmail.com>
+---
+ plugins/fakeobjects/plugin.js | 14 ++++----------
+ 1 file changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index f1206e069f4..7ff715209d0 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -211,22 +211,16 @@
+ 			} ),
+ 			acfFilter = editor.activeFilter,
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+-			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html ),
+-			filteredHtml;
++			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html );
+ 
+ 		dataFilter.applyTo( fragment );
+-		fragment.writeHtml( writer );
+-
+-		filteredHtml = writer.getHtml();
+ 
+ 		if ( acfFilter ) {
+-			writer.reset();
+ 			acfFilter.applyTo( fragment );
+-			fragment.writeHtml( writer );
+-
+-			filteredHtml = writer.getHtml();
+ 		}
+ 
+-		return filteredHtml;
++		fragment.writeHtml( writer );
++
++		return writer.getHtml();
+ 	}
+ } )();
+
+From 0f60f265ae4cddae725713acd14eb6acb8b53962 Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Fri, 6 Aug 2021 09:25:33 +0200
+Subject: [PATCH 07/12] Add missing allowed content for test.
+
+---
+ tests/plugins/fakeobjects/fakeobjects.js | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tests/plugins/fakeobjects/fakeobjects.js b/tests/plugins/fakeobjects/fakeobjects.js
+index 9a34179cf68..fa1d0dd5f9a 100644
+--- a/tests/plugins/fakeobjects/fakeobjects.js
++++ b/tests/plugins/fakeobjects/fakeobjects.js
+@@ -19,7 +19,10 @@ function fakeHtml( editor, elHtml, className, type ) {
+ 
+ bender.editors = {
+ 	editor: {
+-		name: 'editor1'
++		name: 'editor1',
++		config: {
++			extraAllowedContent: 'em'
++		}
+ 	}
+ };
+ 
+
+From 806a28e7757d208b3d1636e43cb3ff881096bad6 Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Fri, 6 Aug 2021 09:59:58 +0200
+Subject: [PATCH 08/12] Introduce yet another filter to restore `object`,
+ `param` and `embed` elements after filtering.
+
+---
+ plugins/fakeobjects/plugin.js | 36 +++++++++++++++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 4 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 7ff715209d0..2ea93380715 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -202,16 +202,43 @@
+ 	}
+ 
+ 	function filterHtml( editor, html ) {
+-		var dataFilter = new CKEDITOR.htmlParser.filter( {
++		var toDataElementFilterRules = {
++				iframe: function( element ) {
++					element.children = [];
++				}
++			},
++			restoreObjectFilter = new CKEDITOR.htmlParser.filter( {
+ 				elements: {
+-					iframe: function( element ) {
+-						element.children = [];
++					object: function( element ) {
++						element.name = 'cke:object';
++					},
++
++					param: function( element ) {
++						element.name = 'cke:param';
++					},
++
++					embed: function( element ) {
++						element.name = 'cke:embed';
+ 					}
+ 				}
+ 			} ),
+ 			acfFilter = editor.activeFilter,
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+-			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html );
++			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html ),
++			dataFilter;
++
++		toDataElementFilterRules[ 'cke:object' ] = function( element ) {
++			element.name = 'object';
++		};
++		toDataElementFilterRules[ 'cke:param' ] = function( element ) {
++			element.name = 'param';
++		};
++		toDataElementFilterRules[ 'cke:embed' ] = function( element ) {
++			element.name = 'embed';
++		};
++		dataFilter =  new CKEDITOR.htmlParser.filter( {
++			elements: toDataElementFilterRules
++		} ),
+ 
+ 		dataFilter.applyTo( fragment );
+ 
+@@ -219,6 +246,7 @@
+ 			acfFilter.applyTo( fragment );
+ 		}
+ 
++		restoreObjectFilter.applyTo( fragment );
+ 		fragment.writeHtml( writer );
+ 
+ 		return writer.getHtml();
+
+From c56e21b4d1add9ae37e9d735026860915dd48ff0 Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Fri, 6 Aug 2021 10:01:06 +0200
+Subject: [PATCH 09/12] Allow `[allowfullscreen]` attribute on `embed` element.
+
+---
+ plugins/flash/plugin.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/plugins/flash/plugin.js b/plugins/flash/plugin.js
+index 70647d1165e..cda3e165067 100644
+--- a/plugins/flash/plugin.js
++++ b/plugins/flash/plugin.js
+@@ -39,7 +39,7 @@
+ 		init: function( editor ) {
+ 			var allowed = 'object[classid,codebase,height,hspace,vspace,width];' +
+ 				'param[name,value];' +
+-				'embed[height,hspace,pluginspage,src,type,vspace,width]';
++				'embed[allowfullscreen,height,hspace,pluginspage,src,type,vspace,width]';
+ 
+ 			if ( CKEDITOR.dialog.isTabEnabled( editor, 'flash', 'properties' ) )
+ 				allowed += ';object[align]; embed[allowscriptaccess,quality,scale,wmode]';
+
+From 4b984c865bac15da52272377b6e4e7057120c00e Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Fri, 6 Aug 2021 11:31:19 +0200
+Subject: [PATCH 10/12] Make cke: handling more general.
+
+---
+ plugins/fakeobjects/plugin.js | 45 ++++++++++++-----------------------
+ 1 file changed, 15 insertions(+), 30 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 2ea93380715..64fc1d75eaf 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -202,43 +202,25 @@
+ 	}
+ 
+ 	function filterHtml( editor, html ) {
+-		var toDataElementFilterRules = {
+-				iframe: function( element ) {
+-					element.children = [];
+-				}
+-			},
+-			restoreObjectFilter = new CKEDITOR.htmlParser.filter( {
++		var unprefixedElements = [],
++			prefixRegex = /^cke:/i,
++			dataFilter =  new CKEDITOR.htmlParser.filter( {
+ 				elements: {
+-					object: function( element ) {
+-						element.name = 'cke:object';
+-					},
++					'^': function( element ) {
++						if ( prefixRegex.test( element.name ) ) {
++							element.name = element.name.replace( prefixRegex, '' );
+ 
+-					param: function( element ) {
+-						element.name = 'cke:param';
++							unprefixedElements.push( element );
++						}
+ 					},
+-
+-					embed: function( element ) {
+-						element.name = 'cke:embed';
++					iframe: function( element ) {
++						element.children = [];
+ 					}
+ 				}
+ 			} ),
+ 			acfFilter = editor.activeFilter,
+ 			writer = new CKEDITOR.htmlParser.basicWriter(),
+-			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html ),
+-			dataFilter;
+-
+-		toDataElementFilterRules[ 'cke:object' ] = function( element ) {
+-			element.name = 'object';
+-		};
+-		toDataElementFilterRules[ 'cke:param' ] = function( element ) {
+-			element.name = 'param';
+-		};
+-		toDataElementFilterRules[ 'cke:embed' ] = function( element ) {
+-			element.name = 'embed';
+-		};
+-		dataFilter =  new CKEDITOR.htmlParser.filter( {
+-			elements: toDataElementFilterRules
+-		} ),
++			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html );
+ 
+ 		dataFilter.applyTo( fragment );
+ 
+@@ -246,7 +228,10 @@
+ 			acfFilter.applyTo( fragment );
+ 		}
+ 
+-		restoreObjectFilter.applyTo( fragment );
++		CKEDITOR.tools.array.forEach( unprefixedElements, function( element ) {
++			element.name = 'cke:' + element.name;
++		} );
++
+ 		fragment.writeHtml( writer );
+ 
+ 		return writer.getHtml();
+
+From 0e7f0bd3c09e17fb808ea1df60ca57a4abab500b Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Mon, 9 Aug 2021 12:50:05 +0200
+Subject: [PATCH 11/12] Add comment with explanation.
+
+---
+ plugins/fakeobjects/plugin.js | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index 64fc1d75eaf..c6233d5fa37 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -201,6 +201,9 @@
+ 		};
+ 	}
+ 
++	// Content stored inside fake element is raw and should be explicitly
++	// passed to ACF filter. Additionally some elements can have prefixes in tag names,
++	// which should be removed before filtering and added after it.
+ 	function filterHtml( editor, html ) {
+ 		var unprefixedElements = [],
+ 			prefixRegex = /^cke:/i,
+
+From 0b89d11b041c39ac46b2213a76e6f37d45affa35 Mon Sep 17 00:00:00 2001
+From: Tomasz Jakut <vepomoc@gmail.com>
+Date: Mon, 9 Aug 2021 12:56:25 +0200
+Subject: [PATCH 12/12] Remove unnecessary `if`.
+
+---
+ plugins/fakeobjects/plugin.js | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/plugins/fakeobjects/plugin.js b/plugins/fakeobjects/plugin.js
+index c6233d5fa37..8ec8848306a 100644
+--- a/plugins/fakeobjects/plugin.js
++++ b/plugins/fakeobjects/plugin.js
+@@ -226,10 +226,7 @@
+ 			fragment = CKEDITOR.htmlParser.fragment.fromHtml( html );
+ 
+ 		dataFilter.applyTo( fragment );
+-
+-		if ( acfFilter ) {
+-			acfFilter.applyTo( fragment );
+-		}
++		acfFilter.applyTo( fragment );
+ 
+ 		CKEDITOR.tools.array.forEach( unprefixedElements, function( element ) {
+ 			element.name = 'cke:' + element.name;

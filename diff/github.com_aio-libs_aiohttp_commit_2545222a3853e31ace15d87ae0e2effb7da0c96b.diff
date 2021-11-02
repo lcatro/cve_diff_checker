@@ -1,0 +1,473 @@
+From 0d0166dc24490574fa6cb7d27da1d52be6136bcf Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Wed, 10 Feb 2021 04:12:46 +0000
+Subject: [PATCH 01/15] Add test reproducing open redirects with
+ normalize_path_middleware().
+
+---
+ tests/test_web_middleware.py | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 842dc9777f3..97e1dfecec4 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -361,6 +361,19 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+         with pytest.raises(AssertionError):
+             web.normalize_path_middleware(append_slash=True, remove_slash=True)
+ 
++    async def test_open_redirects(
++        self, aiohttp_client: Any
++    ) -> None:
++        async def handle(request: web.Request) -> web.StreamResponse:
++            return web.Response(text="hello")
++
++        app = web.Application(middlewares=[web.normalize_path_middleware()])
++        app.add_routes([web.get('/', handle)])
++        client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
++        resp = await client.get('//google.com', allow_redirects=False)
++        assert resp.status == 404
++        assert resp.url.query == URL('//google.com').query
++
+ 
+ async def test_bug_3669(aiohttp_client: Any):
+     async def paymethod(request):
+
+From 5d19ea5e28ae9a55ef1f33ea820f813bf26a7e57 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Wed, 10 Feb 2021 04:33:11 +0000
+Subject: [PATCH 02/15] Prevent open redirects from normalize_path_middleware.
+
+---
+ CHANGES/openredirects.bugfix |  1 +
+ aiohttp/web_middlewares.py   |  4 ++--
+ tests/test_web_middleware.py | 10 ++++------
+ 3 files changed, 7 insertions(+), 8 deletions(-)
+ create mode 100644 CHANGES/openredirects.bugfix
+
+diff --git a/CHANGES/openredirects.bugfix b/CHANGES/openredirects.bugfix
+new file mode 100644
+index 00000000000..91ac9db4f04
+--- /dev/null
++++ b/CHANGES/openredirects.bugfix
+@@ -0,0 +1 @@
++Prevent open redirects from normalize_path_middleware.
+diff --git a/aiohttp/web_middlewares.py b/aiohttp/web_middlewares.py
+index ad6284a5081..205ac89d76c 100644
+--- a/aiohttp/web_middlewares.py
++++ b/aiohttp/web_middlewares.py
+@@ -98,9 +98,9 @@ async def impl(request: Request, handler: _Handler) -> StreamResponse:
+             if merge_slashes:
+                 paths_to_check.append(re.sub("//+", "/", path))
+             if append_slash and not request.path.endswith("/"):
+-                paths_to_check.append(path + "/")
++                paths_to_check.append(re.sub("^//+", "/", path + "/"))
+             if remove_slash and request.path.endswith("/"):
+-                paths_to_check.append(path[:-1])
++                paths_to_check.append(re.sub("^//+", "/", path[:-1]))
+             if merge_slashes and append_slash:
+                 paths_to_check.append(re.sub("//+", "/", path + "/"))
+             if merge_slashes and remove_slash and path.endswith("/"):
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 97e1dfecec4..7210d4472d8 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -361,18 +361,16 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+         with pytest.raises(AssertionError):
+             web.normalize_path_middleware(append_slash=True, remove_slash=True)
+ 
+-    async def test_open_redirects(
+-        self, aiohttp_client: Any
+-    ) -> None:
++    async def test_open_redirects(self, aiohttp_client: Any) -> None:
+         async def handle(request: web.Request) -> web.StreamResponse:
+             return web.Response(text="hello")
+ 
+         app = web.Application(middlewares=[web.normalize_path_middleware()])
+-        app.add_routes([web.get('/', handle)])
++        app.add_routes([web.get("/", handle)])
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+-        resp = await client.get('//google.com', allow_redirects=False)
++        resp = await client.get("//google.com", allow_redirects=False)
+         assert resp.status == 404
+-        assert resp.url.query == URL('//google.com').query
++        assert resp.url.query == URL("//google.com").query
+ 
+ 
+ async def test_bug_3669(aiohttp_client: Any):
+
+From d548c6c47bd7c3ea18baada687c40b42c7fd0364 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Wed, 10 Feb 2021 14:16:25 +0000
+Subject: [PATCH 03/15] Update CHANGES/openredirects.bugfix
+
+Co-authored-by: Sviatoslav Sydorenko <sviat@redhat.com>
+---
+ CHANGES/openredirects.bugfix | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGES/openredirects.bugfix b/CHANGES/openredirects.bugfix
+index 91ac9db4f04..c031b71ddef 100644
+--- a/CHANGES/openredirects.bugfix
++++ b/CHANGES/openredirects.bugfix
+@@ -1 +1,4 @@
+-Prevent open redirects from normalize_path_middleware.
++**(SECURITY BUG)** Started preventing open redirects in the
++``aiohttp.web.normalize_path_middleware`` middleware. For
++more details, see
++https://github.com/aio-libs/aiohttp/security/advisories/GHSA-v6wp-4m6f-gcjg.
+
+From 3dd15cb20fad3a617f85fc84d274a6dff2fb5388 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Wed, 10 Feb 2021 14:17:06 +0000
+Subject: [PATCH 04/15] Explicitly check for Location in headers.
+
+Co-authored-by: Sviatoslav Sydorenko <sviat@redhat.com>
+---
+ tests/test_web_middleware.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 7210d4472d8..1fce5193dcf 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -370,6 +370,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+         resp = await client.get("//google.com", allow_redirects=False)
+         assert resp.status == 404
++        assert 'Location' not in resp.headers
+         assert resp.url.query == URL("//google.com").query
+ 
+ 
+
+From 10872a09c6f809c125321257522ccbcb38016c4c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Thu, 18 Feb 2021 01:17:37 +0000
+Subject: [PATCH 05/15] Update tests/test_web_middleware.py
+
+Co-authored-by: Sviatoslav Sydorenko <sviat@redhat.com>
+---
+ tests/test_web_middleware.py | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 1fce5193dcf..acb490ffa89 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -363,7 +363,11 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+ 
+     async def test_open_redirects(self, aiohttp_client: Any) -> None:
+         async def handle(request: web.Request) -> web.StreamResponse:
+-            return web.Response(text="hello")
++            pytest.fail(
++                msg="Security advisory 'GHSA-v6wp-4m6f-gcjg' test handler "
++                "matched unexpectedly",
++                pytrace=False,
++            )
+ 
+         app = web.Application(middlewares=[web.normalize_path_middleware()])
+         app.add_routes([web.get("/", handle)])
+
+From e2e8fa01eaf19629d7f00e50a98864067adb478a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Thu, 18 Feb 2021 01:39:05 +0000
+Subject: [PATCH 06/15] Use parametrize to test append_slash and remove_slash.
+
+Strip extra trailing slashes just once.
+---
+ aiohttp/web_middlewares.py   |  5 +++--
+ tests/test_web_middleware.py | 14 ++++++++++++--
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/aiohttp/web_middlewares.py b/aiohttp/web_middlewares.py
+index 205ac89d76c..c3b21be69c8 100644
+--- a/aiohttp/web_middlewares.py
++++ b/aiohttp/web_middlewares.py
+@@ -98,9 +98,9 @@ async def impl(request: Request, handler: _Handler) -> StreamResponse:
+             if merge_slashes:
+                 paths_to_check.append(re.sub("//+", "/", path))
+             if append_slash and not request.path.endswith("/"):
+-                paths_to_check.append(re.sub("^//+", "/", path + "/"))
++                paths_to_check.append(path + "/")
+             if remove_slash and request.path.endswith("/"):
+-                paths_to_check.append(re.sub("^//+", "/", path[:-1]))
++                paths_to_check.append(path[:-1])
+             if merge_slashes and append_slash:
+                 paths_to_check.append(re.sub("//+", "/", path + "/"))
+             if merge_slashes and remove_slash and path.endswith("/"):
+@@ -108,6 +108,7 @@ async def impl(request: Request, handler: _Handler) -> StreamResponse:
+                 paths_to_check.append(merged_slashes[:-1])
+ 
+             for path in paths_to_check:
++                path = re.sub("^//+", "/", path)
+                 resolves, request = await _check_request_resolves(request, path)
+                 if resolves:
+                     raise redirect_class(request.raw_path + query)
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index acb490ffa89..257e2a6d1d7 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -361,7 +361,16 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+         with pytest.raises(AssertionError):
+             web.normalize_path_middleware(append_slash=True, remove_slash=True)
+ 
+-    async def test_open_redirects(self, aiohttp_client: Any) -> None:
++    @pytest.mark.parametrize(
++        "append_slash, remove_slash",
++        [
++            (True, False),
++            (False, True),
++        ],
++    )
++    async def test_open_redirects(
++            self, append_slash: bool, remove_slash: bool,
++            aiohttp_client: Any) -> None:
+         async def handle(request: web.Request) -> web.StreamResponse:
+             pytest.fail(
+                 msg="Security advisory 'GHSA-v6wp-4m6f-gcjg' test handler "
+@@ -369,7 +378,8 @@ async def handle(request: web.Request) -> web.StreamResponse:
+                 pytrace=False,
+             )
+ 
+-        app = web.Application(middlewares=[web.normalize_path_middleware()])
++        app = web.Application(middlewares=[web.normalize_path_middleware(
++            append_slash=append_slash, remove_slash=remove_slash)])
+         app.add_routes([web.get("/", handle)])
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+         resp = await client.get("//google.com", allow_redirects=False)
+
+From e4e4a1439713da6773a9a09747fc6cfcbc8ebe3e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Thu, 18 Feb 2021 01:45:50 +0000
+Subject: [PATCH 07/15] Add existing URL, but check for redirect Location.
+
+---
+ tests/test_web_middleware.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 257e2a6d1d7..7dad86b70ef 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -380,11 +380,11 @@ async def handle(request: web.Request) -> web.StreamResponse:
+ 
+         app = web.Application(middlewares=[web.normalize_path_middleware(
+             append_slash=append_slash, remove_slash=remove_slash)])
+-        app.add_routes([web.get("/", handle)])
++        app.add_routes([web.get("/", handle), web.get("/google.com", handle)])
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+         resp = await client.get("//google.com", allow_redirects=False)
+-        assert resp.status == 404
+-        assert 'Location' not in resp.headers
++        assert resp.status == 308
++        assert resp.headers.get('Location') == '/google.com'
+         assert resp.url.query == URL("//google.com").query
+ 
+ 
+
+From 348a67001fc7040c117a905306b3a2ff82fb3c85 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jelmer=20Vernoo=C4=B3?= <jelmer@jelmer.uk>
+Date: Sun, 21 Feb 2021 18:12:09 +0000
+Subject: [PATCH 08/15] Credit 'Beast Glatisant' for finding the original issue
+ on https://janitor.kali.org/.
+
+---
+ CHANGES/openredirects.bugfix | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/CHANGES/openredirects.bugfix b/CHANGES/openredirects.bugfix
+index c031b71ddef..7fa556c8c7f 100644
+--- a/CHANGES/openredirects.bugfix
++++ b/CHANGES/openredirects.bugfix
+@@ -2,3 +2,5 @@
+ ``aiohttp.web.normalize_path_middleware`` middleware. For
+ more details, see
+ https://github.com/aio-libs/aiohttp/security/advisories/GHSA-v6wp-4m6f-gcjg.
++
++Thanks to 'Beast Glatisant' for finding the first instance of this issue.
+
+From 522f00984058876a13bf43fda8b3b71a475a2cf1 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Sun, 21 Feb 2021 21:34:08 +0100
+Subject: [PATCH 09/15] Add a test case with append_slash and remove_slash both
+ disabled
+
+---
+ tests/test_web_middleware.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 7dad86b70ef..63ea84e01ef 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -366,6 +366,7 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+         [
+             (True, False),
+             (False, True),
++            (False, False),
+         ],
+     )
+     async def test_open_redirects(
+
+From 6d22d023da86dc8a480750a1cdd953892c005e7a Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Sun, 21 Feb 2021 21:34:32 +0100
+Subject: [PATCH 10/15] Use list for parametrize params
+
+---
+ tests/test_web_middleware.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index 63ea84e01ef..f2728d0cc39 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -362,7 +362,7 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+             web.normalize_path_middleware(append_slash=True, remove_slash=True)
+ 
+     @pytest.mark.parametrize(
+-        "append_slash, remove_slash",
++        ["append_slash", "remove_slash"],
+         [
+             (True, False),
+             (False, True),
+
+From db675b26aa7a6991e849479407f8f1bd2f709472 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <wk@sydorenko.org.ua>
+Date: Sun, 21 Feb 2021 21:35:08 +0100
+Subject: [PATCH 11/15] Autoformat tests
+
+---
+ tests/test_web_middleware.py | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index f2728d0cc39..ee45c6316c4 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -370,8 +370,8 @@ async def test_cannot_remove_and_add_slash(self) -> None:
+         ],
+     )
+     async def test_open_redirects(
+-            self, append_slash: bool, remove_slash: bool,
+-            aiohttp_client: Any) -> None:
++        self, append_slash: bool, remove_slash: bool, aiohttp_client: Any
++    ) -> None:
+         async def handle(request: web.Request) -> web.StreamResponse:
+             pytest.fail(
+                 msg="Security advisory 'GHSA-v6wp-4m6f-gcjg' test handler "
+@@ -379,13 +379,18 @@ async def handle(request: web.Request) -> web.StreamResponse:
+                 pytrace=False,
+             )
+ 
+-        app = web.Application(middlewares=[web.normalize_path_middleware(
+-            append_slash=append_slash, remove_slash=remove_slash)])
++        app = web.Application(
++            middlewares=[
++                web.normalize_path_middleware(
++                    append_slash=append_slash, remove_slash=remove_slash
++                )
++            ]
++        )
+         app.add_routes([web.get("/", handle), web.get("/google.com", handle)])
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+         resp = await client.get("//google.com", allow_redirects=False)
+         assert resp.status == 308
+-        assert resp.headers.get('Location') == '/google.com'
++        assert resp.headers.get("Location") == "/google.com"
+         assert resp.url.query == URL("//google.com").query
+ 
+ 
+
+From ca4b1a74c77e431fcaae4d3cb6b28a80e80991a5 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Sun, 21 Feb 2021 21:48:22 +0100
+Subject: [PATCH 12/15] Use unshielded getitem in the test
+
+---
+ tests/test_web_middleware.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/test_web_middleware.py b/tests/test_web_middleware.py
+index ee45c6316c4..33343b65dee 100644
+--- a/tests/test_web_middleware.py
++++ b/tests/test_web_middleware.py
+@@ -390,7 +390,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
+         client = await aiohttp_client(app, server_kwargs={"skip_url_asserts": True})
+         resp = await client.get("//google.com", allow_redirects=False)
+         assert resp.status == 308
+-        assert resp.headers.get("Location") == "/google.com"
++        assert resp.headers["Location"] == "/google.com"
+         assert resp.url.query == URL("//google.com").query
+ 
+ 
+
+From d1234c716b4a34275c53ee3c09c982d2ff0cc524 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Sun, 21 Feb 2021 21:52:29 +0100
+Subject: [PATCH 13/15] Add a security note to the fix
+
+---
+ aiohttp/web_middlewares.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/aiohttp/web_middlewares.py b/aiohttp/web_middlewares.py
+index c3b21be69c8..3b040e8499e 100644
+--- a/aiohttp/web_middlewares.py
++++ b/aiohttp/web_middlewares.py
+@@ -108,7 +108,7 @@ async def impl(request: Request, handler: _Handler) -> StreamResponse:
+                 paths_to_check.append(merged_slashes[:-1])
+ 
+             for path in paths_to_check:
+-                path = re.sub("^//+", "/", path)
++                path = re.sub("^//+", "/", path)  # SECURITY: GHSA-v6wp-4m6f-gcjg
+                 resolves, request = await _check_request_resolves(request, path)
+                 if resolves:
+                     raise redirect_class(request.raw_path + query)
+
+From 3d4c06a323babc628b11534de9d3da77a1334387 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Thu, 25 Feb 2021 02:58:45 +0100
+Subject: [PATCH 14/15] Update credits in the change fragment
+
+---
+ CHANGES/openredirects.bugfix | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CHANGES/openredirects.bugfix b/CHANGES/openredirects.bugfix
+index 7fa556c8c7f..e7dcd8d7632 100644
+--- a/CHANGES/openredirects.bugfix
++++ b/CHANGES/openredirects.bugfix
+@@ -3,4 +3,4 @@
+ more details, see
+ https://github.com/aio-libs/aiohttp/security/advisories/GHSA-v6wp-4m6f-gcjg.
+ 
+-Thanks to 'Beast Glatisant' for finding the first instance of this issue.
++Thanks to `Beast Glatisant <https://github.com/g147>`__ for finding the first instance of this issue and `Jelmer Vernooĳ <https://jelmer.uk/>`__ for reporting and tracking it down in aiohttp.
+
+From d2f9a839bf50cbafafe953acf1f9d8c399261486 Mon Sep 17 00:00:00 2001
+From: Sviatoslav Sydorenko <sviat@redhat.com>
+Date: Thu, 25 Feb 2021 11:56:36 +0100
+Subject: [PATCH 15/15] Point the change note to the issue #5497
+
+---
+ CHANGES/{openredirects.bugfix => 5497.bugfix} | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+ rename CHANGES/{openredirects.bugfix => 5497.bugfix} (52%)
+
+diff --git a/CHANGES/openredirects.bugfix b/CHANGES/5497.bugfix
+similarity index 52%
+rename from CHANGES/openredirects.bugfix
+rename to CHANGES/5497.bugfix
+index e7dcd8d7632..aeea26e5083 100644
+--- a/CHANGES/openredirects.bugfix
++++ b/CHANGES/5497.bugfix
+@@ -3,4 +3,7 @@
+ more details, see
+ https://github.com/aio-libs/aiohttp/security/advisories/GHSA-v6wp-4m6f-gcjg.
+ 
+-Thanks to `Beast Glatisant <https://github.com/g147>`__ for finding the first instance of this issue and `Jelmer Vernooĳ <https://jelmer.uk/>`__ for reporting and tracking it down in aiohttp.
++Thanks to `Beast Glatisant <https://github.com/g147>`__ for
++finding the firstinstance of this issue and `Jelmer Vernooĳ
++<https://jelmer.uk/>`__ for reporting and tracking it down
++in aiohttp.

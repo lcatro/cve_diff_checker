@@ -1,0 +1,43 @@
+From 1d8e3102dd8fd23431ae6127d14a236da6b4a4a5 Mon Sep 17 00:00:00 2001
+From: James Lu <james@overdrivenetworks.com>
+Date: Tue, 18 Jul 2017 07:41:17 +0800
+Subject: [PATCH] Switch to msitools' msiinfo for ProductVersion fetching
+
+This replaces the insecure VBScript-based parsing, which has issues described at http://news.dieweltistgarnichtso.net/posts/gnome-thumbnailer-msi-fail.html
+---
+ usr/bin/gnome-exe-thumbnailer | 21 +++------------------
+ 1 file changed, 3 insertions(+), 18 deletions(-)
+
+diff --git a/usr/bin/gnome-exe-thumbnailer b/usr/bin/gnome-exe-thumbnailer
+index 3f382a8..a7f1edd 100755
+--- a/usr/bin/gnome-exe-thumbnailer
++++ b/usr/bin/gnome-exe-thumbnailer
+@@ -356,25 +356,10 @@ fi
+ # Get the version number:
+ if [[ ${INPUTFILE##*.} = 'msi' ]]
+ then
+-	# Look for the ProductVersion property if user has the Microsoft (R) Windows Script Host installed:
+-	if which wine && grep -v 'Wine placeholder DLL' $HOME/.wine/drive_c/windows/system32/cscript.exe
++	# Look for the ProductVersion property using msitools' msiinfo if present
++	if which msiinfo
+ 	then
+-		# Workaround wine bug #19799: cscript crashes if you call WScript.Arguments(0)
+-		# http://bugs.winehq.org/show_bug.cgi?id=19799
+-		<<< "
+-			Dim WI, DB, View, Record
+-			Set WI = CreateObject(\"WindowsInstaller.Installer\")
+-			Set DB = WI.OpenDatabase(\"$INPUTFILE\",0)
+-			Set View = DB.OpenView(\"SELECT Value FROM Property WHERE Property = 'ProductVersion'\")
+-			View.Execute
+-			Wscript.Echo View.Fetch.StringData(1)
+-		" iconv -f utf8 -t unicode > $TEMPFILE1.vbs
+-
+-		VERSION=$(
+-			DISPLAY=NONE wine cscript.exe //E:vbs //NoLogo Z:\\tmp\\${TEMPFILE1##*/}.vbs 2>/dev/null \
+-			| egrep -o '^[0-9]+\.[0-9]+(\.[0-9][0-9]?)?(beta)?'
+-		)
+-
++		VERSION=$(msiinfo export "$INPUTFILE" 'Property' | grep 'ProductVersion' | cut -f 2)
+ 	else
+ 		# Try to get the version number from extended file properties at least:
+ 		VERSION=$(

@@ -1,0 +1,337 @@
+From 6b9d1aafcb61a3663c883663eb19ccdbfcde8d33 Mon Sep 17 00:00:00 2001
+From: Eddie Kohler <ekohler@gmail.com>
+Date: Thu, 26 Feb 2015 15:34:00 -0500
+Subject: [PATCH] Security fixes.
+
+- Don't overflow the small cs_start buffer (reported by Niels
+  Thykier via the debian tracker (Jakub Wilk), found with a
+  fuzzer ("American fuzzy lop")).
+
+- Cast arguments to <ctype.h> functions to unsigned char.
+---
+ Makefile.am |  4 ++--
+ t1asm.c     | 40 +++++++++++++---------------------------
+ t1asmhelp.h | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ t1disasm.c  | 41 +----------------------------------------
+ t1lib.c     | 14 ++++++++------
+ t1mac.c     |  9 +++++----
+ 6 files changed, 77 insertions(+), 79 deletions(-)
+ create mode 100644 t1asmhelp.h
+
+diff --git a/Makefile.am b/Makefile.am
+index b294bea..bf0d339 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -9,9 +9,9 @@ t1ascii_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+ t1binary_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+ 	clp.c t1lib.h t1lib.c t1binary.c
+ t1asm_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+-	clp.c t1lib.h t1lib.c t1asm.c
++	clp.c t1lib.h t1asmhelp.h t1lib.c t1asm.c
+ t1disasm_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+-	clp.c t1lib.h t1lib.c t1disasm.c
++	clp.c t1lib.h t1asmhelp.h t1lib.c t1disasm.c
+ t1unmac_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+ 	clp.c t1lib.h t1lib.c t1unmac.c
+ t1mac_SOURCES = include/lcdf/clp.h include/lcdf/inttypes.h \
+diff --git a/t1asm.c b/t1asm.c
+index 8c068cf..0021bf0 100644
+--- a/t1asm.c
++++ b/t1asm.c
+@@ -66,6 +66,7 @@
+ #include <errno.h>
+ #include <lcdf/clp.h>
+ #include "t1lib.h"
++#include "t1asmhelp.h"
+ 
+ #define LINESIZE 512
+ 
+@@ -90,10 +91,6 @@ static int in_eexec = 0;
+ /* need to add 1 as space for \0 */
+ static char line[LINESIZE + 1];
+ 
+-/* lenIV and charstring start command */
+-static int lenIV = 4;
+-static char cs_start[10];
+-
+ /* for charstring buffering */
+ static byte *charstring_buf, *charstring_bp;
+ static int charstring_bufsiz;
+@@ -273,7 +270,7 @@ static void eexec_start(char *string)
+ static int check_line_charstring(void)
+ {
+   char *p = line;
+-  while (isspace(*p))
++  while (isspace((unsigned char) *p))
+     p++;
+   return (*p == '/' || (p[0] == 'd' && p[1] == 'u' && p[2] == 'p'));
+ }
+@@ -359,8 +356,8 @@ static int CDECL command_compare(const void *key, const void *item)
+ 
+ static int is_integer(char *string)
+ {
+-  if (isdigit(string[0]) || string[0] == '-' || string[0] == '+') {
+-    while (*++string && isdigit(*string))
++  if (isdigit((unsigned char) string[0]) || string[0] == '-' || string[0] == '+') {
++    while (*++string && isdigit((unsigned char) *string))
+       ;                                           /* deliberately empty */
+     if (!*string)
+       return 1;
+@@ -626,7 +623,7 @@ Report bugs to <ekohler@gmail.com>.\n", program_name);
+ 
+ int main(int argc, char *argv[])
+ {
+-  char *p, *q, *r;
++  char *p, *q;
+ 
+   Clp_Parser *clp =
+     Clp_NewParser(argc, (const char * const *)argv, sizeof(options) / sizeof(options[0]), options);
+@@ -740,36 +737,25 @@ particular purpose.\n");
+     t1utils_getline();
+ 
+     if (!ever_active) {
+-      if (strncmp(line, "currentfile eexec", 17) == 0 && isspace(line[17])) {
++      if (strncmp(line, "currentfile eexec", 17) == 0 && isspace((unsigned char) line[17])) {
+ 	/* Allow arbitrary whitespace after "currentfile eexec".
+ 	   Thanks to Tom Kacvinsky <tjk@ams.org> for reporting this.
+ 	   Note: strlen("currentfile eexec") == 17. */
+-	for (p = line + 18; isspace(*p); p++)
++	for (p = line + 18; isspace((unsigned char) *p); p++)
+ 	  ;
+ 	eexec_start(p);
+ 	continue;
+       } else if (strncmp(line, "/lenIV", 6) == 0) {
+-	lenIV = atoi(line + 6);
+-      } else if ((p = strstr(line, "string currentfile"))
+-		 && strstr(line, "readstring")) { /* enforce `readstring' */
+-	/* locate the name of the charstring start command */
+-	*p = '\0';                                  /* damage line[] */
+-	q = strrchr(line, '/');
+-	if (q) {
+-	  r = cs_start;
+-	  ++q;
+-	  while (!isspace(*q) && *q != '{')
+-	    *r++ = *q++;
+-	  *r = '\0';
+-	}
+-	*p = 's';                                   /* repair line[] */
++        set_lenIV(line);
++      } else if ((p = strstr(line, "string currentfile"))) {
++        set_cs_start(line);
+       }
+     }
+ 
+     if (!active) {
+-      if ((p = strstr(line, "/Subrs")) && isdigit(p[7]))
++      if ((p = strstr(line, "/Subrs")) && isdigit((unsigned char) p[7]))
+ 	ever_active = active = 1;
+-      else if ((p = strstr(line, "/CharStrings")) && isdigit(p[13]))
++      else if ((p = strstr(line, "/CharStrings")) && isdigit((unsigned char) p[13]))
+ 	ever_active = active = 1;
+     }
+     if ((p = strstr(line, "currentfile closefile"))) {
+@@ -778,7 +764,7 @@ particular purpose.\n");
+       /* 1/3/2002 -- happy new year! -- Luc Devroye reports a failure with
+          some printers when `currentfile closefile' is followed by space */
+       p += sizeof("currentfile closefile") - 1;
+-      for (q = p; isspace(*q) && *q != '\n'; q++)
++      for (q = p; isspace((unsigned char) *q) && *q != '\n'; q++)
+ 	/* nada */;
+       if (q == p && !*q)
+ 	error("warning: `currentfile closefile' line too long");
+diff --git a/t1asmhelp.h b/t1asmhelp.h
+new file mode 100644
+index 0000000..c974fc7
+--- /dev/null
++++ b/t1asmhelp.h
+@@ -0,0 +1,48 @@
++#ifndef T1ASMHELP_H
++#define T1ASMHELP_H
++
++static int lenIV = 4;
++
++/* If the line contains an entry of the form `/lenIV <num>' then set the global
++   lenIV to <num>.  This indicates the number of random bytes at the beginning
++   of each charstring. */
++
++static void
++set_lenIV(const char* line)
++{
++  char *p = strstr(line, "/lenIV ");
++
++  /* Allow lenIV to be negative. Thanks to Tom Kacvinsky <tjk@ams.org> */
++  if (p && (isdigit((unsigned char) p[7]) || p[7] == '+' || p[7] == '-')) {
++    lenIV = atoi(p + 7);
++  }
++}
++
++
++static const char* cs_start = "";
++
++static void
++set_cs_start(const char* line)
++{
++    static int cs_start_set = 0;
++    char *p, *q, *r;
++
++    if ((p = strstr(line, "string currentfile"))
++        && strstr(line, "readstring")) {
++        /* locate the name of the charstring start command */
++        for (q = p; q != line && q[-1] != '/'; --q)
++            /* nada */;
++        if (q != line) {
++            for (r = q; r != p && !isspace((unsigned char) *r) && *r != '{'; ++r)
++                /* nada */;
++            if (cs_start_set)
++                free((char*) cs_start);
++            cs_start = p = malloc(r - q + 1);
++            memcpy(p, q, r - q);
++            p[r - q] = 0;
++            cs_start_set = 1;
++        }
++    }
++}
++
++#endif
+diff --git a/t1disasm.c b/t1disasm.c
+index 86e6c6f..524f042 100644
+--- a/t1disasm.c
++++ b/t1disasm.c
+@@ -70,6 +70,7 @@
+ #include <assert.h>
+ #include <lcdf/clp.h>
+ #include "t1lib.h"
++#include "t1asmhelp.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -78,8 +79,6 @@ extern "C" {
+ typedef unsigned char byte;
+ 
+ static FILE *ofp;
+-static int lenIV = 4;
+-static char cs_start[10];
+ static int unknown = 0;
+ 
+ /* decryption stuff */
+@@ -90,44 +89,6 @@ static uint16_t er_default = 55665;
+ static int error_count = 0;
+ 
+ 
+-/* If the line contains an entry of the form `/lenIV <num>' then set the global
+-   lenIV to <num>.  This indicates the number of random bytes at the beginning
+-   of each charstring. */
+-
+-static void
+-set_lenIV(char *line)
+-{
+-  char *p = strstr(line, "/lenIV ");
+-
+-  /* Allow lenIV to be negative. Thanks to Tom Kacvinsky <tjk@ams.org> */
+-  if (p && (isdigit(p[7]) || p[7] == '+' || p[7] == '-')) {
+-    lenIV = atoi(p + 7);
+-  }
+-}
+-
+-static void
+-set_cs_start(char *line)
+-{
+-  char *p, *q, *r;
+-
+-  if ((p = strstr(line, "string currentfile"))) {
+-    /* enforce presence of `readstring' -- 5/29/99 */
+-    if (!strstr(line, "readstring"))
+-      return;
+-    /* locate the name of the charstring start command */
+-    *p = '\0';					  /* damage line[] */
+-    q = strrchr(line, '/');
+-    if (q) {
+-      r = cs_start;
+-      ++q;
+-      while (!isspace(*q) && *q != '{')
+-	*r++ = *q++;
+-      *r = '\0';
+-    }
+-    *p = 's';					  /* repair line[] */
+-  }
+-}
+-
+ /* Subroutine to output strings. */
+ 
+ static void
+diff --git a/t1lib.c b/t1lib.c
+index f34fa0a..28df311 100644
+--- a/t1lib.c
++++ b/t1lib.c
+@@ -59,7 +59,7 @@ translate_hex_string(char *s, char *saved_orphan)
+   char *start = s;
+   char *t = s;
+   for (; *s; s++) {
+-    if (isspace(*s))
++    if (isspace((unsigned char) *s))
+       continue;
+     if (c1) {
+       *t++ = (hexval(c1) << 4) + hexval(*s);
+@@ -136,10 +136,10 @@ process_pfa(FILE *ifp, const char *ifp_filename, struct font_reader *fr)
+ 
+ 	/* now that we have the line, handle it */
+ 	if (blocktyp == PFA_ASCII) {
+-	    if (strncmp(line, "currentfile eexec", 17) == 0 && isspace(line[17])) {
++	    if (strncmp(line, "currentfile eexec", 17) == 0 && isspace((unsigned char) line[17])) {
+ 		char saved_p;
+ 		/* assert(line == buffer); */
+-		for (line += 18; isspace(*line); line++)
++		for (line += 18; isspace((unsigned char) *line); line++)
+ 		    /* nada */;
+ 		saved_p = *line;
+ 		*line = 0;
+@@ -158,12 +158,14 @@ process_pfa(FILE *ifp, const char *ifp_filename, struct font_reader *fr)
+ 	if (blocktyp == PFA_EEXEC_TEST) {
+ 	    /* 8.Feb.2004: fix bug if first character in a binary eexec block
+ 	       is 0, reported by Werner Lemberg */
+-	    for (; line < last && isspace(*line); line++)
++	    for (; line < last && isspace((unsigned char) *line); line++)
+ 		/* nada */;
+ 	    if (line == last)
+ 		continue;
+-	    else if (last >= line + 4 && isxdigit(line[0]) && isxdigit(line[1])
+-		     && isxdigit(line[2]) && isxdigit(line[3]))
++	    else if (last >= line + 4 && isxdigit((unsigned char) line[0])
++                     && isxdigit((unsigned char) line[1])
++		     && isxdigit((unsigned char) line[2])
++                     && isxdigit((unsigned char) line[3]))
+ 		blocktyp = PFA_HEX;
+ 	    else
+ 		blocktyp = PFA_BINARY;
+diff --git a/t1mac.c b/t1mac.c
+index 61e2ef4..617ad01 100644
+--- a/t1mac.c
++++ b/t1mac.c
+@@ -370,10 +370,11 @@ t1mac_output_ascii(char *s, int len)
+     s[len-1] = '\r';
+   t1mac_output_data((byte *)s, len);
+   if (strncmp(s, "/FontName", 9) == 0) {
+-    for (s += 9; isspace(*s); s++) ;
++    for (s += 9; isspace((unsigned char) *s); s++)
++        /* skip */;
+     if (*s == '/') {
+       const char *t = ++s;
+-      while (*t && !isspace(*t)) t++;
++      while (*t && !isspace((unsigned char) *t)) t++;
+       free(font_name);
+       font_name = (char *)malloc(t - s + 1);
+       memcpy(font_name, s, t - s);
+@@ -994,11 +995,11 @@ particular purpose.\n");
+     int part = 0, len = 0;
+     char *x, *s;
+     for (x = s = font_name; *s; s++)
+-      if (isupper(*s) || isdigit(*s)) {
++      if (isupper((unsigned char) *s) || isdigit((unsigned char) *s)) {
+ 	*x++ = *s;
+ 	part++;
+ 	len = 1;
+-      } else if (islower(*s)) {
++      } else if (islower((unsigned char) *s)) {
+ 	if (len < (part <= 1 ? 5 : 3))
+ 	  *x++ = *s;
+ 	len++;

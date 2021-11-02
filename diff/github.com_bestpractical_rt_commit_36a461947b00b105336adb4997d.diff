@@ -1,0 +1,63 @@
+From 36a461947b00b105336adb4997d1c7767d8484c4 Mon Sep 17 00:00:00 2001
+From: Shawn M Moore <shawn@bestpractical.com>
+Date: Mon, 27 Jul 2015 23:20:10 +0000
+Subject: [PATCH] Escape message crypt status as we insert it into the DOM
+
+The ->{'Value'} part of each message is inserted into the DOM with no
+escaping (to accommodate MakeClicky and callbacks using HTML). Values RT
+receives from other systems must be escaped or they leave us vulnerable to
+an XSS injection attack.
+
+This also happens to fix a bug where email addresses of senders would in
+some cases not be shown in the browser.
+---
+ share/html/Elements/CryptStatus | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/share/html/Elements/CryptStatus b/share/html/Elements/CryptStatus
+index b022b10299d..f2411a5e86a 100644
+--- a/share/html/Elements/CryptStatus
++++ b/share/html/Elements/CryptStatus
+@@ -147,7 +147,7 @@ foreach my $run ( @runs ) {
+                 push @messages, {
+                     Tag     => $protocol,
+                     Classes => [qw/keycheck bad/],
+-                    Value   => loc( "Public key '0x[_1]' is required to verify signature", $line->{'Key'} ),
++                    Value   => $m->interp->apply_escapes( loc( "Public key '0x[_1]' is required to verify signature", $line->{'Key'} ), 'h'),
+                 };
+             }
+         }
+@@ -156,21 +156,21 @@ foreach my $run ( @runs ) {
+             push @messages, {
+                 Tag     => $protocol,
+                 Classes => ['passphrasecheck', lc $line->{Status}],
+-                Value   => loc( $line->{'Message'} ),
++                Value   => $m->interp->apply_escapes( loc( $line->{'Message'} ), 'h'),
+             };
+         }
+         elsif ( $line->{'Operation'} eq 'Decrypt' ) {
+             push @messages, {
+                 Tag     => $protocol,
+                 Classes => ['decrypt', lc $line->{Status}],
+-                Value   => loc( $line->{'Message'} ),
++                Value   => $m->interp->apply_escapes( loc( $line->{'Message'} ), 'h'),
+             };
+         }
+         elsif ( $line->{'Operation'} eq 'Verify' ) {
+             push @messages, {
+                 Tag     => $protocol,
+                 Classes => ['verify', lc $line->{Status}, 'trust-'.($line->{Trust} || 'UNKNOWN')],
+-                Value   => loc( $line->{'Message'} ),
++                Value   => $m->interp->apply_escapes( loc( $line->{'Message'} ), 'h'),
+             };
+         }
+         else {
+@@ -178,7 +178,7 @@ foreach my $run ( @runs ) {
+             push @messages, {
+                 Tag     => $protocol,
+                 Classes => [lc $line->{Operation}, lc $line->{Status}],
+-                Value   => loc( $line->{'Message'} ),
++                Value   => $m->interp->apply_escapes( loc( $line->{'Message'} ), 'h'),
+             }
+         }
+     }

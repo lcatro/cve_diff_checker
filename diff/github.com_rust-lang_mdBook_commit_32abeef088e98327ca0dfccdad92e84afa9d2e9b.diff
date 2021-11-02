@@ -1,0 +1,27 @@
+From 32abeef088e98327ca0dfccdad92e84afa9d2e9b Mon Sep 17 00:00:00 2001
+From: Pietro Albini <pietro@pietroalbini.org>
+Date: Wed, 30 Dec 2020 22:13:15 +0100
+Subject: [PATCH] fix xss in the search page
+
+Thanks to Kamil Vavra for responsibly disclosing the vulnerability
+according to Rust's Security Policy.
+---
+ src/theme/searcher/searcher.js | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/theme/searcher/searcher.js b/src/theme/searcher/searcher.js
+index e1cc806b8e..acf3d50cbc 100644
+--- a/src/theme/searcher/searcher.js
++++ b/src/theme/searcher/searcher.js
+@@ -145,6 +145,11 @@ window.search = window.search || {};
+             url.push("");
+         }
+ 
++        // encodeURIComponent escapes all chars that could allow an XSS except
++        // for '. Due to that we also manually replace ' with its url-encoded
++        // representation (%27).
++        var searchterms = encodeURIComponent(searchterms.join(" ")).replace(/\'/g, "%27");
++
+         return '<a href="' + path_to_root + url[0] + '?' + URL_MARK_PARAM + '=' + searchterms + '#' + url[1]
+             + '" aria-details="teaser_' + teaser_count + '">' + result.doc.breadcrumbs + '</a>'
+             + '<span class="teaser" id="teaser_' + teaser_count + '" aria-label="Search Result Teaser">' 

@@ -1,0 +1,145 @@
+From dccb5f7d776e93863ae10bbff56a45c523c6eeb0 Mon Sep 17 00:00:00 2001
+From: Michal Srb <michalsrb@gmail.com>
+Date: Mon, 27 Mar 2017 13:55:46 +0300
+Subject: [PATCH] Prevent leak of SecurityServer and ClientServer.
+
+They are created in SConnection's and CConnection's constructors but never destroyed.
+
+There is no reason for the indirection, so lets make them direct members.
+---
+ common/rfb/CConnection.cxx |  5 ++---
+ common/rfb/CConnection.h   |  4 ++--
+ common/rfb/SConnection.cxx | 12 +++++-------
+ common/rfb/SConnection.h   |  2 +-
+ 4 files changed, 10 insertions(+), 13 deletions(-)
+
+diff --git a/common/rfb/CConnection.cxx b/common/rfb/CConnection.cxx
+index 202041816..88befd5ec 100644
+--- a/common/rfb/CConnection.cxx
++++ b/common/rfb/CConnection.cxx
+@@ -44,7 +44,6 @@ CConnection::CConnection()
+     state_(RFBSTATE_UNINITIALISED), useProtocol3_3(false),
+     framebuffer(NULL), decoder(this)
+ {
+-  security = new SecurityClient();
+ }
+ 
+ CConnection::~CConnection()
+@@ -167,7 +166,7 @@ void CConnection::processSecurityTypesMsg()
+   int secType = secTypeInvalid;
+ 
+   std::list<rdr::U8> secTypes;
+-  secTypes = security->GetEnabledSecTypes();
++  secTypes = security.GetEnabledSecTypes();
+ 
+   if (cp.isVersion(3,3)) {
+ 
+@@ -235,7 +234,7 @@ void CConnection::processSecurityTypesMsg()
+   }
+ 
+   state_ = RFBSTATE_SECURITY;
+-  csecurity = security->GetCSecurity(secType);
++  csecurity = security.GetCSecurity(secType);
+   processSecurityMsg();
+ }
+ 
+diff --git a/common/rfb/CConnection.h b/common/rfb/CConnection.h
+index 799a9c21c..e0a000ff9 100644
+--- a/common/rfb/CConnection.h
++++ b/common/rfb/CConnection.h
+@@ -26,6 +26,7 @@
+ 
+ #include <rfb/CMsgHandler.h>
+ #include <rfb/DecodeManager.h>
++#include <rfb/SecurityClient.h>
+ #include <rfb/util.h>
+ 
+ namespace rfb {
+@@ -34,7 +35,6 @@ namespace rfb {
+   class CMsgWriter;
+   class CSecurity;
+   class IdentityVerifier;
+-  class SecurityClient;
+ 
+   class CConnection : public CMsgHandler {
+   public:
+@@ -148,7 +148,7 @@ namespace rfb {
+     stateEnum state() { return state_; }
+ 
+     CSecurity *csecurity;
+-    SecurityClient *security;
++    SecurityClient security;
+   protected:
+     void setState(stateEnum s) { state_ = s; }
+ 
+diff --git a/common/rfb/SConnection.cxx b/common/rfb/SConnection.cxx
+index 17ef4d908..85cc6e824 100644
+--- a/common/rfb/SConnection.cxx
++++ b/common/rfb/SConnection.cxx
+@@ -51,7 +51,7 @@ const SConnection::AccessRights SConnection::AccessFull           = 0xffff;
+ SConnection::SConnection()
+   : readyForSetColourMapEntries(false),
+     is(0), os(0), reader_(0), writer_(0),
+-    security(0), ssecurity(0), state_(RFBSTATE_UNINITIALISED),
++    ssecurity(0), state_(RFBSTATE_UNINITIALISED),
+     preferredEncoding(encodingRaw)
+ {
+   defaultMajorVersion = 3;
+@@ -60,8 +60,6 @@ SConnection::SConnection()
+     defaultMinorVersion = 3;
+ 
+   cp.setVersion(defaultMajorVersion, defaultMinorVersion);
+-
+-  security = new SecurityServer();
+ }
+ 
+ SConnection::~SConnection()
+@@ -142,7 +140,7 @@ void SConnection::processVersionMsg()
+ 
+   std::list<rdr::U8> secTypes;
+   std::list<rdr::U8>::iterator i;
+-  secTypes = security->GetEnabledSecTypes();
++  secTypes = security.GetEnabledSecTypes();
+ 
+   if (cp.isVersion(3,3)) {
+ 
+@@ -161,7 +159,7 @@ void SConnection::processVersionMsg()
+     os->writeU32(*i);
+     if (*i == secTypeNone) os->flush();
+     state_ = RFBSTATE_SECURITY;
+-    ssecurity = security->GetSSecurity(*i);
++    ssecurity = security.GetSSecurity(*i);
+     processSecurityMsg();
+     return;
+   }
+@@ -193,7 +191,7 @@ void SConnection::processSecurityType(int secType)
+   std::list<rdr::U8> secTypes;
+   std::list<rdr::U8>::iterator i;
+ 
+-  secTypes = security->GetEnabledSecTypes();
++  secTypes = security.GetEnabledSecTypes();
+   for (i=secTypes.begin(); i!=secTypes.end(); i++)
+     if (*i == secType) break;
+   if (i == secTypes.end())
+@@ -204,7 +202,7 @@ void SConnection::processSecurityType(int secType)
+ 
+   try {
+     state_ = RFBSTATE_SECURITY;
+-    ssecurity = security->GetSSecurity(secType);
++    ssecurity = security.GetSSecurity(secType);
+   } catch (rdr::Exception& e) {
+     throwConnFailedException(e.str());
+   }
+diff --git a/common/rfb/SConnection.h b/common/rfb/SConnection.h
+index b43cf0866..63dc31469 100644
+--- a/common/rfb/SConnection.h
++++ b/common/rfb/SConnection.h
+@@ -196,7 +196,7 @@ namespace rfb {
+     rdr::OutStream* os;
+     SMsgReader* reader_;
+     SMsgWriter* writer_;
+-    SecurityServer *security;
++    SecurityServer security;
+     SSecurity* ssecurity;
+     stateEnum state_;
+     rdr::S32 preferredEncoding;

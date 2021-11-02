@@ -1,0 +1,40 @@
+From 34affe7a63fc5d842580a9f23616d057e17dfe27 Mon Sep 17 00:00:00 2001
+From: Roberto Ierusalimschy <roberto@inf.puc-rio.br>
+Date: Fri, 17 Jul 2020 14:54:26 -0300
+Subject: [PATCH] Fixed bug: 'luaD_callnoyield' called twice in a row
+
+In luaD_callnoyield, when there is a possible stack overflow, it
+zeros the number of CallInfos to force a check when calling the
+function. However, if the "function" is not a function, the code will
+raise an error before checking the stack. Then, the error handling calls
+luaD_callnoyield again and nCcalls is decremented again, crossing the
+stack redzone without raising an error. (This loop can only happens
+once, because the error handler must be a function.  But once is enough
+to cross the redzone.)
+---
+ ldo.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/ldo.c b/ldo.c
+index 98dd9fbbf..5473815a1 100644
+--- a/ldo.c
++++ b/ldo.c
+@@ -515,14 +515,13 @@ void luaD_call (lua_State *L, StkId func, int nresults) {
+ 
+ /*
+ ** Similar to 'luaD_call', but does not allow yields during the call.
+-** If there is a stack overflow, freeing all CI structures will
+-** force the subsequent call to invoke 'luaE_extendCI', which then
+-** will raise any errors.
+ */
+ void luaD_callnoyield (lua_State *L, StkId func, int nResults) {
+   incXCcalls(L);
+-  if (getCcalls(L) <= CSTACKERR)  /* possible stack overflow? */
+-    luaE_freeCI(L);
++  if (getCcalls(L) <= CSTACKERR) {  /* possible C stack overflow? */
++    luaE_exitCcall(L);  /* to compensate decrement in next call */
++    luaE_enterCcall(L);  /* check properly */
++  }
+   luaD_call(L, func, nResults);
+   decXCcalls(L);
+ }

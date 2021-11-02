@@ -1,0 +1,36 @@
+From 9e62869465573cb2d9b5053f1fa02a81fce21d69 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 16:29:20 -0700
+Subject: [PATCH] Add more validation to `RequantizationRangePerChannel`.
+
+PiperOrigin-RevId: 387693946
+Change-Id: Ife8dcbdb021bec4787eef6a4361dd08f17c14bd6
+---
+ .../mkl/mkl_requantization_range_per_channel_op.cc | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/tensorflow/core/kernels/mkl/mkl_requantization_range_per_channel_op.cc b/tensorflow/core/kernels/mkl/mkl_requantization_range_per_channel_op.cc
+index 24dabb07ca067..a38df2450d194 100644
+--- a/tensorflow/core/kernels/mkl/mkl_requantization_range_per_channel_op.cc
++++ b/tensorflow/core/kernels/mkl/mkl_requantization_range_per_channel_op.cc
+@@ -57,6 +57,20 @@ class MklRequantizationRangePerChannelOp : public OpKernel {
+         ctx, input_max.dim_size(0) == depth,
+         errors::InvalidArgument("input_max has incorrect size, expected ",
+                                 depth, " was ", input_max.dim_size(0)));
++    OP_REQUIRES(
++        ctx, input_min.NumElements() == depth,
++        errors::InvalidArgument("input_min must have the same number of "
++                                "elements as input_max, got ",
++                                input_min.NumElements(), " and ", depth));
++    OP_REQUIRES(ctx, input.NumElements() > 0,
++                errors::InvalidArgument("input must not be empty"));
++    OP_REQUIRES(ctx, input.dims() == 4,
++                errors::InvalidArgument("input must be in NHWC format"));
++    OP_REQUIRES(
++        ctx, input.dim_size(3) == depth,
++        errors::InvalidArgument(
++            "input must have same number of channels as length of input_min: ",
++            input.dim_size(3), " vs ", depth));
+ 
+     const float* input_min_data = input_min.flat<float>().data();
+     const float* input_max_data = input_max.flat<float>().data();

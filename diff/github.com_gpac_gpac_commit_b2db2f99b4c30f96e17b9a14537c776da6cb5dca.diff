@@ -1,0 +1,37 @@
+From b2db2f99b4c30f96e17b9a14537c776da6cb5dca Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@gpac.io>
+Date: Thu, 8 Apr 2021 09:29:42 +0200
+Subject: [PATCH] fixed #1728
+
+---
+ src/filters/reframe_latm.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/filters/reframe_latm.c b/src/filters/reframe_latm.c
+index f65609bfc..bb40d55d8 100644
+--- a/src/filters/reframe_latm.c
++++ b/src/filters/reframe_latm.c
+@@ -448,8 +448,8 @@ GF_Err latm_dmx_process(GF_Filter *filter)
+ 	GF_LATMDmxCtx *ctx = gf_filter_get_udta(filter);
+ 	GF_FilterPacket *pck, *dst_pck;
+ 	u32 pos;
+-	u8 *data, *output;
+-	u32 pck_size, prev_pck_size;
++	u8 *data=NULL, *output;
++	u32 pck_size=0, prev_pck_size;
+ 	u64 cts = GF_FILTER_NO_TS;
+ 
+ 	if (ctx->in_error)
+@@ -475,10 +475,10 @@ GF_Err latm_dmx_process(GF_Filter *filter)
+ 		} else {
+ 			return GF_OK;
+ 		}
++	} else {
++		data = (char *) gf_filter_pck_get_data(pck, &pck_size);
+ 	}
+ 
+-	data = (char *) gf_filter_pck_get_data(pck, &pck_size);
+-
+ 	//input pid sets some timescale - we flushed pending data , update cts
+ 	if (ctx->timescale && pck) {
+ 		cts = gf_filter_pck_get_cts(pck);

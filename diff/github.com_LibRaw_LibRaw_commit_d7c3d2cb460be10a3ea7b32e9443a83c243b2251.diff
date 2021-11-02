@@ -1,0 +1,84 @@
+From d7c3d2cb460be10a3ea7b32e9443a83c243b2251 Mon Sep 17 00:00:00 2001
+From: Alex Tutubalin <lexa@lexa.ru>
+Date: Sat, 4 Mar 2017 21:27:39 +0300
+Subject: [PATCH] Secunia SA75000 advisory: several buffer overruns
+
+---
+ dcraw/dcraw.c             | 12 ++++++++++--
+ internal/dcraw_common.cpp | 12 ++++++++++--
+ 2 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/dcraw/dcraw.c b/dcraw/dcraw.c
+index b6fc378a..4c44a2a0 100644
+--- a/dcraw/dcraw.c
++++ b/dcraw/dcraw.c
+@@ -12870,6 +12870,10 @@ int CLASS parse_tiff_ifd(int base)
+         load_raw = &CLASS sony_arw_load_raw;
+         data_offset = get4() + base;
+         ifd++;
++#ifdef LIBRAW_LIBRARY_BUILD
++	if (ifd >= sizeof tiff_ifd / sizeof tiff_ifd[0])
++	  throw LIBRAW_EXCEPTION_IO_CORRUPT;
++#endif    
+         break;
+       }
+ #ifdef LIBRAW_LIBRARY_BUILD
+@@ -13177,7 +13181,7 @@ int CLASS parse_tiff_ifd(int base)
+       break;
+     case 50454: /* Sinar tag */
+     case 50455:
+-      if (len > 2560000 || !(cbuf = (char *)malloc(len)))
++      if (len < 1 || len > 2560000 || !(cbuf = (char *)malloc(len)))
+         break;
+ #ifndef LIBRAW_LIBRARY_BUILD
+       fread(cbuf, 1, len, ifp);
+@@ -14795,7 +14799,11 @@ int CLASS parse_jpeg(int offset)
+     }
+     order = get2();
+     hlen = get4();
+-    if (get4() == 0x48454150) /* "HEAP" */
++    if (get4() == 0x48454150
++#ifdef LIBRAW_LIBRARY_BUILD
++	&& (save+hlen) >= 0 && (save+hlen)<=ifp->size()
++#endif
++	) /* "HEAP" */
+     {
+ #ifdef LIBRAW_LIBRARY_BUILD
+       imgdata.lens.makernotes.CameraMount = LIBRAW_MOUNT_FixedLens;
+diff --git a/internal/dcraw_common.cpp b/internal/dcraw_common.cpp
+index 44802e04..8edf5359 100644
+--- a/internal/dcraw_common.cpp
++++ b/internal/dcraw_common.cpp
+@@ -11542,6 +11542,10 @@ int CLASS parse_tiff_ifd(int base)
+         load_raw = &CLASS sony_arw_load_raw;
+         data_offset = get4() + base;
+         ifd++;
++#ifdef LIBRAW_LIBRARY_BUILD
++	if (ifd >= sizeof tiff_ifd / sizeof tiff_ifd[0])
++	  throw LIBRAW_EXCEPTION_IO_CORRUPT;
++#endif    
+         break;
+       }
+ #ifdef LIBRAW_LIBRARY_BUILD
+@@ -11849,7 +11853,7 @@ int CLASS parse_tiff_ifd(int base)
+       break;
+     case 50454: /* Sinar tag */
+     case 50455:
+-      if (len > 2560000 || !(cbuf = (char *)malloc(len)))
++      if (len < 1 || len > 2560000 || !(cbuf = (char *)malloc(len)))
+         break;
+ #ifndef LIBRAW_LIBRARY_BUILD
+       fread(cbuf, 1, len, ifp);
+@@ -13467,7 +13471,11 @@ int CLASS parse_jpeg(int offset)
+     }
+     order = get2();
+     hlen = get4();
+-    if (get4() == 0x48454150) /* "HEAP" */
++    if (get4() == 0x48454150
++#ifdef LIBRAW_LIBRARY_BUILD
++	&& (save+hlen) >= 0 && (save+hlen)<=ifp->size()
++#endif
++	) /* "HEAP" */
+     {
+ #ifdef LIBRAW_LIBRARY_BUILD
+       imgdata.lens.makernotes.CameraMount = LIBRAW_MOUNT_FixedLens;

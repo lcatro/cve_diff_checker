@@ -1,0 +1,108 @@
+From 8c00f3c220655961dc3f869f37005794ab3e3500 Mon Sep 17 00:00:00 2001
+From: mcdruid <drew@mcdruid.co.uk>
+Date: Mon, 6 Sep 2021 11:39:57 +0100
+Subject: [PATCH] Add tests for symlink security fixes (CVE-2021-32610)
+
+---
+ tests/evil_symlink_win.phpt     |  24 ++++++++++++++++++++++++
+ tests/evil_symlink_win.tar      | Bin 0 -> 1536 bytes
+ tests/out_of_path_relative.phpt |  30 ++++++++++++++++++++++++++++++
+ tests/out_of_path_relative.tar  | Bin 0 -> 10240 bytes
+ 4 files changed, 54 insertions(+)
+ create mode 100644 tests/evil_symlink_win.phpt
+ create mode 100644 tests/evil_symlink_win.tar
+ create mode 100644 tests/out_of_path_relative.phpt
+ create mode 100644 tests/out_of_path_relative.tar
+
+diff --git a/tests/evil_symlink_win.phpt b/tests/evil_symlink_win.phpt
+new file mode 100644
+index 0000000..e255692
+--- /dev/null
++++ b/tests/evil_symlink_win.phpt
+@@ -0,0 +1,24 @@
++--TEST--
++tests extraction of out-of-path symlink with a windows path
++--SKIPIF--
++--FILE--
++<?php
++require_once dirname(__FILE__) . '/setup.php.inc';
++$extract_target = dirname(__FILE__) . '/evil_symlink_win';
++mkdir($extract_target, 0777, TRUE);
++$tar = new Archive_Tar(dirname(__FILE__) . '/evil_symlink_win.tar');
++$tar->extract($extract_target);
++// On Windows dirname() will have used backslashes but the error messages do not.
++$extract_target = str_replace('\\', '/', $extract_target);
++$phpunit->assertErrors(array(array('package' => 'PEAR_Error', 'message' => 'Out-of-path file extraction {' . $extract_target . '/evil.txt --> C:\windows\system.ini}')), 'after 1');
++// N.B. file_exists() typically will not detect a broken symbolic link
++$phpunit->assertFalse(is_link($extract_target . '/evil.txt'), 'Out-of-path symlink should not have succeeded');
++echo 'tests done';
++?>
++--CLEAN--
++<?php
++unlink(dirname(__FILE__) . '/evil_symlink_win/evil.txt');
++rmdir(dirname(__FILE__) . '/evil_symlink_win');
++?>
++--EXPECT--
++tests done
+diff --git a/tests/evil_symlink_win.tar b/tests/evil_symlink_win.tar
+new file mode 100644
+index 0000000000000000000000000000000000000000..6fc6fe5cbf64cf077407ae96651b1cc293e380b1
+GIT binary patch
+literal 1536
+zcmYc-%goU$sVHHfAus>}b8~YBAZ2K7YJg0Gq(Fed(8R#R%*f2x#LR@jz|hRp)Q~~J
+z$k{5UJTosPzq~l6xU#q;HCHb)FO$j+EiEodEK*Ql$W2ZuD$Pv6X*wZ!oEk?ZMnhmU
+L1V%$(aE1T?8IT>k
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/out_of_path_relative.phpt b/tests/out_of_path_relative.phpt
+new file mode 100644
+index 0000000..8cb37d3
+--- /dev/null
++++ b/tests/out_of_path_relative.phpt
+@@ -0,0 +1,30 @@
++--TEST--
++tests extraction of out-of-path symlink
++--SKIPIF--
++--FILE--
++<?php
++require_once dirname(__FILE__) . '/setup.php.inc';
++$extract_target = dirname(__FILE__) . '/one/two/three/four';
++mkdir($extract_target, 0777, TRUE);
++file_put_contents(dirname(__FILE__) . '/one/two/secret.txt', 'password1');
++$tar = new Archive_Tar(dirname(__FILE__) . '/out_of_path_relative.tar');
++$tar->extract($extract_target);
++// On Windows dirname() will have used backslashes but the error messages do not.
++$extract_target = str_replace('\\', '/', $extract_target);
++$phpunit->assertErrors(array(array('package' => 'PEAR_Error', 'message' => 'Out-of-path file extraction {' . $extract_target . '/five/six/evil.txt --> ../../../../secret.txt}')), 'after 1');
++$phpunit->assertFileNotExists($extract_target . '/five/six/evil.txt', 'Out-of-path symlink should not have succeeded');
++echo 'tests done';
++?>
++--CLEAN--
++<?php
++unlink(dirname(__FILE__) . '/one/two/secret.txt');
++unlink(dirname(__FILE__) . '/one/two/three/four/five/six/evil.txt');
++rmdir(dirname(__FILE__) . '/one/two/three/four/five/six');
++rmdir(dirname(__FILE__) . '/one/two/three/four/five');
++rmdir(dirname(__FILE__) . '/one/two/three/four');
++rmdir(dirname(__FILE__) . '/one/two/three');
++rmdir(dirname(__FILE__) . '/one/two');
++rmdir(dirname(__FILE__) . '/one');
++?>
++--EXPECT--
++tests done
+diff --git a/tests/out_of_path_relative.tar b/tests/out_of_path_relative.tar
+new file mode 100644
+index 0000000000000000000000000000000000000000..d1beddb56a2718856c359444674d82112ef62059
+GIT binary patch
+literal 10240
+zcmeIx-wJ~u7>8jm#VaUvn%6VRK-f;oqRU@y5Ic!=Fk`UyL-63kKRiF};~Z*Hw$xhQ
+zJF!mMJM}*2RxY8fvKOUXW4%yXH_i&_%3kZW`!uHOAf>ps-7v*&_sCEE-G#s1=yU#K
+zTuQ!y9Pr`%ea_$5#*qIRFK5d?%<)#GB^5aImH(RSk^le9-y7$JG*wk^V+`#O()Vxp
+z=l{Pz+-!*e0tg_000IagfB*srAb<b@2q1s}0tg_000IagfB*srAb<b@2q18xzymE}
+BNQ3|Y
+
+literal 0
+HcmV?d00001
+

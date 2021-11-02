@@ -1,0 +1,37 @@
+From ff254722a2683867fcb3e67569ffd36226c4bc62 Mon Sep 17 00:00:00 2001
+From: oy <Tom_Adams@web.de>
+Date: Fri, 4 Nov 2016 18:43:31 +0100
+Subject: [PATCH] added some checks to snap handling
+
+---
+ src/engine/client/client.cpp | 2 +-
+ src/engine/shared/snapshot.h | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/engine/client/client.cpp b/src/engine/client/client.cpp
+index c5e1475941..fe4b27b783 100644
+--- a/src/engine/client/client.cpp
++++ b/src/engine/client/client.cpp
+@@ -1239,7 +1239,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket)
+ 
+ 			pData = (const char *)Unpacker.GetRaw(PartSize);
+ 
+-			if(Unpacker.Error())
++			if(Unpacker.Error() || NumParts < 1 || NumParts > CSnapshot::MAX_PARTS || Part < 0 | Part >= NumParts || PartSize < 0 || PartSize > MAX_SNAPSHOT_PACKSIZE)
+ 				return;
+ 
+ 			if(GameTick >= m_CurrentRecvTick)
+diff --git a/src/engine/shared/snapshot.h b/src/engine/shared/snapshot.h
+index 07d1be6098..7438e2fa2b 100644
+--- a/src/engine/shared/snapshot.h
++++ b/src/engine/shared/snapshot.h
+@@ -31,7 +31,8 @@ class CSnapshot
+ public:
+ 	enum
+ 	{
+-		MAX_SIZE=64*1024
++		MAX_PARTS	= 64,
++		MAX_SIZE	= MAX_PARTS*1024
+ 	};
+ 
+ 	void Clear() { m_DataSize = 0; m_NumItems = 0; }

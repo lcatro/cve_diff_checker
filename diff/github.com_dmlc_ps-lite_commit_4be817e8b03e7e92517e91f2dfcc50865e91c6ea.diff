@@ -1,0 +1,23 @@
+From 4be817e8b03e7e92517e91f2dfcc50865e91c6ea Mon Sep 17 00:00:00 2001
+From: Madan Jampani <madan.jampani@gmail.com>
+Date: Tue, 21 Nov 2017 12:07:36 -0800
+Subject: [PATCH] Avoid listening on all interfaces by default
+
+---
+ src/zmq_van.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/zmq_van.h b/src/zmq_van.h
+index c54d650c..f6a14cc4 100644
+--- a/src/zmq_van.h
++++ b/src/zmq_van.h
+@@ -63,7 +63,8 @@ class ZMQVan : public Van {
+     CHECK(receiver_ != NULL)
+         << "create receiver socket failed: " << zmq_strerror(errno);
+     int local = GetEnv("DMLC_LOCAL", 0);
+-    std::string addr = local ? "ipc:///tmp/" : "tcp://*:";
++    std::string hostname = node.hostname.empty() ? "*" : node.hostname;
++    std::string addr = local ? "ipc:///tmp/" : "tcp://" + hostname + ":";
+     int port = node.port;
+     unsigned seed = static_cast<unsigned>(time(NULL)+port);
+     for (int i = 0; i < max_retry+1; ++i) {

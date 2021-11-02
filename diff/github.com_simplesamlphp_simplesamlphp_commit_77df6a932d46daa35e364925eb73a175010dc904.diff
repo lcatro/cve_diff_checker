@@ -1,0 +1,24 @@
+From 77df6a932d46daa35e364925eb73a175010dc904 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jaime=20Pe=CC=81rez=20Crespo?= <jaime.perez@uninett.no>
+Date: Thu, 30 Mar 2017 10:51:00 +0200
+Subject: [PATCH] Fix an issue with IV generation in
+ SimpleSAML\Utils\Crypto::aesEncrypt().
+
+IVs must be random and one-time (never reused). Additionally, by deriving it from the key, the key length was effectively reduced to 128 bits.
+---
+ lib/SimpleSAML/Utils/Crypto.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/SimpleSAML/Utils/Crypto.php b/lib/SimpleSAML/Utils/Crypto.php
+index d8a3356d1e..22335b3235 100644
+--- a/lib/SimpleSAML/Utils/Crypto.php
++++ b/lib/SimpleSAML/Utils/Crypto.php
+@@ -86,7 +86,7 @@ private static function _aesEncrypt($data, $secret)
+         $key    = openssl_digest($secret, 'sha256');
+         $method = 'AES-256-CBC';
+         $ivSize = 16;
+-        $iv     = substr($key, 0, $ivSize);
++        $iv     = openssl_random_pseudo_bytes($ivSize);
+ 
+         return $iv.openssl_encrypt($data, $method, $key, $raw, $iv);
+     }

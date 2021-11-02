@@ -1,0 +1,59 @@
+From 6a974059190b8a0c7e499f4ab12fe108127099cb Mon Sep 17 00:00:00 2001
+From: Eric Covener <covener@apache.org>
+Date: Thu, 5 Mar 2015 02:33:16 +0000
+Subject: [PATCH]   *) SECURITY: CVE-2015-0253 (cve.mitre.org)      core: Fix a
+ crash introduced in with ErrorDocument 400 pointing      to a local URL-path
+ with the INCLUDES filter active, introduced      in 2.4.11. PR 57531. [Yann
+ Ylavic]
+
+Submitted By: ylavic
+Committed By: covener
+
+
+
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/trunk@1664205 13f79535-47bb-0310-9956-ffa450edef68
+---
+ CHANGES           | 5 +++++
+ server/protocol.c | 4 ++--
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGES b/CHANGES
+index f817c05f838..064446d6111 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -1,6 +1,11 @@
+                                                          -*- coding: utf-8 -*-
+ Changes with Apache 2.5.0
+ 
++  *) SECURITY: CVE-2015-0253 (cve.mitre.org)
++     core: Fix a crash introduced in with ErrorDocument 400 pointing
++     to a local URL-path with the INCLUDES filter active, introduced
++     in 2.4.11. PR 57531. [Yann Ylavic]
++
+   *) core: If explicitly configured, use the KeepaliveTimeout value of the
+      virtual host which handled the latest request on the connection, or by
+      default the one of the first virtual host bound to the same IP:port.
+diff --git a/server/protocol.c b/server/protocol.c
+index 91468960520..cfa625a5199 100644
+--- a/server/protocol.c
++++ b/server/protocol.c
+@@ -606,8 +606,6 @@ static int read_request_line(request_rec *r, apr_bucket_brigade *bb)
+              */
+             if (APR_STATUS_IS_ENOSPC(rv)) {
+                 r->status    = HTTP_REQUEST_URI_TOO_LARGE;
+-                r->proto_num = HTTP_VERSION(1,0);
+-                r->protocol  = apr_pstrdup(r->pool, "HTTP/1.0");
+             }
+             else if (APR_STATUS_IS_TIMEUP(rv)) {
+                 r->status = HTTP_REQUEST_TIME_OUT;
+@@ -615,6 +613,8 @@ static int read_request_line(request_rec *r, apr_bucket_brigade *bb)
+             else if (APR_STATUS_IS_EINVAL(rv)) {
+                 r->status = HTTP_BAD_REQUEST;
+             }
++            r->proto_num = HTTP_VERSION(1,0);
++            r->protocol  = apr_pstrdup(r->pool, "HTTP/1.0");
+             return 0;
+         }
+     } while ((len <= 0) && (++num_blank_lines < max_blank_lines));

@@ -1,0 +1,58 @@
+From fb4440de9cc76e9c14bd3ddf3333e78621f40ad0 Mon Sep 17 00:00:00 2001
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 1 Mar 2021 15:25:31 -0600
+Subject: [PATCH] opt_go: Tolerate unplanned server death
+
+While debugging some experimental nbdkit code that was triggering an
+assertion failure in nbdkit, I noticed a secondary failure of nbdsh
+also dying from an assertion:
+
+libnbd: debug: nbdsh: nbd_opt_go: transition: NEWSTYLE.OPT_GO.SEND -> DEAD
+libnbd: debug: nbdsh: nbd_opt_go: option queued, ignoring state machine failure
+nbdsh: opt.c:86: nbd_unlocked_opt_go: Assertion `nbd_internal_is_state_negotiating (get_next_state (h))' failed.
+
+Although my trigger was from non-production nbdkit code, libnbd should
+never die from an assertion failure merely because a server
+disappeared at the wrong moment during an incomplete reply to
+NBD_OPT_GO or NBD_OPT_INFO.  If this is assigned a CVE, a followup
+patch will add mention of it in docs/libnbd-security.pod.
+
+Fixes: bbf1c51392 (api: Give aio_opt_go a completion callback)
+---
+ lib/opt.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/lib/opt.c b/lib/opt.c
+index 2317b72..e5802f4 100644
+--- a/lib/opt.c
++++ b/lib/opt.c
+@@ -1,5 +1,5 @@
+ /* NBD client library in userspace
+- * Copyright (C) 2020 Red Hat Inc.
++ * Copyright (C) 2020-2021 Red Hat Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -83,7 +83,8 @@ nbd_unlocked_opt_go (struct nbd_handle *h)
+ 
+   r = wait_for_option (h);
+   if (r == 0 && err) {
+-    assert (nbd_internal_is_state_negotiating (get_next_state (h)));
++    assert (nbd_internal_is_state_negotiating (get_next_state (h)) ||
++            nbd_internal_is_state_dead (get_next_state (h)));
+     set_error (err, "server replied with error to opt_go request");
+     return -1;
+   }
+@@ -105,7 +106,8 @@ nbd_unlocked_opt_info (struct nbd_handle *h)
+ 
+   r = wait_for_option (h);
+   if (r == 0 && err) {
+-    assert (nbd_internal_is_state_negotiating (get_next_state (h)));
++    assert (nbd_internal_is_state_negotiating (get_next_state (h)) ||
++            nbd_internal_is_state_dead (get_next_state (h)));
+     set_error (err, "server replied with error to opt_info request");
+     return -1;
+   }
+-- 
+GitLab
+

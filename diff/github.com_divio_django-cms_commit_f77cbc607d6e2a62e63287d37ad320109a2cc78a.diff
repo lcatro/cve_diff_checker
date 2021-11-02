@@ -1,0 +1,224 @@
+From c210a7684287c095850feb6f521c621011fde264 Mon Sep 17 00:00:00 2001
+From: Iacopo Spalletti <i.spalletti@nephila.it>
+Date: Fri, 5 Jun 2015 13:09:06 +0200
+Subject: [PATCH] Only allow POST for some actions
+
+---
+ cms/admin/pageadmin.py                        |  6 +++++
+ cms/static/cms/js/modules/cms.changelist.js   | 13 +++++++++--
+ cms/static/cms/js/modules/cms.toolbar.js      | 22 ++++++++++++++++++-
+ .../admin/cms/page/tree/menu_item.html        |  4 ++--
+ cms/tests/admin.py                            | 10 ++++++---
+ cms/tests/publisher.py                        |  6 ++---
+ cms/tests/reversion_tests.py                  |  2 +-
+ 7 files changed, 51 insertions(+), 12 deletions(-)
+
+diff --git a/cms/admin/pageadmin.py b/cms/admin/pageadmin.py
+index 7ec7827d343..f854ba9bbec 100644
+--- a/cms/admin/pageadmin.py
++++ b/cms/admin/pageadmin.py
+@@ -928,6 +928,7 @@ def change_template(self, request, object_id):
+             helpers.make_revision_with_plugins(page, request.user, message)
+         return HttpResponse(force_unicode(_("The template was successfully changed")))
+ 
++    @require_POST
+     @wrap_transaction
+     def move_page(self, request, page_id, extra_context=None):
+         """
+@@ -1013,6 +1014,7 @@ def copy_language(self, request, page_id):
+                 helpers.make_revision_with_plugins(page, request.user, message)
+             return HttpResponse("ok")
+ 
++    @require_POST
+     @wrap_transaction
+     def copy_page(self, request, page_id, extra_context=None):
+         """
+@@ -1046,6 +1048,7 @@ def copy_page(self, request, page_id, extra_context=None):
+         context.update(extra_context or {})
+         return HttpResponseRedirect('../../')
+ 
++    @require_POST
+     @wrap_transaction
+     @create_revision()
+     def publish_page(self, request, page_id, language):
+@@ -1146,6 +1149,7 @@ def cleanup_history(self, page, publish=False):
+                         revision.delete()
+                         deleted.append(revision.pk)
+ 
++    @require_POST
+     @wrap_transaction
+     def unpublish(self, request, page_id, language):
+         """
+@@ -1181,6 +1185,7 @@ def unpublish(self, request, page_id, language):
+             path = "%s?language=%s&page_id=%s" % (path, request.GET.get('redirect_language'), request.GET.get('redirect_page_id'))
+         return HttpResponseRedirect(path)
+ 
++    @require_POST
+     @wrap_transaction
+     def revert_page(self, request, page_id, language):
+         page = get_object_or_404(Page, id=page_id)
+@@ -1316,6 +1321,7 @@ def preview_page(self, request, object_id, language):
+             page.site.domain, url)
+         return HttpResponseRedirect(url)
+ 
++    @require_POST
+     def change_innavigation(self, request, page_id):
+         """
+         Switch the in_navigation of a page
+diff --git a/cms/static/cms/js/modules/cms.changelist.js b/cms/static/cms/js/modules/cms.changelist.js
+index 7b1bb4f6eee..e7d37fd86fd 100644
+--- a/cms/static/cms/js/modules/cms.changelist.js
++++ b/cms/static/cms/js/modules/cms.changelist.js
+@@ -178,8 +178,17 @@ $(document).ready(function () {
+ 				// cancel if not confirmed
+ 				if(!confirm(that.options.lang.publish.replace('§', $(this).text().toLowerCase()))) return false;
+ 
+-				// publish page and update
+-				window.location.href = $(this).attr('href');
++				// send post request to prevent xss attacks
++				$.ajax({
++					'type': 'post',
++					'url': $(this).prop('href'),
++					'success': function () {
++						CMS.API.Helpers.reloadBrowser();
++					},
++					'error': function (request) {
++						throw new Error(request);
++					}
++				});
+ 			});
+ 		},
+ 
+diff --git a/cms/static/cms/js/modules/cms.toolbar.js b/cms/static/cms/js/modules/cms.toolbar.js
+index 3757b22da5b..2e7a9954135 100644
+--- a/cms/static/cms/js/modules/cms.toolbar.js
++++ b/cms/static/cms/js/modules/cms.toolbar.js
+@@ -213,7 +213,27 @@ $(document).ready(function () {
+ 
+ 				// in case of the publish button
+ 				btn.find('.cms_publish-page').bind(that.click, function (e) {
+-					if(!confirm(that.config.lang.publish)) e.preventDefault();
++					if(!confirm(that.config.lang.publish)) {
++						e.preventDefault();
++					}
++				});
++
++				btn.find('.cms_btn-publish').bind(that.click, function (e) {
++					e.preventDefault();
++					// send post request to prevent xss attacks
++					$.ajax({
++						'type': 'post',
++						'url': $(this).prop('href'),
++						'data': {
++							'csrfmiddlewaretoken': CMS.config.csrf
++						},
++						'success': function () {
++							CMS.API.Helpers.reloadBrowser();
++						},
++						'error': function (request) {
++							throw new Error(request);
++						}
++					});
+ 				});
+ 			});
+ 		},
+diff --git a/cms/templates/admin/cms/page/tree/menu_item.html b/cms/templates/admin/cms/page/tree/menu_item.html
+index 9e47829adbc..491dff42732 100644
+--- a/cms/templates/admin/cms/page/tree/menu_item.html
++++ b/cms/templates/admin/cms/page/tree/menu_item.html
+@@ -30,8 +30,8 @@
+ 				{% if lang in page.languages %}
+ 				<div class="language-tooltip" hidden="hidden">
+ 					{% trans "Pick an action:" %}
+-					<a href="./{{ page.id }}/{{ lang }}/unpublish/?redirect_language={{ preview_language }}&redirect_page_id={{ request.GET.page_id }}">{% trans "Unpublish" %}</a>
+-					<a href="./{{ page.id }}/{{ lang }}/publish/?redirect_language={{ preview_language }}&redirect_page_id={{ request.GET.page_id }}">{% trans "Publish" %}</a>
++					<a href="./{{ page.id }}/{{ lang }}/unpublish/?redirect_language={{ preview_language }}&redirect_page_id={{ request.GET.page_id }}" class="js-ajax-submit">{% trans "Unpublish" %}</a>
++					<a href="./{{ page.id }}/{{ lang }}/publish/?redirect_language={{ preview_language }}&redirect_page_id={{ request.GET.page_id }}" class="js-ajax-submit">{% trans "Publish" %}</a>
+ 				</div>
+ 				{% endif %}
+ 			{% else %}
+diff --git a/cms/tests/admin.py b/cms/tests/admin.py
+index bfe68ec2c9f..cbbccb44f38 100644
+--- a/cms/tests/admin.py
++++ b/cms/tests/admin.py
+@@ -646,14 +646,14 @@ def test_change_publish_unpublish(self):
+         with self.login_user_context(permless):
+             request = self.get_request()
+             response = self.admin_class.publish_page(request, page.pk, "en")
+-            self.assertEqual(response.status_code, 403)
++            self.assertEqual(response.status_code, 405)
+             page = self.reload(page)
+             self.assertFalse(page.is_published('en'))
+ 
+             request = self.get_request(post_data={'no': 'data'})
+             response = self.admin_class.publish_page(request, page.pk, "en")
+-            # Forbidden
+             self.assertEqual(response.status_code, 403)
++            page = self.reload(page)
+             self.assertFalse(page.is_published('en'))
+ 
+         admin_user = self.get_admin()
+@@ -689,6 +689,10 @@ def test_change_innavigation(self):
+         with self.login_user_context(permless):
+             request = self.get_request()
+             response = self.admin_class.change_innavigation(request, page.pk)
++            self.assertEqual(response.status_code, 405)
++        with self.login_user_context(permless):
++            request = self.get_request(post_data={'no': 'data'})
++            response = self.admin_class.change_innavigation(request, page.pk)
+             self.assertEqual(response.status_code, 403)
+         with self.login_user_context(permless):
+             request = self.get_request(post_data={'no': 'data'})
+@@ -748,7 +752,7 @@ def test_revert_page_redirects(self):
+         admin_user = self.get_admin()
+         self.page.publish("en")  # Ensure public copy exists before reverting
+         with self.login_user_context(admin_user):
+-            response = self.client.get(admin_reverse('cms_page_revert_page', args=(self.page.pk, 'en')))
++            response = self.client.post(admin_reverse('cms_page_revert_page', args=(self.page.pk, 'en')))
+             self.assertEqual(response.status_code, 302)
+             url = response['Location']
+             self.assertTrue(url.endswith('?%s' % get_cms_setting('CMS_TOOLBAR_URL__EDIT_OFF')))
+diff --git a/cms/tests/publisher.py b/cms/tests/publisher.py
+index 87f215ffea7..5fe20fc07ec 100644
+--- a/cms/tests/publisher.py
++++ b/cms/tests/publisher.py
+@@ -342,7 +342,7 @@ def test_publish_home(self):
+         self.assertEqual(Page.objects.all().count(), 1)
+         superuser = self.get_superuser()
+         with self.login_user_context(superuser):
+-            response = self.client.get(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
++            response = self.client.post(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
+             self.assertEqual(response.status_code, 302)
+             self.assertEqual(response['Location'], "http://testserver/en/?%s" % get_cms_setting('CMS_TOOLBAR_URL__EDIT_OFF'))
+ 
+@@ -381,7 +381,7 @@ def test_publish_admin(self):
+         page = self.create_page("test_admin", published=False)
+         superuser = self.get_superuser()
+         with self.login_user_context(superuser):
+-            response = self.client.get(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
++            response = self.client.post(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
+             self.assertEqual(response.status_code, 302)
+         page = Page.objects.get(pk=page.pk)
+ 
+@@ -396,7 +396,7 @@ def test_publish_wrong_lang(self):
+             ):
+             with self.login_user_context(superuser):
+                 with force_language('de'):
+-                    response = self.client.get(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
++                    response = self.client.post(admin_reverse("cms_page_publish_page", args=[page.pk, 'en']))
+         self.assertEqual(response.status_code, 302)
+         page = Page.objects.get(pk=page.pk)
+ 
+diff --git a/cms/tests/reversion_tests.py b/cms/tests/reversion_tests.py
+index 7a88b7a9ba6..b04e902cb71 100644
+--- a/cms/tests/reversion_tests.py
++++ b/cms/tests/reversion_tests.py
+@@ -246,7 +246,7 @@ def test_publish_limits(self):
+                 self.assertEqual(Revision.objects.all().count(), 5)
+                 for x in range(10):
+                     publish_url = URL_CMS_PAGE + "%s/en/publish/" % page_pk
+-                    response = self.client.get(publish_url)
++                    response = self.client.post(publish_url)
+                     self.assertEqual(response.status_code, 302)
+                 self.assertEqual(Revision.objects.all().count(), 4)
+ 

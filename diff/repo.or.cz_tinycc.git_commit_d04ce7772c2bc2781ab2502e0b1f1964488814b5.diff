@@ -1,0 +1,66 @@
+From d04ce7772c2bc2781ab2502e0b1f1964488814b5 Mon Sep 17 00:00:00 2001
+From: Michael Matz <matz@suse.de>
+Date: Thu, 30 May 2019 21:31:35 +0200
+Subject: [PATCH] Don't allow section switches in local asm instructions
+
+GCC wouldn't be able to implement this either (due to the separate
+phases of compilation and assembly).  We could allow it but it
+makes not much sense and actively can confuse broken code into
+segfaulting TCC.  At least we can warn.
+
+Warning exposes a problem in tcctest, and fixing that gives us
+an opportunity to also test .pushsection/.popsection and .previous
+directive support.
+---
+ tccasm.c        | 8 ++++++++
+ tests/tcctest.c | 4 ++--
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/tccasm.c b/tccasm.c
+index e0beed3..54d28da 100644
+--- a/tccasm.c
++++ b/tccasm.c
+@@ -1146,6 +1146,7 @@ ST_FUNC void asm_instr(void)
+     ASMOperand operands[MAX_ASM_OPERANDS];
+     int nb_outputs, nb_operands, i, must_subst, out_reg;
+     uint8_t clobber_regs[NB_ASM_REGS];
++    Section *sec;
+ 
+     next();
+     /* since we always generate the asm() instruction, we can ignore
+@@ -1220,8 +1221,15 @@ ST_FUNC void asm_instr(void)
+     asm_gen_code(operands, nb_operands, nb_outputs, 0, 
+                  clobber_regs, out_reg);    
+ 
++    /* We don't allow switching section within inline asm to
++       bleed out to surrounding code.  */
++    sec = cur_text_section;
+     /* assemble the string with tcc internal assembler */
+     tcc_assemble_inline(tcc_state, astr1.data, astr1.size - 1, 0);
++    if (sec != cur_text_section) {
++        tcc_warning("inline asm tries to change current section");
++        use_section1(tcc_state, sec);
++    }
+ 
+     /* restore the current C token */
+     next();
+diff --git a/tests/tcctest.c b/tests/tcctest.c
+index bdf1065..6c6c793 100644
+--- a/tests/tcctest.c
++++ b/tests/tcctest.c
+@@ -3438,10 +3438,10 @@ void asm_dot_test(void)
+         case 2:
+             asm(".text; jmp .+6; .int 123; mov .-4"RX",%eax; jmp p0");
+ 	case 3:
+-            asm(".data; Y=.; .int 999; X=Y; .int 456; X=.-4");
++            asm(".pushsection \".data\"; Y=.; .int 999; X=Y; .int 456; X=.-4; .popsection");
+             asm(".text; mov X"RX",%eax; jmp p0");
+         case 4:
+-            asm(".data; X=.; .int 789; Y=.; .int 999");
++            asm(".data; X=.; .int 789; Y=.; .int 999; .previous");
+             asm(".text; mov X"RX",%eax; X=Y; jmp p0");
+         case 0:
+ 	    asm(".text; p0=.; mov %%eax,%0;" : "=m"(r)); break;
+-- 
+2.11.4.GIT
+

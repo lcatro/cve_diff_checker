@@ -1,0 +1,58 @@
+From ff70c47a396ef1e3cb73c90513da4f5cb71bebba Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 13 Apr 2021 14:24:00 -0700
+Subject: [PATCH] Fix `tf.raw_ops.GetSessionTensor` and
+ `tf.raw_ops.DeleteSessionTensor` null pointer dereferences.
+
+PiperOrigin-RevId: 368294154
+Change-Id: Ie10f07a0a9a1c2b685e08153d48a0ca4b93f9fc9
+---
+ tensorflow/core/kernels/session_ops.cc | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/tensorflow/core/kernels/session_ops.cc b/tensorflow/core/kernels/session_ops.cc
+index ee81ad2763262..109acc55722cc 100644
+--- a/tensorflow/core/kernels/session_ops.cc
++++ b/tensorflow/core/kernels/session_ops.cc
+@@ -91,7 +91,6 @@ TF_CALL_NUMBER_TYPES(REGISTER_GPU_KERNEL);
+ REGISTER_GPU_KERNEL(bool);
+ #undef REGISTER_GPU_KERNEL
+ 
+-
+ class GetSessionTensorOp : public OpKernel {
+  public:
+   explicit GetSessionTensorOp(OpKernelConstruction* context)
+@@ -101,7 +100,11 @@ class GetSessionTensorOp : public OpKernel {
+     const Tensor& handle = ctx->input(0);
+     const string& name = handle.scalar<tstring>()();
+     Tensor val;
+-    OP_REQUIRES_OK(ctx, ctx->session_state()->GetTensor(name, &val));
++    auto session_state = ctx->session_state();
++    OP_REQUIRES(ctx, session_state != nullptr,
++                errors::FailedPrecondition(
++                    "GetSessionTensor called on null session state"));
++    OP_REQUIRES_OK(ctx, session_state->GetTensor(name, &val));
+     ctx->set_output(0, val);
+   }
+ 
+@@ -122,7 +125,6 @@ TF_CALL_NUMBER_TYPES(REGISTER_GPU_KERNEL);
+ REGISTER_GPU_KERNEL(bool);
+ #undef REGISTER_GPU_KERNEL
+ 
+-
+ class DeleteSessionTensorOp : public OpKernel {
+  public:
+   explicit DeleteSessionTensorOp(OpKernelConstruction* context)
+@@ -131,7 +133,11 @@ class DeleteSessionTensorOp : public OpKernel {
+   void Compute(OpKernelContext* ctx) override {
+     const Tensor& handle = ctx->input(0);
+     const string& name = handle.scalar<tstring>()();
+-    OP_REQUIRES_OK(ctx, ctx->session_state()->DeleteTensor(name));
++    auto session_state = ctx->session_state();
++    OP_REQUIRES(ctx, session_state != nullptr,
++                errors::FailedPrecondition(
++                    "DeleteSessionTensor called on null session state"));
++    OP_REQUIRES_OK(ctx, session_state->DeleteTensor(name));
+   }
+ 
+   TF_DISALLOW_COPY_AND_ASSIGN(DeleteSessionTensorOp);

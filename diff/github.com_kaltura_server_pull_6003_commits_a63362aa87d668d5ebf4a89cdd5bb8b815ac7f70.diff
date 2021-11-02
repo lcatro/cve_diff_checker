@@ -1,0 +1,139 @@
+From a63362aa87d668d5ebf4a89cdd5bb8b815ac7f70 Mon Sep 17 00:00:00 2001
+From: yossipapi <yossi.papiashvili@kaltura.com>
+Date: Mon, 4 Sep 2017 14:02:29 +0300
+Subject: [PATCH] Use constas for patterns
+
+---
+ admin_console/web/tools/bigRedButton.php       | 10 +++++-----
+ admin_console/web/tools/bigRedButtonPtsPoc.php | 12 ++++++------
+ admin_console/web/tools/safeGetInput.php       |  5 +++++
+ alpha/web/lib/bigRedButtonPtsPocHlsjs.php      | 12 ++++++------
+ 4 files changed, 22 insertions(+), 17 deletions(-)
+
+diff --git a/admin_console/web/tools/bigRedButton.php b/admin_console/web/tools/bigRedButton.php
+index 253fa13ef46..15388c7abb9 100644
+--- a/admin_console/web/tools/bigRedButton.php
++++ b/admin_console/web/tools/bigRedButton.php
+@@ -8,8 +8,8 @@
+ if(!isset($_GET['playerVersion']))
+ 	die('html5 lib version must be supplied in query string');
+ 
+-$partnerId = safeGetInput('partnerId', '/[^0-9]/');
+-$html5Version = safeGetInput('playerVersion', '/[^v0-9.]/');
++$partnerId = safeGetInput('partnerId', INTEGER_ONLY_PATTERN);
++$html5Version = safeGetInput('playerVersion', HTML_VERSION_PATTERN);
+ ?>
+ <!DOCTYPE html>
+ <!--[if lt IE 7]>      <html class="lt-ie10 lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+@@ -307,15 +307,15 @@ function updateSystemTime()
+ 		</tr>
+ 		<tr>
+ 			<td>Admin Secret:</td>
+-			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', '/[^A-Za-z0-9]/') : ''; ?>" />
++			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', SECRET_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr>
+ 			<td>Entry Id:</td>
+-			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', '/[^a-z0-9_]/') : ''; ?>" />
++			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', ENTRY_ID_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr>
+         	<td>uiConf Id:</td>
+-            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', '/[^0-9]/') : ''; ?>" />
++            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', INTEGER_ONLY_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr>
+ 			<td colspan="2">
+diff --git a/admin_console/web/tools/bigRedButtonPtsPoc.php b/admin_console/web/tools/bigRedButtonPtsPoc.php
+index d7dff70bfc7..5b109179978 100644
+--- a/admin_console/web/tools/bigRedButtonPtsPoc.php
++++ b/admin_console/web/tools/bigRedButtonPtsPoc.php
+@@ -7,8 +7,8 @@
+ if(!isset($_GET['playerVersion']))
+ 	die('html5 lib version must be supplied in query string');
+ 
+-$partnerId = safeGetInput('partnerId', '/[^0-9]/');
+-$html5Version = safeGetInput('playerVersion', '/[^v0-9.]/');
++$partnerId = safeGetInput('partnerId', INTEGER_ONLY_PATTERN);
++$html5Version = safeGetInput('playerVersion', HTML_VERSION_PATTERN);
+ 
+ ?>
+ <!DOCTYPE html>
+@@ -212,19 +212,19 @@ function sendAd(){
+ 	  	<table>
+ 		<tr style="display: none; ">
+ 			<td>Admin Secret:</td>
+-			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', '/[^A-Za-z0-9]/') : ''; ?>" />
++			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', SECRET_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+ 			<td>Entry Id:</td>
+-			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', '/[^a-z0-9_]/') : ''; ?>" />
++			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', ENTRY_ID_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+         	<td>Admin uiConf Id:</td>
+-            <td><input type="text" id="txtAdminUiConfId" value="<?php echo isset($_GET['adminUiConfId']) ? safeGetInput('adminUiConfId', '/[^0-9]/') : ''; ?>" />
++            <td><input type="text" id="txtAdminUiConfId" value="<?php echo isset($_GET['adminUiConfId']) ? safeGetInput('adminUiConfId', INTEGER_ONLY_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+         	<td>User uiConf Id:</td>
+-            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', '/[^0-9]/') : ''; ?>" />
++            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', INTEGER_ONLY_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+ 			<td colspan="2">
+diff --git a/admin_console/web/tools/safeGetInput.php b/admin_console/web/tools/safeGetInput.php
+index 313b9df8b22..2c264f13d30 100644
+--- a/admin_console/web/tools/safeGetInput.php
++++ b/admin_console/web/tools/safeGetInput.php
+@@ -1,5 +1,10 @@
+ <?php
+ 
++CONST SECRET_PATTERN = '/[^a-z0-9]/';
++CONST ENTRY_ID_PATTERN = '/[^a-z0-9_]/';
++CONST INTEGER_ONLY_PATTERN = '/[^0-9]/';
++CONST HTML_VERSION_PATTERN = '/[^v0-9.]/';
++
+ function safeGetInput($filedName, $pattern)
+ {
+ 	$fieldValue = $_GET[$filedName];
+diff --git a/alpha/web/lib/bigRedButtonPtsPocHlsjs.php b/alpha/web/lib/bigRedButtonPtsPocHlsjs.php
+index b799b37fe86..147ccd29cea 100644
+--- a/alpha/web/lib/bigRedButtonPtsPocHlsjs.php
++++ b/alpha/web/lib/bigRedButtonPtsPocHlsjs.php
+@@ -7,8 +7,8 @@
+ if(!isset($_GET['playerVersion']))
+ 	die('html5 lib version must be supplied in query string');
+ 
+-$partnerId = safeGetInput('partnerId', '/[^0-9]/');
+-$html5Version = safeGetInput('playerVersion', '/[^v0-9.]/');
++$partnerId = safeGetInput('partnerId', INTEGER_ONLY_PATTERN);
++$html5Version = safeGetInput('playerVersion', HTML_VERSION_PATTERN);
+ 
+ ?>
+ <!DOCTYPE html>
+@@ -214,19 +214,19 @@ function sendAd(){
+ 	  	<table>
+ 		<tr style="display: none; ">
+ 			<td>Admin Secret:</td>
+-			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', '/[^A-Za-z0-9]/') : ''; ?>" />
++			<td><input type="text" id="txtSecret" value="<?php echo isset($_GET['secret']) ? safeGetInput('secret', SECRET_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+ 			<td>Entry Id:</td>
+-			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', '/[^a-z0-9_]/') : ''; ?>" />
++			<td><input type="text" id="txtEntryId" value="<?php echo isset($_GET['entryId']) ? safeGetInput('entryId', ENTRY_ID_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+         	<td>Admin uiConf Id:</td>
+-            <td><input type="text" id="txtAdminUiConfId" value="<?php echo isset($_GET['adminUiConfId']) ? safeGetInput('adminUiConfId', '/[^0-9]/') : ''; ?>" />
++            <td><input type="text" id="txtAdminUiConfId" value="<?php echo isset($_GET['adminUiConfId']) ? safeGetInput('adminUiConfId', INTEGER_ONLY_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+         	<td>User uiConf Id:</td>
+-            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', '/[^0-9]/') : ''; ?>" />
++            <td><input type="text" id="txtUiConfId" value="<?php echo isset($_GET['uiConfId']) ? safeGetInput('uiConfId', INTEGER_ONLY_PATTERN) : ''; ?>" />
+ 		</td>
+ 		<tr style="display: none; ">
+ 			<td colspan="2">

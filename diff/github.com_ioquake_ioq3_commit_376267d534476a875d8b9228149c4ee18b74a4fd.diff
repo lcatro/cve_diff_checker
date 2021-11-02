@@ -1,0 +1,75 @@
+From 376267d534476a875d8b9228149c4ee18b74a4fd Mon Sep 17 00:00:00 2001
+From: SmileTheory <SmileTheory@gmail.com>
+Date: Mon, 13 Mar 2017 14:14:00 -0700
+Subject: [PATCH] Don't load .pk3s as .dlls, and don't load user config files
+ from .pk3s.
+
+---
+ code/client/cl_main.c | 4 ++--
+ code/qcommon/files.c  | 6 ++++++
+ code/sys/sys_main.c   | 7 +++++++
+ 3 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/code/client/cl_main.c b/code/client/cl_main.c
+index b68d4f9900..31dd9ab782 100644
+--- a/code/client/cl_main.c
++++ b/code/client/cl_main.c
+@@ -3200,7 +3200,7 @@ void CL_InitRef( void ) {
+ 	Com_Printf( "----- Initializing Renderer ----\n" );
+ 
+ #ifdef USE_RENDERER_DLOPEN
+-	cl_renderer = Cvar_Get("cl_renderer", "opengl2", CVAR_ARCHIVE | CVAR_LATCH);
++	cl_renderer = Cvar_Get("cl_renderer", "opengl2", CVAR_ARCHIVE | CVAR_LATCH | CVAR_PROTECTED);
+ 
+ 	Com_sprintf(dllName, sizeof(dllName), "renderer_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
+ 
+@@ -3551,7 +3551,7 @@ void CL_Init( void ) {
+ 
+ 	cl_allowDownload = Cvar_Get ("cl_allowDownload", "0", CVAR_ARCHIVE);
+ #ifdef USE_CURL_DLOPEN
+-	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE);
++	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE | CVAR_PROTECTED);
+ #endif
+ 
+ 	cl_conXOffset = Cvar_Get ("cl_conXOffset", "0", 0);
+diff --git a/code/qcommon/files.c b/code/qcommon/files.c
+index 92a9e40577..27f5713de1 100644
+--- a/code/qcommon/files.c
++++ b/code/qcommon/files.c
+@@ -1364,12 +1364,18 @@ long FS_FOpenFileRead(const char *filename, fileHandle_t *file, qboolean uniqueF
+ {
+ 	searchpath_t *search;
+ 	long len;
++	qboolean isLocalConfig;
+ 
+ 	if(!fs_searchpaths)
+ 		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+ 
++	isLocalConfig = !strcmp(filename, "autoexec.cfg") || !strcmp(filename, Q3CONFIG_CFG);
+ 	for(search = fs_searchpaths; search; search = search->next)
+ 	{
++		// autoexec.cfg and q3config.cfg can only be loaded outside of pk3 files.
++		if (isLocalConfig && search->pack)
++			continue;
++
+ 		len = FS_FOpenFileReadDir(filename, search, file, uniqueFILE, qfalse);
+ 
+ 		if(file == NULL)
+diff --git a/code/sys/sys_main.c b/code/sys/sys_main.c
+index 2ccf3020b2..6d7fe7bf95 100644
+--- a/code/sys/sys_main.c
++++ b/code/sys/sys_main.c
+@@ -500,6 +500,13 @@ void *Sys_LoadDll(const char *name, qboolean useSystemLib)
+ {
+ 	void *dllhandle;
+ 	
++	// Don't load any DLLs that end with the pk3 extension
++	if (COM_CompareExtension(name, ".pk3"))
++	{
++		Com_Printf("Rejecting DLL named \"%s\"", name);
++		return NULL;
++	}
++
+ 	if(useSystemLib)
+ 		Com_Printf("Trying to load \"%s\"...\n", name);
+ 	

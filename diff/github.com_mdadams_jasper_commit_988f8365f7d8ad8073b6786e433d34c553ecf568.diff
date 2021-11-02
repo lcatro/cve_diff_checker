@@ -1,0 +1,99 @@
+From 988f8365f7d8ad8073b6786e433d34c553ecf568 Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Sat, 22 Oct 2016 14:36:49 -0700
+Subject: [PATCH] Fixed an integer overflow problem.
+
+---
+ src/libjasper/base/jas_malloc.c |  4 ++--
+ src/libjasper/base/jas_seq.c    | 27 ++++++++++++++++++++-------
+ 2 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/src/libjasper/base/jas_malloc.c b/src/libjasper/base/jas_malloc.c
+index 23154e31..b4b868f9 100644
+--- a/src/libjasper/base/jas_malloc.c
++++ b/src/libjasper/base/jas_malloc.c
+@@ -238,7 +238,7 @@ void jas_free(void *ptr)
+ void *jas_malloc(size_t size)
+ {
+ 	void *result;
+-	JAS_DBGLOG(101, ("jas_malloc called with %zu\n", size));
++	JAS_DBGLOG(101, ("jas_malloc(%zu)\n", size));
+ 	result = malloc(size);
+ 	JAS_DBGLOG(100, ("jas_malloc(%zu) -> %p\n", size, result));
+ 	return result;
+@@ -247,7 +247,7 @@ void *jas_malloc(size_t size)
+ void *jas_realloc(void *ptr, size_t size)
+ {
+ 	void *result;
+-	JAS_DBGLOG(101, ("jas_realloc called with %x,%zu\n", ptr, size));
++	JAS_DBGLOG(101, ("jas_realloc(%x, %zu)\n", ptr, size));
+ 	result = realloc(ptr, size);
+ 	JAS_DBGLOG(100, ("jas_realloc(%p, %zu) -> %p\n", ptr, size, result));
+ 	return result;
+diff --git a/src/libjasper/base/jas_seq.c b/src/libjasper/base/jas_seq.c
+index cac20e2d..adc7e139 100644
+--- a/src/libjasper/base/jas_seq.c
++++ b/src/libjasper/base/jas_seq.c
+@@ -101,13 +101,16 @@ jas_matrix_t *jas_matrix_create(int numrows, int numcols)
+ {
+ 	jas_matrix_t *matrix;
+ 	int i;
++	size_t size;
++
++	matrix = 0;
+ 
+ 	if (numrows < 0 || numcols < 0) {
+-		return 0;
++		goto error;
+ 	}
+ 
+ 	if (!(matrix = jas_malloc(sizeof(jas_matrix_t)))) {
+-		return 0;
++		goto error;
+ 	}
+ 	matrix->flags_ = 0;
+ 	matrix->numrows_ = numrows;
+@@ -115,21 +118,25 @@ jas_matrix_t *jas_matrix_create(int numrows, int numcols)
+ 	matrix->rows_ = 0;
+ 	matrix->maxrows_ = numrows;
+ 	matrix->data_ = 0;
+-	matrix->datasize_ = numrows * numcols;
++	matrix->datasize_ = 0;
++
++	// matrix->datasize_ = numrows * numcols;
++	if (!jas_safe_size_mul(numrows, numcols, &size)) {
++		goto error;
++	}
++	matrix->datasize_ = size;
+ 
+ 	if (matrix->maxrows_ > 0) {
+ 		if (!(matrix->rows_ = jas_alloc2(matrix->maxrows_,
+ 		  sizeof(jas_seqent_t *)))) {
+-			jas_matrix_destroy(matrix);
+-			return 0;
++			goto error;
+ 		}
+ 	}
+ 
+ 	if (matrix->datasize_ > 0) {
+ 		if (!(matrix->data_ = jas_alloc2(matrix->datasize_,
+ 		  sizeof(jas_seqent_t)))) {
+-			jas_matrix_destroy(matrix);
+-			return 0;
++			goto error;
+ 		}
+ 	}
+ 
+@@ -147,6 +154,12 @@ jas_matrix_t *jas_matrix_create(int numrows, int numcols)
+ 	matrix->yend_ = matrix->numrows_;
+ 
+ 	return matrix;
++
++error:
++	if (matrix) {
++		jas_matrix_destroy(matrix);
++	}
++	return 0;
+ }
+ 
+ void jas_matrix_destroy(jas_matrix_t *matrix)

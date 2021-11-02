@@ -1,0 +1,87 @@
+From d515b4b4a300479cdf1a6e0d1bb95bc1f9fee514 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Fri, 4 Aug 2017 00:08:23 +0100
+Subject: [PATCH] CVE-2017-13043/BGP: fix decoding of MVPN route types 6 and 7
+
+RFC 6514 Section 4.6 defines the structure for Shared Tree Join (6) and
+Source Tree Join (7) multicast VPN route types. decode_multicast_vpn()
+didn't implement the Source AS field of that structure properly, adjust
+the offsets to put it right.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-bgp.c                 |   4 ++--
+ tests/TESTLIST              |   1 +
+ tests/bgp_mvpn_6_and_7.out  |  13 +++++++++++++
+ tests/bgp_mvpn_6_and_7.pcap | Bin 0 -> 371 bytes
+ 4 files changed, 16 insertions(+), 2 deletions(-)
+ create mode 100644 tests/bgp_mvpn_6_and_7.out
+ create mode 100644 tests/bgp_mvpn_6_and_7.pcap
+
+diff --git a/print-bgp.c b/print-bgp.c
+index d7a336a46..ced54c3dd 100644
+--- a/print-bgp.c
++++ b/print-bgp.c
+@@ -965,13 +965,13 @@ decode_multicast_vpn(netdissect_options *ndo,
+ 
+         case BGP_MULTICAST_VPN_ROUTE_TYPE_SHARED_TREE_JOIN: /* fall through */
+         case BGP_MULTICAST_VPN_ROUTE_TYPE_SOURCE_TREE_JOIN:
+-            ND_TCHECK2(pptr[0], BGP_VPN_RD_LEN);
++            ND_TCHECK2(pptr[0], BGP_VPN_RD_LEN + 4);
+             offset = strlen(buf);
+ 	    snprintf(buf + offset, buflen - offset, ", RD: %s, Source-AS %s",
+ 		bgp_vpn_rd_print(ndo, pptr),
+ 		as_printf(ndo, astostr, sizeof(astostr),
+ 		EXTRACT_32BITS(pptr + BGP_VPN_RD_LEN)));
+-            pptr += BGP_VPN_RD_LEN;
++            pptr += BGP_VPN_RD_LEN + 4;
+ 
+             bgp_vpn_sg_print(ndo, pptr, buf, buflen);
+             break;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 7532e2403..63e7eee00 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -564,6 +564,7 @@ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+ vqp-oobr		vqp-oobr.pcap			vqp-oobr.out		-v -c1
+ bgp_pmsi_tunnel-oobr	bgp_pmsi_tunnel-oobr.pcap	bgp_pmsi_tunnel-oobr.out -v -c1
++bgp_mvpn_6_and_7	bgp_mvpn_6_and_7.pcap		bgp_mvpn_6_and_7.out	-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/bgp_mvpn_6_and_7.out b/tests/bgp_mvpn_6_and_7.out
+new file mode 100644
+index 000000000..3eb4a2d09
+--- /dev/null
++++ b/tests/bgp_mvpn_6_and_7.out
+@@ -0,0 +1,13 @@
++IP (tos 0xc, ttl 254, id 21263, offset 0, flags [rsvd], proto TCP (6), length 517, bad cksum 8e15 (->99c9)!)
++    241.0.93.20.179 > 255.247.0.1.200: Flags [none], seq 2146691977:2146692450, win 56026, options [unknown-161,eol], length 473: BGP
++	Update Message (2), length: 45
++	  Withdrawn routes: 3 bytes
++	  Attribute Set (128), length: 7, Flags [OTPE+f]: 
++	    Origin AS: 148
++	      Multi-Protocol Reach NLRI (14), length: 71, Flags [T+6]: 
++	    AFI: IPv4 (1), SAFI: Multicast VPN (5), nh-length: 0, no SNPA
++	      Route-Type: Intra-AS I-PMSI (1), length: 0, RD: 62209:33686018 (= 2.2.2.2), Originator bogus address length 4294967232
++	      Route-Type: Unknown (0), length: 0
++	      Route-Type: Unknown (243), length: 1
++	      Route-Type: Inter-AS I-PMSI (2), length: 2, RD: unknown RD format, Source-AS 368115805
++	      Route-Type: Inter-AS I-PMSI (2), length: 2, RD: unknown RD format, Source-AS 335544320[|BGP]
+diff --git a/tests/bgp_mvpn_6_and_7.pcap b/tests/bgp_mvpn_6_and_7.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..a478b95d3d8091cb9dc422b605677eb9b5fa851a
+GIT binary patch
+literal 371
+zcmca|c+)~A1{MYe20<WZV5kLRMj&=5c*39{$-x2Qm@zPLUg7!8P|v}5^Z-M{QVs@J
+z9wydc{sxABY<;318Dd5Le+R1D%y6Rq^XpCq#)iHGhFiA;uISDM8qM_|4KV03F))Ap
+zUwwGf{{{wjpjA`c_}m#7St0g*W@Lf@xY=L_fy|Bpo86HDG+PC1HZDg24FGCVAj;*W
+Pn~vYhFPMQ|#_wqWLj8le
+
+literal 0
+HcmV?d00001
+

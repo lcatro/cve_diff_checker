@@ -1,0 +1,116 @@
+From 29870c8fe95e4e8a672f6f28c5fbe692bea09e9c Mon Sep 17 00:00:00 2001
+From: Martin Blix Grydeland <martin@varnish-software.com>
+Date: Fri, 13 Mar 2015 12:57:39 +0100
+Subject: [PATCH] Check for duplicate Content-Length headers in requests
+
+If a duplicate CL header is in the request, we fail the request with a
+400 (Bad Request)
+
+Fix a test case that was sending duplicate CL by misstake and would
+not fail because of that.
+---
+ bin/varnishd/cache_http.c        | 19 +++++++++++++------
+ bin/varnishtest/tests/b00041.vtc | 23 +++++++++++++++++++++++
+ bin/varnishtest/tests/r00102.vtc |  2 --
+ 3 files changed, 36 insertions(+), 8 deletions(-)
+ create mode 100644 bin/varnishtest/tests/b00041.vtc
+
+diff --git a/bin/varnishd/cache_http.c b/bin/varnishd/cache_http.c
+index 5ab7bc0928..3680422abc 100644
+--- a/bin/varnishd/cache_http.c
++++ b/bin/varnishd/cache_http.c
+@@ -639,10 +639,12 @@ http_splitline(struct worker *w, int fd, struct http *hp,
+ /*--------------------------------------------------------------------*/
+ 
+ static int
+-htc_request_check_host_hdr(struct http *hp)
++htc_request_check_hdrs(struct sess *sp, struct http *hp)
+ {
+ 	int u;
+ 	int seen_host = 0;
++	int seen_cl = 0;
++
+ 	for (u = HTTP_HDR_FIRST; u < hp->nhd; u++) {
+ 		if (hp->hd[u].b == NULL)
+ 			continue;
+@@ -650,10 +652,19 @@ htc_request_check_host_hdr(struct http *hp)
+ 		AN(hp->hd[u].e);
+ 		if (http_IsHdr(&hp->hd[u], H_Host)) {
+ 			if (seen_host) {
++				WSP(sp, SLT_Error, "Duplicated Host header");
+ 				return (400);
+ 			}
+ 			seen_host = 1;
+ 		}
++		if (http_IsHdr(&hp->hd[u], H_Content_Length)) {
++			if (seen_cl) {
++				WSP(sp, SLT_Error,
++				    "Duplicated Content-Length header");
++				return (400);
++			}
++			seen_cl = 1;
++		}
+ 	}
+ 	return (0);
+ }
+@@ -698,11 +709,7 @@ http_DissectRequest(struct sess *sp)
+ 	}
+ 	http_ProtoVer(hp);
+ 
+-	retval = htc_request_check_host_hdr(hp);
+-	if (retval != 0) {
+-		WSP(sp, SLT_Error, "Duplicated Host header");
+-		return (retval);
+-	}
++	retval = htc_request_check_hdrs(sp, hp);
+ 	return (retval);
+ }
+ 
+diff --git a/bin/varnishtest/tests/b00041.vtc b/bin/varnishtest/tests/b00041.vtc
+new file mode 100644
+index 0000000000..292cea9493
+--- /dev/null
++++ b/bin/varnishtest/tests/b00041.vtc
+@@ -0,0 +1,23 @@
++varnishtest "Fail request on duplicate Content-Length headers in requests"
++
++server s1 {
++	rxreq
++	txresp
++} -start
++
++varnish v1 -vcl+backend {
++	sub vcl_deliver {
++		if (req.http.foo) {
++			set resp.http.Foo = req.http.foo;
++		}
++		if (req.http.bar) {
++			set resp.http.Bar = req.http.bar;
++		}
++	}
++} -start
++
++client c1 {
++	txreq -req POST -hdr "Content-Length: 5" -body "12345"
++	rxresp
++	expect resp.status == 400
++} -run
+diff --git a/bin/varnishtest/tests/r00102.vtc b/bin/varnishtest/tests/r00102.vtc
+index 6d2d8aac7e..7309762d80 100644
+--- a/bin/varnishtest/tests/r00102.vtc
++++ b/bin/varnishtest/tests/r00102.vtc
+@@ -17,14 +17,12 @@ varnish v1 -vcl+backend {
+ 
+ client c1 {
+ 	txreq -req POST -url "/" \
+-		-hdr "Content-Length: 10" \
+ 		-body "123456789\n"
+ 	rxresp
+ 	expect resp.status == 200
+ 	expect resp.http.X-Varnish == "1001"
+ 
+ 	txreq -req POST -url "/" \
+-		-hdr "Content-Length: 10" \
+ 		-body "123456789\n"
+ 	rxresp
+ 	expect resp.status == 200

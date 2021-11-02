@@ -1,0 +1,45 @@
+From 6f4dfeb9a2166e93207443879988f97d88a37cde Mon Sep 17 00:00:00 2001
+From: Aviad Reich <aviad@snyk.io>
+Date: Sun, 22 Apr 2018 11:22:24 +0300
+Subject: [PATCH] fix: prevent extracting archived files outside of target path
+
+---
+ adm-zip.js | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/adm-zip.js b/adm-zip.js
+index 972608f..634a96e 100644
+--- a/adm-zip.js
++++ b/adm-zip.js
+@@ -354,6 +354,9 @@ module.exports = function(/*String*/input) {
+ 
+ 
+             var target = pth.resolve(targetPath, maintainEntryPath ? entryName : pth.basename(entryName));
++            if(!target.startsWith(targetPath)) {
++                throw Utils.Errors.INVALID_FILENAME + ": " + entryName;
++            }
+ 
+             if (item.isDirectory) {
+                 target = pth.resolve(target, "..");
+@@ -429,6 +432,10 @@ module.exports = function(/*String*/input) {
+             _zip.entries.forEach(function(entry) {
+                 entryName = entry.entryName.toString();
+ 
++                if(!pth.resolve(targetPath, entryName).startsWith(targetPath)) {
++                    throw Utils.Errors.INVALID_FILENAME + ": " + entryName;
++                }
++
+                 if(isWin){
+                     entryName = escapeFileName(entryName)
+                 }
+@@ -471,6 +478,10 @@ module.exports = function(/*String*/input) {
+                     entryName = escapeFileName(entryName)
+                 }
+ 
++                if(!pth.resolve(targetPath, entryName).startsWith(targetPath)) {
++                  throw Utils.Errors.INVALID_FILENAME + ": " + entryName;
++                }
++
+                 if (entry.isDirectory) {
+                     Utils.makeDir(pth.resolve(targetPath, entryName));
+                     if(--i == 0)

@@ -1,0 +1,108 @@
+From 3129148e5a4cfe83003449a1048660823bfddc51 Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Fri, 29 Sep 2017 09:34:16 +0800
+Subject: QcomModulePkg: Change function type for DrawUI
+
+1. Change the type of function from EFI_STATUS to VOID, as no none
+check the return value
+2. Remove the extra return value check
+3. Correct the string length when doing string alignment
+
+Change-Id: I52ffe56f01527fbf1ac3a2521429b043d4de857b
+---
+ QcomModulePkg/Include/Library/DrawUI.h |  2 +-
+ QcomModulePkg/Library/BootLib/DrawUI.c | 22 +++++++++++++---------
+ 2 files changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/QcomModulePkg/Include/Library/DrawUI.h b/QcomModulePkg/Include/Library/DrawUI.h
+index accbba4..627f088 100644
+--- a/QcomModulePkg/Include/Library/DrawUI.h
++++ b/QcomModulePkg/Include/Library/DrawUI.h
+@@ -119,6 +119,6 @@ VOID SetMenuMsgInfo(MENU_MSG_INFO *MenuMsgInfo, CHAR8* Msg, UINT32 ScaleFactorTy
+ EFI_STATUS DrawMenu(MENU_MSG_INFO *TargetMenu, UINT32 *Height);
+ EFI_STATUS UpdateMsgBackground(MENU_MSG_INFO *MenuMsgInfo, UINT32 NewBgColor);
+ EFI_STATUS BackUpBootLogoBltBuffer();
+-EFI_STATUS RestoreBootLogoBitBuffer();
++VOID RestoreBootLogoBitBuffer (VOID);
+ VOID FreeBootLogoBltBuffer();
+ #endif
+diff --git a/QcomModulePkg/Library/BootLib/DrawUI.c b/QcomModulePkg/Library/BootLib/DrawUI.c
+index 86cd077..559b1c7 100644
+--- a/QcomModulePkg/Library/BootLib/DrawUI.c
++++ b/QcomModulePkg/Library/BootLib/DrawUI.c
+@@ -182,27 +182,28 @@ EFI_STATUS BackUpBootLogoBltBuffer()
+ }
+ 
+ // This function would restore the boot logo if the display on the screen is changed.
+-EFI_STATUS RestoreBootLogoBitBuffer()
++VOID RestoreBootLogoBitBuffer (VOID)
+ {
+ 	EFI_STATUS Status;
+ 	UINT32     Width;
+ 	UINT32     Height;
+ 
+ 	/* Return directly if the boot logo bit buffer is null */
+-	if (!LogoBlt)
+-		return EFI_UNSUPPORTED;
++    if (!LogoBlt) {
++        return;
++    }
+ 
+ 	Width = GetResolutionWidth();
+ 	Height = GetResolutionHeight();
+ 	if (!Width || !Height) {
+ 		DEBUG((EFI_D_ERROR, "Failed to get width or height\n"));
+-		return EFI_UNSUPPORTED;
++        return;
+ 	}
+ 
+ 	/* Ensure the Height * Width doesn't overflow */
+ 	if (Height > DivU64x64Remainder ((UINTN) ~0, Width, NULL)) {
+ 		DEBUG((EFI_D_ERROR, "Height * Width overflow\n"));
+-		return EFI_UNSUPPORTED;
++        return;
+ 	}
+ 
+ 	Status = GraphicsOutputProtocol->Blt (
+@@ -218,7 +219,10 @@ EFI_STATUS RestoreBootLogoBitBuffer()
+ 		Width * sizeof (EFI_GRAPHICS_OUTPUT_BLT_PIXEL)
+ 		);
+ 
+-	return Status;
++    if (Status != EFI_SUCCESS) {
++        FreePool (LogoBlt);
++        LogoBlt = NULL;
++    }
+ }
+ 
+ VOID FreeBootLogoBltBuffer()
+@@ -237,7 +241,7 @@ STATIC UINT32 GetMaxFontCount()
+ 	EFI_IMAGE_OUTPUT *Blt = NULL;
+ 
+ 	Status = gHiiFont->GetGlyph(gHiiFont, 'a', NULL, &Blt, NULL);
+-	if (!EFI_ERROR (Status) && (Status != EFI_WARN_UNKNOWN_GLYPH)) {
++    if (!EFI_ERROR (Status)) {
+ 		if (Blt)
+ 			FontBaseWidth = Blt->Width;
+ 	}
+@@ -311,7 +315,7 @@ STATIC VOID StrAlignRight(CHAR8* Msg, CHAR8* FilledChar, UINT32 ScaleFactorType)
+ 	if (Max_x/factor > AsciiStrLen(Msg)) {
+ 		diff = Max_x/factor - AsciiStrLen(Msg);
+ 		for (i = 0; i < diff; i++) {
+-			AsciiStrnCatS(StrSourceTemp, MAX_MSG_SIZE, FilledChar, Max_x/factor);
++            AsciiStrnCatS (StrSourceTemp, MAX_MSG_SIZE, FilledChar, 1);
+ 		}
+ 		AsciiStrnCatS(StrSourceTemp, MAX_MSG_SIZE, Msg, Max_x/factor);
+ 		CopyMem(Msg, StrSourceTemp, AsciiStrSize(StrSourceTemp));
+@@ -329,7 +333,7 @@ STATIC VOID StrAlignLeft(CHAR8* Msg, UINT32 MaxMsgSize, CHAR8* FilledChar, UINT3
+ 	if (Max_x/factor > AsciiStrLen(Msg)) {
+ 		diff = Max_x/factor - AsciiStrLen(Msg);
+ 		for (i = 0; i < diff; i++) {
+-			AsciiStrnCatS(StrSourceTemp, MAX_MSG_SIZE, FilledChar, Max_x/factor);
++            AsciiStrnCatS (StrSourceTemp, MAX_MSG_SIZE, FilledChar, 1);
+ 		}
+ 		AsciiStrnCatS(Msg, MaxMsgSize, StrSourceTemp, Max_x/factor);
+ 	}
+-- 
+cgit v1.1
+

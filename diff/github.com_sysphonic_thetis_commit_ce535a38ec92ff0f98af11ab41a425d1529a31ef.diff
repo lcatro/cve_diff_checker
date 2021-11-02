@@ -1,0 +1,856 @@
+From ce535a38ec92ff0f98af11ab41a425d1529a31ef Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Tue, 7 Jul 2015 09:10:26 +0900
+Subject: [PATCH] Reinforcement of security. Signed-off-by: MORITA Shintaro
+ <shin@sysphonic.com>
+
+---
+ app/controllers/desktop_controller.rb      |  2 +-
+ app/controllers/items_controller.rb        |  7 ++--
+ app/controllers/login_controller.rb        |  2 +-
+ app/controllers/mail_folders_controller.rb |  2 +-
+ app/controllers/timecards_controller.rb    |  2 +-
+ app/controllers/zeptair_post_controller.rb | 41 +++++++++++++---------
+ app/helpers/items_helper.rb                |  5 ++-
+ app/helpers/sql_helper.rb                  |  8 +++--
+ app/helpers/templates_helper.rb            |  3 +-
+ app/helpers/tree_element.rb                |  3 ++
+ app/helpers/zeptair_dist_helper.rb         |  3 ++
+ app/models/address.rb                      |  2 ++
+ app/models/email.rb                        |  5 +++
+ app/models/folder.rb                       |  1 +
+ app/models/group.rb                        |  1 +
+ app/models/location.rb                     |  1 +
+ app/models/mail_account.rb                 |  8 +++--
+ app/models/mail_folder.rb                  |  4 +++
+ app/models/paid_holiday.rb                 | 13 +++++--
+ app/models/research.rb                     |  2 ++
+ app/models/setting.rb                      | 12 +++++++
+ app/models/team.rb                         | 20 ++++++-----
+ app/models/timecard.rb                     | 23 ++++++++----
+ app/models/toy.rb                          |  2 ++
+ app/models/user.rb                         | 10 +++++-
+ app/views/common/_edit_scope.html.erb      | 10 +++---
+ app/views/schedules/_edit_members.html.erb | 10 +++---
+ app/views/send_mails/edit_send_to.html.erb |  2 +-
+ app/views/timecards/group.html.erb         |  7 ++--
+ 29 files changed, 148 insertions(+), 63 deletions(-)
+
+diff --git a/app/controllers/desktop_controller.rb b/app/controllers/desktop_controller.rb
+index bc82891..4987aa1 100644
+--- a/app/controllers/desktop_controller.rb
++++ b/app/controllers/desktop_controller.rb
+@@ -91,7 +91,7 @@ def edit_timecard
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+       date_s = @date.strftime(Schedule::SYS_DATE_FORM)
+     else
+diff --git a/app/controllers/items_controller.rb b/app/controllers/items_controller.rb
+index ddfd150..aa27348 100644
+--- a/app/controllers/items_controller.rb
++++ b/app/controllers/items_controller.rb
+@@ -1272,9 +1272,10 @@ def team_organize
+       end
+ 
+       users = @team.get_users_a
+-    end 
++    end
+ 
+     team_members = params[:team_members]
++    SqlHelper.validate_token([team_members])
+ 
+     created = false
+     modified = false
+@@ -1305,9 +1306,9 @@ def team_organize
+           @team.clear_users
+         end
+ 
+-        @team.add_users team_members
++        @team.add_users(team_members)
+         @team.save
+-        @team.remove_application team_members
++        @team.remove_application(team_members)
+ 
+         modified = true 
+       end
+diff --git a/app/controllers/login_controller.rb b/app/controllers/login_controller.rb
+index 65c73ac..8232e33 100644
+--- a/app/controllers/login_controller.rb
++++ b/app/controllers/login_controller.rb
+@@ -97,7 +97,7 @@ def send_password
+     Log.add_info(request, params.inspect)
+ 
+     mail_addr = params[:thetisBoxEdit]
+-    SqlHelper.validate_token([mail_addr], ['@-'])
++    SqlHelper.validate_token([mail_addr])
+     begin
+       users = User.where("email='#{mail_addr}'").to_a
+     rescue => evar
+diff --git a/app/controllers/mail_folders_controller.rb b/app/controllers/mail_folders_controller.rb
+index 5859ddd..0b355d2 100644
+--- a/app/controllers/mail_folders_controller.rb
++++ b/app/controllers/mail_folders_controller.rb
+@@ -32,9 +32,9 @@ def show_tree
+     con << "(user_id=#{@login_user.id})"
+ 
+     account_xtype = params[:mail_account_xtype]
++    SqlHelper.validate_token([account_xtype])
+ 
+     unless account_xtype.blank?
+-      SqlHelper.validate_token([account_xtype])
+       con << "(xtype='#{account_xtype}')"
+     end
+     @mail_accounts = MailAccount.find_all(con.join(' and '))
+diff --git a/app/controllers/timecards_controller.rb b/app/controllers/timecards_controller.rb
+index 1b9b5ff..de91294 100644
+--- a/app/controllers/timecards_controller.rb
++++ b/app/controllers/timecards_controller.rb
+@@ -120,7 +120,7 @@ def edit
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+       date_s = @date.strftime(Schedule::SYS_DATE_FORM)
+     else
+diff --git a/app/controllers/zeptair_post_controller.rb b/app/controllers/zeptair_post_controller.rb
+index bc45e88..f2a12b6 100644
+--- a/app/controllers/zeptair_post_controller.rb
++++ b/app/controllers/zeptair_post_controller.rb
+@@ -81,33 +81,35 @@ def query
+ 
+     target_user = nil
+ 
+-    SqlHelper.validate_token([params[:user_id], params[:zeptair_id], params[:group_id]])
++    user_id = params[:user_id]
++    zeptair_id = params[:zeptair_id]
++    group_id = params[:group_id]
++    SqlHelper.validate_token([user_id, zeptair_id, group_id])
+ 
+-    unless params[:user_id].blank?
+-      target_user = User.find(params[:user_id])
++    unless user_id.blank?
++      target_user = User.find(user_id)
+     end
+ 
+-    unless params[:zeptair_id].blank?
+-      zeptair_id = params[:zeptair_id]
++    unless zeptair_id.blank?
+       target_user = User.where("zeptair_id=#{zeptair_id}").first
+     end
+ 
+     if target_user.nil?
+ 
+-      if params[:group_id].blank?
++      if group_id.blank?
+         sql = 'select distinct Item.* from items Item, attachments Attachment'
+         sql << " where Item.xtype='#{Item::XTYPE_ZEPTAIR_POST}' and Item.id=Attachment.item_id"
+         sql << ' order by Item.user_id ASC'
+       else
+-        group_ids = [params[:group_id]]
++        group_ids = [group_id]
+ 
+         if params[:recursive] == 'true'
+-          group_ids += Group.get_childs(params[:group_id], true, false)
++          group_ids += Group.get_childs(group_id, true, false)
+         end
+ 
+         groups_con = []
+-        group_ids.each do |group_id|
+-          groups_con << SqlHelper.get_sql_like(['User.groups'], "|#{@group_id}|")
++        group_ids.each do |grp_id|
++          groups_con << SqlHelper.get_sql_like(['User.groups'], "|#{grp_id}|")
+         end
+         sql = 'select distinct Item.* from items Item, attachments Attachment, users User'
+         sql << " where Item.xtype='#{Item::XTYPE_ZEPTAIR_POST}' and Item.id=Attachment.item_id"
+@@ -134,15 +136,20 @@ def delete_attachment
+ 
+     target_user = nil
+ 
+-    unless params[:user_id].blank?
+-      if @login_user.admin?(User::AUTH_ZEPTAIR) or @login_user.id.to_s == params[:user_id].to_s
+-        target_user = User.find(params[:user_id])
++    user_id = params[:user_id]
++    zeptair_id = params[:zeptair_id]
++    attachment_id = params[:attachment_id]
++    SqlHelper.validate_token([user_id, zeptair_id, attachment_id])
++
++    unless user_id.blank?
++      if @login_user.admin?(User::AUTH_ZEPTAIR) or @login_user.id.to_s == user_id.to_s
++        target_user = User.find(user_id)
+       end
+     end
+ 
+-    unless params[:zeptair_id].blank?
++    unless zeptair_id.blank?
+ 
+-      target_user = User.where("zeptair_id=#{params[:zeptair_id]}").first
++      target_user = User.where("zeptair_id=#{zeptair_id}").first
+ 
+       unless @login_user.admin?(User::AUTH_ZEPTAIR) or @login_user.id == target_user.id
+         target_user = nil
+@@ -150,7 +157,7 @@ def delete_attachment
+     end
+ 
+     if target_user.nil?
+-      if params[:attachment_id].blank?
++      if attachment_id.blank?
+ 
+         query
+         unless @post_items.nil?
+@@ -163,7 +170,7 @@ def delete_attachment
+         end
+ 
+       else
+-        attach = Attachment.find(params[:attachment_id])
++        attach = Attachment.find(attachment_id)
+ 
+         item = Item.find(attach.item_id)
+ 
+diff --git a/app/helpers/items_helper.rb b/app/helpers/items_helper.rb
+index 29b7e9c..64d3318 100644
+--- a/app/helpers/items_helper.rb
++++ b/app/helpers/items_helper.rb
+@@ -24,6 +24,9 @@ module ItemsHelper
+   #return:: Next revision number.
+   #
+   def self.get_next_revision(user_id, source_id)
++
++    SqlHelper.validate_token([user_id, source_id])
++
+     copied_items = Item.where("user_id=#{user_id} and source_id=#{source_id}").order('created_at DESC').to_a
+ 
+     rev = 0
+@@ -35,7 +38,7 @@ def self.get_next_revision(user_id, source_id)
+       break
+     end
+ 
+-    return '#' + sprintf('%03d', rev+1)
++    return ('#' + sprintf('%03d', rev+1))
+   end
+ 
+   #=== self.get_copies_folder
+diff --git a/app/helpers/sql_helper.rb b/app/helpers/sql_helper.rb
+index 7a6c4c6..e6186fb 100644
+--- a/app/helpers/sql_helper.rb
++++ b/app/helpers/sql_helper.rb
+@@ -25,8 +25,12 @@ module SqlHelper
+   #
+   def self.validate_token(tokens, extra_chars=nil)
+ 
+-    extra_chars = Regexp.escape((extra_chars || []).join())
+-    regexp = Regexp.new("^[ ]*[a-zA-Z0-9_.#{extra_chars}]+[ ]*$")
++    if extra_chars.nil?
++      extra_chars = ''
++    else
++      extra_chars = Regexp.escape(extra_chars.join())
++    end
++    regexp = Regexp.new("^[ ]*[a-zA-Z0-9_.@\\-#{extra_chars}]+[ ]*$")
+ 
+     [tokens].flatten.each do |token|
+       next if token.blank?
+diff --git a/app/helpers/templates_helper.rb b/app/helpers/templates_helper.rb
+index b1bb49b..f76c736 100644
+--- a/app/helpers/templates_helper.rb
++++ b/app/helpers/templates_helper.rb
+@@ -166,6 +166,8 @@ def self.get_tmpl_folder
+   #
+   def self.get_tmpl_subfolder(name)
+ 
++    SqlHelper.validate_token([name])
++
+     tmpl_folder = Folder.where("folders.name='#{TMPL_ROOT}'").first
+ 
+     unless tmpl_folder.nil?
+@@ -179,5 +181,4 @@ def self.get_tmpl_subfolder(name)
+ 
+     return [tmpl_folder, child]
+   end
+-
+ end
+diff --git a/app/helpers/tree_element.rb b/app/helpers/tree_element.rb
+index fe1c01a..8dce9d4 100644
+--- a/app/helpers/tree_element.rb
++++ b/app/helpers/tree_element.rb
+@@ -78,6 +78,8 @@ def get_parents(ret_obj, cache=nil)
+   #
+   def self.get_childs(klass, node_id, recursive, ret_obj)
+ 
++    SqlHelper.validate_token([node_id])
++
+     array = []
+ 
+     if recursive
+@@ -131,6 +133,7 @@ def get_childs(recursive, ret_obj)
+   #
+   def self.get_tree(klass, tree, conditions, node_id, order_by)
+ 
++    SqlHelper.validate_token([node_id])
+     if conditions.nil?
+       con = ''
+     else
+diff --git a/app/helpers/zeptair_dist_helper.rb b/app/helpers/zeptair_dist_helper.rb
+index eb978c7..3f44057 100644
+--- a/app/helpers/zeptair_dist_helper.rb
++++ b/app/helpers/zeptair_dist_helper.rb
+@@ -61,6 +61,7 @@ def self.get_ack_entry_for(target)
+   #
+   def self.get_comment_of(item_id, user_id)
+ 
++    SqlHelper.validate_token([item_id, user_id])
+     begin
+       comment = Comment.where("(user_id=#{user_id}) and (item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").first
+     rescue => evar
+@@ -143,6 +144,7 @@ def self.completed_ack_message(item_id)
+   #return:: The number of ACK messages to the specified Distribution Item.
+   #
+   def self.count_ack_users(item_id)
++    SqlHelper.validate_token([item_id])
+     return Comment.where("(item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").count
+   end
+ 
+@@ -154,6 +156,7 @@ def self.count_ack_users(item_id)
+   #return:: The number of completed users of the specified Distribution Item.
+   #
+   def self.count_completed_users(item_id)
++    SqlHelper.validate_token([item_id])
+     ack_msg = ZeptairDistHelper.completed_ack_message(item_id)
+     return Comment.where("(item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}') and (message='#{ack_msg}')").count
+   end
+diff --git a/app/models/address.rb b/app/models/address.rb
+index 7eefef6..20e9159 100644
+--- a/app/models/address.rb
++++ b/app/models/address.rb
+@@ -36,6 +36,8 @@ class Address < ActiveRecord::Base
+   #
+   def self.get_by_email(mail_addr, user, book=Address::BOOK_BOTH)
+ 
++    SqlHelper.validate_token([mail_addr])
++
+     email_con = []
+     email_con.push("(email1='#{mail_addr}')")
+     email_con.push("(email2='#{mail_addr}')")
+diff --git a/app/models/email.rb b/app/models/email.rb
+index 6c50aad..8d5f026 100644
+--- a/app/models/email.rb
++++ b/app/models/email.rb
+@@ -618,6 +618,9 @@ def get_dir
+   #_max_:: Max number.
+   #
+   def self.trim(user_id, mail_account_id, max)
++
++    SqlHelper.validate_token([user_id, mail_account_id])
++
+     begin
+       count = Email.where("mail_account_id=#{mail_account_id}").count
+       if count > max
+@@ -757,6 +760,8 @@ def self.destroy(id)
+   #
+   def self.destroy_by_user(user_id, add_con=nil)
+ 
++    SqlHelper.validate_token([user_id])
++
+     con = "user_id=#{user_id}"
+     con << " and (#{add_con})" unless add_con.nil? or add_con.empty?
+     emails = Email.where(con).to_a
+diff --git a/app/models/folder.rb b/app/models/folder.rb
+index f52e715..8411290 100644
+--- a/app/models/folder.rb
++++ b/app/models/folder.rb
+@@ -641,6 +641,7 @@ def self.get_childs_for(user, folder_id, recursive, admin, ret_obj)
+   #
+   def self.get_childs(folder_id, conditions, recursive, admin, ret_obj)
+ 
++    SqlHelper.validate_token([folder_id])
+     arr = []
+ 
+     if recursive
+diff --git a/app/models/group.rb b/app/models/group.rb
+index d2bacfc..78b0581 100644
+--- a/app/models/group.rb
++++ b/app/models/group.rb
+@@ -374,6 +374,7 @@ def get_group_folder
+   #
+   def self.get_group_folder(group_id)
+ 
++    SqlHelper.validate_token([group_id])
+     begin
+       return Folder.where("(owner_id=#{group_id}) and (xtype='#{Folder::XTYPE_GROUP}')").first
+     rescue => evar
+diff --git a/app/models/location.rb b/app/models/location.rb
+index 78c99e7..9b34ea6 100644
+--- a/app/models/location.rb
++++ b/app/models/location.rb
+@@ -44,6 +44,7 @@ def self.get_for(user)
+   #
+   def self.get_for_group(group_id)
+ 
++    SqlHelper.validate_token([group_id])
+     if group_id.nil?
+       con = 'group_id is null'
+     else
+diff --git a/app/models/mail_account.rb b/app/models/mail_account.rb
+index e5eb9c3..7158d7d 100644
+--- a/app/models/mail_account.rb
++++ b/app/models/mail_account.rb
+@@ -154,6 +154,8 @@ def need_pop?(uid)
+   #
+   def self.destroy_by_user(user_id, add_con=nil)
+ 
++    SqlHelper.validate_token([user_id])
++
+     con = "user_id=#{user_id}"
+     con << " and (#{add_con})" unless add_con.nil? or add_con.empty?
+     mail_accounts = MailAccount.where(con).to_a
+@@ -265,12 +267,12 @@ def self.get_default_for(user_id, xtype=nil)
+       where = 'where ' + con.join(' and ')
+     end
+ 
+-    account_ary = MailAccount.find_by_sql('select * from mail_accounts ' + where + ' order by xorder ASC, title ASC')
++    mail_accounts = MailAccount.find_by_sql('select * from mail_accounts ' + where + ' order by xorder ASC, title ASC')
+ 
+-    if account_ary.nil? or account_ary.empty?
++    if mail_accounts.nil? or mail_accounts.empty?
+       return nil
+     else
+-      return account_ary.first
++      return mail_accounts.first
+     end
+   end
+ end
+diff --git a/app/models/mail_folder.rb b/app/models/mail_folder.rb
+index d0bee9f..9ee5d26 100644
+--- a/app/models/mail_folder.rb
++++ b/app/models/mail_folder.rb
+@@ -148,6 +148,8 @@ def self.get_for(user, mail_account_id, xtype)
+       user_id = user.to_s
+     end
+ 
++    SqlHelper.validate_token([user_id, mail_account_id, xtype])
++
+     con = []
+     con << "(user_id=#{user_id})"
+     con << "(mail_account_id=#{mail_account_id})"
+@@ -173,6 +175,8 @@ def self.get_account_roots_for(user)
+       user_id = user.to_s
+     end
+ 
++    SqlHelper.validate_token([user_id])
++
+     con = []
+     con << "(user_id=#{user_id})"
+     con << "(xtype='#{MailFolder::XTYPE_ACCOUNT_ROOT}')"
+diff --git a/app/models/paid_holiday.rb b/app/models/paid_holiday.rb
+index 79a7f8e..7a2a8ff 100644
+--- a/app/models/paid_holiday.rb
++++ b/app/models/paid_holiday.rb
+@@ -29,6 +29,9 @@ class PaidHoliday < ActiveRecord::Base
+   #return:: PaidHoliday(s) for the specified User.
+   #
+   def self.get_for(user_id, fiscal_year=nil)
++
++    SqlHelper.validate_token([user_id, fiscal_year])
++
+     begin
+       con = []
+       con << "(user_id=#{user_id})"
+@@ -54,8 +57,13 @@ def self.get_for(user_id, fiscal_year=nil)
+   #
+   def self.update_for(user_id, fiscal_year, num)
+ 
++    SqlHelper.validate_token([user_id, fiscal_year])
++
+     if num <= 0
+-      PaidHoliday.destroy_all(['user_id=? and year=?', user_id, fiscal_year])
++      con = []
++      con << "(user_id=#{user_id})"
++      con << "(year=#{fiscal_year})"
++      PaidHoliday.destroy_all(con.join(' and '))
+       return
+     end
+ 
+@@ -82,6 +90,8 @@ def self.update_for(user_id, fiscal_year, num)
+   #
+   def self.get_carried_over(user_id, year)
+ 
++    SqlHelper.validate_token([user_id, year])
++
+     yaml = ApplicationHelper.get_config_yaml
+     unless yaml[:timecard].nil?
+       paidhld_carry_over = yaml[:timecard]['paidhld_carry_over']
+@@ -134,5 +144,4 @@ def self.get_carried_over(user_id, year)
+       return 0
+     end
+   end
+-
+ end
+diff --git a/app/models/research.rb b/app/models/research.rb
+index f2a275e..95fb54f 100644
+--- a/app/models/research.rb
++++ b/app/models/research.rb
+@@ -356,6 +356,8 @@ def self.get_status
+   #
+   def self.get_for(user_id)
+ 
++    SqlHelper.validate_token([user_id])
++
+     return Research.where("user_id=#{user_id}").first
+   end
+ 
+diff --git a/app/models/setting.rb b/app/models/setting.rb
+index c03f03b..6c99ea8 100644
+--- a/app/models/setting.rb
++++ b/app/models/setting.rb
+@@ -30,6 +30,8 @@ class Setting < ActiveRecord::Base
+   #
+   def self.get_for(user_id, category=nil)
+ 
++    SqlHelper.validate_token([user_id, category])
++
+     con = []
+     con << "(user_id=#{user_id})"
+     con << "(category='#{category}')" unless category.nil?
+@@ -58,6 +60,8 @@ def self.get_for(user_id, category=nil)
+   #
+   def self.get_value(user_id, category, key)
+ 
++    SqlHelper.validate_token([user_id, category, key])
++
+     con = []
+     con << "(user_id=#{user_id})"
+     con << "(category='#{category}')"
+@@ -81,6 +85,8 @@ def self.get_value(user_id, category, key)
+   #
+   def self.save_value(user_id, category, key, value)
+ 
++    SqlHelper.validate_token([user_id, category, key])
++
+     con = []
+     con << "(user_id=#{user_id})"
+     con << "(category='#{category}')"
+@@ -118,6 +124,8 @@ def self.save_value(user_id, category, key, value)
+   #
+   def self.get_for_group(group_id, category=nil)
+ 
++    SqlHelper.validate_token([group_id, category])
++
+     con = []
+     con << "(group_id=#{group_id})"
+     con << "(category='#{category}')" unless category.nil?
+@@ -146,6 +154,8 @@ def self.get_for_group(group_id, category=nil)
+   #
+   def self.get_group_value(group_id, category, key)
+ 
++    SqlHelper.validate_token([group_id, category, key])
++
+     con = []
+     con << "(group_id=#{group_id})"
+     con << "(category='#{category}')"
+@@ -169,6 +179,8 @@ def self.get_group_value(group_id, category, key)
+   #
+   def self.save_group_value(group_id, category, key, value)
+ 
++    SqlHelper.validate_token([group_id, category, key])
++
+     con = []
+     con << "(group_id=#{group_id})"
+     con << "(category='#{category}')"
+diff --git a/app/models/team.rb b/app/models/team.rb
+index 1cefeab..56ab9b3 100644
+--- a/app/models/team.rb
++++ b/app/models/team.rb
+@@ -365,6 +365,7 @@ def get_team_folder
+   #
+   def self.get_team_folder(team_id)
+ 
++    SqlHelper.validate_token([team_id])
+     begin
+       return Folder.where("(owner_id=#{team_id}) and (xtype='#{Folder::XTYPE_TEAM}')").first
+     rescue => evar
+@@ -397,23 +398,24 @@ def create_team_folder
+   #
+   #Removes applications of the specified Users.
+   #
+-  #_users_:: Array of User-IDs.
++  #_user_ids_:: Array of User-IDs.
+   #
+-  def remove_application(users)
++  def remove_application(user_ids)
+ 
+-    return if users.nil? or users.empty?
++    return if user_ids.nil? or user_ids.empty?
+ 
+-    array = ["(xtype='#{Comment::XTYPE_APPLY}')"]
+-    array << "(item_id=#{self.item_id})"
++    SqlHelper.validate_token([user_ids])
++
++    con = ["(xtype='#{Comment::XTYPE_APPLY}')"]
++    con << "(item_id=#{self.item_id})"
+ 
+     user_con_a = []
+-    users.each do |user_id|
++    user_ids.each do |user_id|
+       user_con_a << "(user_id=#{user_id})"
+     end
+ 
+-    array << '(' + user_con_a.join(' or ') + ')'
++    con << '(' + user_con_a.join(' or ') + ')'
+ 
+-    Comment.destroy_all(array.join(' and '))
++    Comment.destroy_all(con.join(' and '))
+  end
+-
+ end
+diff --git a/app/models/timecard.rb b/app/models/timecard.rb
+index 6dc3ddf..5c439be 100644
+--- a/app/models/timecard.rb
++++ b/app/models/timecard.rb
+@@ -422,12 +422,14 @@ def _get_break_span(break_start, break_end)
+   #Gets Timecard of the specified User and Date.
+   #
+   #_user_id_:: Target User-ID.
+-  #_date_:: Target Date.
++  #_date_s_:: Target Date string.
+   #return:: Timecard for the specified User and Date.
+   #
+-  def self.get_for(user_id, date)
++  def self.get_for(user_id, date_s)
++
++    SqlHelper.validate_token([user_id, date_s])
+     begin
+-      con = "(user_id=#{user_id}) and (date='#{date}')"
++      con = "(user_id=#{user_id}) and (date='#{date_s}')"
+       return Timecard.where(con).first
+     rescue
+     end
+@@ -444,7 +446,13 @@ def self.get_for(user_id, date)
+   #return:: Timecard for the specified User and span.
+   #
+   def self.find_term(user_id, start_date, end_date)
+-    con = "(user_id=#{user_id}) and (date >= '#{start_date}') and (date <= '#{end_date}')"
++
++    SqlHelper.validate_token([user_id])
++
++    start_s = start_date.strftime(Schedule::SYS_DATE_FORM)
++    end_s = end_date.strftime(Schedule::SYS_DATE_FORM)
++
++    con = "(user_id=#{user_id}) and (date >= '#{start_s}') and (date <= '#{end_s}')"
+     ary = Timecard.where(con).order('date ASC').to_a
+     timecards_h = Hash.new
+     unless ary.nil?
+@@ -466,9 +474,12 @@ def self.find_term(user_id, start_date, end_date)
+   #
+   def self.applied_paid_hlds(user_id, start_date, end_date)
+ 
+-    SqlHelper.validate_token([user_id, start_date, end_date])
++    SqlHelper.validate_token([user_id])
++
++    start_s = start_date.strftime(Schedule::SYS_DATE_FORM)
++    end_s = end_date.strftime(Schedule::SYS_DATE_FORM)
+ 
+-    sql = "SELECT COUNT(*) FROM timecards WHERE user_id = #{user_id} AND date >= '#{start_date}' AND date <= '#{end_date}'"
++    sql = "SELECT COUNT(*) FROM timecards WHERE user_id = #{user_id} AND date >= '#{start_s}' AND date <= '#{end_s}'"
+ 
+     sum = 0.0
+     self.workcodes.each do |key, params|
+diff --git a/app/models/toy.rb b/app/models/toy.rb
+index be06391..a0bf852 100644
+--- a/app/models/toy.rb
++++ b/app/models/toy.rb
+@@ -194,6 +194,8 @@ def self.on_desktop?(user, xtype, target_id)
+ 
+     return false if user.nil? or xtype.nil? or target_id.nil?
+ 
++    SqlHelper.validate_token([xtype, target_id])
++
+     con = "(user_id=#{user.id}) and (xtype='#{xtype}') and (target_id=#{target_id})"
+ 
+     begin
+diff --git a/app/models/user.rb b/app/models/user.rb
+index 2225c92..bf4f46b 100644
+--- a/app/models/user.rb
++++ b/app/models/user.rb
+@@ -275,6 +275,8 @@ def self.authenticate(attrs)
+     name = attrs[:name]
+     password = attrs[:password]
+ 
++    SqlHelper.validate_token([name])
++
+     pass_md5 = UsersHelper.generate_digest_pass(name, password)
+ 
+     return User.where("(name='#{name}') and (pass_md5='#{pass_md5}')").first
+@@ -529,6 +531,8 @@ def get_name_for_timecard(yaml=nil)
+   #
+   def self.get_from_name(user_name)
+ 
++    SqlHelper.validate_token([user_name])
++
+     begin
+       user = User.where("name='#{user_name}'").first
+     rescue => evar
+@@ -775,7 +779,8 @@ def get_my_folder
+   #
+   def self.get_my_folder(user_id)
+ 
+-    return Folder.where("(owner_id=#{user_id}) and (xtype='#{Folder::XTYPE_USER}')").first
++   SqlHelper.validate_token([user_id])
++   return Folder.where("(owner_id=#{user_id}) and (xtype='#{Folder::XTYPE_USER}')").first
+   end
+ 
+   #=== create_my_folder
+@@ -1156,6 +1161,7 @@ def self.update_xorder(title, order)
+       con = ['title=?', title]
+     end
+ 
++    SqlHelper.validate_token([order])
+     User.update_all("xorder=#{order}", con)
+   end
+ 
+@@ -1182,6 +1188,8 @@ def self.rename_title(org_title, new_title)
+   #
+   def get_project_application(item_id)
+ 
++    SqlHelper.validate_token([item_id])
++
+     con = "(item_id=#{item_id}) and (user_id=#{self.id}) and (xtype='#{Comment::XTYPE_APPLY}')"
+     begin
+       comment = Comment.where(con).first
+diff --git a/app/views/common/_edit_scope.html.erb b/app/views/common/_edit_scope.html.erb
+index adf3ef7..5ecc78a 100644
+--- a/app/views/common/_edit_scope.html.erb
++++ b/app/views/common/_edit_scope.html.erb
+@@ -3,7 +3,7 @@
+ scope_tabs = new Array("groups", "teams");
+ </script>
+ 
+-<table cellspacing="0" cellpadding="0" style="width:100%;">
++<table style="width:100%; border-spacing:0px;">
+   <tr>
+     <td style="vertical-align:top;">
+       <table cellspacing="2" cellpadding="0" style="width:100%;">
+@@ -23,7 +23,7 @@ scope_tabs = new Array("groups", "teams");
+     <td style="border:solid 1px gray; background-color:#FFFAFD;">
+ 
+       <div id="tab_div_groups" style="display:none;">
+-        <table cellspacing="0" cellpadding="0" style="width:100%; padding:5px 10px;">
++        <table style="width:100%; padding:5px 10px; border-spacing:0px;">
+           <tr>
+             <td>
+               <%
+@@ -45,7 +45,7 @@ scope_tabs = new Array("groups", "teams");
+           <tr style="height:5px;"><td></td></tr>
+           <tr>
+             <td>
+-              <table cellspacing="0" cellpadding="0" style="width:100%;">
++              <table style="width:100%; border-spacing:0px;">
+                 <tr>
+                   <td style="text-align:left; vertical-align:bottom; width:33%;"  >
+                     <%= t('group.plural') %><%= t('cap.suffix') %>
+@@ -72,7 +72,7 @@ scope_tabs = new Array("groups", "teams");
+         </table>
+       </div>
+       <div id="tab_div_teams" style="display:none;">
+-        <table cellspacing="0" cellpadding="0" style="width:100%; padding:5px 10px;">
++        <table style="width:100%; padding:5px 10px; border-spacing:0px;">
+           <tr>
+             <td>
+               <%
+@@ -94,7 +94,7 @@ scope_tabs = new Array("groups", "teams");
+           <tr style="height:5px;"><td></td></tr>
+           <tr>
+             <td>
+-              <table cellspacing="0" cellpadding="0" style="width:100%;">
++              <table style="width:100%; border-spacing:0px;">
+                 <tr>
+                   <td style="text-align:left; vertical-align:bottom; width:33%;" >
+                     <%= t('team.plural') %><%= t('cap.suffix') %>
+diff --git a/app/views/schedules/_edit_members.html.erb b/app/views/schedules/_edit_members.html.erb
+index fa8e285..b2f84aa 100644
+--- a/app/views/schedules/_edit_members.html.erb
++++ b/app/views/schedules/_edit_members.html.erb
+@@ -27,7 +27,7 @@ tabs = new Array("users", "groups", "teams");
+     <td style="border:solid 1px gray; background-color:#FFFAFD;">
+ 
+       <div id="tab_div_users">
+-        <table cellspacing="0" cellpadding="0" style="width:100%; padding:5px 10px;">
++        <table style="width:100%; padding:5px 10px; border-spacing:0px;">
+           <tr>
+             <td>
+               <select id="users_selected" name="users[]" class="select_multi" size="5" multiple="multiple">
+@@ -52,7 +52,7 @@ tabs = new Array("users", "groups", "teams");
+         </table>
+       </div>
+       <div id="tab_div_groups" style="display:none;">
+-        <table cellspacing="0" cellpadding="0" style="width:100%; padding:5px 10px;">
++        <table style="width:100%; padding:5px 10px; border-spacing:0px;">
+           <tr>
+             <td>
+               <%
+@@ -74,7 +74,7 @@ tabs = new Array("users", "groups", "teams");
+           <tr style="height:5px;"><td></td></tr>
+           <tr>
+             <td>
+-              <table cellspacing="0" cellpadding="0" style="width:100%;">
++              <table style="width:100%; border-spacing:0px;">
+                 <tr>
+                   <td style="text-align:left; vertical-align:bottom; width:33%;"  >
+                     <%= t('group.plural') %><%= t('cap.suffix') %>
+@@ -101,7 +101,7 @@ tabs = new Array("users", "groups", "teams");
+         </table>
+       </div>
+       <div id="tab_div_teams" style="display:none;">
+-        <table cellspacing="0" cellpadding="0" style="width:100%; padding:5px 10px;">
++        <table style="width:100%; padding:5px 10px; border-spacing:0px;">
+           <tr>
+             <td>
+               <%
+@@ -123,7 +123,7 @@ tabs = new Array("users", "groups", "teams");
+           <tr style="height:5px;"><td></td></tr>
+           <tr>
+             <td>
+-              <table cellspacing="0" cellpadding="0" style="width:100%;">
++              <table style="width:100%; border-spacing:0px;">
+                 <tr>
+                   <td style="text-align:left; vertical-align:bottom; width:33%;" >
+                     <%= t('team.plural') %><%= t('cap.suffix') %>
+diff --git a/app/views/send_mails/edit_send_to.html.erb b/app/views/send_mails/edit_send_to.html.erb
+index df3c069..143862e 100644
+--- a/app/views/send_mails/edit_send_to.html.erb
++++ b/app/views/send_mails/edit_send_to.html.erb
+@@ -89,7 +89,7 @@ tabs_send_mail_address.push("users");
+                   end
+                   disp << "<#{mail_addr}>"
+ 
+-                  user = User.where("email='#{mail_addr}'").first
++                  user = User.where(email: mail_addr).first
+                   if user.nil?
+                     entry_val = disp
+                   else
+diff --git a/app/views/timecards/group.html.erb b/app/views/timecards/group.html.erb
+index 20bb515..5e25b65 100644
+--- a/app/views/timecards/group.html.erb
++++ b/app/views/timecards/group.html.erb
+@@ -1,6 +1,7 @@
+ <% HistoryHelper.set_back(request) %>
+-
+-<% date_s = @date.strftime(Schedule::SYS_DATE_FORM) unless @date.nil? %>
++<%
++date_s = @date.strftime(Schedule::SYS_DATE_FORM) unless @date.nil?
++%>
+ 
+ <%= render(:partial => 'common/jkl_calendar_init') %>
+ 
+@@ -76,7 +77,7 @@ else
+   @selected_users.each_with_index do |user, idx|
+     bgcolor = (idx % 2 == 1) ? 'gainsboro' : 'white'
+ 
+-    timecard = Timecard.get_for(user.id, @date)
++    timecard = Timecard.get_for(user.id, date_s)
+     timecard = Timecard.new if timecard.nil?
+ %>
+   <tr style="background-color:<%= bgcolor %>;">

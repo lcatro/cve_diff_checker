@@ -1,0 +1,642 @@
+From e563ca61e4f3b7210cb61f53284adaa8aef4a49a Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Thu, 28 Jan 2016 10:54:36 +0100
+Subject: [PATCH] Fix other CSRF issues
+
+Cross-Site Request Forgery (CSRF)
+---------------------------------
+
+Following a number of CSRF reports, the Revive Team has conducted a security
+audit of the admin interface scripts in order to identify and fix other
+potential CSRF vulnerabilities.
+
+The effort led to fixing 20+ such issues: please see the commit for the full
+list of files affected.
+
+A CVE-ID has been requested, but not assigned yet.
+
+CWE: CWE-352
+CVSSv2: 5 (AV:N/AC:L/Au:N/C:N/I:N/A:P)
+---
+ lib/OA/Admin/Template.php                     |  2 +
+ lib/max/Admin/Inventory/TrackerAppend.php     |  1 +
+ .../Admin/Inventory/themes/TrackerAppend.html |  3 +-
+ lib/max/other/html.php                        | 41 ++++++++++++++-----
+ lib/templates/admin/campaign-zone.html        |  5 +++
+ www/admin/banner-modify.php                   |  4 +-
+ www/admin/campaign-modify.php                 |  2 +
+ www/admin/campaign-zone-link.php              |  5 ++-
+ www/admin/channel-acl.php                     |  2 +
+ www/admin/channel-modify.php                  |  2 +
+ www/admin/lib-maintenance-priority.inc.php    |  2 +-
+ www/admin/maintenance-acl-check.php           |  3 ++
+ www/admin/maintenance-appendcode-check.php    |  3 ++
+ www/admin/maintenance-banners-check.php       |  3 ++
+ www/admin/maintenance-encoding.php            |  3 ++
+ www/admin/maintenance-menus.php               |  4 +-
+ www/admin/maintenance-plugins.php             | 16 +++++---
+ www/admin/maintenance-priority-calculate.php  |  1 +
+ www/admin/maintenance-priority.php            |  2 +-
+ www/admin/maintenance-storage-move.php        |  1 +
+ www/admin/maintenance-storage.php             |  2 +-
+ www/admin/run-mpe.php                         |  1 +
+ www/admin/tracker-append.php                  |  2 +
+ www/admin/tracker-variables.php               |  3 ++
+ www/admin/updates-history.php                 |  3 ++
+ www/admin/zone-modify.php                     |  1 +
+ 26 files changed, 92 insertions(+), 25 deletions(-)
+
+diff --git a/lib/OA/Admin/Template.php b/lib/OA/Admin/Template.php
+index cd41beab89..0234b11b09 100644
+--- a/lib/OA/Admin/Template.php
++++ b/lib/OA/Admin/Template.php
+@@ -119,6 +119,8 @@ function init($templateName)
+          */
+         $this->register_function('rv_add_session_token', array('OA_Admin_Template', '_add_session_token'));
+ 
++        // Also assign a template variable for other usages
++        $this->assign("csrfToken", phpAds_SessionGetToken());
+     }
+ 
+     /**
+diff --git a/lib/max/Admin/Inventory/TrackerAppend.php b/lib/max/Admin/Inventory/TrackerAppend.php
+index 314b3ed66a..33948d90bb 100644
+--- a/lib/max/Admin/Inventory/TrackerAppend.php
++++ b/lib/max/Admin/Inventory/TrackerAppend.php
+@@ -46,6 +46,7 @@ function __construct()
+     {
+         $this->_useDefaultDal();
+ 
++        $this->csrf_token    = phpAds_SessionGetToken();
+         $this->advertiser_id = MAX_getValue('clientid', 0);
+         $this->tracker_id    = MAX_getValue('trackerid', 0);
+         $this->assetPath 	 = OX::assetPath();
+diff --git a/lib/max/Admin/Inventory/themes/TrackerAppend.html b/lib/max/Admin/Inventory/themes/TrackerAppend.html
+index 332f5e9e88..3056792deb 100644
+--- a/lib/max/Admin/Inventory/themes/TrackerAppend.html
++++ b/lib/max/Admin/Inventory/themes/TrackerAppend.html
+@@ -13,7 +13,7 @@
+ function MMM_trackerAction(action, id)
+ {
+     var f = document.getElementById('trackerAppendForm');
+-    
++
+     f.t_action.value = action;
+     f.t_id.value = id;
+     f.submit();
+@@ -26,6 +26,7 @@
+ <span class='tab-s'>You have unsaved changes on this page, make sure you press &quot;Save Changes&quot; when finished</span><br>
+ </div>
+ <form id="trackerAppendForm" class="section" method="post">
++    <input type="hidden" name="token" value="{csrf_token}" />
+     <input type="hidden" name="clientid" value="{advertiser_id}" />
+     <input type="hidden" name="trackerid" value="{tracker_id}" />
+     <input type="hidden" name="t_action" />
+diff --git a/lib/max/other/html.php b/lib/max/other/html.php
+index 87c69f1c0e..0e6bc05df3 100644
+--- a/lib/max/other/html.php
++++ b/lib/max/other/html.php
+@@ -1147,6 +1147,7 @@ function MAX_displayAcls($acls, $aParams)
+     $conf = $GLOBALS['_MAX']['CONF'];
+ 
+     echo "<form action='{$page}' method='post'>";
++    echo "<input type='hidden' name='token' value='".urlencode(phpAds_SessionGetToken())."' />";
+ 
+     echo "<label><img src='" . OX::assetPath() . "/images/icon-acl-add.gif' align='absmiddle'>&nbsp;". $GLOBALS['strACLAdd'] .": &nbsp;";
+     echo "<select name='type' accesskey='{$GLOBALS['keyAddNew']}' tabindex='".($tabindex++)."'>";
+@@ -1689,11 +1690,14 @@ function addAdvertiserPageToolsAndShortcuts($advertiserId)
+ function addTrackerPageTools($advertiserId, $trackerId, $aOtherAdvertisers)
+ {
+     if (OA_Permission::isAccount(OA_ACCOUNT_ADMIN) || OA_Permission::isAccount(OA_ACCOUNT_MANAGER)) {
++        $token = phpAds_SessionGetToken();
++
+         //duplicate
+-        addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "tracker-modify.php?clientid=".$advertiserId."&trackerid=".$trackerId."&duplicate=true&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconTrackerDuplicate");
++        addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "tracker-modify.php?token=".urlencode($token)."&clientid=".$advertiserId."&trackerid=".$trackerId."&duplicate=true&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconTrackerDuplicate");
+ 
+         //move to
+         $form  = "<form action='" . MAX::constructUrl(MAX_URL_ADMIN, 'tracker-modify.php') . "'>
++            <input type='hidden' name='token' value='".htmlspecialchars($token, ENT_QUOTES)."'>
+             <input type='hidden' name='trackerid' value='$trackerId'
+             <input type='hidden' name='clientid' value='$advertiserId'
+             <input type='hidden' name='returnurl' value='tracker-edit.php'>
+@@ -1706,7 +1710,7 @@ function addTrackerPageTools($advertiserId, $trackerId, $aOtherAdvertisers)
+ 
+         //delete
+         $deleteConfirm = phpAds_DelConfirm($GLOBALS['strConfirmDeleteTracker']);
+-        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "tracker-delete.php?token=" . urlencode(phpAds_SessionGetToken()) . "&clientid=".$advertiserId."&trackerid=".$trackerId."&returnurl=advertiser-trackers.php"), "iconDelete", null, $deleteConfirm);
++        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "tracker-delete.php?token=".urlencode($token)."&clientid=".$advertiserId."&trackerid=".$trackerId."&returnurl=advertiser-trackers.php"), "iconDelete", null, $deleteConfirm);
+         addPageShortcut($GLOBALS['strBackToTrackers'], MAX::constructUrl(MAX_URL_ADMIN, "advertiser-trackers.php?clientid=$advertiserId"), "iconBack");
+     }
+ }
+@@ -1717,13 +1721,17 @@ function addCampaignPageTools($clientid, $campaignid, $aOtherAdvertisers, $aEnti
+     global $phpAds_TextDirection;
+ 
+     if (!OA_Permission::isAccount(OA_ACCOUNT_ADVERTISER)) {
+-        addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "campaign-modify.php?duplicate=1&clientid=$clientid&campaignid=$campaignid&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconCampaignDuplicate");
++
++        $token = phpAds_SessionGetToken();
++
++        addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "campaign-modify.php?token=".urlencode($token)."&duplicate=1&clientid=$clientid&campaignid=$campaignid&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconCampaignDuplicate");
+ 
+         if (OA_Permission::hasAccessToObject('campaigns', $campaignid, OA_Permission::OPERATION_MOVE)) {
+             $form = "<form action='" . MAX::constructUrl(MAX_URL_ADMIN, 'campaign-modify.php') . "'>
++            <input type='hidden' name='token' value='".htmlspecialchars($token, ENT_QUOTES)."'>
+             <input type='hidden' name='clientid' value='$clientid'>
+             <input type='hidden' name='campaignid' value='$campaignid'>
+-            <input type='hidden' name='returnurl' value='".htmlspecialchars(basename($_SERVER['SCRIPT_NAME']))."'>
++            <input type='hidden' name='returnurl' value='".htmlspecialchars(basename($_SERVER['SCRIPT_NAME'], ENT_QUOTES))."'>
+             <select name='newclientid'>";
+                 $aOtherAdvertisers = _multiSort($aOtherAdvertisers,'name','advertiser_id');
+                 foreach ($aOtherAdvertisers as $aOtherAdvertiser) {
+@@ -1740,7 +1748,7 @@ function addCampaignPageTools($clientid, $campaignid, $aOtherAdvertisers, $aEnti
+         }
+ 
+         $deleteConfirm = phpAds_DelConfirm($GLOBALS['strConfirmDeleteCampaign']);
+-        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "campaign-delete.php?token=" . urlencode(phpAds_SessionGetToken()) . "&clientid=$clientid&campaignid=$campaignid&returnurl=advertiser-campaigns.php"), "iconDelete", null, $deleteConfirm);
++        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "campaign-delete.php?token=".urlencode($token)."&clientid=$clientid&campaignid=$campaignid&returnurl=advertiser-campaigns.php"), "iconDelete", null, $deleteConfirm);
+     }
+ 
+     //shortcuts
+@@ -1761,16 +1769,20 @@ function addCampaignPageTools($clientid, $campaignid, $aOtherAdvertisers, $aEnti
+ 
+ function addBannerPageTools($advertiserId, $campaignId, $bannerId, $aOtherCampaigns, $aOtherBanners, $aEntities)
+ {
++    global $phpAds_TextDirection;
++
+     if (empty($bannerId)) {
+         return;
+     }
+ 
+-    global $phpAds_TextDirection;
++    $token = phpAds_SessionGetToken();
++
+     //duplicate
+-    addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "banner-modify.php?duplicate=true&clientid=$advertiserId&campaignid=$campaignId&bannerid=$bannerId&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconBannerDuplicate");
++    addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "banner-modify.php?token=".urlencode($token)."&duplicate=true&clientid=$advertiserId&campaignid=$campaignId&bannerid=$bannerId&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconBannerDuplicate");
+ 
+     //move to
+     $form = "<form action='" . MAX::constructUrl(MAX_URL_ADMIN, 'banner-modify.php') . "'>
++    <input type='hidden' name='token' value='".htmlspecialchars($token, ENT_QUOTES)."'>
+     <input type='hidden' name='clientid' value='$advertiserId'>
+     <input type='hidden' name='campaignid' value='$campaignId'>
+     <input type='hidden' name='bannerid' value='$bannerId'>
+@@ -1795,6 +1807,7 @@ function addBannerPageTools($advertiserId, $campaignId, $bannerId, $aOtherCampai
+     //apply to
+     if (basename($_SERVER['SCRIPT_NAME']) == 'banner-acl.php') {
+         $form = "<form action='" . MAX::constructUrl(MAX_URL_ADMIN, 'banner-modify.php') . "'>
++        <input type='hidden' name='token' value='".htmlspecialchars($token, ENT_QUOTES)."'>
+         <input type='hidden' name='clientid' value='$advertiserId'>
+         <input type='hidden' name='campaignid' value='$campaignId'>
+         <input type='hidden' name='bannerid' value='$bannerId'>
+@@ -1815,7 +1828,7 @@ function addBannerPageTools($advertiserId, $campaignId, $bannerId, $aOtherCampai
+     //delete
+     if (!OA_Permission::isAccount(OA_ACCOUNT_ADVERTISER)) {
+         $deleteConfirm = phpAds_DelConfirm($GLOBALS['strConfirmDeleteBanner']);
+-        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "banner-delete.php?token=" . urlencode(phpAds_SessionGetToken()) . "&clientid=$advertiserId&campaignid=$campaignId&bannerid=$bannerId&returnurl=campaign-banners.php"), "iconDelete", null, $deleteConfirm);
++        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "banner-delete.php?token=".urlencode($token)."&clientid=$advertiserId&campaignid=$campaignId&bannerid=$bannerId&returnurl=campaign-banners.php"), "iconDelete", null, $deleteConfirm);
+     }
+ 
+     /* Shortcuts */
+@@ -1840,6 +1853,9 @@ function addWebsitePageTools($websiteId)
+ function addZonePageTools($affiliateid, $zoneid, $aOtherPublishers, $aEntities)
+ {
+     global $phpAds_TextDirection;
++
++    $token = phpAds_SessionGetToken();
++
+     //duplicate
+     if (OA_Permission::isAccount(OA_ACCOUNT_ADMIN)
+         || OA_Permission::isAccount(OA_ACCOUNT_MANAGER)
+@@ -1851,6 +1867,7 @@ function addZonePageTools($affiliateid, $zoneid, $aOtherPublishers, $aEntities)
+     if (OA_Permission::isAccount(OA_ACCOUNT_ADMIN)
+         || OA_Permission::isAccount(OA_ACCOUNT_MANAGER)) {
+         $form = "<form action='" . MAX::constructUrl(MAX_URL_ADMIN, 'zone-modify.php') . "'>
++        <input type='hidden' name='token' value='".htmlspecialchars($token, ENT_QUOTES)."'>
+         <input type='hidden' name='affiliateid' value='$affiliateid'>
+         <input type='hidden' name='zoneid' value='$zoneid'>
+         <input type='hidden' name='returnurl' value='".htmlspecialchars(basename($_SERVER['SCRIPT_NAME']))."'>
+@@ -1872,7 +1889,7 @@ function addZonePageTools($affiliateid, $zoneid, $aOtherPublishers, $aEntities)
+        || OA_Permission::isAccount(OA_ACCOUNT_MANAGER)
+        || OA_Permission::hasPermission(OA_PERM_ZONE_DELETE)) {
+         $deleteConfirm = phpAds_DelConfirm($GLOBALS['strConfirmDeleteZone']);
+-        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "zone-delete.php?token=" . urlencode(phpAds_SessionGetToken()) . "&affiliateid=$affiliateid&zoneid=$zoneid&returnurl=affiliate-zones.php"), "iconDelete", null, $deleteConfirm);
++        addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "zone-delete.php?token=".urlencode($token)."&affiliateid=$affiliateid&zoneid=$zoneid&returnurl=affiliate-zones.php"), "iconDelete", null, $deleteConfirm);
+     }
+ 
+     //shortcut
+@@ -1890,12 +1907,14 @@ function addChannelPageTools($agencyid, $websiteId, $channelid, $channelType)
+         $deleteReturlUrl = MAX::constructUrl(MAX_URL_ADMIN, 'channel-index.php');
+     }
+ 
++    $token = phpAds_SessionGetToken();
++
+     //duplicate
+-    addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "channel-modify.php?duplicate=true&agencyid=$agencyid&affiliateid=$websiteId&channelid=$channelid&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconTargetingChannelDuplicate");
++    addPageLinkTool($GLOBALS["strDuplicate"], MAX::constructUrl(MAX_URL_ADMIN, "channel-modify.php?token=".urlencode($token)."&duplicate=true&agencyid=$agencyid&affiliateid=$websiteId&channelid=$channelid&returnurl=".urlencode(basename($_SERVER['SCRIPT_NAME']))), "iconTargetingChannelDuplicate");
+ 
+     //delete
+     $deleteConfirm = phpAds_DelConfirm($GLOBALS['strConfirmDeleteChannel']);
+-    addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "channel-delete.php?token=" . urlencode(phpAds_SessionGetToken()) . "&agencyid=$agencyid&affiliateid=$websiteId&channelid=$channelid&returnurl=$deleteReturlUrl"), "iconDelete", null, $deleteConfirm);
++    addPageLinkTool($GLOBALS["strDelete"], MAX::constructUrl(MAX_URL_ADMIN, "channel-delete.php?token=".urlencode($token)."&agencyid=$agencyid&affiliateid=$websiteId&channelid=$channelid&returnurl=$deleteReturlUrl"), "iconDelete", null, $deleteConfirm);
+ }
+ 
+ 
+diff --git a/lib/templates/admin/campaign-zone.html b/lib/templates/admin/campaign-zone.html
+index e24f913b1f..f635f1f72d 100644
+--- a/lib/templates/admin/campaign-zone.html
++++ b/lib/templates/admin/campaign-zone.html
+@@ -13,6 +13,7 @@
+ 
+ <form id="zoneLinkingForm">
+ <div id="campaign-zone" class="new-form">
++  <input id="csrf-token" type="hidden" value="{$csrfToken|escape}" />
+   <input id="advertiser-id" type="hidden" value="{$advertiserId}" />
+   <input id="campaign-id" type="hidden" value="{$campaignId}" />
+ 
+@@ -213,6 +214,7 @@ <h3 class="filter-panel-title">{t str=LinkedZones}</h3>
+     }
+ 
+     var postData = {
++      "token": $("#csrf-token").val(),
+       "clientid": $("#advertiser-id").val(),
+       "campaignid": $("#campaign-id").val(),
+       "text-linked": quickSearchLinked,
+@@ -238,6 +240,9 @@ <h3 class="filter-panel-title">{t str=LinkedZones}</h3>
+           updatePanel(data, "available");
+           updatePanel(data, "linked");
+ 
++          // Refresh token
++          $("#csrf-token").val(extractPart(data, "value", "token"));
++
+ 	        $("#linking-status").html(extractPart(data, "info", "result")).stop().show().css("opacity", "1");
+ 	        if (window.linkingTimout) {
+ 	          window.linkingTimout.clearTimeout();
+diff --git a/www/admin/banner-modify.php b/www/admin/banner-modify.php
+index 421d79282c..67817fd156 100644
+--- a/www/admin/banner-modify.php
++++ b/www/admin/banner-modify.php
+@@ -31,13 +31,13 @@
+ // Security check
+ OA_Permission::enforceAccount(OA_ACCOUNT_MANAGER);
+ 
+-OA_Permission::checkSessionToken();
+-
+ /*-------------------------------------------------------*/
+ /* Main code                                             */
+ /*-------------------------------------------------------*/
+ 
+ if (!empty($bannerid)) {
++    OA_Permission::checkSessionToken();
++
+     OA_Permission::enforceAccessToObject('banners', $bannerid);
+ 
+     if (!empty($moveto) && isset($moveto_x)) {
+diff --git a/www/admin/campaign-modify.php b/www/admin/campaign-modify.php
+index dbf4008a9a..d33170736d 100644
+--- a/www/admin/campaign-modify.php
++++ b/www/admin/campaign-modify.php
+@@ -43,6 +43,8 @@
+ /*-------------------------------------------------------*/
+ 
+ if (!empty($campaignid)) {
++    OA_Permission::checkSessionToken();
++
+     if (!empty($duplicate)) {
+     	// Duplicate the campaign
+     	$doCampaigns = OA_Dal::factoryDO('campaigns');
+diff --git a/www/admin/campaign-zone-link.php b/www/admin/campaign-zone-link.php
+index 55df6d4530..e9c73a7a57 100644
+--- a/www/admin/campaign-zone-link.php
++++ b/www/admin/campaign-zone-link.php
+@@ -38,6 +38,8 @@
+ OA_Permission::enforceAccount ( OA_ACCOUNT_MANAGER );
+ OA_Permission::enforceAccessToObject ( 'campaigns', $campaignid );
+ 
++OA_Permission::checkSessionToken();
++
+ $aZonesIds = array();
+ $aZonesIdsHash = array();
+ foreach ($_REQUEST['ids'] as $zone) {
+@@ -103,4 +105,5 @@
+ };
+ echo "<!--result-info-end-->";
+ 
+-?>
++// CSRF Token
++echo "<!--token-value-start-->".phpAds_SessionGetToken()."<!--token-value-end-->";
+diff --git a/www/admin/channel-acl.php b/www/admin/channel-acl.php
+index 694a46c255..ec8744935f 100644
+--- a/www/admin/channel-acl.php
++++ b/www/admin/channel-acl.php
+@@ -59,6 +59,8 @@
+     $acl = MAX_AclAdjust($acl, $action);
+ }
+ elseif (!empty($submit)) {
++    OA_Permission::checkSessionToken();
++
+     $acl = (isset($acl)) ? $acl : array();
+     // Only save when inputs are valid
+     if (OX_AclCheckInputsFields($acl, $pageName) === true) {
+diff --git a/www/admin/channel-modify.php b/www/admin/channel-modify.php
+index 5fc81573cd..cde27af561 100644
+--- a/www/admin/channel-modify.php
++++ b/www/admin/channel-modify.php
+@@ -34,6 +34,8 @@
+ 
+ // Security check
+ if (isset($channelid) && $channelid != '') {
++    OA_Permission::checkSessionToken();
++
+     if (isset($duplicate) && $duplicate == 'true') {
+ 
+         //get channel old channel name
+diff --git a/www/admin/lib-maintenance-priority.inc.php b/www/admin/lib-maintenance-priority.inc.php
+index c0c2e242cd..8b48255b4e 100644
+--- a/www/admin/lib-maintenance-priority.inc.php
++++ b/www/admin/lib-maintenance-priority.inc.php
+@@ -13,7 +13,7 @@
+ function OA_runMPE()
+ {
+     $objResponse = new xajaxResponse();
+-    $objResponse->addAssign("run-mpe", "innerHTML", "<img src='run-mpe.php' />");
++    $objResponse->addAssign("run-mpe", "innerHTML", "<img src='run-mpe.ph?token=".urlencode(phpAds_SessionGetToken())."' />");
+     return $objResponse;
+ }
+ 
+diff --git a/www/admin/maintenance-acl-check.php b/www/admin/maintenance-acl-check.php
+index 56e3404f12..d0aab95cac 100644
+--- a/www/admin/maintenance-acl-check.php
++++ b/www/admin/maintenance-acl-check.php
+@@ -38,6 +38,8 @@
+ /*-------------------------------------------------------*/
+ 
+ if (!empty($action) && ($action == 'Recompile')) {
++    OA_Permission::checkSessionToken();
++
+     MAX_AclReCompileAll();
+     echo "<strong>$strAllBannerChannelCompiled</strong><br />";
+ }
+@@ -94,6 +96,7 @@
+     echo "<br /><strong>". $strErrorsFound ."</strong><br /><br />";
+     echo $strRepairCompiledLimitations;
+     echo "<form action='' METHOD='GET'>";
++    echo "<input type='hidden' name='token' value='".htmlspecialchars(phpAds_SessionGetToken(), ENT_QUOTES)."' />";
+     echo "<input type='submit' name='action' value='$strRecompile' />";
+     echo "</form>";
+ }
+diff --git a/www/admin/maintenance-appendcode-check.php b/www/admin/maintenance-appendcode-check.php
+index 4b523282a2..9b5ff463f1 100644
+--- a/www/admin/maintenance-appendcode-check.php
++++ b/www/admin/maintenance-appendcode-check.php
+@@ -40,6 +40,8 @@
+ $tr = new MAX_Dal_Inventory_Trackers();
+ 
+ if (!empty($action) && ($action == 'Recompile')) {
++    OA_Permission::checkSessionToken();
++
+     $tr->recompileAppendCodes();
+     echo "<strong>$strAppendCodesRecompiled<br />";
+ }
+@@ -68,6 +70,7 @@
+     echo "<br /><strong>$strErrorsFound</strong><br /><br />";
+     echo "$strRepairAppenedCodes<br />";
+     echo "<form action='' METHOD='GET'>";
++    echo "<input type='hidden' name='token' value='".htmlspecialchars(phpAds_SessionGetToken(), ENT_QUOTES)."' />";
+     echo "<input type='submit' name='action' value='$strRecompile' />";
+     echo "</form>";
+ }
+diff --git a/www/admin/maintenance-banners-check.php b/www/admin/maintenance-banners-check.php
+index b91a947f4f..0be76615ca 100644
+--- a/www/admin/maintenance-banners-check.php
++++ b/www/admin/maintenance-banners-check.php
+@@ -32,6 +32,8 @@
+ /*-------------------------------------------------------*/
+ 
+ if (!empty($action) && ($action == 'Rebuild')) {
++    OA_Permission::checkSessionToken();
++
+     $result = processBanners(true);
+     if (empty($result['errors'])) {
+         if (empty($returnurl)) { $returnurl = 'maintenance-banners-check.php'; }
+@@ -57,6 +59,7 @@
+         _showPageHeader();
+         echo $GLOBALS['strBannerCacheDifferencesFound'];
+         echo "<form action='' METHOD='GET'>";
++        echo "<input type='hidden' name='token' value='".htmlspecialchars(phpAds_SessionGetToken(), ENT_QUOTES)."' />";
+         echo "<input type='submit' name='action' value='{$GLOBALS['strBannerCacheRebuildButton']}' />";
+         echo "</form>";
+     } else {
+diff --git a/www/admin/maintenance-encoding.php b/www/admin/maintenance-encoding.php
+index fbc2157cfc..f98bdf45f3 100644
+--- a/www/admin/maintenance-encoding.php
++++ b/www/admin/maintenance-encoding.php
+@@ -105,6 +105,8 @@
+ );
+ 
+ if (!empty($_POST['encConfirm'])) {
++    OA_Permission::checkSessionToken();
++
+     _iterateTableFields($aTableFields, true);
+     Header("Location: maintenance-maintenance.php");
+ }
+@@ -201,6 +203,7 @@ function _iterateTableFields($aTableFields, $execute = false)
+         }
+     }
+     echo "</table><br />";
++    echo "<input type='hidden' name='token' value='".htmlspecialchars(phpAds_SessionGetToken(), ENT_QUOTES)."' />";
+     echo "<input type='submit' name='encConfirm' value='{$GLOBALS['strConvert']}' /> <input type='button' name='encCancel' value='{$GLOBALS['strCancel']}' onclick='javascript:document.location = \"" . $_SERVER['SCRIPT_NAME'] . "\";' />";
+ }
+ 
+diff --git a/www/admin/maintenance-menus.php b/www/admin/maintenance-menus.php
+index e0e74b0f61..5cdb8981ba 100644
+--- a/www/admin/maintenance-menus.php
++++ b/www/admin/maintenance-menus.php
+@@ -40,6 +40,8 @@
+ 
+ if (!empty($action))
+ {
++    OA_Permission::checkSessionToken();
++
+     switch ($action)
+     {
+         case 'build':
+@@ -53,7 +55,7 @@
+ }
+ 
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-menus.php?action=build'>Rebuild Menu Cache</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-menus.php?action=build&amp;token=".urlencode(phpAds_SessionGetToken())."'>Rebuild Menu Cache</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+ 
+ 
+diff --git a/www/admin/maintenance-plugins.php b/www/admin/maintenance-plugins.php
+index 7f2869da77..c49e7392e3 100644
+--- a/www/admin/maintenance-plugins.php
++++ b/www/admin/maintenance-plugins.php
+@@ -40,6 +40,8 @@
+ 
+ if (!empty($action))
+ {
++    OA_Permission::checkSessionToken();
++
+     switch ($action)
+     {
+         case 'rep':
+@@ -116,19 +118,21 @@
+     }
+ }
+ 
++$token = 'token='.urlencode(phpAds_SessionGetToken()).'&amp;';
++
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=hook'>Rebuild Component Hooks Cache</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=hook'>Rebuild Component Hooks Cache</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=pref'>Rebuild Preferences List</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=pref'>Rebuild Preferences List</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=reg'>Rebuild Delivery Hooks Cache</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=reg'>Rebuild Delivery Hooks Cache</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=rep'>Plugin Report</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=rep'>Plugin Report</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=exp'>Export All Plugins</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=exp'>Export All Plugins</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+ 
+-/*echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?action=dep'>Check Dependencies</a>&nbsp;&nbsp;";
++/*echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-plugins.php?{$token}action=dep'>Check Dependencies</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();*/
+ if ($oTpl)
+ {
+diff --git a/www/admin/maintenance-priority-calculate.php b/www/admin/maintenance-priority-calculate.php
+index 2965c5a4cc..866537a584 100644
+--- a/www/admin/maintenance-priority-calculate.php
++++ b/www/admin/maintenance-priority-calculate.php
+@@ -20,6 +20,7 @@
+ 
+ // Security check
+ OA_Permission::enforceAccount(OA_ACCOUNT_ADMIN);
++OA_Permission::checkSessionToken();
+ 
+ /*-------------------------------------------------------*/
+ /* Main code                                             */
+diff --git a/www/admin/maintenance-priority.php b/www/admin/maintenance-priority.php
+index 1c3174984e..14ef5a86bf 100644
+--- a/www/admin/maintenance-priority.php
++++ b/www/admin/maintenance-priority.php
+@@ -117,7 +117,7 @@ function phpAds_showBanners()
+ echo "<br />";
+ 
+ // Show recalculate button
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-priority-calculate.php'>$strRecalculatePriority</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-priority-calculate.php?token=".urlencode(phpAds_SessionGetToken())."'>$strRecalculatePriority</a>&nbsp;&nbsp;";
+ echo "<br /><br />";
+ phpAds_ShowBreak();
+ 
+diff --git a/www/admin/maintenance-storage-move.php b/www/admin/maintenance-storage-move.php
+index 8a45d2b7d5..d10221e7f6 100644
+--- a/www/admin/maintenance-storage-move.php
++++ b/www/admin/maintenance-storage-move.php
+@@ -21,6 +21,7 @@
+ 
+ // Security check
+ OA_Permission::enforceAccount(OA_ACCOUNT_ADMIN);
++OA_Permission::checkSessionToken();
+ 
+ /*-------------------------------------------------------*/
+ /* Main code                                             */
+diff --git a/www/admin/maintenance-storage.php b/www/admin/maintenance-storage.php
+index ddd793e08d..13e72ba9a9 100644
+--- a/www/admin/maintenance-storage.php
++++ b/www/admin/maintenance-storage.php
+@@ -38,7 +38,7 @@
+ echo "<br /><br />";
+ 
+ phpAds_ShowBreak();
+-echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-storage-move.php'>$strMoveToDirectory</a>&nbsp;&nbsp;";
++echo "<img src='" . OX::assetPath() . "/images/".$phpAds_TextDirection."/icon-undo.gif' border='0' align='absmiddle'>&nbsp;<a href='maintenance-storage-move.php?token=".urlencode(phpAds_SessionGetToken())."'>$strMoveToDirectory</a>&nbsp;&nbsp;";
+ phpAds_ShowBreak();
+ 
+ 
+diff --git a/www/admin/run-mpe.php b/www/admin/run-mpe.php
+index 1b92e1d9fc..c75c885893 100644
+--- a/www/admin/run-mpe.php
++++ b/www/admin/run-mpe.php
+@@ -18,6 +18,7 @@
+ require_once MAX_PATH . '/lib/OA/Maintenance/Priority.php';
+ 
+ OA_Permission::enforceAccount(OA_ACCOUNT_MANAGER, OA_ACCOUNT_ADVERTISER);
++OA_Permission::checkSessionToken();
+ 
+ 
+ // Set longer time out, and ignore user abort
+diff --git a/www/admin/tracker-append.php b/www/admin/tracker-append.php
+index 8a81ad0c5d..685c458aed 100644
+--- a/www/admin/tracker-append.php
++++ b/www/admin/tracker-append.php
+@@ -40,6 +40,8 @@
+ header("Content-Type: text/html; charset=ISO-8859-1");
+ 
+ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
++    OA_Permission::checkSessionToken();
++
+     $trackerAppend->handlePost($_POST);
+ } else {
+     $trackerAppend->handleGet();
+diff --git a/www/admin/tracker-variables.php b/www/admin/tracker-variables.php
+index c99730eacd..6c4b392790 100644
+--- a/www/admin/tracker-variables.php
++++ b/www/admin/tracker-variables.php
+@@ -181,6 +181,8 @@
+     // has user clicked on save changes?
+     if (isset($action['save']))
+     {
++        OA_Permission::checkSessionToken();
++
+         // save variablemethod
+         $doTrackers = OA_Dal::factoryDO('trackers');
+         $doTrackers->get($trackerid);
+@@ -305,6 +307,7 @@
+ if (isset($trackerid) && $trackerid != '')
+ {
+             echo "<form action='".$_SERVER['SCRIPT_NAME']."?clientid=$clientid&trackerid=$trackerid' method='post' onsubmit='return m3_hideShowSubmit()'>\n";
++                echo "<input type='token' name='submit' value='".htmlspecialchars(phpAds_SessionGetToken(), ENT_QUOTES)."'>";
+                 echo "<input type='hidden' name='submit' value='true'>";
+                 echo "<input type='image' name='dummy' src='" . OX::assetPath() . "/images/spacer.gif' border='0' width='1' height='1'>\n";
+                 echo "<br /><br />\n";
+diff --git a/www/admin/updates-history.php b/www/admin/updates-history.php
+index 01d0d8a004..2b7a3526cf 100644
+--- a/www/admin/updates-history.php
++++ b/www/admin/updates-history.php
+@@ -99,6 +99,8 @@ function getDBAuditTable($aAudit)
+ 
+ if (array_key_exists('btn_clean_audit', $_POST))
+ {
++    OA_Permission::checkSessionToken();
++
+     $upgrade_id = $_POST['upgrade_action_id'];
+     $oUpgrader->oAuditor->cleanAuditArtifacts($upgrade_id);
+ }
+@@ -295,6 +297,7 @@ function getDBAuditTable($aAudit)
+                         </table>
+                     </td>
+                     <input type="hidden" name="upgrade_action_id" value="<?php echo $v['upgrade_action_id']; ?>" />
++                    <input type="hidden" name="token" value="<?php echo htmlspecialchars(phpAds_SessionGetToken()); ?>" />
+                 </tr>
+               </form>
+                 <tr height='1'><td colspan='7' bgcolor='#888888'><img src='<?php echo OX::assetPath() ?>/images/break.gif' height='1' width='100%'></td></tr>
+diff --git a/www/admin/zone-modify.php b/www/admin/zone-modify.php
+index 14807dbeb8..ea8fa75fc9 100644
+--- a/www/admin/zone-modify.php
++++ b/www/admin/zone-modify.php
+@@ -32,6 +32,7 @@
+ /*-------------------------------------------------------*/
+ 
+ if (isset($zoneid) && $zoneid != '') {
++    OA_Permission::checkSessionToken();
+ 
+     if (isset($newaffiliateid) && $newaffiliateid != '') {
+         // A publisher cannot move a zone to another publisher!

@@ -1,0 +1,36 @@
+From 5899741d0421391ca878da47907b1452f06aaf1b Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 6 May 2021 15:31:05 -0700
+Subject: [PATCH] Fix heap OOB read in dequantize op.
+
+Also fixes SEGV in same op
+
+PiperOrigin-RevId: 372437896
+Change-Id: I135e94d360c2a1ce374c10f7e0fed1af603dbc02
+---
+ tensorflow/core/kernels/dequantize_op.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/tensorflow/core/kernels/dequantize_op.cc b/tensorflow/core/kernels/dequantize_op.cc
+index 5393a677db242..7a90e0c340b09 100644
+--- a/tensorflow/core/kernels/dequantize_op.cc
++++ b/tensorflow/core/kernels/dequantize_op.cc
+@@ -98,6 +98,18 @@ class DequantizeOp : public OpKernel {
+     if (axis_ > -1) {
+       num_slices = input.dim_size(axis_);
+     }
++    OP_REQUIRES(ctx, input_min_tensor.NumElements() == num_slices,
++                errors::InvalidArgument(
++                    "input_min_tensor must have as many elements as input on "
++                    "the dequantization axis (",
++                    axis_, "), got ", input_min_tensor.NumElements(),
++                    ", expected ", num_slices));
++    OP_REQUIRES(ctx, input_max_tensor.NumElements() == num_slices,
++                errors::InvalidArgument(
++                    "input_max_tensor must have as many elements as input on "
++                    "the dequantization axis (",
++                    axis_, "), got ", input_max_tensor.NumElements(),
++                    ", expected ", num_slices));
+ 
+     Tensor* output = nullptr;
+     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, input.shape(), &output));

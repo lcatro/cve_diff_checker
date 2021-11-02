@@ -1,0 +1,176 @@
+From 759b72f33bc8f4d69f84f09fcb7f010ad45d6fff Mon Sep 17 00:00:00 2001
+From: Toomas Romer <toomas@zeroturnaround.com>
+Date: Thu, 26 Apr 2018 17:52:37 +0300
+Subject: [PATCH] Fixed potential security vulnerability reported by Snyk
+ Security Research Team
+
+This is an arbitrary file write vulnerability, that can be achieved using a specially crafted zip archive, that holds path traversal filenames. So when the filename gets concatenated to the target extraction directory, the final path ends up outside of the target folder.
+---
+ .../java/org/zeroturnaround/zip/ZipUtil.java  |  36 +++++++++++
+ .../zip/DirectoryTraversalMaliciousTest.java  |  61 ++++++++++++++++++
+ .../zip-malicious-traversal-backslashes.zip   | Bin 0 -> 511 bytes
+ .../resources/zip-malicious-traversal.zip     | Bin 0 -> 545 bytes
+ 4 files changed, 97 insertions(+)
+ create mode 100644 src/test/java/org/zeroturnaround/zip/DirectoryTraversalMaliciousTest.java
+ create mode 100644 src/test/resources/zip-malicious-traversal-backslashes.zip
+ create mode 100644 src/test/resources/zip-malicious-traversal.zip
+
+diff --git a/src/main/java/org/zeroturnaround/zip/ZipUtil.java b/src/main/java/org/zeroturnaround/zip/ZipUtil.java
+index 7ebc8dd..604866e 100644
+--- a/src/main/java/org/zeroturnaround/zip/ZipUtil.java
++++ b/src/main/java/org/zeroturnaround/zip/ZipUtil.java
+@@ -1150,6 +1150,15 @@ public void process(InputStream in, ZipEntry zipEntry) throws IOException {
+       String name = mapper.map(zipEntry.getName());
+       if (name != null) {
+         File file = new File(outputDir, name);
++
++        /* If we see the relative traversal string of ".." we need to make sure
++         * that the outputdir + name doesn't leave the outputdir. See
++         * DirectoryTraversalMaliciousTest for details.
++         */
++        if (name.indexOf("..") != -1 && !file.getCanonicalPath().startsWith(outputDir.getCanonicalPath())) {
++          throw new ZipException("The file "+name+" is trying to leave the target output directory of "+outputDir+". Ignoring this file.");
++        }
++
+         if (zipEntry.isDirectory()) {
+           FileUtils.forceMkdir(file);
+         }
+@@ -1218,11 +1227,29 @@ public void process(InputStream in, ZipEntry zipEntry) throws IOException {
+             parentDirectory = file;
+           }
+           File destFile = new File(parentDirectory, dirs[dirs.length - 1]);
++
++          /* If we see the relative traversal string of ".." we need to make sure
++           * that the outputdir + name doesn't leave the outputdir. See
++           * DirectoryTraversalMaliciousTest for details.
++           */
++          if (name.indexOf("..") != -1 && !destFile.getCanonicalPath().startsWith(outputDir.getCanonicalPath())) {
++            throw new ZipException("The file "+name+" is trying to leave the target output directory of "+outputDir+". Ignoring this file.");
++          }
++
+           FileUtils.copy(in, destFile);
+         }
+         // it could be that there are just top level files that the unpacker is used for
+         else {
+           File destFile = new File(outputDir, name);
++
++          /* If we see the relative traversal string of ".." we need to make sure
++           * that the outputdir + name doesn't leave the outputdir. See
++           * DirectoryTraversalMaliciousTest for details.
++           */
++          if (name.indexOf("..") != -1 && !destFile.getCanonicalPath().startsWith(outputDir.getCanonicalPath())) {
++            throw new ZipException("The file "+name+" is trying to leave the target output directory of "+outputDir+". Ignoring this file.");
++          }
++
+           FileUtils.copy(in, destFile);
+         }
+       }
+@@ -1258,6 +1285,15 @@ else if (!rootDir.equals(root)) {
+       String name = mapper.map(getUnrootedName(root, zipEntry.getName()));
+       if (name != null) {
+         File file = new File(outputDir, name);
++
++        /* If we see the relative traversal string of ".." we need to make sure
++         * that the outputdir + name doesn't leave the outputdir. See
++         * DirectoryTraversalMaliciousTest for details.
++         */
++        if (name.indexOf("..") != -1 && !file.getCanonicalPath().startsWith(outputDir.getCanonicalPath())) {
++          throw new ZipException("The file "+name+" is trying to leave the target output directory of "+outputDir+". Ignoring this file.");
++        }
++
+         if (zipEntry.isDirectory()) {
+           FileUtils.forceMkdir(file);
+         }
+diff --git a/src/test/java/org/zeroturnaround/zip/DirectoryTraversalMaliciousTest.java b/src/test/java/org/zeroturnaround/zip/DirectoryTraversalMaliciousTest.java
+new file mode 100644
+index 0000000..8eede3d
+--- /dev/null
++++ b/src/test/java/org/zeroturnaround/zip/DirectoryTraversalMaliciousTest.java
+@@ -0,0 +1,61 @@
++package org.zeroturnaround.zip;
++
++/**
++ *    Copyright (C) 2012 ZeroTurnaround LLC <support@zeroturnaround.com>
++ *
++ *    Licensed under the Apache License, Version 2.0 (the "License");
++ *    you may not use this file except in compliance with the License.
++ *    You may obtain a copy of the License at
++ *
++ *        http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *    Unless required by applicable law or agreed to in writing, software
++ *    distributed under the License is distributed on an "AS IS" BASIS,
++ *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *    See the License for the specific language governing permissions and
++ *    limitations under the License.
++ */
++import java.io.File;
++
++import junit.framework.TestCase;
++
++public class DirectoryTraversalMaliciousTest extends TestCase {
++  /*
++   * This is the contents of the file. There is one evil file that tries to get out of the
++   * target.
++   *
++   * $ unzip -t zip-slip.zip
++   * Archive: zip-slip.zip
++   * testing: good.txt OK
++   * testing: ../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../tmp/evil.txt OK
++   * No errors detected in compressed data of zip-slip.zip.
++   */
++  private static final File badFile = new File("src/test/resources/zip-malicious-traversal.zip");
++  private static final File badFileBackslashes = new File("src/test/resources/zip-malicious-traversal-backslashes.zip");
++
++  public void testUnpackDoesntLeaveTarget() throws Exception {
++    File file = File.createTempFile("temp", null);
++    File tmpDir = file.getParentFile();
++
++    try {
++      ZipUtil.unpack(badFile, tmpDir);
++      fail();
++    }
++    catch (ZipException e) {
++      assertTrue(true);
++    }
++  }
++
++  public void testUnwrapDoesntLeaveTarget() throws Exception {
++    File file = File.createTempFile("temp", null);
++    File tmpDir = file.getParentFile();
++
++    try {
++      ZipUtil.iterate(badFileBackslashes, new ZipUtil.BackslashUnpacker(tmpDir));
++      fail();
++    }
++    catch (ZipException e) {
++      assertTrue(true);
++    }
++  }
++}
+diff --git a/src/test/resources/zip-malicious-traversal-backslashes.zip b/src/test/resources/zip-malicious-traversal-backslashes.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..a67ff8b59185c0a02b74dbe467a48de46c5b9022
+GIT binary patch
+literal 511
+zcmWIWW@h1H0D=Au{XYEp{-1?`Y!DU%;^O?=)S~?Sl9=@T{1m;CijtCy%wh!~N>l)e
+zDCFm*as>cQ5CN)XV3-OtA;GcQ62t@H79iHsiy079l3NgyT9%oE;^;gDkPy_>j7)OO
+zxP1<EIs+pRFKGm^Fv20gn~_O`8Mn7Vnm}MlqZ5!EkPrY`iW~?5-mGjO7cl|hM<D$J
+H#9;sc*l>3)
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/test/resources/zip-malicious-traversal.zip b/src/test/resources/zip-malicious-traversal.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..38b3f499de0163e62ca15ce18350a9d9a477a51b
+GIT binary patch
+literal 545
+zcmWIWW@h1H0D=Au{XYEp{-1?`Y!K#PkYPyA&ri`SsVE5z;bdU8U359h4v0%DxEUB(
+zzA-W|u!sQFm1JZVD*#cV0!Xz&eqJh90MJm76a&LlprHwl)s`S02)6*So}T`Ippx7I
+z{nWC|9FT|Lj?Pm62|-=W$Rx*%D=;L0E@xl>dYWNLBZ!3v8dgZqpan~SHzSh>Gwx6T
+jnE?Vz8bg8PfCLE8QsgiR@MdKLxrhk}K_2A>d6oeH^pk5C
+
+literal 0
+HcmV?d00001
+

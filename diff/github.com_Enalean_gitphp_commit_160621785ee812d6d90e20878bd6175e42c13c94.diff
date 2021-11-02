@@ -1,0 +1,273 @@
+From 160621785ee812d6d90e20878bd6175e42c13c94 Mon Sep 17 00:00:00 2001
+From: Thomas Gerbet <thomas.gerbet@enalean.com>
+Date: Fri, 7 Jul 2017 14:11:47 +0200
+Subject: [PATCH] Fix shell injections
+
+No dynamic parameters should be passed shell_exec() without
+being properly escaped
+---
+ include/controller/Controller_GraphData.class.php |  4 ++--
+ include/git/FileBlame.class.php                   |  4 ++--
+ include/git/FileHistory.class.php                 | 10 +++++-----
+ include/git/FileSearch.class.php                  |  4 ++--
+ include/git/TreeDiff.class.php                    |  4 ++--
+ include/git/blob/BlobLoad_Base.class.php          |  2 +-
+ include/git/commit/CommitLoad_Base.class.php      |  2 +-
+ include/git/project/ProjectLoad_Git.class.php     |  4 ++--
+ include/git/reflist/RefListLoad_Git.class.php     | 10 +++++-----
+ include/git/revlist/RevList_Git.class.php         |  6 +++---
+ include/git/tag/TagLoad_Git.class.php             |  2 +-
+ include/git/tree/TreeLoad_Base.class.php          |  2 +-
+ include/git/tree/TreeLoad_Git.class.php           |  2 +-
+ 13 files changed, 28 insertions(+), 28 deletions(-)
+
+diff --git a/include/controller/Controller_GraphData.class.php b/include/controller/Controller_GraphData.class.php
+index f078819..70df10a 100644
+--- a/include/controller/Controller_GraphData.class.php
++++ b/include/controller/Controller_GraphData.class.php
+@@ -76,7 +76,7 @@ protected function LoadData()
+ 
+ 			$data = array();
+ 
+-			$commits = explode("\n", $this->exe->Execute($this->GetProject()->GetPath(), 'rev-list', array('--format=format:"%H %ct"', $head->GetHash())));
++			$commits = explode("\n", $this->exe->Execute($this->GetProject()->GetPath(), 'rev-list', array('--format=format:"%H %ct"', escapeshellarg($head->GetHash()))));
+ 			foreach ($commits as $commit) {
+ 				if (preg_match('/^([0-9a-fA-F]{40}) ([0-9]+)$/', $commit, $regs)) {
+ 					$data[] = array('CommitEpoch' => (int)$regs[2]);
+@@ -90,7 +90,7 @@ protected function LoadData()
+ 			include_once(GITPHP_GESHIDIR . "geshi.php");
+ 			$geshi = new GeSHi("",'php');
+ 
+-			$files = explode("\n", $this->exe->Execute($this->GetProject()->GetPath(), 'ls-tree', array('-r', '--name-only', $head->GetTree()->GetHash())));
++			$files = explode("\n", $this->exe->Execute($this->GetProject()->GetPath(), 'ls-tree', array('-r', '--name-only', escapeshellarg($head->GetTree()->GetHash()))));
+ 			foreach ($files as $file) {
+ 				$filename = GitPHP_Util::BaseName($file);
+ 				$lang = GitPHP_Util::GeshiFilenameToLanguage($filename);
+diff --git a/include/git/FileBlame.class.php b/include/git/FileBlame.class.php
+index 2040426..2ba440f 100644
+--- a/include/git/FileBlame.class.php
++++ b/include/git/FileBlame.class.php
+@@ -141,9 +141,9 @@ private function LoadData()
+ 		$args = array();
+ 		$args[] = '-s';
+ 		$args[] = '-l';
+-		$args[] = $this->commitHash;
++		$args[] = escapeshellarg($this->commitHash);
+ 		$args[] = '--';
+-		$args[] = $this->path;
++		$args[] = escapeshellarg($this->path);
+ 
+ 		$blamelines = explode("\n", $this->exe->Execute($this->project->GetPath(), GIT_BLAME, $args));
+ 
+diff --git a/include/git/FileHistory.class.php b/include/git/FileHistory.class.php
+index 11de28e..f3081ef 100644
+--- a/include/git/FileHistory.class.php
++++ b/include/git/FileHistory.class.php
+@@ -265,19 +265,19 @@ protected function LoadData()
+ 
+ 		if ($canSkip) {
+ 			if ($this->limit > 0) {
+-				$args[] = '--max-count=' . $this->limit;
++				$args[] = '--max-count=' . escapeshellarg($this->limit);
+ 			}
+ 			if ($this->skip > 0) {
+-				$args[] = '--skip=' . $this->skip;
++				$args[] = '--skip=' . escapeshellarg($this->skip);
+ 			}
+ 		} else {
+ 			if ($this->limit > 0) {
+-				$args[] = '--max-count=' . ($this->limit + $this->skip);
++				$args[] = '--max-count=' . escapeshellarg($this->limit + $this->skip);
+ 			}
+ 		}
+ 
+ 		$args[] = '--';
+-		$args[] = $this->path;
++		$args[] = escapeshellarg($this->path);
+ 		$args[] = '|';
+ 		$args[] = $this->exe->GetBinary();
+ 		$args[] = '--git-dir=' . escapeshellarg($this->project->GetPath());
+@@ -285,7 +285,7 @@ protected function LoadData()
+ 		$args[] = '-r';
+ 		$args[] = '--stdin';
+ 		$args[] = '--';
+-		$args[] = $this->path;
++		$args[] = escapeshellarg($this->path);
+ 		
+ 		$historylines = explode("\n", $this->exe->Execute($this->project->GetPath(), GIT_REV_LIST, $args));
+ 
+diff --git a/include/git/FileSearch.class.php b/include/git/FileSearch.class.php
+index f1f30d9..8e373c1 100644
+--- a/include/git/FileSearch.class.php
++++ b/include/git/FileSearch.class.php
+@@ -382,8 +382,8 @@ private function SearchFileContents()
+ 		$args[] = '--ignore-case';
+ 		$args[] = '-n';
+ 		$args[] = '-e';
+-		$args[] = '"' . addslashes($this->search) . '"';
+-		$args[] = $this->treeHash;
++		$args[] = escapeshellarg($this->search);
++		$args[] = escapeshellarg($this->treeHash);
+ 
+ 		$lines = explode("\n", $this->exe->Execute($this->project->GetPath(), GIT_GREP, $args));
+ 
+diff --git a/include/git/TreeDiff.class.php b/include/git/TreeDiff.class.php
+index bd3e8cf..573f0d3 100644
+--- a/include/git/TreeDiff.class.php
++++ b/include/git/TreeDiff.class.php
+@@ -121,9 +121,9 @@ private function ReadData()
+ 		if (empty($this->fromHash))
+ 			$args[] = '--root';
+ 		else
+-			$args[] = $this->fromHash;
++			$args[] = escapeshellarg($this->fromHash);
+ 
+-		$args[] = $this->toHash;
++		$args[] = escapeshellarg($this->toHash);
+ 
+ 		$diffTreeLines = explode("\n", $this->exe->Execute($this->GetProject()->GetPath(), GIT_DIFF_TREE, $args));
+ 		foreach ($diffTreeLines as $line) {
+diff --git a/include/git/blob/BlobLoad_Base.class.php b/include/git/blob/BlobLoad_Base.class.php
+index eb0bb39..424073a 100644
+--- a/include/git/blob/BlobLoad_Base.class.php
++++ b/include/git/blob/BlobLoad_Base.class.php
+@@ -42,7 +42,7 @@ protected function LoadSize($blob)
+ 
+ 		$args = array();
+ 		$args[] = '-s';
+-		$args[] = $blob->GetHash();
++		$args[] = escapeshellarg($blob->GetHash());
+ 
+ 		return $this->exe->Execute($blob->GetProject()->GetPath(), GIT_CAT_FILE, $args);
+ 	}
+diff --git a/include/git/commit/CommitLoad_Base.class.php b/include/git/commit/CommitLoad_Base.class.php
+index df6b265..c7d0e91 100644
+--- a/include/git/commit/CommitLoad_Base.class.php
++++ b/include/git/commit/CommitLoad_Base.class.php
+@@ -42,7 +42,7 @@ public function LoadContainingTag($commit)
+ 
+ 		$args = array();
+ 		$args[] = '--tags';
+-		$args[] = $commit->GetHash();
++		$args[] = escapeshellarg($commit->GetHash());
+ 		$revs = explode("\n", $this->exe->Execute($commit->GetProject()->GetPath(), GIT_NAME_REV, $args));
+ 
+ 		foreach ($revs as $revline) {
+diff --git a/include/git/project/ProjectLoad_Git.class.php b/include/git/project/ProjectLoad_Git.class.php
+index 70f642a..b64b7e1 100644
+--- a/include/git/project/ProjectLoad_Git.class.php
++++ b/include/git/project/ProjectLoad_Git.class.php
+@@ -89,7 +89,7 @@ public function ExpandHash($project, $abbrevHash)
+ 		$args = array();
+ 		$args[] = '-1';
+ 		$args[] = '--format=format:%H';
+-		$args[] = $abbrevHash;
++		$args[] = escapeshellarg($abbrevHash);
+ 
+ 		$fullData = explode("\n", $this->exe->Execute($project->GetPath(), GIT_REV_LIST, $args));
+ 		if (empty($fullData[0])) {
+@@ -125,7 +125,7 @@ public function AbbreviateHash($project, $hash)
+ 		$args = array();
+ 		$args[] = '-1';
+ 		$args[] = '--format=format:%h';
+-		$args[] = $hash;
++		$args[] = escapeshellarg($hash);
+ 
+ 		$abbrevData = explode("\n", $this->exe->Execute($project->GetPath(), GIT_REV_LIST, $args));
+ 		if (empty($abbrevData[0])) {
+diff --git a/include/git/reflist/RefListLoad_Git.class.php b/include/git/reflist/RefListLoad_Git.class.php
+index 805d3fc..b3c61c4 100644
+--- a/include/git/reflist/RefListLoad_Git.class.php
++++ b/include/git/reflist/RefListLoad_Git.class.php
+@@ -45,7 +45,7 @@ protected function GetRefs($refList, $type)
+ 			return;
+ 
+ 		$args = array();
+-		$args[] = '--' . $type;
++		$args[] = '--' . escapeshellarg($type);
+ 		$args[] = '--dereference';
+ 		$ret = $this->exe->Execute($refList->GetProject()->GetPath(), GIT_SHOW_REF, $args);
+ 
+@@ -86,17 +86,17 @@ protected function GetOrderedRefs($refList, $type, $order, $count = 0, $skip = 0
+ 			return null;
+ 
+ 		$args = array();
+-		$args[] = '--sort=' . $order;
++		$args[] = '--sort=' . escapeshellarg($order);
+ 		$args[] = '--format="%(refname)"';
+ 		if ($count > 0) {
+ 			if ($skip > 0) {
+-				$args[] = '--count=' . ($count + $skip);
++				$args[] = '--count=' . escapeshellarg($count + $skip);
+ 			} else {
+-				$args[] = '--count=' . $count;
++				$args[] = '--count=' . escapeshellarg($count);
+ 			}
+ 		}
+ 		$args[] = '--';
+-		$args[] = 'refs/' . $type;
++		$args[] = escapeshellarg('refs/' . $type);
+ 		$ret = $this->exe->Execute($refList->GetProject()->GetPath(), GIT_FOR_EACH_REF, $args);
+ 
+ 		$lines = explode("\n", $ret);
+diff --git a/include/git/revlist/RevList_Git.class.php b/include/git/revlist/RevList_Git.class.php
+index 5593ed2..5684601 100644
+--- a/include/git/revlist/RevList_Git.class.php
++++ b/include/git/revlist/RevList_Git.class.php
+@@ -52,14 +52,14 @@ public function RevList($project, $hash, $count, $skip = 0, $args = array())
+ 
+ 		if ($canSkip) {
+ 			if ($count > 0) {
+-				$extraargs[] = '--max-count=' . $count;
++				$extraargs[] = '--max-count=' . escapeshellarg($count);
+ 			}
+ 			if ($skip > 0) {
+-				$extraargs[] = '--skip=' . $skip;
++				$extraargs[] = '--skip=' . escapeshellarg($skip);
+ 			}
+ 		} else {
+ 			if ($count > 0) {
+-				$extraargs[] = '--max-count=' . ($count + $skip);
++				$extraargs[] = '--max-count=' . escapeshellarg($count + $skip);
+ 			}
+ 		}
+ 
+diff --git a/include/git/tag/TagLoad_Git.class.php b/include/git/tag/TagLoad_Git.class.php
+index e569751..3ac6eee 100644
+--- a/include/git/tag/TagLoad_Git.class.php
++++ b/include/git/tag/TagLoad_Git.class.php
+@@ -112,7 +112,7 @@ public function Load($tag)
+ 			case 'tag':
+ 				$args = array();
+ 				$args[] = 'tag';
+-				$args[] = $objectHash;
++				$args[] = escapeshellarg($objectHash);
+ 				$ret = $this->exe->Execute($tag->GetProject()->GetPath(), GIT_CAT_FILE, $args);
+ 				$lines = explode("\n", $ret);
+ 				foreach ($lines as $i => $line) {
+diff --git a/include/git/tree/TreeLoad_Base.class.php b/include/git/tree/TreeLoad_Base.class.php
+index 0104a52..35814f5 100644
+--- a/include/git/tree/TreeLoad_Base.class.php
++++ b/include/git/tree/TreeLoad_Base.class.php
+@@ -47,7 +47,7 @@ public function LoadHashPaths($tree)
+ 		$args[] = '--full-name';
+ 		$args[] = '-r';
+ 		$args[] = '-t';
+-		$args[] = $tree->GetHash();
++		$args[] = escapeshellarg($tree->GetHash());
+ 
+ 		$lines = explode("\n", $this->exe->Execute($tree->GetProject()->GetPath(), GIT_LS_TREE, $args));
+ 
+diff --git a/include/git/tree/TreeLoad_Git.class.php b/include/git/tree/TreeLoad_Git.class.php
+index 91a634e..fa12bac 100644
+--- a/include/git/tree/TreeLoad_Git.class.php
++++ b/include/git/tree/TreeLoad_Git.class.php
+@@ -29,7 +29,7 @@ public function Load($tree)
+ 		if ($this->exe->CanShowSizeInTree())
+ 			$args[] = '-l';
+ 		$args[] = '-t';
+-		$args[] = $tree->GetHash();
++		$args[] = escapeshellarg($tree->GetHash());
+ 		
+ 		$lines = explode("\n", $this->exe->Execute($tree->GetProject()->GetPath(), GIT_LS_TREE, $args));
+ 

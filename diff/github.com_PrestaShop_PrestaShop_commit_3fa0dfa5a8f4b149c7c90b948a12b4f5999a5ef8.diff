@@ -1,0 +1,39 @@
+From 41cedac7bd0e0f1e425b92c6e26f5aac1275be5a Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 11 Aug 2020 11:13:38 +0200
+Subject: [PATCH] Escape location and ids when setting location
+
+---
+ classes/stock/StockAvailable.php | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/classes/stock/StockAvailable.php b/classes/stock/StockAvailable.php
+index 11cf930e8813..2d2f5ef500f7 100644
+--- a/classes/stock/StockAvailable.php
++++ b/classes/stock/StockAvailable.php
+@@ -395,17 +395,17 @@ public static function setLocation($id_product, $location, $id_shop = null, $id_
+         if ($existing_id > 0) {
+             Db::getInstance()->update(
+                 'stock_available',
+-                array('location' => $location),
+-                'id_product = ' . $id_product .
+-                (($id_product_attribute) ? ' AND id_product_attribute = ' . $id_product_attribute : '') .
++                ['location' => pSQL($location)],
++                'id_product = ' . (int) $id_product .
++                (($id_product_attribute) ? ' AND id_product_attribute = ' . (int) $id_product_attribute : '') .
+                 StockAvailable::addSqlShopRestriction(null, $id_shop)
+             );
+         } else {
+-            $params = array(
+-                'location' => $location,
+-                'id_product' => $id_product,
+-                'id_product_attribute' => $id_product_attribute,
+-            );
++            $params = [
++                'location' => pSQL($location),
++                'id_product' => (int) $id_product,
++                'id_product_attribute' => (int) $id_product_attribute,
++            ];
+ 
+             StockAvailable::addSqlShopParams($params, $id_shop);
+             Db::getInstance()->insert('stock_available', $params, false, true, Db::ON_DUPLICATE_KEY);

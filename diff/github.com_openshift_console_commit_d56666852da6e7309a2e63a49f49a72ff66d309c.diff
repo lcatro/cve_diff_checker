@@ -1,0 +1,265 @@
+From 09e85eb699b5cd668d8891e544fc78a458e01a56 Mon Sep 17 00:00:00 2001
+From: Samuel Padgett <spadgett@redhat.com>
+Date: Thu, 16 Aug 2018 09:08:00 -0400
+Subject: [PATCH] Bug 1622372 - Require CSRF token on all proxied requests
+
+* Require a CSRF token on all proxied requests. This prevents loading
+  content hosted from a pod under the console domain by clicking on a
+  link that uses the console proxy. Previously, it was not required for
+  GET requests.
+* Do not forward the X-CSRFToken header through the proxy.
+* Set `Content-Security-Policy: default-src 'none'` in the proxied
+  response to prevent scripts from running in proxied content.
+
+In order to support the CSRF token for WebSockets, this adds an
+`x-csrf-token` query parameter when headers can't be set. It also updates
+the console to check the `Origin` header when present since `Referer` is
+not set for WebSockets.
+
+Fixes https://bugzilla.redhat.com/show_bug.cgi?id=1622372
+---
+ auth/auth.go                         | 32 ++++++++++++++++++++++------
+ auth/auth_test.go                    |  2 +-
+ cmd/bridge/main.go                   |  6 +++---
+ frontend/public/co-fetch.js          |  6 ++----
+ frontend/public/module/ws-factory.js | 12 ++++++++++-
+ pkg/proxy/proxy.go                   |  5 ++++-
+ server/middleware.go                 | 27 +++++++----------------
+ server/server.go                     |  1 -
+ 8 files changed, 54 insertions(+), 37 deletions(-)
+
+diff --git a/auth/auth.go b/auth/auth.go
+index 955a0395318..bd5498bf490 100644
+--- a/auth/auth.go
++++ b/auth/auth.go
+@@ -27,6 +27,7 @@ import (
+ const (
+ 	CSRFCookieName    = "csrf-token"
+ 	CSRFHeader        = "X-CSRFToken"
++	CSRFQueryParam    = "x-csrf-token"
+ 	stateCookieName   = "state-token"
+ 	errorOAuth        = "oauth_error"
+ 	errorLoginState   = "login_state_error"
+@@ -356,13 +357,24 @@ func (a *Authenticator) redirectAuthError(w http.ResponseWriter, authErr string,
+ 	w.WriteHeader(http.StatusSeeOther)
+ }
+ 
+-func (a *Authenticator) VerifyReferer(r *http.Request) (err error) {
+-	referer := r.Referer()
+-	if len(referer) == 0 {
+-		return fmt.Errorf("No referer!")
++func (a *Authenticator) getSourceOrigin(r *http.Request) string {
++	origin := r.Header.Get("Origin")
++	if len(origin) != 0 {
++		return origin
+ 	}
+ 
+-	u, err := url.Parse(referer)
++	return r.Referer()
++}
++
++// VerifySourceOrigin checks that the Origin request header, if present, matches the target origin. Otherwise, it checks the Referer request header.
++// https://www.owasp.org/index.php/Cross-Site_Request_Forgery_(CSRF)_Prevention_Cheat_Sheet#Identifying_Source_Origin
++func (a *Authenticator) VerifySourceOrigin(r *http.Request) (err error) {
++	source := a.getSourceOrigin(r)
++	if len(source) == 0 {
++		return fmt.Errorf("no Origin or Referer header in request")
++	}
++
++	u, err := url.Parse(source)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -370,10 +382,11 @@ func (a *Authenticator) VerifyReferer(r *http.Request) (err error) {
+ 	isValid := a.refererURL.Hostname() == u.Hostname() &&
+ 		a.refererURL.Port() == u.Port() &&
+ 		a.refererURL.Scheme == u.Scheme &&
+-		strings.HasPrefix(u.Path, a.refererURL.Path)
++		// The Origin header does not have a path
++		(u.Path == "" || strings.HasPrefix(u.Path, a.refererURL.Path))
+ 
+ 	if !isValid {
+-		return fmt.Errorf("invalid referer: %v expected `%v`", referer, a.refererURL)
++		return fmt.Errorf("invalid Origin or Referer: %v expected `%v`", source, a.refererURL)
+ 	}
+ 	return nil
+ }
+@@ -392,6 +405,11 @@ func (a *Authenticator) SetCSRFCookie(path string, w *http.ResponseWriter) {
+ 
+ func (a *Authenticator) VerifyCSRFToken(r *http.Request) (err error) {
+ 	CSRFToken := r.Header.Get(CSRFHeader)
++	if CSRFToken == "" {
++		// Fallback to a query parameter, which is needed for websockets
++		CSRFToken = r.URL.Query().Get(CSRFQueryParam)
++	}
++
+ 	CRSCookie, err := r.Cookie(CSRFCookieName)
+ 	if err != nil {
+ 		return fmt.Errorf("No CSRF Cookie!")
+diff --git a/auth/auth_test.go b/auth/auth_test.go
+index 376aa2b88d2..9787fd7040e 100644
+--- a/auth/auth_test.go
++++ b/auth/auth_test.go
+@@ -228,7 +228,7 @@ func testReferer(t *testing.T, referer string, accept bool) {
+ 		r.Header.Set("Referer", referer)
+ 	}
+ 
+-	err = a.VerifyReferer(r)
++	err = a.VerifySourceOrigin(r)
+ 
+ 	if err != nil && accept {
+ 		t.Errorf("Unexpected error for referer `%v`:\n%v", referer, err)
+diff --git a/cmd/bridge/main.go b/cmd/bridge/main.go
+index f10ebd3da21..8229db06f10 100644
+--- a/cmd/bridge/main.go
++++ b/cmd/bridge/main.go
+@@ -248,7 +248,7 @@ func main() {
+ 
+ 		srv.K8sProxyConfig = &proxy.Config{
+ 			TLSClientConfig: tlsConfig,
+-			HeaderBlacklist: []string{"Cookie"},
++			HeaderBlacklist: []string{"Cookie", "X-CSRFToken"},
+ 			Endpoint:        k8sEndpoint,
+ 		}
+ 
+@@ -268,7 +268,7 @@ func main() {
+ 			// Only proxy requests to the Prometheus API, not the UI.
+ 			srv.PrometheusProxyConfig = &proxy.Config{
+ 				TLSClientConfig: prometheusTLSConfig,
+-				HeaderBlacklist: []string{"Cookie"},
++				HeaderBlacklist: []string{"Cookie", "X-CSRFToken"},
+ 				Endpoint:        &url.URL{Scheme: "https", Host: openshiftPrometheusHost, Path: "/api"},
+ 			}
+ 		} else if !os.IsNotExist(err) {
+@@ -283,7 +283,7 @@ func main() {
+ 			TLSClientConfig: &tls.Config{
+ 				InsecureSkipVerify: *fK8sModeOffClusterSkipVerifyTLS,
+ 			},
+-			HeaderBlacklist: []string{"Cookie"},
++			HeaderBlacklist: []string{"Cookie", "X-CSRFToken"},
+ 			Endpoint:        k8sEndpoint,
+ 		}
+ 	default:
+diff --git a/frontend/public/co-fetch.js b/frontend/public/co-fetch.js
+index 8719df9d60b..25740951477 100644
+--- a/frontend/public/co-fetch.js
++++ b/frontend/public/co-fetch.js
+@@ -84,16 +84,14 @@ export class TimeoutError extends Error {
+ }
+ 
+ const cookiePrefix = 'csrf-token=';
+-const getCSRFToken = () => document && document.cookie && document.cookie.split(';')
++export const getCSRFToken = () => document && document.cookie && document.cookie.split(';')
+   .map(c => _.trim(c))
+   .filter(c => c.startsWith(cookiePrefix))
+   .map(c => c.slice(cookiePrefix.length)).pop();
+ 
+ export const coFetch = (url, options = {}, timeout=20000) => {
+   const allOptions = _.defaultsDeep({}, initDefaults, options);
+-  if (allOptions.method !== 'GET') {
+-    allOptions.headers['X-CSRFToken'] = getCSRFToken();
+-  }
++  allOptions.headers['X-CSRFToken'] = getCSRFToken();
+ 
+   // If the URL being requested is absolute (and therefore, not a local request),
+   // remove the authorization header to prevent credentials from leaking.
+diff --git a/frontend/public/module/ws-factory.js b/frontend/public/module/ws-factory.js
+index 276feee49ee..4fe0e31bf5e 100644
+--- a/frontend/public/module/ws-factory.js
++++ b/frontend/public/module/ws-factory.js
+@@ -5,6 +5,15 @@
+  */
+ /* eslint-disable no-console */
+ 
++import { getCSRFToken } from '../co-fetch';
++
++function addCSRFQueryParam(href) {
++  const url = new URL(href);
++  const csrfToken = getCSRFToken();
++  url.searchParams.set('x-csrf-token', csrfToken);
++  return url.href;
++}
++
+ function createURL(host, path) {
+   let url;
+ 
+@@ -22,7 +31,8 @@ function createURL(host, path) {
+   if (path) {
+     url += path;
+   }
+-  return url;
++
++  return addCSRFQueryParam(url);
+ }
+ 
+ export function WSFactory(id, options) {
+diff --git a/pkg/proxy/proxy.go b/pkg/proxy/proxy.go
+index bebd000581f..8159a88f4a0 100644
+--- a/pkg/proxy/proxy.go
++++ b/pkg/proxy/proxy.go
+@@ -85,9 +85,12 @@ func decodeSubprotocol(encodedProtocol string) (string, error) {
+ 	return string(decodedProtocol), err
+ }
+ 
+-var headerBlacklist = []string{"Cookie"}
++var headerBlacklist = []string{"Cookie", "X-CSRFToken"}
+ 
+ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
++	// Block scripts from running in proxied content for browsers that support Content-Security-Policy.
++	w.Header().Set("Content-Security-Policy", "default-src 'none';")
++
+ 	isWebsocket := false
+ 	upgrades := r.Header["Upgrade"]
+ 
+diff --git a/server/middleware.go b/server/middleware.go
+index cf549f6bbdd..ba7062791ee 100644
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -27,27 +27,16 @@ func authMiddlewareWithUser(a *auth.Authenticator, handlerFunc func(user *auth.U
+ 
+ 		r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", user.Token))
+ 
+-		safe := false
+-		switch r.Method {
+-		case
+-			"GET",
+-			"HEAD",
+-			"OPTIONS",
+-			"TRACE":
+-			safe = true
++		if err := a.VerifySourceOrigin(r); err != nil {
++			plog.Infof("invalid source origin: %v", err)
++			w.WriteHeader(http.StatusForbidden)
++			return
+ 		}
+ 
+-		if !safe {
+-			if err := a.VerifyReferer(r); err != nil {
+-				plog.Infof("Invalid referer %v", err)
+-				w.WriteHeader(http.StatusForbidden)
+-				return
+-			}
+-			if err := a.VerifyCSRFToken(r); err != nil {
+-				plog.Infof("Invalid CSRFToken %v", err)
+-				w.WriteHeader(http.StatusForbidden)
+-				return
+-			}
++		if err := a.VerifyCSRFToken(r); err != nil {
++			plog.Infof("invalid CSRFToken: %v", err)
++			w.WriteHeader(http.StatusForbidden)
++			return
+ 		}
+ 
+ 		handlerFunc(user, w, r)
+diff --git a/server/server.go b/server/server.go
+index 51d3a443d27..50e1be0d218 100644
+--- a/server/server.go
++++ b/server/server.go
+@@ -61,7 +61,6 @@ type jsGlobals struct {
+ 	Branding             string `json:"branding"`
+ 	DocumentationBaseURL string `json:"documentationBaseURL"`
+ 	ClusterName          string `json:"clusterName"`
+-	CSRFToken            string `json:"CSRFToken"`
+ 	GoogleTagManagerID   string `json:"googleTagManagerID"`
+ 	LoadTestFactor       int    `json:"loadTestFactor"`
+ }

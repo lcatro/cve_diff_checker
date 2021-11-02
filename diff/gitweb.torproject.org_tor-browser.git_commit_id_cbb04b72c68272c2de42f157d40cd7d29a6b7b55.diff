@@ -1,0 +1,125 @@
+From cbb04b72c68272c2de42f157d40cd7d29a6b7b55 Mon Sep 17 00:00:00 2001
+From: Arthur Edelstein <arthuredelstein@gmail.com>
+Date: Mon, 6 Aug 2018 13:20:40 -0700
+Subject: Bug 24056: Use en-US strings in HTML forms
+
+When privacy.spoof_english = 2, we should hide the user's
+locale in content. So we use en-US default strings for HTML
+form elements, such as a Submit button.
+
+We also force GetLocalizedEllipsis() to always return the
+ellipsis used by en-US.
+---
+ dom/base/nsContentUtils.cpp | 32 +++++++++++++++++++++++++-------
+ dom/base/nsContentUtils.h   |  3 +++
+ 2 files changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/dom/base/nsContentUtils.cpp b/dom/base/nsContentUtils.cpp
+index 8257283e65a2..645f4aee0909 100644
+--- a/dom/base/nsContentUtils.cpp
++++ b/dom/base/nsContentUtils.cpp
+@@ -317,6 +317,8 @@ bool nsContentUtils::sIsBytecodeCacheEnabled = false;
+ int32_t nsContentUtils::sBytecodeCacheStrategy = 0;
+ nsCString* nsContentUtils::sJSBytecodeMimeType = nullptr;
+ 
++int32_t nsContentUtils::sSpoofEnglish = 0;
++
+ int32_t nsContentUtils::sPrivacyMaxInnerWidth = 1000;
+ int32_t nsContentUtils::sPrivacyMaxInnerHeight = 1000;
+ 
+@@ -737,6 +739,9 @@ nsContentUtils::Init()
+   Preferences::AddIntVarCache(&sBytecodeCacheStrategy,
+                               "dom.script_loader.bytecode_cache.strategy", 0);
+ 
++  Preferences::AddIntVarCache(&sSpoofEnglish,
++                              "privacy.spoof_english", 0);
++
+   nsDependentCString buildID(mozilla::PlatformBuildID());
+   sJSBytecodeMimeType = new nsCString(NS_LITERAL_CSTRING("javascript/moz-bytecode-") + buildID);
+ 
+@@ -4040,7 +4045,7 @@ nsContentUtils::GetEventArgNames(int32_t aNameSpaceID,
+   }
+ }
+ 
+-static const char gPropertiesFiles[nsContentUtils::PropertiesFile_COUNT][56] = {
++static const char* gPropertiesFiles[nsContentUtils::PropertiesFile_COUNT] = {
+   // Must line up with the enum values in |PropertiesFile| enum.
+   "chrome://global/locale/css.properties",
+   "chrome://global/locale/xbl.properties",
+@@ -4055,7 +4060,8 @@ static const char gPropertiesFiles[nsContentUtils::PropertiesFile_COUNT][56] = {
+   "chrome://global/locale/commonDialogs.properties",
+   "chrome://global/locale/mathml/mathml.properties",
+   "chrome://global/locale/security/security.properties",
+-  "chrome://necko/locale/necko.properties"
++  "chrome://necko/locale/necko.properties",
++  "resource://gre/chrome/en-US/locale/en-US/global/layout/HtmlForm.properties"
+ };
+ 
+ /* static */ nsresult
+@@ -4098,6 +4104,11 @@ nsresult nsContentUtils::GetLocalizedString(PropertiesFile aFile,
+                                             const char* aKey,
+                                             nsAString& aResult)
+ {
++  // When we spoof English, use en-US default strings in HTML forms.
++  if (aFile == eFORMS_PROPERTIES && sSpoofEnglish == 2) {
++    aFile = eFORMS_PROPERTIES_en_US;
++  }
++
+   nsresult rv = EnsureStringBundle(aFile);
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsIStringBundle *bundle = sStringBundles[aFile];
+@@ -4111,6 +4122,11 @@ nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
+                                                uint32_t aParamsLength,
+                                                nsAString& aResult)
+ {
++  // When we spoof English, use en-US default strings in HTML forms.
++  if (aFile == eFORMS_PROPERTIES && sSpoofEnglish == 2) {
++    aFile = eFORMS_PROPERTIES_en_US;
++  }
++
+   nsresult rv = EnsureStringBundle(aFile);
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsIStringBundle *bundle = sStringBundles[aFile];
+@@ -5722,11 +5738,13 @@ nsContentUtils::GetLocalizedEllipsis()
+ {
+   static char16_t sBuf[4] = { 0, 0, 0, 0 };
+   if (!sBuf[0]) {
+-    nsAutoString tmp;
+-    Preferences::GetLocalizedString("intl.ellipsis", tmp);
+-    uint32_t len = std::min(uint32_t(tmp.Length()),
+-                          uint32_t(ArrayLength(sBuf) - 1));
+-    CopyUnicodeTo(tmp, 0, sBuf, len);
++    if (sSpoofEnglish != 2) {
++      nsAutoString tmp;
++      Preferences::GetLocalizedString("intl.ellipsis", tmp);
++      uint32_t len = std::min(uint32_t(tmp.Length()),
++                              uint32_t(ArrayLength(sBuf) - 1));
++      CopyUnicodeTo(tmp, 0, sBuf, len);
++    }
+     if (!sBuf[0])
+       sBuf[0] = char16_t(0x2026);
+   }
+diff --git a/dom/base/nsContentUtils.h b/dom/base/nsContentUtils.h
+index 246dabf340de..135dafdbc052 100644
+--- a/dom/base/nsContentUtils.h
++++ b/dom/base/nsContentUtils.h
+@@ -1110,6 +1110,7 @@ public:
+     eMATHML_PROPERTIES,
+     eSECURITY_PROPERTIES,
+     eNECKO_PROPERTIES,
++    eFORMS_PROPERTIES_en_US,
+     PropertiesFile_COUNT
+   };
+   static nsresult ReportToConsole(uint32_t aErrorFlags,
+@@ -3514,6 +3515,8 @@ private:
+ 
+   static int32_t sInnerOrOuterWindowCount;
+   static uint32_t sInnerOrOuterWindowSerialCounter;
++
++  static int32_t sSpoofEnglish;
+ };
+ 
+ /* static */ inline
+-- 
+cgit v1.2.1
+

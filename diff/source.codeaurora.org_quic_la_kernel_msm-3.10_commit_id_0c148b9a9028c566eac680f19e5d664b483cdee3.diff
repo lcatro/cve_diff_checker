@@ -1,0 +1,37 @@
+From 0c148b9a9028c566eac680f19e5d664b483cdee3 Mon Sep 17 00:00:00 2001
+From: Srinivasarao P <spathi@codeaurora.org>
+Date: Mon, 6 Jun 2016 12:33:50 +0530
+Subject: qcom: ssr: Fix possible overflow when copying firmware name
+
+Array overflow can occur in firmware_name_store(), if the variable
+buf contains the string larger than size of subsys->desc->fw_name
+
+Change-Id: Ice39d7a1eb0b5f53125cc5d528021a99b9f7ff90
+Signed-off-by: Srinivasarao P <spathi@codeaurora.org>
+---
+ drivers/soc/qcom/subsystem_restart.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/qcom/subsystem_restart.c b/drivers/soc/qcom/subsystem_restart.c
+index a648896..55e3a57 100644
+--- a/drivers/soc/qcom/subsystem_restart.c
++++ b/drivers/soc/qcom/subsystem_restart.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -289,7 +289,8 @@ static ssize_t firmware_name_store(struct device *dev,
+ 
+ 	pr_info("Changing subsys fw_name to %s\n", buf);
+ 	mutex_lock(&track->lock);
+-	strlcpy(subsys->desc->fw_name, buf, count + 1);
++	strlcpy(subsys->desc->fw_name, buf,
++			 min(count + 1, sizeof(subsys->desc->fw_name)));
+ 	mutex_unlock(&track->lock);
+ 	return count;
+ }
+-- 
+cgit v1.1
+

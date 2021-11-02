@@ -1,0 +1,95 @@
+From b15cf19e9e01115f653c76ffdc8f54cd97566553 Mon Sep 17 00:00:00 2001
+From: Marcus Huewe <suse-tux@gmx.de>
+Date: Sun, 27 May 2018 12:35:05 +0200
+Subject: [PATCH] [api] Initialize review state with :new
+
+to have the request review always in a sane state.
+
+https://bugzilla.suse.com/show_bug.cgi?id=1094820
+
+Signed-off-by: Christian Bruckmayer <cbruckmayer@suse.com>
+Co-authored-by: Christian Bruckmayer <cbruckmayer@suse.com>
+---
+ src/api/app/models/review.rb         |  4 ++--
+ src/api/spec/models/review_spec.rb   | 16 ++++++++++++++++
+ src/api/test/unit/bs_request_test.rb | 27 ++++++++++++++++++++++++++-
+ 3 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/src/api/app/models/review.rb b/src/api/app/models/review.rb
+index ebef34e51c2..dcfcb158e50 100644
+--- a/src/api/app/models/review.rb
++++ b/src/api/app/models/review.rb
+@@ -133,8 +133,8 @@ def check_initial
+   def self.new_from_xml_hash(hash)
+     r = Review.new
+ 
+-    r.state = hash.delete('state') { raise ArgumentError, 'no state' }
+-    r.state = r.state.to_sym
++    r.state = :new
++    hash.delete('state')
+ 
+     r.by_user = hash.delete('by_user')
+     r.by_group = hash.delete('by_group')
+diff --git a/src/api/spec/models/review_spec.rb b/src/api/spec/models/review_spec.rb
+index aca2b19f3c5..838c6f9d382 100644
+--- a/src/api/spec/models/review_spec.rb
++++ b/src/api/spec/models/review_spec.rb
+@@ -427,4 +427,20 @@
+       expect(review_by_package.reviewable_by?(by_package: other_package.name)).to be_falsy
+     end
+   end
++
++  describe '.new_from_xml_hash' do
++    let(:request_xml) do
++      "<request>
++        <review state='accepted' by_user='#{user}'/>
++      </request>"
++    end
++    let(:request_hash) { Xmlhash.parse(request_xml) }
++    let(:review_hash) { request_hash['review'] }
++
++    subject { Review.new_from_xml_hash(review_hash) }
++
++    it 'initalizes the review in state :new' do
++      expect(subject.state).to eq(:new)
++    end
++  end
+ end
+diff --git a/src/api/test/unit/bs_request_test.rb b/src/api/test/unit/bs_request_test.rb
+index 14e8521be6e..f90654c3357 100644
+--- a/src/api/test/unit/bs_request_test.rb
++++ b/src/api/test/unit/bs_request_test.rb
+@@ -125,7 +125,32 @@ def test_parse_bigger
+     assert_equal 1027, req.number
+ 
+     newxml = req.render_xml
+-    assert_equal xml, newxml
++    expected = <<-XML.strip_heredoc
++      <request id="1027" creator="Iggy">
++        <action type="submit">
++          <source project="home:Iggy" package="TestPack" rev="1"/>
++          <target project="kde4" package="mypackage"/>
++          <options>
++            <sourceupdate>cleanup</sourceupdate>
++          </options>
++          <acceptinfo rev="1" srcmd5="806a6e27ed7915d1bb8d8a989404fd5a" osrcmd5="d41d8cd98f00b204e9800998ecf8427e"/>
++        </action>
++        <priority>critical</priority>
++        <state name="review" who="Iggy" when="2012-11-07T21:13:12">
++          <comment>No comment</comment>
++        </state>
++        <review state="new" when="2017-09-01T09:11:11" by_user="adrian"/>
++        <review state="new" when="2017-09-01T09:11:11" by_group="test_group"/>
++        <review state="new" when="2012-11-07T21:13:12" who="tom" by_user="tom">
++          <comment>review1</comment>
++        </review>
++        <review state="new" when="2012-11-07T21:13:13" who="tom" by_user="tom">
++          <comment>please accept</comment>
++        </review>
++        <description>Left blank</description>
++      </request>
++    XML
++    assert_equal expected, newxml
+ 
+     wi = req.webui_infos(diffs: false)
+     # iggy is *not* target maintainer

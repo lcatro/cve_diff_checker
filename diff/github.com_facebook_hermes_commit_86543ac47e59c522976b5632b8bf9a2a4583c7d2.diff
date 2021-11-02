@@ -1,0 +1,51 @@
+From 86543ac47e59c522976b5632b8bf9a2a4583c7d2 Mon Sep 17 00:00:00 2001
+From: Daniel Andersson <koda@fb.com>
+Date: Wed, 26 Feb 2020 18:57:41 -0800
+Subject: [PATCH] Added stack overflow check for hermes::vm::
+ hermesBuiltinApply
+
+Summary: This adds a missing check for stack overflow.
+
+Reviewed By: tmikov
+
+Differential Revision: D20104955
+
+fbshipit-source-id: 1f37e23d2e28ebcd3aa4176d134b8418e7059ebd
+---
+ lib/VM/JSLib/HermesBuiltin.cpp      |  3 +++
+ test/hermes/stack-overflow-apply.js | 11 +++++++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/lib/VM/JSLib/HermesBuiltin.cpp b/lib/VM/JSLib/HermesBuiltin.cpp
+index 6b42c091a..dfe931b15 100644
+--- a/lib/VM/JSLib/HermesBuiltin.cpp
++++ b/lib/VM/JSLib/HermesBuiltin.cpp
+@@ -653,6 +653,9 @@ hermesBuiltinApply(void *, Runtime *runtime, NativeArgs args) {
+ 
+   ScopedNativeCallFrame newFrame{
+       runtime, len, *fn, isConstructor, thisVal.getHermesValue()};
++  if (LLVM_UNLIKELY(newFrame.overflowed()))
++    return runtime->raiseStackOverflow(Runtime::StackOverflowKind::NativeStack);
++
+   for (uint32_t i = 0; i < len; ++i) {
+     newFrame->getArgRef(i) = argArray->at(runtime, i);
+   }
+diff --git a/test/hermes/stack-overflow-apply.js b/test/hermes/stack-overflow-apply.js
+index 7519ea227..caf2dd40a 100644
+--- a/test/hermes/stack-overflow-apply.js
++++ b/test/hermes/stack-overflow-apply.js
+@@ -32,3 +32,14 @@ try {
+     print("caught:", e.name, e.message);
+ }
+ //CHECK: caught: RangeError {{.*}}
++
++try {
++  v0 = [1.1];
++  function v1() {
++    v1(...v0);
++  }
++  v1();
++} catch (e) {
++    print("caught:", e.name, e.message);
++}
++//CHECK: caught: RangeError {{.*}}

@@ -1,0 +1,35 @@
+From bb6a0383ed553c286f87ca88c207f6774d5c4a8f Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Jul 2021 15:20:26 -0700
+Subject: [PATCH] Prevent heap OOB read in TFLite's `gather_nd.cc`.
+
+Passing negative indices is illegal but there was a missing check so that resulted in OOB accesses.
+
+PiperOrigin-RevId: 387208551
+Change-Id: I6b7a8a62d3e7c13a16d81619e5bc23ae2cdbc7fd
+---
+ tensorflow/lite/kernels/gather_nd.cc | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/gather_nd.cc b/tensorflow/lite/kernels/gather_nd.cc
+index 3ded771382569..c39917b478505 100644
+--- a/tensorflow/lite/kernels/gather_nd.cc
++++ b/tensorflow/lite/kernels/gather_nd.cc
+@@ -123,6 +123,17 @@ TfLiteStatus GatherNdString(const TfLiteTensor* params,
+ template <typename IndicesT>
+ TfLiteStatus EvalGatherNd(TfLiteContext* context, const TfLiteTensor* params,
+                           const TfLiteTensor* indices, TfLiteTensor* output) {
++  bool indices_has_only_positive_elements = true;
++  const auto* indices_values = GetTensorData<IndicesT>(indices);
++  const size_t num_indices = indices->bytes / sizeof(IndicesT);
++  for (size_t i = 0; i < num_indices; i++) {
++    if (indices_values[i] < 0) {
++      indices_has_only_positive_elements = false;
++      break;
++    }
++  }
++  TF_LITE_ENSURE(context, indices_has_only_positive_elements);
++
+   switch (params->type) {
+     case kTfLiteFloat32:
+       return GatherNd<float, IndicesT>(params, indices, output);

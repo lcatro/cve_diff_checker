@@ -1,0 +1,23 @@
+From 97319697c8f9f6ff27b32589947e1918e3015503 Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Thu, 2 Jul 2020 10:41:03 +0900
+Subject: [PATCH] Cancel 9cdf439
+
+Should not free the pointer in `realloc` since it can cause
+use-after-free problem.
+---
+ src/gc.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/gc.c b/src/gc.c
+index 6c83911d53..e1892080f5 100644
+--- a/src/gc.c
++++ b/src/gc.c
+@@ -225,7 +225,6 @@ mrb_realloc(mrb_state *mrb, void *p, size_t len)
+   p2 = mrb_realloc_simple(mrb, p, len);
+   if (len == 0) return p2;
+   if (p2 == NULL) {
+-    mrb_free(mrb, p);
+     mrb->gc.out_of_memory = TRUE;
+     mrb_raise_nomemory(mrb);
+   }

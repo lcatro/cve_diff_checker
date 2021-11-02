@@ -1,0 +1,296 @@
+From 7ba4f8c655e7fd7706e8d7334e44b40fdf56c43e Mon Sep 17 00:00:00 2001
+From: Daniel Huigens <d.huigens@protonmail.com>
+Date: Mon, 4 Feb 2019 13:58:44 +0100
+Subject: [PATCH] Fix ECDH message encryption for some session keys
+
+---
+ src/crypto/crypto.js                   |  6 ++-
+ src/crypto/public_key/elliptic/ecdh.js | 70 ++++++++++++++------------
+ test/crypto/elliptic.js                | 41 +++++++++------
+ test/general/openpgp.js                | 39 ++++++++++++++
+ 4 files changed, 107 insertions(+), 49 deletions(-)
+
+diff --git a/src/crypto/crypto.js b/src/crypto/crypto.js
+index 38d8e8f7a..46675409b 100644
+--- a/src/crypto/crypto.js
++++ b/src/crypto/crypto.js
+@@ -20,6 +20,7 @@
+ /**
+  * @fileoverview Provides functions for asymmetric encryption and decryption as
+  * well as key generation and parameter handling for all public-key cryptosystems.
++ * @requires bn.js
+  * @requires crypto/public_key
+  * @requires crypto/cipher
+  * @requires crypto/random
+@@ -32,6 +33,7 @@
+  * @module crypto/crypto
+  */
+ 
++import BN from 'bn.js';
+ import publicKey from './public_key';
+ import cipher from './cipher';
+ import random from './random';
+@@ -89,9 +91,9 @@ export default {
+           const oid = pub_params[0];
+           const Q = pub_params[1].toUint8Array();
+           const kdf_params = pub_params[2];
+-          const res = await publicKey.elliptic.ecdh.encrypt(
++          const { V, C } = await publicKey.elliptic.ecdh.encrypt(
+             oid, kdf_params.cipher, kdf_params.hash, data, Q, fingerprint);
+-          return constructParams(types, [res.V, res.C]);
++          return constructParams(types, [new BN(V), C]);
+         }
+         default:
+           return [];
+diff --git a/src/crypto/public_key/elliptic/ecdh.js b/src/crypto/public_key/elliptic/ecdh.js
+index 430a9cdd1..6c124e5f5 100644
+--- a/src/crypto/public_key/elliptic/ecdh.js
++++ b/src/crypto/public_key/elliptic/ecdh.js
+@@ -17,6 +17,7 @@
+ 
+ /**
+  * @fileoverview Key encryption and decryption for RFC 6637 ECDH
++ * @requires bn.js
+  * @requires crypto/public_key/elliptic/curve
+  * @requires crypto/aes_kw
+  * @requires crypto/cipher
+@@ -49,10 +50,18 @@ function buildEcdhParam(public_algo, oid, cipher_algo, hash_algo, fingerprint) {
+ }
+ 
+ // Key Derivation Function (RFC 6637)
+-async function kdf(hash_algo, X, length, param) {
++async function kdf(hash_algo, S, length, param, curve, compat) {
++  const len = compat ?
++    S.byteLength() :
++    curve.curve.curve.p.byteLength();
++  // Note: this is not ideal, but the RFC's are unclear
++  // https://tools.ietf.org/html/draft-ietf-openpgp-rfc4880bis-02#appendix-B
++  const X = curve.curve.curve.type === 'mont' ?
++    S.toArrayLike(Uint8Array, 'le', len) :
++    S.toArrayLike(Uint8Array, 'be', len);
+   const digest = await hash.digest(hash_algo, util.concatUint8Array([
+     new Uint8Array([0, 0, 0, 1]),
+-    new Uint8Array(X),
++    X,
+     param
+   ]));
+   return digest.subarray(0, length);
+@@ -61,24 +70,17 @@ async function kdf(hash_algo, X, length, param) {
+ /**
+  * Generate ECDHE ephemeral key and secret from public key
+  *
+- * @param  {module:type/oid}        oid                 Elliptic curve object identifier
+- * @param  {module:enums.symmetric} cipher_algo         Symmetric cipher to use
+- * @param  {module:enums.hash}      hash_algo           Hash algorithm to use
++ * @param  {Curve}                  curve        Elliptic curve object
+  * @param  {Uint8Array}             Q                   Recipient public key
+- * @param  {String}                 fingerprint         Recipient fingerprint
+- * @returns {Promise<{V: Uint8Array, Z: Uint8Array}>}   Returns public part of ephemeral key and generated ephemeral secret
++ * @returns {Promise<{V: Uint8Array, S: BN}>}   Returns public part of ephemeral key and generated ephemeral secret
+  * @async
+  */
+-async function genPublicEphemeralKey(oid, cipher_algo, hash_algo, Q, fingerprint) {
+-  const curve = new Curve(oid);
+-  const param = buildEcdhParam(enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint);
+-  cipher_algo = enums.read(enums.symmetric, cipher_algo);
++async function genPublicEphemeralKey(curve, Q) {
+   const v = await curve.genKeyPair();
+   Q = curve.keyFromPublic(Q);
+-  const S = v.derive(Q);
+   const V = new Uint8Array(v.getPublic());
+-  const Z = await kdf(hash_algo, S, cipher[cipher_algo].keySize, param);
+-  return { V, Z };
++  const S = v.derive(Q);
++  return { V, S };
+ }
+ 
+ /**
+@@ -94,33 +96,28 @@ async function genPublicEphemeralKey(oid, cipher_algo, hash_algo, Q, fingerprint
+  * @async
+  */
+ async function encrypt(oid, cipher_algo, hash_algo, m, Q, fingerprint) {
+-  const { V, Z } = await genPublicEphemeralKey(oid, cipher_algo, hash_algo, Q, fingerprint);
+-  return {
+-      V: new BN(V),
+-      C: aes_kw.wrap(Z, m.toString())
+-  };
++  const curve = new Curve(oid);
++  const { V, S } = await genPublicEphemeralKey(curve, Q);
++  const param = buildEcdhParam(enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint);
++  cipher_algo = enums.read(enums.symmetric, cipher_algo);
++  const Z = await kdf(hash_algo, S, cipher[cipher_algo].keySize, param, curve, false);
++  const C = aes_kw.wrap(Z, m.toString());
++  return { V, C };
+ }
+ 
+ /**
+  * Generate ECDHE secret from private key and public part of ephemeral key
+  *
+- * @param  {module:type/oid}        oid          Elliptic curve object identifier
+- * @param  {module:enums.symmetric} cipher_algo  Symmetric cipher to use
+- * @param  {module:enums.hash}      hash_algo    Hash algorithm to use
++ * @param  {Curve}                  curve        Elliptic curve object
+  * @param  {Uint8Array}             V            Public part of ephemeral key
+  * @param  {Uint8Array}             d            Recipient private key
+- * @param  {String}                 fingerprint  Recipient fingerprint
+- * @returns {Promise<Uint8Array>}                Generated ephemeral secret
++ * @returns {Promise<BN>}                        Generated ephemeral secret
+  * @async
+  */
+-async function genPrivateEphemeralKey(oid, cipher_algo, hash_algo, V, d, fingerprint) {
+-  const curve = new Curve(oid);
+-  const param = buildEcdhParam(enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint);
+-  cipher_algo = enums.read(enums.symmetric, cipher_algo);
++async function genPrivateEphemeralKey(curve, V, d) {
+   V = curve.keyFromPublic(V);
+   d = curve.keyFromPrivate(d);
+-  const S = d.derive(V);
+-  return kdf(hash_algo, S, cipher[cipher_algo].keySize, param);
++  return d.derive(V);
+ }
+ 
+ /**
+@@ -137,8 +134,17 @@ async function genPrivateEphemeralKey(oid, cipher_algo, hash_algo, V, d, fingerp
+  * @async
+  */
+ async function decrypt(oid, cipher_algo, hash_algo, V, C, d, fingerprint) {
+-  const Z = await genPrivateEphemeralKey(oid, cipher_algo, hash_algo, V, d, fingerprint);
++  const curve = new Curve(oid);
++  const S = await genPrivateEphemeralKey(curve, V, d);
++  const param = buildEcdhParam(enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint);
++  cipher_algo = enums.read(enums.symmetric, cipher_algo);
++  try {
++    const Z = await kdf(hash_algo, S, cipher[cipher_algo].keySize, param, curve, false);
++    return new BN(aes_kw.unwrap(Z, C));
++  } catch(e) {}
++  // Work around old OpenPGP.js bug.
++  const Z = await kdf(hash_algo, S, cipher[cipher_algo].keySize, param, curve, true);
+   return new BN(aes_kw.unwrap(Z, C));
+ }
+ 
+-export default { encrypt, decrypt, genPublicEphemeralKey, genPrivateEphemeralKey };
++export default { encrypt, decrypt, genPublicEphemeralKey, genPrivateEphemeralKey, buildEcdhParam, kdf };
+diff --git a/test/crypto/elliptic.js b/test/crypto/elliptic.js
+index 71b7f8cdd..afba9735c 100644
+--- a/test/crypto/elliptic.js
++++ b/test/crypto/elliptic.js
+@@ -197,10 +197,10 @@ describe('Elliptic Curve Cryptography', async function () {
+       const curve = new elliptic_curves.Curve('p256');
+       let key1 = curve.keyFromPrivate(key_data.p256.priv);
+       let key2 = curve.keyFromPublic(signature_data.pub);
+-      const shared1 = openpgp.util.Uint8Array_to_hex(key1.derive(key2));
++      const shared1 = openpgp.util.Uint8Array_to_hex(key1.derive(key2).toArrayLike(Uint8Array));
+       key1 = curve.keyFromPublic(key_data.p256.pub);
+       key2 = curve.keyFromPrivate(signature_data.priv);
+-      const shared2 = openpgp.util.Uint8Array_to_hex(key2.derive(key1));
++      const shared2 = openpgp.util.Uint8Array_to_hex(key2.derive(key1).toArrayLike(Uint8Array));
+       expect(shared1).to.equal(shared2);
+       done();
+     });
+@@ -424,25 +424,36 @@ describe('Elliptic Curve Cryptography', async function () {
+   async function genPublicEphemeralKey(curve, Q, fingerprint) {
+     const curveObj = new openpgp.crypto.publicKey.elliptic.Curve(curve);
+     const oid = new openpgp.OID(curveObj.oid);
+-    return openpgp.crypto.publicKey.elliptic.ecdh.genPublicEphemeralKey(
+-        oid,
+-        curveObj.cipher,
+-        curveObj.hash,
+-        Q,
+-        fingerprint
++    const { V, S } = await openpgp.crypto.publicKey.elliptic.ecdh.genPublicEphemeralKey(
++      curveObj, Q
+     );
++    let cipher_algo = curveObj.cipher;
++    const hash_algo = curveObj.hash;
++    const param = openpgp.crypto.publicKey.elliptic.ecdh.buildEcdhParam(
++      openpgp.enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint
++    );
++    cipher_algo = openpgp.enums.read(openpgp.enums.symmetric, cipher_algo);
++    const Z = await openpgp.crypto.publicKey.elliptic.ecdh.kdf(
++      hash_algo, S, openpgp.crypto.cipher[cipher_algo].keySize, param, curveObj, false
++    );
++    return { V, Z };
+   }
+   async function genPrivateEphemeralKey(curve, V, d, fingerprint) {
+     const curveObj = new openpgp.crypto.publicKey.elliptic.Curve(curve);
+     const oid = new openpgp.OID(curveObj.oid);
+-    return openpgp.crypto.publicKey.elliptic.ecdh.genPrivateEphemeralKey(
+-        oid,
+-        curveObj.cipher,
+-        curveObj.hash,
+-        V,
+-        d,
+-        fingerprint
++    const S = await openpgp.crypto.publicKey.elliptic.ecdh.genPrivateEphemeralKey(
++      curveObj, V, d
++    );
++    let cipher_algo = curveObj.cipher;
++    const hash_algo = curveObj.hash;
++    const param = openpgp.crypto.publicKey.elliptic.ecdh.buildEcdhParam(
++      openpgp.enums.publicKey.ecdh, oid, cipher_algo, hash_algo, fingerprint
++    );
++    cipher_algo = openpgp.enums.read(openpgp.enums.symmetric, cipher_algo);
++    const Z = await openpgp.crypto.publicKey.elliptic.ecdh.kdf(
++      hash_algo, S, openpgp.crypto.cipher[cipher_algo].keySize, param, curveObj, false
+     );
++    return Z;
+   }
+   const ECDHE_VZ1 = await genPublicEphemeralKey("curve25519", Q1, fingerprint1);
+   const ECDHE_VZ2 = await genPublicEphemeralKey("curve25519", Q2, fingerprint1);
+diff --git a/test/general/openpgp.js b/test/general/openpgp.js
+index f82d0cc82..68eed30f0 100644
+--- a/test/general/openpgp.js
++++ b/test/general/openpgp.js
+@@ -304,6 +304,37 @@ const twoPasswordGPGFail = ['-----BEGIN PGP MESSAGE-----',
+ '=cHCV',
+ '-----END PGP MESSAGE-----'].join('\n');
+ 
++const ecdh_msg_bad = `-----BEGIN PGP MESSAGE-----
++Version: ProtonMail
++Comment: https://protonmail.com
++
++wV4DlF328rtCW+wSAQdA9FsAz4rCdoxY/oZaa68WMPMXbO+wtHs4ZXtAOJOs
++SlwwDaABXYC2dt0hUS2zRAL3gBGf4udH/CKJ1vPE58sNeh0ERYLxPHgwrpqI
++oNVWOWH50kUBIdqd7by8RwLOk9GyV6008iFOlOG90mfjvt2g5DsnSB4wEeMg
++pVu3fXj8iAKvFxvihwv1M7gNtP14StP6CngvyGVVEHQ=
++=mvcB
++-----END PGP MESSAGE-----`;
++
++const ecdh_dec_key = `-----BEGIN PGP PRIVATE KEY BLOCK-----
++Version: OpenPGP.js v4.4.6
++Comment: https://openpgpjs.org
++
++xYYEXEBTPxYJKwYBBAHaRw8BAQdAbXBY+2lpOatB+ZLokS/JIWqrVOseja9S
++ewQxMKN6ueT+CQMIuUXr0XofC6VgJvFLyLwDlyyvT4I1HWGKZ6W9HUaslKvS
++rw362rbMZKKfUtfjRJvpqiIU3Dr7iDkHB5vT7Tp5S7AZ2tNKoh/bwfTKdHsT
++1803InFhX3Rlc3RlcjJAcHJvdG9ubWFpbC5jb20iIDxxYV90ZXN0ZXIyQHBy
++b3Rvbm1haWwuY29tPsJ3BBAWCgAfBQJcQFM/BgsJBwgDAgQVCAoCAxYCAQIZ
++AQIbAwIeAQAKCRClzcrGJTMHyTpjAQCJZ7p0TJBZyPQ8m64N24glaM6oM78q
++2Ogpc0e9LcrPowD6AssY2YfUwJNzVFVzR+Lulzu6XVPjn0pXGMhOl03SrQ3H
++iwRcQFM/EgorBgEEAZdVAQUBAQdAAgJJUhKvjGWMq1sDhrJgvqbHK1t1W5RF
++Xoet5noIlAADAQgH/gkDCOFdJ7Yv2cTZYETRT5+ak/ntmslcAqtk3ebd7Ok3
++tQIjO3TYUbkV1eqrpA4I42kGCUkU4Dy26wxuaLRSsO1u/RgXjExZLP9FlWFI
++h6lLS1bCYQQYFggACQUCXEBTPwIbDAAKCRClzcrGJTMHyfNBAP9sdyU3GHNR
++7+QdwYvQp7wN+2VUd8vIf7iwAHOK1Cj4ywD+NhzjFfGYESJ68nnkrYlYdf+u
++OBqYz6mzZAWQZqsjbg4=
++=zrks
++-----END PGP PRIVATE KEY BLOCK-----`;
++
+ function withCompression(tests) {
+   const compressionTypes = Object.keys(openpgp.enums.compression).map(k => openpgp.enums.compression[k]);
+ 
+@@ -2262,6 +2293,14 @@ describe('[Sauce Labs Group 2] OpenPGP.js public api tests', function() {
+         expect(decrypted.data).to.equal('Hello world');
+       });
+ 
++      it('should decrypt broken ECC message from old OpenPGP.js', async function() {
++        const { keys: [key] } = await openpgp.key.readArmored(ecdh_dec_key);
++        const message = await openpgp.message.readArmored(ecdh_msg_bad);
++        await key.decrypt('12345');
++        const decrypted = await openpgp.decrypt({ message, privateKeys: [key] });
++        expect(decrypted.data).to.equal('\n');
++      });
++
+     });
+ 
+     describe('Errors', function() {

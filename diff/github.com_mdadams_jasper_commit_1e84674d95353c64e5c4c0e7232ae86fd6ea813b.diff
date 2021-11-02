@@ -1,0 +1,68 @@
+From 1e84674d95353c64e5c4c0e7232ae86fd6ea813b Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Tue, 25 Oct 2016 07:01:50 -0700
+Subject: [PATCH] Changed the JPC bitstream code to more gracefully handle a
+ request for a larger sized integer than what can be handled (i.e., return
+ with an error instead of failing an assert).
+
+---
+ src/libjasper/jpc/jpc_bs.c  | 10 ++++++++--
+ src/libjasper/jpc/jpc_cs.c  |  4 ++--
+ src/libjasper/jpc/jpc_dec.c |  1 +
+ 3 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/libjasper/jpc/jpc_bs.c b/src/libjasper/jpc/jpc_bs.c
+index f87a40c4..43b0f792 100644
+--- a/src/libjasper/jpc/jpc_bs.c
++++ b/src/libjasper/jpc/jpc_bs.c
+@@ -194,7 +194,10 @@ long jpc_bitstream_getbits(jpc_bitstream_t *bitstream, int n)
+ 
+ 	/* We can reliably get at most 31 bits since ISO/IEC 9899 only
+ 	  guarantees that a long can represent values up to 2^31-1. */
+-	assert(n >= 0 && n < 32);
++	//assert(n >= 0 && n < 32);
++	if (n < 0 || n >= 32) {
++		return -1;
++	}
+ 
+ 	/* Get the number of bits requested from the specified bit stream. */
+ 	v = 0;
+@@ -214,7 +217,10 @@ int jpc_bitstream_putbits(jpc_bitstream_t *bitstream, int n, long v)
+ 
+ 	/* We can reliably put at most 31 bits since ISO/IEC 9899 only
+ 	  guarantees that a long can represent values up to 2^31-1. */
+-	assert(n >= 0 && n < 32);
++	//assert(n >= 0 && n < 32);
++	if (n < 0 || n >= 32) {
++		return EOF;
++	}
+ 	/* Ensure that only the bits to be output are nonzero. */
+ 	assert(!(v & (~JAS_ONES(n))));
+ 
+diff --git a/src/libjasper/jpc/jpc_cs.c b/src/libjasper/jpc/jpc_cs.c
+index 0c855f57..1e0c9afa 100644
+--- a/src/libjasper/jpc/jpc_cs.c
++++ b/src/libjasper/jpc/jpc_cs.c
+@@ -904,8 +904,8 @@ static int jpc_qcd_dumpparms(jpc_ms_t *ms, FILE *out)
+ 	  (int) qcd->compparms.qntsty, qcd->compparms.numguard, qcd->compparms.numstepsizes);
+ 	for (i = 0; i < qcd->compparms.numstepsizes; ++i) {
+ 		fprintf(out, "expn[%d] = 0x%04x; mant[%d] = 0x%04x;\n",
+-		  i, (unsigned) JPC_QCX_GETEXPN(qcd->compparms.stepsizes[i]),
+-		  i, (unsigned) JPC_QCX_GETMANT(qcd->compparms.stepsizes[i]));
++		  i, JAS_CAST(unsigned, JPC_QCX_GETEXPN(qcd->compparms.stepsizes[i])),
++		  i, JAS_CAST(unsigned, JPC_QCX_GETMANT(qcd->compparms.stepsizes[i])));
+ 	}
+ 	return 0;
+ }
+diff --git a/src/libjasper/jpc/jpc_dec.c b/src/libjasper/jpc/jpc_dec.c
+index 95ac7c6d..a023a7bb 100644
+--- a/src/libjasper/jpc/jpc_dec.c
++++ b/src/libjasper/jpc/jpc_dec.c
+@@ -1641,6 +1641,7 @@ static void calcstepsizes(uint_fast16_t refstepsize, int numrlvls,
+ 	mant = JPC_QCX_GETMANT(refstepsize);
+ 	numbands = 3 * numrlvls - 2;
+ 	for (bandno = 0; bandno < numbands; ++bandno) {
++//jas_eprintf("DEBUG %d %d %d %d %d\n", bandno, expn, numrlvls, bandno, ((numrlvls - 1) - (numrlvls - 1 - ((bandno > 0) ? ((bandno + 2) / 3) : (0)))));
+ 		stepsizes[bandno] = JPC_QCX_MANT(mant) | JPC_QCX_EXPN(expn +
+ 		  (numrlvls - 1) - (numrlvls - 1 - ((bandno > 0) ? ((bandno + 2) / 3) : (0))));
+ 	}

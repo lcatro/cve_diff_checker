@@ -1,0 +1,71 @@
+From 1fbcd9bca2f2c77cb61624d36ddee4b3802c38ea Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Wed, 25 Apr 2018 18:31:45 +0200
+Subject: [PATCH] Prevent cloning private issues by unauthorized users
+
+Using a crafted request on bug_report_page.php (modifying the 'm_id'
+parameter), any user with REPORTER access or above is able to view any
+private issue's details (summary, description, steps to reproduce,
+additional information) when cloning. By checking the 'Copy issue notes'
+and 'Copy attachments' checkboxes and completing the clone operation,
+this data also becomes public (except private notes).
+
+Credits to Mustafa Hasan (strukt) strukt93@gmail.com for the finding.
+
+@atrol noted that the same vulnerability also existed in bug_report.php,
+although in this case the information disclosure is limited to notes and
+attachments (issue data itself does not become accessible).
+
+Added an access level check, so that the operation now fails with an
+Access Denied error in both cases.
+
+Fixes #24221, CVE-2018-9839
+Prevent cloning private issues by unauthorized users
+
+Using a crafted request on bug_report_page.php (modifying the 'm_id'
+parameter), any user with REPORTER access or above is able to view any
+private issue's details (summary, description, steps to reproduce,
+additional information) when cloning. By checking the 'Copy issue notes'
+and 'Copy attachments' checkboxes and completing the clone operation,
+this data also becomes public (except private notes).
+
+Added an access level check, so that the operation now fails with an
+Access Denied error.
+
+Credits to Mustafa Hasan (strukt) strukt93@gmail.com for the finding.
+
+Fixes #24221
+---
+ bug_report.php      | 4 ++++
+ bug_report_page.php | 3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/bug_report.php b/bug_report.php
+index 576ea2dc86..362f163409 100644
+--- a/bug_report.php
++++ b/bug_report.php
+@@ -69,6 +69,10 @@
+ 
+ if( $f_master_bug_id > 0 ) {
+ 	bug_ensure_exists( $f_master_bug_id );
++
++	# User can view the master bug
++	access_ensure_bug_level( config_get( 'view_bug_threshold' ), $f_master_bug_id );
++
+ 	if( bug_is_readonly( $f_master_bug_id ) ) {
+ 		error_parameters( $f_master_bug_id );
+ 		trigger_error( ERROR_BUG_READ_ONLY_ACTION_DENIED, ERROR );
+diff --git a/bug_report_page.php b/bug_report_page.php
+index dd37a2763d..c4c5eb7202 100644
+--- a/bug_report_page.php
++++ b/bug_report_page.php
+@@ -89,6 +89,9 @@
+ 		trigger_error( ERROR_BUG_READ_ONLY_ACTION_DENIED, ERROR );
+ 	}
+ 
++	# User can view the master bug
++	access_ensure_bug_level( config_get( 'view_bug_threshold' ), $f_master_bug_id );
++
+ 	$t_bug = bug_get( $f_master_bug_id, true );
+ 
+ 	#@@@ (thraxisp) Note that the master bug is cloned into the same project as the master, independent of

@@ -1,0 +1,124 @@
+From 8d2676fd14f130f9e8f06744743423168bf8d18d Mon Sep 17 00:00:00 2001
+From: Vincent Povirk <vincent@codeweavers.com>
+Date: Tue, 8 May 2018 12:46:19 -0500
+Subject: [PATCH] gdi32: Check for truncated EMF files.
+
+Signed-off-by: Vincent Povirk <vincent@codeweavers.com>
+Signed-off-by: Huw Davies <huw@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/gdi32/enhmetafile.c   | 25 +++++++++++++++++++------
+ dlls/gdi32/enhmfdrv/init.c |  2 +-
+ dlls/gdi32/gdi_private.h   |  2 +-
+ 3 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/dlls/gdi32/enhmetafile.c b/dlls/gdi32/enhmetafile.c
+index 37edc231a37..ffe21f01df9 100644
+--- a/dlls/gdi32/enhmetafile.c
++++ b/dlls/gdi32/enhmetafile.c
+@@ -246,11 +246,16 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
+ /****************************************************************************
+  *          EMF_Create_HENHMETAFILE
+  */
+-HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
++HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, DWORD filesize, BOOL on_disk )
+ {
+     HENHMETAFILE hmf;
+     ENHMETAFILEOBJ *metaObj;
+ 
++    if (filesize < sizeof(*emh))
++    {
++        WARN("File too small for emf header\n");
++        return 0;
++    }
+     if (emh->iType != EMR_HEADER)
+     {
+         SetLastError(ERROR_INVALID_DATA);
+@@ -263,6 +268,11 @@ HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
+              emh->iType, emh->dSignature);
+         return 0;
+     }
++    if (filesize < emh->nBytes)
++    {
++        WARN("File truncated (got %u bytes, header says %u)\n", emh->nBytes, filesize);
++        return 0;
++    }
+ 
+     if (!(metaObj = HeapAlloc( GetProcessHeap(), 0, sizeof(*metaObj) ))) return 0;
+ 
+@@ -318,14 +328,17 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
+     ENHMETAHEADER *emh;
+     HANDLE hMapping;
+     HENHMETAFILE hemf;
++    DWORD filesize;
++
++    filesize = GetFileSize( hFile, NULL );
+ 
+     hMapping = CreateFileMappingA( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
+-    emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, 0 );
++    emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, filesize );
+     CloseHandle( hMapping );
+ 
+     if (!emh) return 0;
+ 
+-    hemf = EMF_Create_HENHMETAFILE( emh, TRUE );
++    hemf = EMF_Create_HENHMETAFILE( emh, filesize, TRUE );
+     if (!hemf)
+         UnmapViewOfFile( emh );
+     return hemf;
+@@ -468,7 +481,7 @@ HENHMETAFILE WINAPI SetEnhMetaFileBits(UINT bufsize, const BYTE *buf)
+     ENHMETAHEADER *emh = HeapAlloc( GetProcessHeap(), 0, bufsize );
+     HENHMETAFILE hmf;
+     memmove(emh, buf, bufsize);
+-    hmf = EMF_Create_HENHMETAFILE( emh, FALSE );
++    hmf = EMF_Create_HENHMETAFILE( emh, bufsize, FALSE );
+     if (!hmf)
+         HeapFree( GetProcessHeap(), 0, emh );
+     return hmf;
+@@ -2562,7 +2575,7 @@ HENHMETAFILE WINAPI CopyEnhMetaFileA(
+     if (!file) {
+         emrDst = HeapAlloc( GetProcessHeap(), 0, emrSrc->nBytes );
+ 	memcpy( emrDst, emrSrc, emrSrc->nBytes );
+-	hmfDst = EMF_Create_HENHMETAFILE( emrDst, FALSE );
++	hmfDst = EMF_Create_HENHMETAFILE( emrDst, emrSrc->nBytes, FALSE );
+ 	if (!hmfDst)
+ 		HeapFree( GetProcessHeap(), 0, emrDst );
+     } else {
+@@ -2604,7 +2617,7 @@ HENHMETAFILE WINAPI CopyEnhMetaFileW(
+     if (!file) {
+         emrDst = HeapAlloc( GetProcessHeap(), 0, emrSrc->nBytes );
+ 	memcpy( emrDst, emrSrc, emrSrc->nBytes );
+-	hmfDst = EMF_Create_HENHMETAFILE( emrDst, FALSE );
++	hmfDst = EMF_Create_HENHMETAFILE( emrDst, emrSrc->nBytes, FALSE );
+ 	if (!hmfDst)
+ 		HeapFree( GetProcessHeap(), 0, emrDst );
+     } else {
+diff --git a/dlls/gdi32/enhmfdrv/init.c b/dlls/gdi32/enhmfdrv/init.c
+index 35803bcc336..8ff0e6c9f21 100644
+--- a/dlls/gdi32/enhmfdrv/init.c
++++ b/dlls/gdi32/enhmfdrv/init.c
+@@ -529,7 +529,7 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
+         CloseHandle( physDev->hFile );
+     }
+ 
+-    hmf = EMF_Create_HENHMETAFILE( physDev->emh, (physDev->hFile != 0) );
++    hmf = EMF_Create_HENHMETAFILE( physDev->emh, physDev->emh->nBytes, (physDev->hFile != 0) );
+     physDev->emh = NULL;  /* So it won't be deleted */
+     free_dc_ptr( dc );
+     return hmf;
+diff --git a/dlls/gdi32/gdi_private.h b/dlls/gdi32/gdi_private.h
+index c5e42319b61..5b09b848466 100644
+--- a/dlls/gdi32/gdi_private.h
++++ b/dlls/gdi32/gdi_private.h
+@@ -268,7 +268,7 @@ extern const struct gdi_dc_funcs *DRIVER_load_driver( LPCWSTR name ) DECLSPEC_HI
+ extern BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size ) DECLSPEC_HIDDEN;
+ 
+ /* enhmetafile.c */
+-extern HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk ) DECLSPEC_HIDDEN;
++extern HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, DWORD filesize, BOOL on_disk ) DECLSPEC_HIDDEN;
+ 
+ /* freetype.c */
+ 
+-- 
+2.20.1
+

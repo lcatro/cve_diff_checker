@@ -1,0 +1,101 @@
+From 470af81cafd3b0c24f039e2559f2e744292054c5 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud86@gmail.com>
+Date: Wed, 26 Feb 2020 15:20:53 +0100
+Subject: [PATCH] Possible leak information
+
+Make sure the customer is the connected one when changing personnal
+data
+Make sure addresses are owned by the connected customer when editing
+one
+---
+ classes/form/CustomerAddressForm.php      |  2 +-
+ classes/form/CustomerAddressFormatter.php |  6 ------
+ classes/form/CustomerForm.php             | 10 +++-------
+ classes/form/CustomerFormatter.php        |  4 ----
+ 4 files changed, 4 insertions(+), 18 deletions(-)
+
+diff --git a/classes/form/CustomerAddressForm.php b/classes/form/CustomerAddressForm.php
+index 306a2e11a511..3e7d975de43c 100644
+--- a/classes/form/CustomerAddressForm.php
++++ b/classes/form/CustomerAddressForm.php
+@@ -134,7 +134,7 @@ public function submit()
+         }
+ 
+         $address = new Address(
+-            $this->getValue('id_address'),
++            Tools::getValue('id_address'),
+             $this->language->id
+         );
+ 
+diff --git a/classes/form/CustomerAddressFormatter.php b/classes/form/CustomerAddressFormatter.php
+index 12a7ac9d2231..4cfc5dfb3ad0 100644
+--- a/classes/form/CustomerAddressFormatter.php
++++ b/classes/form/CustomerAddressFormatter.php
+@@ -66,12 +66,6 @@ public function getFormat()
+         $required = array_flip(AddressFormat::getFieldsRequired());
+ 
+         $format = [
+-            'id_address' => (new FormField())
+-                ->setName('id_address')
+-                ->setType('hidden'),
+-            'id_customer' => (new FormField())
+-                ->setName('id_customer')
+-                ->setType('hidden'),
+             'back' => (new FormField())
+                 ->setName('back')
+                 ->setType('hidden'),
+diff --git a/classes/form/CustomerForm.php b/classes/form/CustomerForm.php
+index dd4cfbe573ba..e914a08896a6 100644
+--- a/classes/form/CustomerForm.php
++++ b/classes/form/CustomerForm.php
+@@ -76,7 +76,6 @@ public function setPasswordRequired($passwordRequired)
+     public function fillFromCustomer(Customer $customer)
+     {
+         $params = get_object_vars($customer);
+-        $params['id_customer'] = $customer->id;
+         $params['birthday'] = $customer->birthday === '0000-00-00' ? null : Tools::displayDate($customer->birthday);
+ 
+         return $this->fillWith($params);
+@@ -87,13 +86,10 @@ public function fillFromCustomer(Customer $customer)
+      */
+     public function getCustomer()
+     {
+-        $customer = new Customer($this->getValue('id_customer'));
++        $customer = new Customer($this->context->customer->id);
+ 
+         foreach ($this->formFields as $field) {
+             $customerField = $field->getName();
+-            if ($customerField === 'id_customer') {
+-                $customerField = 'id';
+-            }
+             if (property_exists($customer, $customerField)) {
+                 $customer->$customerField = $field->getValue();
+             }
+@@ -119,10 +115,10 @@ public function validate()
+         $birthdayField = $this->getField('birthday');
+         if (!empty($birthdayField) &&
+             !empty($birthdayField->getValue()) &&
+-            Validate::isBirthDate($birthdayField->getValue(), Context::getContext()->language->date_format_lite)
++            Validate::isBirthDate($birthdayField->getValue(), $this->context->language->date_format_lite)
+         ) {
+             $dateBuilt = DateTime::createFromFormat(
+-                Context::getContext()->language->date_format_lite,
++                $this->context->language->date_format_lite,
+                 $birthdayField->getValue()
+             );
+             $birthdayField->setValue($dateBuilt->format('Y-m-d'));
+diff --git a/classes/form/CustomerFormatter.php b/classes/form/CustomerFormatter.php
+index bb09c89064e0..6c76c82d3b33 100644
+--- a/classes/form/CustomerFormatter.php
++++ b/classes/form/CustomerFormatter.php
+@@ -91,10 +91,6 @@ public function getFormat()
+     {
+         $format = [];
+ 
+-        $format['id_customer'] = (new FormField())
+-            ->setName('id_customer')
+-            ->setType('hidden');
+-
+         $genders = Gender::getGenders($this->language->id);
+         if ($genders->count() > 0) {
+             $genderField = (new FormField())

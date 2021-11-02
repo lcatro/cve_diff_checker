@@ -1,0 +1,55 @@
+From 5e409ae7a389cdf2ed17469303be3f3f21cec450 Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Sun, 16 Jun 2019 14:36:10 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/1586
+
+---
+ magick/statistic.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/magick/statistic.c b/magick/statistic.c
+index 467fe20efe..7a07c52825 100644
+--- a/magick/statistic.c
++++ b/magick/statistic.c
+@@ -149,8 +149,11 @@ static MagickPixelPacket **DestroyPixelThreadSet(MagickPixelPacket **pixels)
+   return(pixels);
+ }
+ 
+-static MagickPixelPacket **AcquirePixelThreadSet(const Image *image)
++static MagickPixelPacket **AcquirePixelThreadSet(const Image *images)
+ {
++  const Image
++    *next;
++
+   MagickPixelPacket
+     **pixels;
+ 
+@@ -159,6 +162,7 @@ static MagickPixelPacket **AcquirePixelThreadSet(const Image *image)
+     j;
+ 
+   size_t
++    columns,
+     number_threads;
+ 
+   number_threads=(size_t) GetMagickResourceLimit(ThreadResource);
+@@ -167,14 +171,17 @@ static MagickPixelPacket **AcquirePixelThreadSet(const Image *image)
+   if (pixels == (MagickPixelPacket **) NULL)
+     return((MagickPixelPacket **) NULL);
+   (void) memset(pixels,0,number_threads*sizeof(*pixels));
++  columns=images->columns;
++  for (next=images; next != (Image *) NULL; next=next->next)
++    columns=MagickMax(next->columns,columns);
+   for (i=0; i < (ssize_t) number_threads; i++)
+   {
+-    pixels[i]=(MagickPixelPacket *) AcquireQuantumMemory(image->columns,
++    pixels[i]=(MagickPixelPacket *) AcquireQuantumMemory(columns,
+       sizeof(**pixels));
+     if (pixels[i] == (MagickPixelPacket *) NULL)
+       return(DestroyPixelThreadSet(pixels));
+-    for (j=0; j < (ssize_t) image->columns; j++)
+-      GetMagickPixelPacket(image,&pixels[i][j]);
++    for (j=0; j < (ssize_t) columns; j++)
++      GetMagickPixelPacket(images,&pixels[i][j]);
+   }
+   return(pixels);
+ }

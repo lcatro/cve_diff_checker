@@ -1,0 +1,195 @@
+From 104870608fde3c698483fdef6b97f093fc15685d Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@sandstorm.io>
+Date: Fri, 27 Feb 2015 20:23:13 -0800
+Subject: [PATCH] SECURITY: CPU usage amplification attack.
+
+Details: https://github.com/sandstorm-io/capnproto/tree/master/security-advisories/2014-03-02-0-all-cpu-amplification.md
+---
+ CONTRIBUTORS                    |  1 +
+ c++/src/capnp/arena.h           | 11 ++++++++
+ c++/src/capnp/encoding-test.c++ | 30 +++++++++++++++++++++
+ c++/src/capnp/layout.c++        | 48 ++++++++++++++++++++++++++++++---
+ 4 files changed, 87 insertions(+), 3 deletions(-)
+
+diff --git a/CONTRIBUTORS b/CONTRIBUTORS
+index 828002009..47ac10ba8 100644
+--- a/CONTRIBUTORS
++++ b/CONTRIBUTORS
+@@ -10,6 +10,7 @@ Scott Purdy <scott@fer.io>: kj/std iostream interface
+ Bryan Borham <bjboreham@gmail.com>: Initial MSVC support
+ Philip Quinn <p@partylemon.com>: cmake build and other assorted bits
+ Brian Taylor <el.wubo@gmail.com>: emacs syntax highlighting
++Ben Laurie <ben@links.org>: discovered and responsibly disclosed security bugs
+ 
+ This file does not list people who maintain their own Cap'n Proto
+ implementations as separate projects.  Those people are awesome too!  :)
+diff --git a/c++/src/capnp/arena.h b/c++/src/capnp/arena.h
+index 5b28e8de4..2b14fa55d 100644
+--- a/c++/src/capnp/arena.h
++++ b/c++/src/capnp/arena.h
+@@ -117,6 +117,13 @@ class SegmentReader {
+ 
+   KJ_ALWAYS_INLINE(bool containsInterval(const void* from, const void* to));
+ 
++  KJ_ALWAYS_INLINE(bool amplifiedRead(WordCount virtualAmount));
++  // Indicates that the reader should pretend that `virtualAmount` additional data was read even
++  // though no actual pointer was traversed. This is used e.g. when reading a struct list pointer
++  // where the element sizes are zero -- the sender could set the list size arbitrarily high and
++  // cause the receiver to iterate over this list even though the message itself is small, so we
++  // need to defend agaisnt DoS attacks based on this.
++
+   inline Arena* getArena();
+   inline SegmentId getSegmentId();
+ 
+@@ -367,6 +374,10 @@ inline bool SegmentReader::containsInterval(const void* from, const void* to) {
+           arena);
+ }
+ 
++inline bool SegmentReader::amplifiedRead(WordCount virtualAmount) {
++  return readLimiter->canRead(virtualAmount, arena);
++}
++
+ inline Arena* SegmentReader::getArena() { return arena; }
+ inline SegmentId SegmentReader::getSegmentId() { return id; }
+ inline const word* SegmentReader::getStartPtr() { return ptr.begin(); }
+diff --git a/c++/src/capnp/encoding-test.c++ b/c++/src/capnp/encoding-test.c++
+index e93b09b07..6bf07adf1 100644
+--- a/c++/src/capnp/encoding-test.c++
++++ b/c++/src/capnp/encoding-test.c++
+@@ -1410,6 +1410,36 @@ TEST(Encoding, Has) {
+   EXPECT_TRUE(root.asReader().hasInt32List());
+ }
+ 
++TEST(Encoding, VoidListAmplification) {
++  MallocMessageBuilder builder;
++  builder.initRoot<test::TestAnyPointer>().getAnyPointerField().initAs<List<Void>>(1u << 28);
++
++  auto segments = builder.getSegmentsForOutput();
++  EXPECT_EQ(1, segments.size());
++  EXPECT_LT(segments[0].size(), 16);  // quite small for such a big list!
++
++  SegmentArrayMessageReader reader(builder.getSegmentsForOutput());
++  auto root = reader.getRoot<test::TestAnyPointer>().getAnyPointerField();
++  EXPECT_NONFATAL_FAILURE(root.getAs<List<TestAllTypes>>());
++
++  MallocMessageBuilder copy;
++  EXPECT_NONFATAL_FAILURE(copy.setRoot(reader.getRoot<AnyPointer>()));
++}
++
++TEST(Encoding, EmptyStructListAmplification) {
++  MallocMessageBuilder builder;
++  builder.initRoot<test::TestAnyPointer>().getAnyPointerField()
++      .initAs<List<test::TestEmptyStruct>>(1u << 28);
++
++  auto segments = builder.getSegmentsForOutput();
++  EXPECT_EQ(1, segments.size());
++  EXPECT_LT(segments[0].size(), 16);  // quite small for such a big list!
++
++  SegmentArrayMessageReader reader(builder.getSegmentsForOutput());
++  auto root = reader.getRoot<test::TestAnyPointer>().getAnyPointerField();
++  EXPECT_NONFATAL_FAILURE(root.getAs<List<TestAllTypes>>());
++}
++
+ TEST(Encoding, Constants) {
+   EXPECT_EQ(VOID, test::TestConstants::VOID_CONST);
+   EXPECT_EQ(true, test::TestConstants::BOOL_CONST);
+diff --git a/c++/src/capnp/layout.c++ b/c++/src/capnp/layout.c++
+index 5956bb999..aa90fbfc1 100644
+--- a/c++/src/capnp/layout.c++
++++ b/c++/src/capnp/layout.c++
+@@ -308,6 +308,11 @@ struct WireHelpers {
+     return segment == nullptr || segment->containsInterval(start, end);
+   }
+ 
++  static KJ_ALWAYS_INLINE(bool amplifiedRead(SegmentReader* segment, WordCount virtualAmount)) {
++    // If segment is null, this is an unchecked message, so we don't do read limiter checks.
++    return segment == nullptr || segment->amplifiedRead(virtualAmount);
++  }
++
+   static KJ_ALWAYS_INLINE(word* allocate(
+       WirePointer*& ref, SegmentBuilder*& segment, WordCount amount,
+       WirePointer::Kind kind, BuilderArena* orphanArena)) {
+@@ -1675,6 +1680,15 @@ struct WireHelpers {
+             goto useDefault;
+           }
+ 
++          if (wordsPerElement * (1 * ELEMENTS) == 0 * WORDS) {
++            // Watch out for lists of zero-sized structs, which can claim to be arbitrarily large
++            // without having sent actual data.
++            KJ_REQUIRE(amplifiedRead(srcSegment, elementCount * (1 * WORDS / ELEMENTS)),
++                       "Message contains amplified list pointer.") {
++              goto useDefault;
++            }
++          }
++
+           return setListPointer(dstSegment, dst,
+               ListReader(srcSegment, ptr, elementCount, wordsPerElement * BITS_PER_WORD,
+                          tag->structRef.dataSize.get() * BITS_PER_WORD,
+@@ -1693,6 +1707,15 @@ struct WireHelpers {
+             goto useDefault;
+           }
+ 
++          if (elementSize == ElementSize::VOID) {
++            // Watch out for lists of void, which can claim to be arbitrarily large without having
++            // sent actual data.
++            KJ_REQUIRE(amplifiedRead(srcSegment, elementCount * (1 * WORDS / ELEMENTS)),
++                       "Message contains amplified list pointer.") {
++              goto useDefault;
++            }
++          }
++
+           return setListPointer(dstSegment, dst,
+               ListReader(srcSegment, ptr, elementCount, step, dataSize, pointerCount, elementSize,
+                          nestingLimit - 1),
+@@ -1931,6 +1954,15 @@ struct WireHelpers {
+         goto useDefault;
+       }
+ 
++      if (wordsPerElement * (1 * ELEMENTS) == 0 * WORDS) {
++        // Watch out for lists of zero-sized structs, which can claim to be arbitrarily large
++        // without having sent actual data.
++        KJ_REQUIRE(amplifiedRead(segment, size * (1 * WORDS / ELEMENTS)),
++                   "Message contains amplified list pointer.") {
++          goto useDefault;
++        }
++      }
++
+       if (checkElementSize) {
+         // If a struct list was not expected, then presumably a non-struct list was upgraded to a
+         // struct list.  We need to manipulate the pointer to point at the first field of the
+@@ -1988,14 +2020,24 @@ struct WireHelpers {
+       BitCount dataSize = dataBitsPerElement(ref->listRef.elementSize()) * ELEMENTS;
+       WirePointerCount pointerCount =
+           pointersPerElement(ref->listRef.elementSize()) * ELEMENTS;
++      ElementCount elementCount = ref->listRef.elementCount();
+       auto step = (dataSize + pointerCount * BITS_PER_POINTER) / ELEMENTS;
+ 
+-      KJ_REQUIRE(boundsCheck(segment, ptr, ptr +
+-                     roundBitsUpToWords(ElementCount64(ref->listRef.elementCount()) * step)),
++      WordCount wordCount = roundBitsUpToWords(ElementCount64(elementCount) * step);
++      KJ_REQUIRE(boundsCheck(segment, ptr, ptr + wordCount),
+                  "Message contains out-of-bounds list pointer.") {
+         goto useDefault;
+       }
+ 
++      if (elementSize == ElementSize::VOID) {
++        // Watch out for lists of void, which can claim to be arbitrarily large without having sent
++        // actual data.
++        KJ_REQUIRE(amplifiedRead(segment, elementCount * (1 * WORDS / ELEMENTS)),
++                   "Message contains amplified list pointer.") {
++          goto useDefault;
++        }
++      }
++
+       if (checkElementSize) {
+         if (elementSize == ElementSize::BIT && expectedElementSize != ElementSize::BIT) {
+           KJ_FAIL_REQUIRE(
+@@ -2025,7 +2067,7 @@ struct WireHelpers {
+         }
+       }
+ 
+-      return ListReader(segment, ptr, ref->listRef.elementCount(), step,
++      return ListReader(segment, ptr, elementCount, step,
+                         dataSize, pointerCount, elementSize, nestingLimit - 1);
+     }
+   }

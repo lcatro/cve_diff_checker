@@ -1,0 +1,46 @@
+From 30be07759a3de2558da5224f127d052ecf492e8f Mon Sep 17 00:00:00 2001
+From: Fabien Potencier <fabien.potencier@gmail.com>
+Date: Tue, 11 Aug 2015 16:20:28 +0200
+Subject: [PATCH] fixed sandbox security issue
+
+---
+ lib/Twig/Template.php            | 5 +++++
+ test/Twig/Tests/TemplateTest.php | 9 +++++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/lib/Twig/Template.php b/lib/Twig/Template.php
+index 6eb2c36012..4a9fe9aa80 100644
+--- a/lib/Twig/Template.php
++++ b/lib/Twig/Template.php
+@@ -154,6 +154,11 @@ public function displayBlock($name, array $context, array $blocks = array(), $us
+         }
+ 
+         if (null !== $template) {
++            // avoid RCEs when sandbox is enabled
++            if (!$template instanceof Twig_Template) {
++                throw new \LogicException('A block must be a method on a Twig_Template instance.');
++            }
++
+             try {
+                 $template->$block($context, $blocks);
+             } catch (Twig_Error $e) {
+diff --git a/test/Twig/Tests/TemplateTest.php b/test/Twig/Tests/TemplateTest.php
+index 717248595b..172eabffa4 100644
+--- a/test/Twig/Tests/TemplateTest.php
++++ b/test/Twig/Tests/TemplateTest.php
+@@ -10,6 +10,15 @@
+  */
+ class Twig_Tests_TemplateTest extends PHPUnit_Framework_TestCase
+ {
++    /**
++     * @expectedException LogicException
++     */
++    public function testDisplayBlocksAcceptTemplateOnlyAsBlocks()
++    {
++        $template = $this->getMockForAbstractClass('Twig_Template', array(), '', false);
++        $template->displayBlock('foo', array(), array('foo' => array(new stdClass(), 'foo')));
++    }
++
+     /**
+      * @dataProvider getAttributeExceptions
+      */

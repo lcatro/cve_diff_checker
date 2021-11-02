@@ -1,0 +1,32 @@
+From 83deec2e3621c40d15a06e2491f27571d32fe10f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Fr=C3=A9d=C3=A9ric=20Guillot?= <fred@kanboard.net>
+Date: Wed, 30 Jan 2019 22:05:43 -0800
+Subject: [PATCH] Avoid XSS in pagination ordering
+
+---
+ app/Core/Paginator.php | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/app/Core/Paginator.php b/app/Core/Paginator.php
+index 9776a03dd2..d805567e65 100644
+--- a/app/Core/Paginator.php
++++ b/app/Core/Paginator.php
+@@ -169,10 +169,16 @@ public function setFormatter(FormatterInterface $formatter)
+     public function executeQuery()
+     {
+         if ($this->query !== null) {
++
+             $this->query
+                 ->offset($this->offset)
+-                ->limit($this->limit)
+-                ->orderBy($this->order, $this->direction);
++                ->limit($this->limit);
++
++            if (preg_match('/^[a-zA-Z0-9._]+$/', $this->order)) {
++                $this->query->orderBy($this->order, $this->direction);
++            } else {
++                $this->order = '';
++            }
+ 
+             if ($this->formatter !== null) {
+                 return $this->formatter->withQuery($this->query)->format();

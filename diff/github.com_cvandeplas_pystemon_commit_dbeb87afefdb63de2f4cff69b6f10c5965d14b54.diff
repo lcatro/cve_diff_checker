@@ -1,0 +1,34 @@
+From dbeb87afefdb63de2f4cff69b6f10c5965d14b54 Mon Sep 17 00:00:00 2001
+From: Asjid Kalam <asjid.kalam@gmail.com>
+Date: Sat, 13 Feb 2021 23:06:38 +0530
+Subject: [PATCH] Fixed code execution bug using SafeLoader()
+
+---
+ pystemon/config.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/pystemon/config.py b/pystemon/config.py
+index 45a403f..203c358 100644
+--- a/pystemon/config.py
++++ b/pystemon/config.py
+@@ -304,9 +304,9 @@ def _load_yamlconfig(self, configfile):
+             if self._recent_pyyaml():
+                 # https://github.com/yaml/pyyaml/wiki/PyYAML-yaml.load(input)-Deprecation
+                 # only for 5.1+
+-                yamlconfig = yaml.load(open(configfile), Loader=yaml.FullLoader)
++                yamlconfig = yaml.load(open(configfile), Loader=yaml.SafeLoader)
+             else:
+-                yamlconfig = yaml.load(open(configfile))
++                yamlconfig = yaml.safe_load(open(configfile))
+         except yaml.YAMLError as exc:
+             logger.error("Error in configuration file {0}:".format(configfile))
+             if hasattr(exc, 'problem_mark'):
+@@ -315,7 +315,7 @@ def _load_yamlconfig(self, configfile):
+         for includes in yamlconfig.get("includes", []):
+             try:
+                 logger.debug("loading include '{0}'".format(includes))
+-                yamlconfig.update(yaml.load(open(includes)))
++                yamlconfig.update(yaml.safe_load(open(includes)))
+             except Exception as e:
+                 raise PystemonConfigException("failed to load '{0}': {1}".format(includes, e))
+         return yamlconfig

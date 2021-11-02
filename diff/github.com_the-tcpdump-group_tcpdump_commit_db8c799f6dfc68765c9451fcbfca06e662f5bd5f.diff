@@ -1,0 +1,157 @@
+From db8c799f6dfc68765c9451fcbfca06e662f5bd5f Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Mon, 6 Mar 2017 10:13:22 -0800
+Subject: [PATCH] CVE-2017-13009/IPv6 mobility: Add a bounds check.
+
+This fixes a buffer over-read discovered by Brian 'geeknik' Carpenter.
+
+Add a test using the capture file supplied by the reporter(s).
+
+While we're at it:
+
+Add a comment giving the RFC for IPv6 mobility headers.
+
+Clean up some bounds checks to make it clearer what they're checking, by
+matching the subsequent EXTRACT_ calls or memcpy.
+
+For the binding update, if none of the flag bits are set, don't check
+the individual flag bits.
+---
+ print-mobility.c                     |  37 +++++++++++++++------------
+ tests/TESTLIST                       |   1 +
+ tests/ipv6-mobility-header-oobr.out  |   1 +
+ tests/ipv6-mobility-header-oobr.pcap | Bin 0 -> 88 bytes
+ 4 files changed, 22 insertions(+), 17 deletions(-)
+ create mode 100644 tests/ipv6-mobility-header-oobr.out
+ create mode 100644 tests/ipv6-mobility-header-oobr.pcap
+
+diff --git a/print-mobility.c b/print-mobility.c
+index ca5541330..d3ca0cabd 100644
+--- a/print-mobility.c
++++ b/print-mobility.c
+@@ -28,6 +28,7 @@
+  */
+ 
+ /* \summary: IPv6 mobility printer */
++/* RFC 3775 */
+ 
+ #ifdef HAVE_CONFIG_H
+ #include "config.h"
+@@ -241,7 +242,7 @@ mobility_print(netdissect_options *ndo,
+ 	case IP6M_CAREOF_TEST_INIT:
+ 		hlen = IP6M_MINLEN;
+ 		if (ndo->ndo_vflag) {
+-			ND_TCHECK2(*mh, hlen + 8);
++			ND_TCHECK_32BITS(&bp[hlen + 4]);
+ 			ND_PRINT((ndo, " %s Init Cookie=%08x:%08x",
+ 			       type == IP6M_HOME_TEST_INIT ? "Home" : "Care-of",
+ 			       EXTRACT_32BITS(&bp[hlen]),
+@@ -255,7 +256,7 @@ mobility_print(netdissect_options *ndo,
+ 		ND_PRINT((ndo, " nonce id=0x%x", EXTRACT_16BITS(&mh->ip6m_data16[0])));
+ 		hlen = IP6M_MINLEN;
+ 		if (ndo->ndo_vflag) {
+-			ND_TCHECK2(*mh, hlen + 8);
++			ND_TCHECK_32BITS(&bp[hlen + 4]);
+ 			ND_PRINT((ndo, " %s Init Cookie=%08x:%08x",
+ 			       type == IP6M_HOME_TEST ? "Home" : "Care-of",
+ 			       EXTRACT_32BITS(&bp[hlen]),
+@@ -263,7 +264,7 @@ mobility_print(netdissect_options *ndo,
+ 		}
+ 		hlen += 8;
+ 		if (ndo->ndo_vflag) {
+-			ND_TCHECK2(*mh, hlen + 8);
++			ND_TCHECK_32BITS(&bp[hlen + 4]);
+ 			ND_PRINT((ndo, " %s Keygen Token=%08x:%08x",
+ 			       type == IP6M_HOME_TEST ? "Home" : "Care-of",
+ 			       EXTRACT_32BITS(&bp[hlen]),
+@@ -275,22 +276,23 @@ mobility_print(netdissect_options *ndo,
+ 		ND_TCHECK(mh->ip6m_data16[0]);
+ 		ND_PRINT((ndo, " seq#=%u", EXTRACT_16BITS(&mh->ip6m_data16[0])));
+ 		hlen = IP6M_MINLEN;
+-		ND_TCHECK2(*mh, hlen + 1);
+-		if (bp[hlen] & 0xf0)
++		ND_TCHECK_16BITS(&bp[hlen]);
++		if (bp[hlen] & 0xf0) {
+ 			ND_PRINT((ndo, " "));
+-		if (bp[hlen] & 0x80)
+-			ND_PRINT((ndo, "A"));
+-		if (bp[hlen] & 0x40)
+-			ND_PRINT((ndo, "H"));
+-		if (bp[hlen] & 0x20)
+-			ND_PRINT((ndo, "L"));
+-		if (bp[hlen] & 0x10)
+-			ND_PRINT((ndo, "K"));
++			if (bp[hlen] & 0x80)
++				ND_PRINT((ndo, "A"));
++			if (bp[hlen] & 0x40)
++				ND_PRINT((ndo, "H"));
++			if (bp[hlen] & 0x20)
++				ND_PRINT((ndo, "L"));
++			if (bp[hlen] & 0x10)
++				ND_PRINT((ndo, "K"));
++		}
+ 		/* Reserved (4bits) */
+ 		hlen += 1;
+ 		/* Reserved (8bits) */
+ 		hlen += 1;
+-		ND_TCHECK2(*mh, hlen + 2);
++		ND_TCHECK_16BITS(&bp[hlen]);
+ 		/* units of 4 secs */
+ 		ND_PRINT((ndo, " lifetime=%u", EXTRACT_16BITS(&bp[hlen]) << 2));
+ 		hlen += 2;
+@@ -298,14 +300,15 @@ mobility_print(netdissect_options *ndo,
+ 	case IP6M_BINDING_ACK:
+ 		ND_TCHECK(mh->ip6m_data8[0]);
+ 		ND_PRINT((ndo, " status=%u", mh->ip6m_data8[0]));
++		ND_TCHECK(mh->ip6m_data8[1]);
+ 		if (mh->ip6m_data8[1] & 0x80)
+ 			ND_PRINT((ndo, " K"));
+ 		/* Reserved (7bits) */
+ 		hlen = IP6M_MINLEN;
+-		ND_TCHECK2(*mh, hlen + 2);
++		ND_TCHECK_16BITS(&bp[hlen]);
+ 		ND_PRINT((ndo, " seq#=%u", EXTRACT_16BITS(&bp[hlen])));
+ 		hlen += 2;
+-		ND_TCHECK2(*mh, hlen + 2);
++		ND_TCHECK_16BITS(&bp[hlen]);
+ 		/* units of 4 secs */
+ 		ND_PRINT((ndo, " lifetime=%u", EXTRACT_16BITS(&bp[hlen]) << 2));
+ 		hlen += 2;
+@@ -315,7 +318,7 @@ mobility_print(netdissect_options *ndo,
+ 		ND_PRINT((ndo, " status=%u", mh->ip6m_data8[0]));
+ 		/* Reserved */
+ 		hlen = IP6M_MINLEN;
+-		ND_TCHECK2(*mh, hlen + 16);
++		ND_TCHECK2(bp[hlen], 16);
+ 		ND_PRINT((ndo, " homeaddr %s", ip6addr_string(ndo, &bp[hlen])));
+ 		hlen += 16;
+ 		break;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 17ee6fb73..5dad008ef 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -439,6 +439,7 @@ ieee802.11_tim_ie_oobr	ieee802.11_tim_ie_oobr.pcap	ieee802.11_tim_ie_oobr.out
+ decnet-shorthdr-oobr	decnet-shorthdr-oobr.pcap	decnet-shorthdr-oobr.out
+ isakmp-3948-oobr-2	isakmp-3948-oobr-2.pcap		isakmp-3948-oobr-2.out
+ ieee802.11_rates_oobr	ieee802.11_rates_oobr.pcap	ieee802.11_rates_oobr.out
++ipv6-mobility-header-oobr	ipv6-mobility-header-oobr.pcap	ipv6-mobility-header-oobr.out
+ 
+ # bad packets from Kamil Frankowicz
+ snmp-heapoverflow-1	snmp-heapoverflow-1.pcap	snmp-heapoverflow-1.out
+diff --git a/tests/ipv6-mobility-header-oobr.out b/tests/ipv6-mobility-header-oobr.out
+new file mode 100644
+index 000000000..8188f8a8f
+--- /dev/null
++++ b/tests/ipv6-mobility-header-oobr.out
+@@ -0,0 +1 @@
++IP6 3030:3030:3030:3030:3030:3030:3030:3030 > 3030:3030:3030:3030:3030:3030:3030:3030: mobility: BA status=48[|MOBILITY]
+diff --git a/tests/ipv6-mobility-header-oobr.pcap b/tests/ipv6-mobility-header-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..87f6ef19e505a0c81527cd3c2bf3bad712b82830
+GIT binary patch
+literal 88
+qcmca|c+)~A1{MYbD9~qMV0g*^=NcFQ`5>ueu)G~q6+Vg$EC~QQR}nk_
+
+literal 0
+HcmV?d00001
+

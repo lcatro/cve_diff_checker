@@ -1,0 +1,40 @@
+From 6db74a4fcbff258c7cdf51a6ff0724fc10c485e5 Mon Sep 17 00:00:00 2001
+From: Mathieu Leplatre <mathieu@mozilla.com>
+Date: Fri, 26 Feb 2021 11:26:06 +0100
+Subject: [PATCH] Remove leading slashes in 404 redirections
+
+When reaching http://server//page/ the server should not redirect to ``/page`` instead of ``//page``.
+---
+ pollbot/middlewares.py | 2 +-
+ tests/test_views.py    | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/pollbot/middlewares.py b/pollbot/middlewares.py
+index 1c5d381..249cb80 100644
+--- a/pollbot/middlewares.py
++++ b/pollbot/middlewares.py
+@@ -61,7 +61,7 @@ async def handle_any(request, response):
+ async def handle_404(request, response):
+     if 'json' not in response.headers['Content-Type']:
+         if request.path.endswith('/'):
+-            return web.HTTPFound(request.path.rstrip('/'))
++            return web.HTTPFound('/' + request.path.strip('/'))
+         return web.json_response({
+             "status": 404,
+             "message": "Page '{}' not found".format(request.path)
+diff --git a/tests/test_views.py b/tests/test_views.py
+index 6b262fe..baeb56a 100644
+--- a/tests/test_views.py
++++ b/tests/test_views.py
+@@ -61,6 +61,11 @@ async def test_redirects_trailing_slashes(cli):
+     assert resp.headers['Location'] == "/v1/firefox/54.0"
+ 
+ 
++async def test_redirects_strip_leading_slashes(cli):
++    resp = await check_response(cli, "//page/", status=302, allow_redirects=False)
++    assert resp.headers['Location'] == "/page"
++
++
+ async def check_yaml_resource(cli, url, filename, **kwargs):
+     with open(os.path.join(HERE, "..", "pollbot", filename)) as stream:
+         content = yaml.safe_load(stream)

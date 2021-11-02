@@ -1,0 +1,28 @@
+From dae9900580a8888969481cd72035408091edb11b Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@gpac.io>
+Date: Mon, 4 Jan 2021 11:06:52 +0100
+Subject: [PATCH] fixed #1659
+
+---
+ src/isomedia/isom_store.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/isomedia/isom_store.c b/src/isomedia/isom_store.c
+index 37dfbe55a9..ee2b2cfaf2 100644
+--- a/src/isomedia/isom_store.c
++++ b/src/isomedia/isom_store.c
+@@ -150,8 +150,14 @@ GF_Err SetupWriters(MovieWriter *mw, GF_List *writers, u8 interleaving)
+ 
+ 	trackCount = gf_list_count(movie->moov->trackList);
+ 	for (i = 0; i < trackCount; i++) {
++		GF_SampleTableBox *stbl;
+ 		trak = gf_isom_get_track(movie->moov, i+1);
+ 
++		stbl = (trak->Media && trak->Media->information) ? trak->Media->information->sampleTable : NULL;
++		if (!stbl || !stbl->SampleSize || !stbl->ChunkOffset || !stbl->SampleToChunk) {
++			return GF_ISOM_INVALID_FILE;
++		}
++
+ 		GF_SAFEALLOC(writer, TrackWriter);
+ 		if (!writer) goto exit;
+ 		writer->sampleNumber = 1;

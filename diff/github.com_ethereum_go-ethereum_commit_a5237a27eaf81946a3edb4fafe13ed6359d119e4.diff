@@ -1,0 +1,64 @@
+From a5237a27eaf81946a3edb4fafe13ed6359d119e4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Felf=C3=B6ldi=20Zsolt?= <zsfelfoldi@gmail.com>
+Date: Tue, 5 Jun 2018 09:23:00 +0200
+Subject: [PATCH] les: add Skip overflow check to GetBlockHeadersMsg handler
+ (#16891)
+
+---
+ les/handler.go | 25 ++++++++++++++++++-------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/les/handler.go b/les/handler.go
+index 22899eb1bc39..1b6916578797 100644
+--- a/les/handler.go
++++ b/les/handler.go
+@@ -19,6 +19,7 @@ package les
+ 
+ import (
+ 	"encoding/binary"
++	"encoding/json"
+ 	"errors"
+ 	"fmt"
+ 	"math/big"
+@@ -441,7 +442,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
+ 
+ 			// Advance to the next header of the query
+ 			switch {
+-			case query.Origin.Hash != (common.Hash{}) && query.Reverse:
++			case hashMode && query.Reverse:
+ 				// Hash based traversal towards the genesis block
+ 				for i := 0; i < int(query.Skip)+1; i++ {
+ 					if header := pm.blockchain.GetHeader(query.Origin.Hash, number); header != nil {
+@@ -452,16 +453,26 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
+ 						break
+ 					}
+ 				}
+-			case query.Origin.Hash != (common.Hash{}) && !query.Reverse:
++			case hashMode && !query.Reverse:
+ 				// Hash based traversal towards the leaf block
+-				if header := pm.blockchain.GetHeaderByNumber(origin.Number.Uint64() + query.Skip + 1); header != nil {
+-					if pm.blockchain.GetBlockHashesFromHash(header.Hash(), query.Skip+1)[query.Skip] == query.Origin.Hash {
+-						query.Origin.Hash = header.Hash()
++				var (
++					current = origin.Number.Uint64()
++					next    = current + query.Skip + 1
++				)
++				if next <= current {
++					infos, _ := json.MarshalIndent(p.Peer.Info(), "", "  ")
++					p.Log().Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
++					unknown = true
++				} else {
++					if header := pm.blockchain.GetHeaderByNumber(next); header != nil {
++						if pm.blockchain.GetBlockHashesFromHash(header.Hash(), query.Skip+1)[query.Skip] == query.Origin.Hash {
++							query.Origin.Hash = header.Hash()
++						} else {
++							unknown = true
++						}
+ 					} else {
+ 						unknown = true
+ 					}
+-				} else {
+-					unknown = true
+ 				}
+ 			case query.Reverse:
+ 				// Number based traversal towards the genesis block

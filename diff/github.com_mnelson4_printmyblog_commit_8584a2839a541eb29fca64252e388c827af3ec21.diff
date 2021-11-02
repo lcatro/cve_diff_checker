@@ -1,0 +1,76 @@
+From 8584a2839a541eb29fca64252e388c827af3ec21 Mon Sep 17 00:00:00 2001
+From: Mike Nelson <michael@eventespresso.com>
+Date: Fri, 26 Apr 2019 20:40:30 -0700
+Subject: [PATCH] do a little more sanitizing of the site param when REST PRoxy
+ enabled
+
+---
+ .../RestApiDetector/RestApiDetector.php       | 41 +++++++++++++------
+ 1 file changed, 28 insertions(+), 13 deletions(-)
+
+diff --git a/includes/vendor/mnelson4/RestApiDetector/RestApiDetector.php b/includes/vendor/mnelson4/RestApiDetector/RestApiDetector.php
+index d422fbd3..1d576355 100644
+--- a/includes/vendor/mnelson4/RestApiDetector/RestApiDetector.php
++++ b/includes/vendor/mnelson4/RestApiDetector/RestApiDetector.php
+@@ -30,11 +30,7 @@ class RestApiDetector
+      */
+     public function __construct($site)
+     {
+-        // If the REST API Proxy Plugin isn't active, always use the current site.
+-        if(! PMB_REST_PROXY_EXISTS){
+-            $site = '';
+-        }
+-        $this->setSite($site);
++        $this->setSite($this->sanitizeSite($site));
+         $this->getSiteInfo();
+     }
+ 
+@@ -55,14 +51,7 @@ public function getSiteInfo()
+             $this->setLocal(true);
+             return;
+         }
+-        // If they forgot to add http(s), add it for them.
+-        if(strpos($this->getSite(), 'http://') === false && strpos($this->getSite(), 'https://') === false) {
+-            $this->setSite( 'http://' . $this->getSite());
+-        }
+-        // if there is one, check if it exists in wordpress.com, eg "retirementreflections.com"
+-        $site = trailingslashit(sanitize_text_field($this->getSite()));
+-
+-
++        $site = $this->getSite();
+         // Let's see if it's self-hosted...
+         $data = $this->getSelfHostedSiteInfo($site);
+ //        if($data === false){
+@@ -77,6 +66,32 @@ public function getSiteInfo()
+         return $data;
+     }
+ 
++    /**
++     * Avoid SSRF by sanitizing the site received.
++     * @since $VID:$
++     * @param $site
++     * @return mixed|string
++     */
++    protected function sanitizeSite($site)
++    {
++        // If the REST API Proxy Plugin isn't active, always use the current site.
++        if(! PMB_REST_PROXY_EXISTS){
++            return '';
++        }
++        // If they forgot to add http(s), add it for them.
++        if(strpos($site, 'http://') === false && strpos($site, 'https://') === false) {
++            $site = 'http://' . $site;
++        }
++        // if there is one, check if it exists in wordpress.com, eg "retirementreflections.com"
++
++        $file_info = pathinfo($site);
++        if( isset($file_info['extension'])){
++            $site = str_replace($file_info['filename'] . "." . $file_info['extension'], "", $site);
++        }
++        $site = trailingslashit(sanitize_text_field($site));
++        return $site;
++    }
++
+     /**
+      * Tries to get the site's name, description, and URL, assuming it's self-hosted.
+      * Returns a true on success, false if the site works but wasn't a self-hosted WordPress site, or

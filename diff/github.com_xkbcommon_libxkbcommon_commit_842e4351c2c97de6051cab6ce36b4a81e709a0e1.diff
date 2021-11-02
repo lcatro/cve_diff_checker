@@ -1,0 +1,28 @@
+From 842e4351c2c97de6051cab6ce36b4a81e709a0e1 Mon Sep 17 00:00:00 2001
+From: Ran Benita <ran234@gmail.com>
+Date: Mon, 12 Mar 2018 09:43:55 +0200
+Subject: [PATCH] compose: fix infinite loop in parser on some inputs
+
+The parser would enter an infinite loop if an unterminated keysym
+literal occurs at EOF.
+
+Found with the afl fuzzer.
+
+Signed-off-by: Ran Benita <ran234@gmail.com>
+---
+ src/compose/parser.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/compose/parser.c b/src/compose/parser.c
+index 40c9470e..439d404f 100644
+--- a/src/compose/parser.c
++++ b/src/compose/parser.c
+@@ -144,7 +144,7 @@ lex(struct scanner *s, union lvalue *val)
+ 
+     /* LHS Keysym. */
+     if (chr(s, '<')) {
+-        while (peek(s) != '>' && !eol(s))
++        while (peek(s) != '>' && !eol(s) && !eof(s))
+             buf_append(s, next(s));
+         if (!chr(s, '>')) {
+             scanner_err(s, "unterminated keysym literal");

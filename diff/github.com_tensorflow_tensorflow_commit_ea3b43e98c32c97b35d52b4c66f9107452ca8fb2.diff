@@ -1,0 +1,24 @@
+From ea3b43e98c32c97b35d52b4c66f9107452ca8fb2 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Thu, 22 Apr 2021 15:11:05 -0700
+Subject: [PATCH] Fix `tf.raw_ops.CTCGreedyDecoder` CHECK failure.
+
+PiperOrigin-RevId: 369960465
+Change-Id: If0b8b3264d5a47a24ac0970ed7b81ce6b4921fae
+---
+ tensorflow/core/kernels/ctc_decoder_ops.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ctc_decoder_ops.cc b/tensorflow/core/kernels/ctc_decoder_ops.cc
+index d62aef2d03b98..22681f97437f0 100644
+--- a/tensorflow/core/kernels/ctc_decoder_ops.cc
++++ b/tensorflow/core/kernels/ctc_decoder_ops.cc
+@@ -232,6 +232,8 @@ class CTCGreedyDecoderOp : public OpKernel {
+         int prev_indices = -1;
+         for (int t = 0; t < seq_len_t(b); ++t) {
+           int max_class_indices;
++          OP_REQUIRES(ctx, input_list_t[t].dimension(1) > 0,
++                      errors::InvalidArgument("Invalid input dimensions."));
+           log_prob_t(b, 0) +=
+               -RowMax<T>(input_list_t[t], b, &max_class_indices);
+           if (max_class_indices != blank_index &&

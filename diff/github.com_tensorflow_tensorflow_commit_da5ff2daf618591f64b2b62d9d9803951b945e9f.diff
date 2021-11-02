@@ -1,0 +1,25 @@
+From da5ff2daf618591f64b2b62d9d9803951b945e9f Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 28 Apr 2021 11:24:45 -0700
+Subject: [PATCH] Fix FPE issue with `tf.raw_ops.DenseCountSparseOutput`.
+
+PiperOrigin-RevId: 370946862
+Change-Id: I3752584ad04aaecb327ff6793a9640ac56acfe7a
+---
+ tensorflow/core/kernels/count_ops.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/count_ops.cc b/tensorflow/core/kernels/count_ops.cc
+index eeb0b853c7aad..40aa1fe458c1e 100644
+--- a/tensorflow/core/kernels/count_ops.cc
++++ b/tensorflow/core/kernels/count_ops.cc
+@@ -122,6 +122,9 @@ class DenseCount : public OpKernel {
+ 
+     int num_batch_elements = 1;
+     for (int i = 0; i < num_batch_dimensions; ++i) {
++      OP_REQUIRES(context, data.shape().dim_size(i) != 0,
++                  errors::InvalidArgument(
++                      "Invalid input: Shapes dimension cannot be 0."));
+       num_batch_elements *= data.shape().dim_size(i);
+     }
+     int num_value_elements = data.shape().num_elements() / num_batch_elements;

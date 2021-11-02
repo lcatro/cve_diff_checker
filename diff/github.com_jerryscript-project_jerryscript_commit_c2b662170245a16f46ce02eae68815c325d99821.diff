@@ -1,0 +1,44 @@
+From c2b662170245a16f46ce02eae68815c325d99821 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?D=C3=A1niel=20B=C3=A1tyai?= <dbatyai@inf.u-szeged.hu>
+Date: Thu, 28 May 2020 07:55:16 +0200
+Subject: [PATCH] Fix adding entries to the internal buffer of a Map object
+ (#3805)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When appending the key/value pair separately, garbage collection could be
+triggered before the value is added, which could cause problems during
+marking. This patch changes insertion to add both values at the same
+time, which prevents partial entries from being present in the internal
+buffer.
+
+Fixes #3804.
+
+JerryScript-DCO-1.0-Signed-off-by: Dániel Bátyai dbatyai@inf.u-szeged.hu
+---
+ jerry-core/ecma/operations/ecma-container-object.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/jerry-core/ecma/operations/ecma-container-object.c b/jerry-core/ecma/operations/ecma-container-object.c
+index 0dadc5ce51..0732c02353 100644
+--- a/jerry-core/ecma/operations/ecma-container-object.c
++++ b/jerry-core/ecma/operations/ecma-container-object.c
+@@ -64,11 +64,14 @@ ecma_op_internal_buffer_append (ecma_collection_t *container_p, /**< internal co
+ {
+   JERRY_ASSERT (container_p != NULL);
+ 
+-  ecma_collection_push_back (container_p, ecma_copy_value_if_not_object (key_arg));
+-
+   if (lit_id == LIT_MAGIC_STRING_WEAKMAP_UL || lit_id == LIT_MAGIC_STRING_MAP_UL)
+   {
+-    ecma_collection_push_back (container_p, ecma_copy_value_if_not_object (value_arg));
++    ecma_value_t values[] = { ecma_copy_value_if_not_object (key_arg), ecma_copy_value_if_not_object (value_arg) };
++    ecma_collection_append (container_p, values, 2);
++  }
++  else
++  {
++    ecma_collection_push_back (container_p, ecma_copy_value_if_not_object (key_arg));
+   }
+ 
+   ECMA_CONTAINER_SET_SIZE (container_p, ECMA_CONTAINER_GET_SIZE (container_p) + 1);

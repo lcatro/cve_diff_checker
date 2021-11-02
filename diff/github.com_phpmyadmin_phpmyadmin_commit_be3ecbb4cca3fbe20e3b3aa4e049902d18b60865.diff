@@ -1,0 +1,392 @@
+From be3ecbb4cca3fbe20e3b3aa4e049902d18b60865 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Fri, 17 Jun 2016 15:38:48 +0200
+Subject: [PATCH] Simplify and cleanup transformation plugins
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove PMA_transformation_global_html_replace which makes the code only
+more confusing.
+
+Also add escaping to browse transformations.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ .../abs/DateFormatTransformationsPlugin.php   | 10 +++--
+ .../abs/DownloadTransformationsPlugin.php     |  2 +-
+ .../abs/ImageLinkTransformationsPlugin.php    | 12 +-----
+ .../abs/InlineTransformationsPlugin.php       | 30 ++++++---------
+ .../abs/LongToIPv4TransformationsPlugin.php   |  2 +-
+ .../abs/PreApPendTransformationsPlugin.php    |  4 +-
+ .../abs/SubstringTransformationsPlugin.php    |  2 +-
+ .../TextImageLinkTransformationsPlugin.php    | 24 +++---------
+ .../abs/TextLinkTransformationsPlugin.php     | 27 +++++--------
+ libraries/transformations.lib.php             | 38 -------------------
+ .../TransformationPluginsTest.php             |  6 +--
+ test/libraries/PMA_transformation_test.php    | 28 --------------
+ 12 files changed, 41 insertions(+), 144 deletions(-)
+
+diff --git a/libraries/plugins/transformations/abs/DateFormatTransformationsPlugin.php b/libraries/plugins/transformations/abs/DateFormatTransformationsPlugin.php
+index 238004284c7..7a7e0cee94b 100644
+--- a/libraries/plugins/transformations/abs/DateFormatTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/DateFormatTransformationsPlugin.php
+@@ -11,6 +11,8 @@
+ use PMA;
+ use PMA\libraries\plugins\TransformationsPlugin;
+ 
++require_once 'libraries/js_escape.lib.php';
++
+ /**
+  * Provides common methods for all of the date format transformations plugins.
+  *
+@@ -145,11 +147,11 @@ public function applyTransformation($buffer, $options = array(), $meta = '')
+             } else {
+                 $text = 'INVALID DATE TYPE';
+             }
+-            $buffer = '<dfn onclick="alert(\'' . $source . '\');" title="'
+-                . $source . '">' . $text . '</dfn>';
++            return '<dfn onclick="alert(\'' . PMA_jsFormat($source, false) . '\');" title="'
++                . htmlspecialchars($source) . '">' . htmlspecialchars($text) . '</dfn>';
++        } else {
++            return htmlspecialchars($buffer);
+         }
+-
+-        return $buffer;
+     }
+ 
+     /* ~~~~~~~~~~~~~~~~~~~~ Getters and Setters ~~~~~~~~~~~~~~~~~~~~ */
+diff --git a/libraries/plugins/transformations/abs/DownloadTransformationsPlugin.php b/libraries/plugins/transformations/abs/DownloadTransformationsPlugin.php
+index ee556cdeb40..51525749648 100644
+--- a/libraries/plugins/transformations/abs/DownloadTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/DownloadTransformationsPlugin.php
+@@ -69,7 +69,7 @@ public function applyTransformation($buffer, $options = array(), $meta = '')
+             '<a href="transformation_wrapper.php%s&amp;ct=application'
+             . '/octet-stream&amp;cn=%s" title="%s" class="disableAjax">%s</a>',
+             $options['wrapper_link'],
+-            urlencode($cn),
++            htmlspecialchars(urlencode($cn)),
+             htmlspecialchars($cn),
+             htmlspecialchars($cn)
+         );
+diff --git a/libraries/plugins/transformations/abs/ImageLinkTransformationsPlugin.php b/libraries/plugins/transformations/abs/ImageLinkTransformationsPlugin.php
+index 1592144fd68..5246fb2e5ff 100644
+--- a/libraries/plugins/transformations/abs/ImageLinkTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/ImageLinkTransformationsPlugin.php
+@@ -49,16 +49,8 @@ public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+         // must disable the page loader, see
+         // https://wiki.phpmyadmin.net/pma/Page_loader#Bypassing_the_page_loader
+-        $transform_options = array(
+-            'string' => '<a class="disableAjax"'
+-                . ' target="_new" href="transformation_wrapper.php'
+-                . $options['wrapper_link'] . '" alt="[__BUFFER__]">[BLOB]</a>',
+-        );
+-
+-        return PMA_Transformation_globalHtmlReplace(
+-            $buffer,
+-            $transform_options
+-        );
++        return '<a class="disableAjax" target="_new" href="transformation_wrapper.php'
++            . $options['wrapper_link'] . '" alt="[' . htmlspecialchars($buffer) . ']">[BLOB]</a>';
+     }
+ 
+     /* ~~~~~~~~~~~~~~~~~~~~ Getters and Setters ~~~~~~~~~~~~~~~~~~~~ */
+diff --git a/libraries/plugins/transformations/abs/InlineTransformationsPlugin.php b/libraries/plugins/transformations/abs/InlineTransformationsPlugin.php
+index 814c8dae474..9d2a12f59fb 100644
+--- a/libraries/plugins/transformations/abs/InlineTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/InlineTransformationsPlugin.php
+@@ -49,30 +49,22 @@ public static function getInfo()
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+         if (PMA_IS_GD2) {
+-            $transform_options = array(
+-                'string' => '<a href="transformation_wrapper.php'
+-                    . $options['wrapper_link']
+-                    . '" target="_blank"><img src="transformation_wrapper.php'
+-                    . $options['wrapper_link'] . '&amp;resize=jpeg&amp;newWidth='
+-                    . (isset($options[0]) ? $options[0] : '100') . '&amp;newHeight='
+-                    . (isset($options[1]) ? $options[1] : 100)
+-                    . '" alt="[__BUFFER__]" border="0" /></a>',
+-            );
++            return '<a href="transformation_wrapper.php'
++                . $options['wrapper_link']
++                . '" target="_blank"><img src="transformation_wrapper.php'
++                . $options['wrapper_link'] . '&amp;resize=jpeg&amp;newWidth='
++                . (isset($options[0]) ? $options[0] : '100') . '&amp;newHeight='
++                . (isset($options[1]) ? $options[1] : 100)
++                . '" alt="[' . htmlspecialchars($buffer) . ']" border="0" /></a>';
+         } else {
+-            $transform_options = array(
+-                'string' => '<img src="transformation_wrapper.php'
+-                    . $options['wrapper_link']
+-                    . '" alt="[__BUFFER__]" width="320" height="240" />',
+-            );
++            return '<img src="transformation_wrapper.php'
++                . $options['wrapper_link']
++                . '" alt="[' . htmlspecialchars($buffer) . ']" width="320" height="240" />';
+         }
+-
+-        return PMA_Transformation_globalHtmlReplace(
+-            $buffer,
+-            $transform_options
+-        );
+     }
+ 
+ 
++
+     /* ~~~~~~~~~~~~~~~~~~~~ Getters and Setters ~~~~~~~~~~~~~~~~~~~~ */
+ 
+     /**
+diff --git a/libraries/plugins/transformations/abs/LongToIPv4TransformationsPlugin.php b/libraries/plugins/transformations/abs/LongToIPv4TransformationsPlugin.php
+index 8ca5817a37c..234a4925b38 100644
+--- a/libraries/plugins/transformations/abs/LongToIPv4TransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/LongToIPv4TransformationsPlugin.php
+@@ -42,7 +42,7 @@ public static function getInfo()
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+         if ($buffer < 0 || $buffer > 4294967295) {
+-            return $buffer;
++            return htmlspecialchars($buffer);
+         }
+ 
+         return long2ip($buffer);
+diff --git a/libraries/plugins/transformations/abs/PreApPendTransformationsPlugin.php b/libraries/plugins/transformations/abs/PreApPendTransformationsPlugin.php
+index 9d85a3d72d0..7247ce13b9b 100644
+--- a/libraries/plugins/transformations/abs/PreApPendTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/PreApPendTransformationsPlugin.php
+@@ -46,10 +46,8 @@ public function applyTransformation($buffer, $options = array(), $meta = '')
+         $options = $this->getOptions($options, array('', ''));
+ 
+         //just prepend and/or append the options to the original text
+-        $newtext = htmlspecialchars($options[0]) . $buffer
++        return htmlspecialchars($options[0]) . htmlspecialchars($buffer)
+             . htmlspecialchars($options[1]);
+-
+-        return $newtext;
+     }
+ 
+     /* ~~~~~~~~~~~~~~~~~~~~ Getters and Setters ~~~~~~~~~~~~~~~~~~~~ */
+diff --git a/libraries/plugins/transformations/abs/SubstringTransformationsPlugin.php b/libraries/plugins/transformations/abs/SubstringTransformationsPlugin.php
+index fcf48b00e0c..57979d1cf2f 100644
+--- a/libraries/plugins/transformations/abs/SubstringTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/SubstringTransformationsPlugin.php
+@@ -71,7 +71,7 @@ public function applyTransformation($buffer, $options = array(), $meta = '')
+             }
+         }
+ 
+-        return $newtext;
++        return htmlspecialchars($newtext);
+     }
+ 
+ 
+diff --git a/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php b/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
+index 76009d32b81..ef534f296b2 100644
+--- a/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
+@@ -14,9 +14,6 @@
+     exit;
+ }
+ 
+-/* For PMA_Transformation_globalHtmlReplace */
+-require_once 'libraries/transformations.lib.php';
+-
+ /**
+  * Provides common methods for all of the image link transformations plugins.
+  *
+@@ -49,21 +46,12 @@ public static function getInfo()
+      */
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+-        $transform_options = array(
+-            'string' => '<a href="' . (isset($options[0]) ? $options[0] : '')
+-                . $buffer . '" target="_blank"><img src="'
+-                . (isset($options[0]) ? $options[0] : '') . $buffer
+-                . '" border="0" width="' . (isset($options[1]) ? $options[1] : 100)
+-                . '" height="' . (isset($options[2]) ? $options[2] : 50) . '" />'
+-                . $buffer . '</a>',
+-        );
+-
+-        $buffer = PMA_Transformation_globalHtmlReplace(
+-            $buffer,
+-            $transform_options
+-        );
+-
+-        return $buffer;
++        return '<a href="' . htmlspecialchars(isset($options[0]) ? $options[0] : '')
++            . htmlspecialchars($buffer) . '" target="_blank"><img src="'
++            . htmlspecialchars(isset($options[0]) ? $options[0] : '') . htmlspecialchars($buffer)
++            . '" border="0" width="' . (isset($options[1]) ? $options[1] : 100)
++            . '" height="' . (isset($options[2]) ? $options[2] : 50) . '" />'
++            . htmlspecialchars($buffer) . '</a>';
+     }
+ 
+ 
+diff --git a/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php b/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
+index ec2da90ec27..000b9d056be 100644
+--- a/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
+@@ -14,9 +14,6 @@
+     exit;
+ }
+ 
+-/* For PMA_Transformation_globalHtmlReplace */
+-require_once 'libraries/transformations.lib.php';
+-
+ /**
+  * Provides common methods for all of the link transformations plugins.
+  *
+@@ -49,25 +46,19 @@ public static function getInfo()
+      */
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+-
+         $append_part = (isset($options[2]) && $options[2]) ? '' : $buffer;
+ 
+-        $transform_options = array(
+-            'string' => '<a href="'
+-                . (isset($options[0]) ? $options[0] : '') . $append_part
+-                . '" title="'
+-                . htmlspecialchars(isset($options[1]) ? $options[1] : '')
+-                . '" target="_new">'
+-                . htmlspecialchars(isset($options[1]) ? $options[1] : $buffer)
+-                . '</a>',
+-        );
+-
+-        return PMA_Transformation_globalHtmlReplace(
+-            $buffer,
+-            $transform_options
+-        );
++        return '<a href="'
++            . htmlspecialchars(isset($options[0]) ? $options[0] : '')
++            . htmlspecialchars($append_part)
++            . '" title="'
++            . htmlspecialchars(isset($options[1]) ? $options[1] : '')
++            . '" target="_new">'
++            . htmlspecialchars(isset($options[1]) ? $options[1] : $buffer)
++            . '</a>';
+     }
+ 
++
+     /* ~~~~~~~~~~~~~~~~~~~~ Getters and Setters ~~~~~~~~~~~~~~~~~~~~ */
+ 
+     /**
+diff --git a/libraries/transformations.lib.php b/libraries/transformations.lib.php
+index 5e1562e20e1..2526024bcef 100644
+--- a/libraries/transformations.lib.php
++++ b/libraries/transformations.lib.php
+@@ -400,44 +400,6 @@ function PMA_setMIME($db, $table, $key, $mimetype, $transformation,
+  * GLOBAL Plugin functions
+  */
+ 
+-
+-/**
+- * Replaces "[__BUFFER__]" occurrences found in $options['string'] with the text
+- * in $buffer, after performing a regular expression search and replace on
+- * $buffer using $options['regex'] and $options['regex_replace'].
+- *
+- * @param string $buffer  text that will be replaced in $options['string'],
+- *                        after being formatted
+- * @param array  $options the options required to format $buffer
+- *     = array (
+- *         'string'        => 'string', // text containing "[__BUFFER__]"
+- *         'regex'         => 'mixed',  // the pattern to search for
+- *         'regex_replace' => 'mixed',  // string or array of strings to replace
+- *                                      // with
+- *     );
+- *
+- * @return string containing the text with all the replacements
+- */
+-function PMA_Transformation_globalHtmlReplace($buffer, $options = array())
+-{
+-    if (! isset($options['string'])) {
+-        $options['string'] = '';
+-    }
+-
+-    if (isset($options['regex']) && isset($options['regex_replace'])) {
+-        $buffer = preg_replace(
+-            '@' . str_replace('@', '\@', $options['regex']) . '@si',
+-            $options['regex_replace'],
+-            $buffer
+-        );
+-    }
+-
+-    // Replace occurrences of [__BUFFER__] with actual text
+-    $return = str_replace("[__BUFFER__]", $buffer, $options['string']);
+-    return $return;
+-}
+-
+-
+ /**
+  * Delete related transformation details
+  * after deleting database. table or column
+diff --git a/test/classes/plugin/transformations/TransformationPluginsTest.php b/test/classes/plugin/transformations/TransformationPluginsTest.php
+index e09bba8e296..872adb352c2 100644
+--- a/test/classes/plugin/transformations/TransformationPluginsTest.php
++++ b/test/classes/plugin/transformations/TransformationPluginsTest.php
+@@ -780,7 +780,7 @@ public function transformationDataProvider()
+                 '<a href="transformation_wrapper.phpPMA_wrapper_link" '
+                 . 'target="_blank"><img src="transformation_wrapper.php'
+                 . 'PMA_wrapper_link&amp;resize=jpeg&amp;newWidth=./image/&amp;'
+-                . 'newHeight=200" alt="PMA_JPEG_Inline" border="0" /></a>'
++                . 'newHeight=200" alt="[PMA_JPEG_Inline]" border="0" /></a>'
+             ),
+             array(
+                 new Image_JPEG_Link(),
+@@ -790,7 +790,7 @@ public function transformationDataProvider()
+                 ),
+                 '<a class="disableAjax" target="_new"'
+                 . ' href="transformation_wrapper.phpPMA_wrapper_link"'
+-                . ' alt="PMA_IMAGE_LINK">[BLOB]</a>'
++                . ' alt="[PMA_IMAGE_LINK]">[BLOB]</a>'
+             ),
+             array(
+                 new Image_PNG_Inline(),
+@@ -802,7 +802,7 @@ public function transformationDataProvider()
+                 . ' target="_blank"><img src="transformation_wrapper.php'
+                 . 'PMA_wrapper_link&amp;'
+                 . 'resize=jpeg&amp;newWidth=./image/&amp;newHeight=200" '
+-                . 'alt="PMA_PNG_Inline" border="0" /></a>'
++                . 'alt="[PMA_PNG_Inline]" border="0" /></a>'
+             ),
+             array(
+                 new Text_Plain_Dateformat(),
+diff --git a/test/libraries/PMA_transformation_test.php b/test/libraries/PMA_transformation_test.php
+index 1319d19a2c9..f573c5e476a 100644
+--- a/test/libraries/PMA_transformation_test.php
++++ b/test/libraries/PMA_transformation_test.php
+@@ -208,34 +208,6 @@ public function testGetMime()
+         );
+     }
+ 
+-    /**
+-     * Test for PMA_Transformation_globalHtmlReplace
+-     *
+-     * @return void
+-     */
+-    public function testTransformationGlobalHtmlReplace()
+-    {
+-        // Case 1
+-        $actual = PMA_Transformation_globalHtmlReplace('', array());
+-        $this->assertEquals(
+-            '',
+-            $actual
+-        );
+-
+-        // Case 2
+-        $buffer = 'foobar';
+-        $options = array(
+-            'regex' => 'foo',
+-            'regex_replace' => 'bar',
+-            'string' => 'x[__BUFFER__]x'
+-        );
+-        $actual = PMA_Transformation_globalHtmlReplace($buffer, $options);
+-        $this->assertEquals(
+-            'xbarbarx',
+-            $actual
+-        );
+-    }
+-
+     /**
+      * Test for PMA_clearTransformations
+      *

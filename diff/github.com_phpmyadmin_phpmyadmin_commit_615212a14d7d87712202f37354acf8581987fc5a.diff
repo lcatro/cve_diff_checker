@@ -1,0 +1,59 @@
+From 615212a14d7d87712202f37354acf8581987fc5a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Wed, 22 Jun 2016 13:26:03 +0200
+Subject: [PATCH] Do not allow javascript: links in transformation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ .../abs/TextImageLinkTransformationsPlugin.php        | 11 ++++++++---
+ .../abs/TextLinkTransformationsPlugin.php             | 11 +++++++----
+ 2 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php b/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
+index ef534f296b2..d341f59da91 100644
+--- a/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/TextImageLinkTransformationsPlugin.php
+@@ -46,9 +46,14 @@ public static function getInfo()
+      */
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+-        return '<a href="' . htmlspecialchars(isset($options[0]) ? $options[0] : '')
+-            . htmlspecialchars($buffer) . '" target="_blank"><img src="'
+-            . htmlspecialchars(isset($options[0]) ? $options[0] : '') . htmlspecialchars($buffer)
++        $url = (isset($options[0]) ? $options[0] : '') . $buffer;
++        $parsed = parse_url($url);
++        /* Do not allow javascript links */
++        if (isset($parsed['scheme']) && $parsed['scheme'] == 'javascript') {
++            return htmlspecialchars($url);
++        }
++        return '<a href="' . htmlspecialchars($url)
++            . '" target="_blank"><img src="' . htmlspecialchars($url)
+             . '" border="0" width="' . (isset($options[1]) ? $options[1] : 100)
+             . '" height="' . (isset($options[2]) ? $options[2] : 50) . '" />'
+             . htmlspecialchars($buffer) . '</a>';
+diff --git a/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php b/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
+index 000b9d056be..a125b01e5fa 100644
+--- a/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
++++ b/libraries/plugins/transformations/abs/TextLinkTransformationsPlugin.php
+@@ -46,11 +46,14 @@ public static function getInfo()
+      */
+     public function applyTransformation($buffer, $options = array(), $meta = '')
+     {
+-        $append_part = (isset($options[2]) && $options[2]) ? '' : $buffer;
+-
++        $url = (isset($options[0]) ? $options[0] : '') . ((isset($options[2]) && $options[2]) ? '' : $buffer);
++        $parsed = parse_url($url);
++        /* Do not allow javascript links */
++        if (isset($parsed['scheme']) && $parsed['scheme'] == 'javascript') {
++            return htmlspecialchars($url);
++        }
+         return '<a href="'
+-            . htmlspecialchars(isset($options[0]) ? $options[0] : '')
+-            . htmlspecialchars($append_part)
++            . htmlspecialchars($url)
+             . '" title="'
+             . htmlspecialchars(isset($options[1]) ? $options[1] : '')
+             . '" target="_new">'

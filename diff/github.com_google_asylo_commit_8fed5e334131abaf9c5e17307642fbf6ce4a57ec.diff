@@ -1,0 +1,32 @@
+From 8fed5e334131abaf9c5e17307642fbf6ce4a57ec Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Fri, 25 Sep 2020 15:34:34 -0700
+Subject: [PATCH] Check sockaddr size in inet_pton
+
+PiperOrigin-RevId: 333821843
+Change-Id: Ie0b694f1edd3f7a4a3de6df964d68566961accf6
+---
+ asylo/platform/host_call/trusted/host_calls.cc | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/asylo/platform/host_call/trusted/host_calls.cc b/asylo/platform/host_call/trusted/host_calls.cc
+index a2e2b0df1..e1b575cda 100644
+--- a/asylo/platform/host_call/trusted/host_calls.cc
++++ b/asylo/platform/host_call/trusted/host_calls.cc
+@@ -1283,8 +1283,16 @@ int enc_untrusted_inet_pton(int af, const char *src, void *dst) {
+   auto klinux_addr_buffer = output.next();
+   size_t max_size = 0;
+   if (af == AF_INET) {
++    if (klinux_addr_buffer.size() != sizeof(klinux_in_addr)) {
++      ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
++          "enc_untrusted_inet_pton: unexpected output size");
++    }
+     max_size = sizeof(struct in_addr);
+   } else if (af == AF_INET6) {
++    if (klinux_addr_buffer.size() != sizeof(klinux_in6_addr)) {
++      ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
++          "enc_untrusted_inet_pton: unexpected output size");
++    }
+     max_size = sizeof(struct in6_addr);
+   }
+   memcpy(dst, klinux_addr_buffer.data(),

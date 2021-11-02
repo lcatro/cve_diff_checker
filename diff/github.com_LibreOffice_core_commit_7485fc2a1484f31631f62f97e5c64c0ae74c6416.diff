@@ -1,0 +1,49 @@
+From 7485fc2a1484f31631f62f97e5c64c0ae74c6416 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Caol=C3=A1n=20McNamara?= <caolanm@redhat.com>
+Date: Thu, 22 Dec 2016 13:35:31 +0000
+Subject: [PATCH] Resolves: ofz#313 cbBmiSrc > getDIBV5HeaderSize
+
+Change-Id: I67fb67dc0a4cb609b8f1391c1eb6dd395755a933
+---
+ vcl/source/filter/wmf/enhwmf.cxx | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/vcl/source/filter/wmf/enhwmf.cxx b/vcl/source/filter/wmf/enhwmf.cxx
+index 7f91ffc3d14cf..a8118a274744a 100644
+--- a/vcl/source/filter/wmf/enhwmf.cxx
++++ b/vcl/source/filter/wmf/enhwmf.cxx
+@@ -1252,13 +1252,22 @@ bool EnhWMFReader::ReadEnhWMF()
+                     else
+                     {
+                         const sal_uInt32 nSourceSize = cbBmiSrc + cbBitsSrc + 14;
+-                        if ( nSourceSize <= ( nEndPos - nStartPos ) )
++                        bool bSafeRead = nSourceSize <= (nEndPos - nStartPos);
++                        sal_uInt32 nDeltaToDIB5HeaderSize(0);
++                        const bool bReadAlpha(0x01 == aFunc.aAlphaFormat);
++                        if (bSafeRead && bReadAlpha)
+                         {
+                             // we need to read alpha channel data if AlphaFormat of BLENDFUNCTION is
+                             // AC_SRC_ALPHA (==0x01). To read it, create a temp DIB-File which is ready
+                             // for DIB-5 format
+-                            const bool bReadAlpha(0x01 == aFunc.aAlphaFormat);
+-                            const sal_uInt32 nDeltaToDIB5HeaderSize(bReadAlpha ? getDIBV5HeaderSize() - cbBmiSrc : 0);
++                            const sal_uInt32 nHeaderSize = getDIBV5HeaderSize();
++                            if (cbBmiSrc > nHeaderSize)
++                                bSafeRead = false;
++                            else
++                                nDeltaToDIB5HeaderSize = nHeaderSize - cbBmiSrc;
++                        }
++                        if (bSafeRead)
++                        {
+                             const sal_uInt32 nTargetSize(cbBmiSrc + nDeltaToDIB5HeaderSize + cbBitsSrc + 14);
+                             char* pBuf = new char[ nTargetSize ];
+                             SvMemoryStream aTmp( pBuf, nTargetSize, StreamMode::READ | StreamMode::WRITE );
+@@ -1277,7 +1286,7 @@ bool EnhWMFReader::ReadEnhWMF()
+                             pWMF->Seek( nStart + offBmiSrc );
+                             pWMF->ReadBytes(pBuf + 14, cbBmiSrc);
+ 
+-                            if(bReadAlpha)
++                            if (bReadAlpha)
+                             {
+                                 // need to add values for all stuff that DIBV5Header is bigger
+                                 // than DIBInfoHeader, all values are correctly initialized to zero,

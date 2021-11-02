@@ -1,0 +1,33 @@
+From 5ec24a2642bd0854b884d1a9b51d12371373b410 Mon Sep 17 00:00:00 2001
+From: "Gao,Yan" <ygao@suse.com>
+Date: Mon, 22 Feb 2016 18:12:05 +0100
+Subject: [PATCH] Fix: remote: cl#5269 - Notify other clients of a new
+ connection only if the handshake has completed (bsc#967388)
+
+---
+ lrmd/tls_backend.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/lrmd/tls_backend.c b/lrmd/tls_backend.c
+index fd316e42ad..0e0782869a 100644
+--- a/lrmd/tls_backend.c
++++ b/lrmd/tls_backend.c
+@@ -79,6 +79,9 @@ lrmd_remote_client_msg(gpointer data)
+                 g_source_remove(client->remote->auth_timeout);
+             }
+             client->remote->auth_timeout = 0;
++
++            /* Alert other clients of the new connection */
++            notify_of_new_client(client);
+         }
+         return 0;
+     }
+@@ -289,8 +292,6 @@ lrmd_remote_listen(gpointer data)
+                         &lrmd_remote_fd_cb);
+     g_hash_table_insert(client_connections, new_client->id, new_client);
+ 
+-    /* Alert other clients of the new connection */
+-    notify_of_new_client(new_client);
+     return TRUE;
+ }
+ 

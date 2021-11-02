@@ -1,0 +1,48 @@
+From c8d9ac9402687b4be6e4b5359a62c9333bbd5b9a Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Thu, 26 Mar 2020 15:59:58 +0100
+Subject: [PATCH] Do not return sensitives data in the search customers handler
+
+---
+ .../QueryHandler/SearchCustomersHandler.php   | 27 +++++++++++++------
+ 1 file changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/src/Adapter/Customer/QueryHandler/SearchCustomersHandler.php b/src/Adapter/Customer/QueryHandler/SearchCustomersHandler.php
+index ab5a5e86bc11..431ed428f954 100644
+--- a/src/Adapter/Customer/QueryHandler/SearchCustomersHandler.php
++++ b/src/Adapter/Customer/QueryHandler/SearchCustomersHandler.php
+@@ -58,15 +58,26 @@ public function handle(SearchCustomers $query)
+             }
+ 
+             foreach ($customersResult as $customerArray) {
+-                if ($customerArray['active']) {
+-                    $customerArray['fullname_and_email'] = sprintf(
+-                        '%s %s - %s',
+-                        $customerArray['firstname'],
+-                        $customerArray['lastname'],
+-                        $customerArray['email']
+-                    );
+-                    $customers[$customerArray['id_customer']] = $customerArray;
++                if (!$customerArray['active']) {
++                    continue;
+                 }
++
++                $customerArray['fullname_and_email'] = sprintf(
++                    '%s %s - %s',
++                    $customerArray['firstname'],
++                    $customerArray['lastname'],
++                    $customerArray['email']
++                );
++
++                unset(
++                    $customerArray['passwd'],
++                    $customerArray['secure_key'],
++                    $customerArray['last_passwd_gen'],
++                    $customerArray['reset_password_token'],
++                    $customerArray['reset_password_validity']
++                );
++                $customers[$customerArray['id_customer']] = $customerArray;
++
+             }
+         }
+ 

@@ -1,0 +1,29 @@
+From e79ef306afe332faf22e9b442a2c6b59cb175573 Mon Sep 17 00:00:00 2001
+From: Tim Kientzle <kientzle@acm.org>
+Date: Sun, 19 Jun 2016 14:14:09 -0700
+Subject: [PATCH] Issue #718: Fix TALOS-CAN-152
+
+If a 7-Zip archive declares a rediculously large number of substreams,
+it can overflow an internal counter, leading a subsequent memory
+allocation to be too small for the substream data.
+
+Thanks to the Open Source and Threat Intelligence project at Cisco
+for reporting this issue.
+---
+ libarchive/archive_read_support_format_7zip.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/libarchive/archive_read_support_format_7zip.c b/libarchive/archive_read_support_format_7zip.c
+index 90901acb7..1dfe52b85 100644
+--- a/libarchive/archive_read_support_format_7zip.c
++++ b/libarchive/archive_read_support_format_7zip.c
+@@ -2153,6 +2153,9 @@ read_SubStreamsInfo(struct archive_read *a, struct _7z_substream_info *ss,
+ 				return (-1);
+ 			if (UMAX_ENTRY < f[i].numUnpackStreams)
+ 				return (-1);
++			if (unpack_streams > SIZE_MAX - UMAX_ENTRY) {
++				return (-1);
++			}
+ 			unpack_streams += (size_t)f[i].numUnpackStreams;
+ 		}
+ 		if ((p = header_bytes(a, 1)) == NULL)

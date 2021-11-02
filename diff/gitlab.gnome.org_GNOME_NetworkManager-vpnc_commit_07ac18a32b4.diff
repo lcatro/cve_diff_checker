@@ -1,0 +1,46 @@
+From 07ac18a32b4e361a27ef48ac757d36cbb46e8e12 Mon Sep 17 00:00:00 2001
+From: Lubomir Rintel <lkundrak@v3.sk>
+Date: Fri, 13 Jul 2018 18:51:04 +0200
+Subject: [PATCH] service: disallow newlinies in configuration values
+ (CVE-2018-10900)
+
+The vpnc configuration format doesn't allow those. vpnc(8):
+
+  The values start exactly one space after the keywords, and run to the end
+  of line. This lets you put any kind of weird character (except CR, LF and
+  NUL) in your strings
+
+We have no choice but to reject them. If we didn't it would allow the
+user to inject arbitrary configuration directives with potential
+security implications.
+
+https://pulsesecurity.co.nz/advisories/NM-VPNC-Privesc
+
+Reported by: Denis Andzakovic
+---
+ src/nm-vpnc-service.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/nm-vpnc-service.c b/src/nm-vpnc-service.c
+index 364ff7c..802f5ac 100644
+--- a/src/nm-vpnc-service.c
++++ b/src/nm-vpnc-service.c
+@@ -209,7 +209,14 @@ validate_one_property (const char *key, const char *value, gpointer user_data)
+ 		break; /* technically valid, but unused */
+ 	case ITEM_TYPE_STRING:
+ 	case ITEM_TYPE_SECRET:
+-		break; /* valid */
++		if (strchr (value, '\n') || strchr (value, '\r')) {
++			g_set_error (info->error,
++			             NM_VPN_PLUGIN_ERROR,
++			             NM_VPN_PLUGIN_ERROR_BAD_ARGUMENTS,
++			             _("property â%sâ contains a newline character"),
++			             key);
++		}
++		break;
+ 	case ITEM_TYPE_PATH:
+ 		if (   !value
+ 		    || !strlen (value)
+-- 
+GitLab
+

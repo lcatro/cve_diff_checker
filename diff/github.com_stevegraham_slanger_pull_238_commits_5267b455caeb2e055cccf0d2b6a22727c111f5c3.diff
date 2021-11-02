@@ -1,0 +1,90 @@
+From 5267b455caeb2e055cccf0d2b6a22727c111f5c3 Mon Sep 17 00:00:00 2001
+From: Pieter Hiele <pieter@honoki.net>
+Date: Wed, 27 Feb 2019 10:15:22 +0100
+Subject: [PATCH] bug fixes
+
+---
+ lib/slanger/api/request_validation.rb | 4 ++--
+ lib/slanger/connection.rb             | 2 +-
+ lib/slanger/handler.rb                | 4 ++--
+ lib/slanger/presence_channel.rb       | 2 +-
+ lib/slanger/redis.rb                  | 2 +-
+ 5 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/lib/slanger/api/request_validation.rb b/lib/slanger/api/request_validation.rb
+index 1f2318a..56646ee 100644
+--- a/lib/slanger/api/request_validation.rb
++++ b/lib/slanger/api/request_validation.rb
+@@ -12,7 +12,7 @@ def initialize(*args)
+       end
+ 
+       def data
+-        @data ||= Oj.load(body["data"] || params["data"])
++        @data ||= Oj.strict_load(body["data"] || params["data"])
+       end
+ 
+       def body
+@@ -87,7 +87,7 @@ def parse_body!
+       end
+ 
+       def assert_valid_json!(string)
+-        Oj.load(string)
++        Oj.strict_load(string)
+       rescue Oj::ParserError
+         raise Slanger::InvalidRequest.new("Invalid request body: #{raw_body}")
+       end
+diff --git a/lib/slanger/connection.rb b/lib/slanger/connection.rb
+index 3a98d58..463b1e7 100644
+--- a/lib/slanger/connection.rb
++++ b/lib/slanger/connection.rb
+@@ -9,7 +9,7 @@ def initialize socket, socket_id=nil
+     end
+ 
+     def send_message m
+-      msg = Oj.load m
++      msg = Oj.strict_load m
+       s = msg.delete 'socket_id'
+       socket.send Oj.dump(msg, mode: :compat) unless s == socket_id
+     end
+diff --git a/lib/slanger/handler.rb b/lib/slanger/handler.rb
+index f294c34..2cd2d5a 100644
+--- a/lib/slanger/handler.rb
++++ b/lib/slanger/handler.rb
+@@ -25,9 +25,9 @@ def initialize(socket, handshake)
+     # Dispatches message handling to method with same name as
+     # the event name
+     def onmessage(msg)
+-      msg = Oj.load(msg)
++      msg = Oj.strict_load(msg)
+ 
+-      msg['data'] = Oj.load(msg['data']) if msg['data'].is_a? String
++      msg['data'] = Oj.strict_load(msg['data']) if msg['data'].is_a? String
+ 
+       event = msg['event'].gsub(/\Apusher:/, 'pusher_')
+ 
+diff --git a/lib/slanger/presence_channel.rb b/lib/slanger/presence_channel.rb
+index d996fa6..3600b92 100644
+--- a/lib/slanger/presence_channel.rb
++++ b/lib/slanger/presence_channel.rb
+@@ -32,7 +32,7 @@ def initialize(attrs)
+     end
+ 
+     def subscribe(msg, callback, &blk)
+-      channel_data = Oj.load msg['data']['channel_data']
++      channel_data = Oj.strict_load msg['data']['channel_data']
+       public_subscription_id = SecureRandom.uuid
+ 
+       # Send event about the new subscription to the Redis slanger:connection_notification Channel.
+diff --git a/lib/slanger/redis.rb b/lib/slanger/redis.rb
+index b62345c..f79ac0e 100644
+--- a/lib/slanger/redis.rb
++++ b/lib/slanger/redis.rb
+@@ -25,7 +25,7 @@ def publisher
+     def subscriber
+       @subscriber ||= new_connection.pubsub.tap do |c|
+         c.on(:message) do |channel, message|
+-          message = Oj.load(message)
++          message = Oj.strict_load(message)
+           c = Channel.from message['channel']
+           c.dispatch message, channel
+         end

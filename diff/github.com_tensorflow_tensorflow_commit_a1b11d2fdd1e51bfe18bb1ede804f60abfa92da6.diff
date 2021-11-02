@@ -1,0 +1,27 @@
+From a1b11d2fdd1e51bfe18bb1ede804f60abfa92da6 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 20 Apr 2021 10:52:46 -0700
+Subject: [PATCH] Fix one division by zero
+
+PiperOrigin-RevId: 369474832
+Change-Id: I1082858ed78d9b2e4738ce30b231955973d49e1e
+---
+ tensorflow/core/kernels/quantized_mul_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantized_mul_op.cc b/tensorflow/core/kernels/quantized_mul_op.cc
+index 4e191f162662b..fb56f68bf14db 100644
+--- a/tensorflow/core/kernels/quantized_mul_op.cc
++++ b/tensorflow/core/kernels/quantized_mul_op.cc
+@@ -347,6 +347,11 @@ class QuantizedMulOp : public OpKernel {
+         tensor_num_elements = x.NumElements();
+         tensor_offset = offset_x;
+       }
++      if (vector_num_elements == 0) {
++        context->SetStatus(
++            errors::InvalidArgument("vector must have at least 1 element"));
++        return;
++      }
+       VectorTensorMultiply<T, Toutput>(
+           vector_data, vector_offset, vector_num_elements, tensor_data,
+           tensor_offset, tensor_num_elements, z_data);

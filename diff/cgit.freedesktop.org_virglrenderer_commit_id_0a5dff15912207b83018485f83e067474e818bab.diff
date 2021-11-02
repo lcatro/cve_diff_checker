@@ -1,0 +1,34 @@
+From 0a5dff15912207b83018485f83e067474e818bab Mon Sep 17 00:00:00 2001
+From: Li Qiang <liq3ea@gmail.com>
+Date: Thu, 5 Jan 2017 18:02:46 -0800
+Subject: vrend: never destroy context 0 in vrend_renderer_context_destroy
+
+There will be a crash if the guest destroy context 0. As the context 0 is
+allocate in renderer init, not destroy in vrend_renderer_context_destroy.
+The context will be freed in renderer fini by calling vrend_decode_reset.
+
+Signed-off-by: Li Qiang <liq3ea@gmail.com>
+Signed-off-by: Dave Airlie <airlied@redhat.com>
+---
+ src/vrend_decode.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/vrend_decode.c b/src/vrend_decode.c
+index cab3956..11ac1ed 100644
+--- a/src/vrend_decode.c
++++ b/src/vrend_decode.c
+@@ -1093,6 +1093,11 @@ void vrend_renderer_context_destroy(uint32_t handle)
+    if (handle >= VREND_MAX_CTX)
+       return;
+ 
++   /* never destroy context 0 here, it will be destroyed in vrend_decode_reset()*/
++   if (handle == 0) {
++      return;
++   }
++
+    ctx = dec_ctx[handle];
+    if (!ctx)
+       return;
+-- 
+cgit v1.2.1
+

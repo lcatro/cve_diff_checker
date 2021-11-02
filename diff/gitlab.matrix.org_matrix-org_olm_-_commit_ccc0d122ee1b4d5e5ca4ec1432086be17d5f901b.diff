@@ -1,0 +1,73 @@
+From ccc0d122ee1b4d5e5ca4ec1432086be17d5f901b Mon Sep 17 00:00:00 2001
+From: Denis Kasak <dkasak@termina.org.uk>
+Date: Tue, 18 May 2021 13:05:11 +0200
+Subject: [PATCH] olm_pk_decrypt: Ensure inputs are of correct length.
+
+---
+ src/pk.cpp | 31 +++++++++++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/src/pk.cpp b/src/pk.cpp
+index 8d736b0..05d5db1 100644
+--- a/src/pk.cpp
++++ b/src/pk.cpp
+@@ -73,11 +73,13 @@ size_t olm_pk_encryption_set_recipient_key (
+             OlmErrorCode::OLM_INPUT_BUFFER_TOO_SMALL;
+         return std::size_t(-1);
+     }
++
+     olm::decode_base64(
+         (const uint8_t*)key,
+         olm_pk_key_length(),
+         (uint8_t *)encryption->recipient_key.public_key
+     );
++
+     return 0;
+ }
+ 
+@@ -363,17 +365,38 @@ size_t olm_pk_decrypt(
+         return std::size_t(-1);
+     }
+ 
++    size_t raw_ciphertext_length = olm::decode_base64_length(ciphertext_length);
++
++    if (ephemeral_key_length != olm::encode_base64_length(CURVE25519_KEY_LENGTH)
++        || mac_length != olm::encode_base64_length(MAC_LENGTH)
++        || raw_ciphertext_length == std::size_t(-1)) {
++        decryption->last_error = OlmErrorCode::OLM_INVALID_BASE64;
++        return std::size_t(-1);
++    }
++
+     struct _olm_curve25519_public_key ephemeral;
+     olm::decode_base64(
+-        (const uint8_t*)ephemeral_key, ephemeral_key_length,
++        (const uint8_t*)ephemeral_key,
++        olm::encode_base64_length(CURVE25519_KEY_LENGTH),
+         (uint8_t *)ephemeral.public_key
+     );
++
+     olm::SharedKey secret;
+     _olm_crypto_curve25519_shared_secret(&decryption->key_pair, &ephemeral, secret);
++
+     uint8_t raw_mac[MAC_LENGTH];
+-    olm::decode_base64((const uint8_t*)mac, olm::encode_base64_length(MAC_LENGTH), raw_mac);
+-    size_t raw_ciphertext_length = olm::decode_base64_length(ciphertext_length);
+-    olm::decode_base64((const uint8_t *)ciphertext, ciphertext_length, (uint8_t *)ciphertext);
++    olm::decode_base64(
++        (const uint8_t *)mac,
++        olm::encode_base64_length(MAC_LENGTH),
++        raw_mac
++    );
++
++    olm::decode_base64(
++        (const uint8_t *)ciphertext,
++        ciphertext_length,
++        (uint8_t *)ciphertext
++    );
++
+     size_t result = _olm_cipher_aes_sha_256_ops.decrypt(
+         olm_pk_cipher,
+         secret, sizeof(secret),
+-- 
+GitLab
+

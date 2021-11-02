@@ -1,0 +1,330 @@
+diff --git a/modules/osf_import/osf_import.module b/modules/osf_import/osf_import.module
+index 7258eed0fe3c2454271feb42b305022d7a7615d0..0e440c8e88fd98122ee7c0cbca6a3d344552c815 100644
+--- a/modules/osf_import/osf_import.module
++++ b/modules/osf_import/osf_import.module
+@@ -268,8 +268,12 @@ function osf_import() {
+       include_once DRUPAL_ROOT . '/' . drupal_get_path('module', 'osf') . '/framework/WebServiceQuerier.php';
+       include_once DRUPAL_ROOT . '/' . drupal_get_path('module', 'osf') . '/framework/ProcessorXML.php';
+ 
++      if (!isset($_POST["token"]) ||
++          !drupal_valid_token($_POST["token"], 'osf-import')) {
++        return drupal_access_denied();                       
++      }
++      
+       $contentType = "";
+-
+       if (isset($_POST["ctype"])) {
+         $contentType = $_POST["ctype"];
+       }
+@@ -307,13 +311,29 @@ function osf_import() {
+       $defaultEndpoint = osf_configure_get_endpoint_by_uri($wsfAddress);
+ 
+       $rdfDocument = "";
++      
++      // Make sure that someone couldn't move outside of the /tmp/ directory with that file
++      if(strpos($_FILES['userfile']['name'], '..'))
++      {
++        return "";
++      }
+ 
+-      if (!move_uploaded_file($_FILES['userfile']['tmp_name'], "/tmp/" . $_FILES['userfile']['name'])) {
++      // Get the extension of the file
++      preg_match("/.*\.(.*)$/",$_FILES['userfile']['name'], $matches);
++      
++      $fileExtension = $matches[1];
++      
++      // Sanitize the name of the file
++      $filename = substr($_FILES['userfile']['name'], 0, (strlen($_FILES['userfile']['name']) - (strlen($fileExtension) + 1)));
++      
++      $filename = preg_replace('/[^a-zA-Z0-9_\-]/', '', $filename) . "." . $fileExtension;
++      
++      if (!move_uploaded_file($_FILES['userfile']['tmp_name'], "/tmp/" . $filename)) {
+         return "";
+       }
+ 
+-      // Read file form the server
+-      $file = fopen("/tmp/" . $_FILES['userfile']['name'], "r");
++      // Read file from the server
++      $file = fopen("/tmp/" . $filename, "r");
+ 
+       $fileContent = "";
+       
+@@ -323,7 +343,7 @@ function osf_import() {
+ 
+       fclose($file);
+ 
+-      unlink("/tmp/" . $_FILES['userfile']['name']);
++      unlink("/tmp/" . $filename);
+ 
+       global $user;
+       global $base_url;
+@@ -818,7 +838,7 @@ function osf_import() {
+     $html
+       .= "	<form enctype=\"multipart/form-data\" action=\"\" method=\"POST\">
+ 			
+-							    <!--<input class=\"form-text\" type=\"hidden\" name=\"MAX_FILE_SIZE\" value=\"30000\" />-->
++			          <input class=\"form-text\" type=\"hidden\" name=\"token\" value=\"".drupal_get_token('osf-import')."\" />
+ 			
+ 								<table width=\"100%\" border=\"0\">
+ 								    <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+diff --git a/modules/osf_ontology/osf_ontology.module b/modules/osf_ontology/osf_ontology.module
+index 9deef354ab0e0ff75efa2460686b06ba841ff24e..73e6e55596e2da299e2798d2f20c8ec7feab37b2 100644
+--- a/modules/osf_ontology/osf_ontology.module
++++ b/modules/osf_ontology/osf_ontology.module
+@@ -43,7 +43,7 @@ function osf_ontology_main() {
+   drupal_add_js(drupal_get_path("module", "osf_ontology") . "/js/ontology.js");
+   drupal_add_js(drupal_get_path("module", "osf_ontology") . "/js/hex_md5.js");
+   drupal_add_js(drupal_get_path("module", "osf_ontology") . "/js/resultset.js");    
+-
++  
+   $namespaces = Namespaces::getNamespaces();
+   
+   $jsNamespaces = 'var namespacesObj = {';
+@@ -79,31 +79,36 @@ function osf_ontology_main() {
+     drupal_add_js(drupal_get_path("module", "osf_ontology") . "/js/ontologySearch.js");
+     drupal_add_js(drupal_get_path("module", "osf_ontology") . "/js/jquery.autocomplete-ontology.js");
+ 
+-    $html = "";
+-
+-    $html .= '<script type="text/javascript">var osf_ontologyModuleFullPath = "' . $base_url . "/"
+-      . drupal_get_path("module", "osf_ontology") . '";</script>';
+-
+     $defaultNetwork = current(osf_configure_get_default_endpoint());  
+-      
+-    $html .= '<script type="text/javascript">var searchURL = "' . $base_url . "/" . $_GET["q"] . '/search/";</script>';
+-    $html .= '<script type="text/javascript">var network = "' . $defaultNetwork->uri . '";</script>';
+-    $html .= '<script type="text/javascript">var initialDataset = "' . $_GET["dataset"] . '";</script>';
+-    $html .= '<script type="text/javascript">var structModulesBaseUrl = "' . $base_url . '/osf/";</script>';
+-    $html .= '<script type="text/javascript">var OSFBaseURL = "' . $defaultNetwork->uri . '";</script>';
+ 
+-    $html .= '<div class="breadCrumb"><div class="breadCrumb"><a href="' . $base_url . "/"
+-      . str_replace("search", "", $_GET["q"]) . '">'.t('Ontologies').'</a> &gt; <a href="' . $base_url . '/' . $_GET["q"]
+-      . '/?query=' . $_GET["query"] . '&network=' . $defaultNetwork->uri . '">'.t('Search Ontologies').'</a></div></div>';
++    drupal_add_js(array('osfOntology' => array('osf_ontologyModuleFullPath' => $base_url . "/". drupal_get_path("module", "osf_ontology"))), 'setting');
++    drupal_add_js(array('osfOntology' => array('searchURL' => $base_url . "/" . $_GET["q"] . "/search/")), 'setting');
++    drupal_add_js(array('osfOntology' => array('network' => $defaultNetwork->uri)), 'setting');
++    drupal_add_js(array('osfOntology' => array('initialDataset' => $_GET["dataset"])), 'setting');
++    drupal_add_js(array('osfOntology' => array('structModulesBaseUrl' => $base_url . '/osf/')), 'setting');
++    drupal_add_js(array('osfOntology' => array('OSFBaseURL' => $defaultNetwork->uri)), 'setting');
++    
++    drupal_add_js('
++     var osf_ontologyModuleFullPath = Drupal.settings.osfOntology.osf_ontologyModuleFullPath;
++     var searchURL = Drupal.settings.osfOntology.searchURL;
++     var network = Drupal.settings.osfOntology.network;
++     var initialDataset = Drupal.settings.osfOntology.initialDataset;
++     var structModulesBaseUrl = Drupal.settings.osfOntology.structModulesBaseUrl;
++     var OSFBaseURL = Drupal.settings.osfOntology.OSFBaseURL;', array('type' => 'inline', 'scope' => 'footer'));
++ 
++    $html = "";
+ 
+-    if ((boolean) variable_get("osf_OntologySettings_enable_search", TRUE) === TRUE &&
+-        empty($_GET['modal']) && empty($_POST['modal'])) {
++    $html .= '<div class="breadCrumb"><div class="breadCrumb"><a href="' . $base_url . "/"
++      . str_replace("search", "", check_plain($_GET["q"])) . '">'.t('Ontologies').'</a> &gt; <a href="' . $base_url . '/' . check_plain($_GET["q"])
++      . '/?query=' . check_plain($_GET["query"]) . '&network=' . $defaultNetwork->uri . '">'.t('Search Ontologies').'</a></div></div>';
++    
++    if (variable_get("osf_OntologySettings_enable_search", 1) && check_plain($_GET['modal']) != '' && empty($_POST['modal'])) {
+       $html
+         .= '<div class="searchBoxContainer"><input type="text" class="form-text searchBox" id="searchBox" onkeypress="return submitSearchEnter(this,event);" /><img src="'
+         . $base_url . "/" . drupal_get_path("module", "osf_ontology")
+           . '/imgs/magnifier.png" id="searchButtonImage" class="searchButtonImage" title="'.t('Search').'" alt="'.t('Search').'" onclick="search();" /></div>';
+ 
+-      $html .= '<script type="text/javascript">jQuery(document).ready(function() {readySearch("' . $_GET["query"]
++      $html .= '<script type="text/javascript">jQuery(document).ready(function() {readySearch("' . check_plain($_GET["query"])
+         . '");});</script>';
+ 
+       $html
+@@ -123,7 +128,7 @@ function osf_ontology_main() {
+                   </table>
+         ';
+     }
+-              
++       
+     return ($html);
+   }
+ 
+@@ -257,7 +262,7 @@ function osf_ontology_main() {
+     $defaultNetwork = current(osf_configure_get_default_endpoint());
+     
+     $wsq = new WebServiceQuerier(rtrim($defaultNetwork->uri, '/') . "/ontology/read/", "post", "application/rdf+xml",
+-      "ontology=" . $_GET["exportUri"] . "&function=getSerialized");
++      "ontology=" . check_plain($_GET["exportUri"]) . "&function=getSerialized");
+ 
+     if ($wsq->getStatus() != 200) {
+       $wsq->displayError();
+@@ -269,8 +274,7 @@ function osf_ontology_main() {
+       ob_clean();
+ 
+       header("Content-Type: application/rdf+xml; charset=utf-8");
+-      header("Content-Disposition: attachment; filename=" . preg_replace("/[^A-Za-z0-9]/", "_", $_GET["exportUri"])
+-        . ".xml");
++      header("Content-Disposition: attachment; filename=" . preg_replace("/[^A-Za-z0-9]/", "_", check_plain($_GET["exportUri"])) . ".xml");
+ 
+       echo $wsq->getResultset();
+     }
+@@ -313,12 +317,12 @@ function osf_ontology_main() {
+       // Invoke all the hooks that wants to do something when an ontology is removed.
+       module_invoke_all('ontology_remove', $_POST["removeUri"]);
+ 
++      // Try to remove the file from the filesystem.
++      @unlink(str_replace("file://localhost", "", $_POST["removeUri"]));
++
+       drupal_set_message(t("Ontology removed from the system"));
+     }
+ 
+-    // Try to remove the file from the filesystem.
+-    @unlink(str_replace("file://localhost", "", $_POST["removeUri"]));
+-
+     unset($wsq);
+   }
+ 
+@@ -359,7 +363,6 @@ function osf_ontology_main() {
+       $_GET['niUri'] = $_POST['niUri'];
+     }
+     
+-    
+     drupal_add_js(array('osf_ontology' => array(
+       'browse' => !empty($_GET['browse']),
+     )), 'setting');
+@@ -384,28 +387,35 @@ function osf_ontology_main() {
+     $html = "";
+ 
+     if (variable_get('osf_OntologySettings_enable_reasonner_by_default', 1) == 1) {
+-      $html .= '<script type="text/javascript">var useReasoner = "true";</script>';
++      drupal_add_js(array('osfOntology' => array('useReasoner' => true)), 'setting');
+     }
+     else {
+-      $html .= '<script type="text/javascript">var useReasoner = "false";</script>';
++      drupal_add_js(array('osfOntology' => array('useReasoner' => false)), 'setting');
+     }
++    
++    drupal_add_js('var useReasoner = Drupal.settings.osfOntology.useReasoner;', array('type' => 'inline', 'scope' => 'footer'));
+ 
+     if (!variable_get('osf_OntologySettings_read_mode', 1) && user_access('administer osf ontology') &&
+         empty($_GET['modal']) && empty($_POST['modal'])) {
+-      
+-      $html .= '<script type="text/javascript">var isAdmin = true;</script>';
++      drupal_add_js(array('osfOntology' => array('isAdmin' => true)), 'setting');
+     }
+     else {
+-      $html .= '<script type="text/javascript">var isAdmin = false;</script>';
++      drupal_add_js(array('osfOntology' => array('isAdmin' => false)), 'setting');
+     }
+     
++    drupal_add_js('var isAdmin = Drupal.settings.osfOntology.isAdmin;', array('type' => 'inline', 'scope' => 'footer'));      
++    
+     $defaultNetwork = current(osf_configure_get_default_endpoint());
+     
+-    $html .= '<script type="text/javascript">var structModulesBaseUrl = "' . $base_url . '/osf/";</script>';
+-    $html .= '<script type="text/javascript">var network = "' . $defaultNetwork->uri . '";</script>';
+-    $html .= '<script type="text/javascript">var osf_ontologyModuleFullPath = "' . $base_url . "/"
+-      . drupal_get_path("module", "osf_ontology") . '";</script>';
++    drupal_add_js(array('osfOntology' => array('structModulesBaseUrl' => $base_url . '/osf')), 'setting');
++    drupal_add_js(array('osfOntology' => array('network' => $defaultNetwork->uri)), 'setting');
++    drupal_add_js(array('osfOntology' => array('osf_ontologyModuleFullPath' => $base_url . "/" . drupal_get_path("module", "osf_ontology"))), 'setting');
++
++    drupal_add_js('var structModulesBaseUrl = Drupal.settings.osfOntology.structModulesBaseUrl;', array('type' => 'inline', 'scope' => 'footer'));    
++    drupal_add_js('var network = Drupal.settings.osfOntology.network;', array('type' => 'inline', 'scope' => 'footer'));    
++    drupal_add_js('var osf_ontologyModuleFullPath = Drupal.settings.osfOntology.osf_ontologyModuleFullPath;', array('type' => 'inline', 'scope' => 'footer'));    
+ 
++    
+     if (!isset($_GET["classUri"])) {
+       $_GET["classUri"] = "";
+     }
+@@ -420,7 +430,7 @@ function osf_ontology_main() {
+ 
+     $html .= '<script type="text/javascript">
+                 jQuery(document).ready(function() {
+-                  readyView("' . $_GET["dataset"] . '", "' . $defaultNetwork->uri . '", "' . $_GET["classUri"] . '", "' . $_GET["propertyUri"] . '", "' . $_GET["niUri"] . '");
++                  readyView("' . check_plain($_GET["dataset"]) . '", "' . $defaultNetwork->uri . '", "' . check_plain($_GET["classUri"]) . '", "' . check_plain($_GET["propertyUri"]) . '", "' . check_plain($_GET["niUri"]) . '");
+                 });
+               </script>';
+ 
+@@ -432,9 +442,9 @@ function osf_ontology_main() {
+             <td colspan="2" style="border: 0px">
+ 
+               <div class="breadCrumb"><a href="'
+-      . $base_url . "/" . str_replace("view", "", $_GET["q"])
+-      . '">'.t('Ontologies').'</a> &gt; <a id="breadCrumbOntologyName" href="' . $base_url . '/' . $_GET["q"] . '/?network='
+-      . urlencode($defaultNetwork->uri) . '&dataset=' . urlencode($_GET["dataset"]) . '"></a></div>';
++      . $base_url . "/" . str_replace("view", "", check_plain($_GET["q"]))
++      . '">'.t('Ontologies').'</a> &gt; <a id="breadCrumbOntologyName" href="' . $base_url . '/' . check_plain($_GET["q"]) . '/?network='
++      . urlencode($defaultNetwork->uri) . '&dataset=' . urlencode(check_plain($_GET["dataset"])) . '"></a></div>';
+ 
+     if ((boolean) variable_get("osf_OntologySettings_enable_search", TRUE) === TRUE &&
+         empty($_GET['modal']) && empty($_POST['modal'])) {
+@@ -448,9 +458,9 @@ function osf_ontology_main() {
+                   <input type="radio" name="option_layout" value="1" title="'.t('Search for all ontologies').'" /> All
+                   <br /-->
+                   <a href="'
+-      . $base_url . "/" . str_replace("view", "search", $_GET["q"]) . '/?network=' . urlencode($defaultNetwork->uri)
++      . $base_url . "/" . str_replace("view", "search", check_plain($_GET["q"])) . '/?network=' . urlencode($defaultNetwork->uri)
+       . '&dataset='
+-      . urlencode($_GET["dataset"])
++      . urlencode(check_plain($_GET["dataset"]))
+       . '">'.t('Advanced Search').'</a>
+                 </div>
+               </div>';
+@@ -599,7 +609,8 @@ function osf_ontology_main() {
+           substr($versionIRI, strrpos($versionIRI, "/") + 1, strlen($versionIRI) - strrpos($versionIRI, "/") - 1)
+             . "-1.0.owl";
+ 
+-        $versionIRI .= "/1.0/";      }
++        $versionIRI .= "/1.0/";
++      }
+       else {
+         $fileName = substr($versionIRI, strrpos($versionIRI, "/"), strlen($versionIRI) - strrpos($versionIRI, "/") - 1)
+           . "-1.0.owl";
+@@ -985,25 +996,32 @@ function osf_ontology_main() {
+ 
+     $defaultNetwork = current(osf_configure_get_default_endpoint());
+ 
+-    $html .= '<script type="text/javascript">var structModulesBaseUrl = "' . $base_url . '/osf/";</script>';
+-    $html .= '<script type="text/javascript">var network = "' . $defaultNetwork->uri . '";</script>';
+-    $html .= '<script type="text/javascript">var osf_ontologyModuleFullPath = "' . $base_url . "/"
+-      . drupal_get_path("module", "osf_ontology") . '";</script>';
++    drupal_add_js(array('osfOntology' => array('structModulesBaseUrl' => $base_url . '/osf/')), 'setting');
++    drupal_add_js(array('osfOntology' => array('network' => $defaultNetwork->uri)), 'setting');
++    drupal_add_js(array('osfOntology' => array('osf_ontologyModuleFullPath' => $base_url . "/" . drupal_get_path("module", "osf_ontology"))), 'setting');
++    drupal_add_js(array('osfOntology' => array('searchURL' => $base_url . "/" . $_GET["q"] . "/search/")), 'setting');
++
++    
++    drupal_add_js('var structModulesBaseUrl = Drupal.settings.osfOntology.structModulesBaseUrl;', array('type' => 'inline', 'scope' => 'footer'));    
++    drupal_add_js('var network = Drupal.settings.osfOntology.network;', array('type' => 'inline', 'scope' => 'footer'));    
++    drupal_add_js('var osf_ontologyModuleFullPath = Drupal.settings.osfOntology.osf_ontologyModuleFullPath;', array('type' => 'inline', 'scope' => 'footer'));    
++    drupal_add_js('var searchURL = Drupal.settings.osfOntology.searchURL;', array('type' => 'inline', 'scope' => 'footer'));    
+ 
+-    $html .= '<script type="text/javascript">var searchURL = "' . $base_url . "/" . $_GET["q"] . '/search/";</script>';
+ 
+     if (!variable_get('osf_OntologySettings_read_mode', 1) && user_access('administer osf') &&
+         empty($_GET['modal']) && empty($_POST['modal'])) {
+-      $html .= '<script type="text/javascript">var isAdmin = true;</script>';
++      drupal_add_js(array('osfOntology' => array('isAdmin' => true)), 'setting');
+     }
+     else {
+-      $html .= '<script type="text/javascript">var isAdmin = false;</script>';
++      drupal_add_js(array('osfOntology' => array('isAdmin' => false)), 'setting');
+     }
++    
++    drupal_add_js('var isAdmin = Drupal.settings.osfOntology.isAdmin;', array('type' => 'inline', 'scope' => 'footer'));          
+ 
+     $endpointSCEID = db_query('SELECT sceid FROM {osf_configure_endpoints} WHERE uri = :uri', 
+                          array(':uri' => current(osf_configure_get_default_endpoint())->uri))->fetchField();
+     
+-    $html .= '<script type="text/javascript">var sceid = '.$endpointSCEID.';</script>';
++    drupal_add_js('var sceid = '.$endpointSCEID.';', 'inline');    
+ 
+     $html .= '<div class="breadCrumb"><a href="">'.t('Ontologies').'</a></div>';
+ 
+@@ -1036,9 +1054,8 @@ function osf_ontology_main() {
+     $html .= '<div class="ontologiesListContainer" id="ontologiesListContainer"></div>';
+     $html .= '<div class="ontologyEditContainer" id="ontologyEditContainer"></div>';
+ 
+-    $html .= '<script type="text/javascript">var OSFBaseURL = "'
+-      . $defaultNetwork->uri . '";</script>';
+-
++    drupal_add_js('var OSFBaseURL = "' . $defaultNetwork->uri . '";', 'inline');
++    
+     $html .= '<div class="ontologiesActionsContainer" id="ontologiesActionsContainer">';
+ 
+     global $base_url;

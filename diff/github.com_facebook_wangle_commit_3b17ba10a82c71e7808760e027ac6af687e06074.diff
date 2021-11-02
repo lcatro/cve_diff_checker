@@ -1,0 +1,35 @@
+From 3b17ba10a82c71e7808760e027ac6af687e06074 Mon Sep 17 00:00:00 2001
+From: Mingtao Yang <mingtao@fb.com>
+Date: Thu, 10 Jan 2019 15:27:00 -0800
+Subject: [PATCH] AcceptRoutingHandler should not assume a folly::AsyncSocket
+
+Summary:
+There is no reason to perform a cast to folly::AsyncSocket, when all of the
+required behavior is in folly::AsyncTransportWrapper.
+
+CVE-2019-3554
+
+Reviewed By: avasylev
+
+Differential Revision: D13599212
+
+fbshipit-source-id: 3bb5475fe464c04cf5c04115f34e1bcf237cb4aa
+---
+ wangle/bootstrap/AcceptRoutingHandler-inl.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/wangle/bootstrap/AcceptRoutingHandler-inl.h b/wangle/bootstrap/AcceptRoutingHandler-inl.h
+index d21fda68d..b0b27f39b 100644
+--- a/wangle/bootstrap/AcceptRoutingHandler-inl.h
++++ b/wangle/bootstrap/AcceptRoutingHandler-inl.h
+@@ -86,8 +86,9 @@ void AcceptRoutingHandler<Pipeline, R>::onRoutingData(
+ 
+   // Fetch the socket from the pipeline and pause reading from the
+   // socket
+-  auto socket = std::dynamic_pointer_cast<folly::AsyncSocket>(
++  auto socket = std::dynamic_pointer_cast<folly::AsyncTransportWrapper>(
+       routingPipeline->getTransport());
++  CHECK(socket);
+   routingPipeline->transportInactive();
+   socket->detachEventBase();
+ 

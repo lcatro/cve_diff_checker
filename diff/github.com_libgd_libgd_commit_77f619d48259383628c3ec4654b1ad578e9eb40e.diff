@@ -1,0 +1,67 @@
+From 77f619d48259383628c3ec4654b1ad578e9eb40e Mon Sep 17 00:00:00 2001
+From: Pierre Joye <pierre.php@gmail.com>
+Date: Sat, 4 Jun 2016 23:09:01 +0700
+Subject: [PATCH] fix #215 gdImageFillToBorder stack-overflow when invalid
+ color is used
+
+---
+ src/gd.c                                 | 8 +++++++-
+ tests/gdimagefilltoborder/.gitignore     | 1 +
+ tests/gdimagefilltoborder/CMakeLists.txt | 1 +
+ tests/gdimagefilltoborder/Makemodule.am  | 3 ++-
+ 4 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/gd.c b/src/gd.c
+index 06032475c..704ce79a4 100644
+--- a/src/gd.c
++++ b/src/gd.c
+@@ -1928,11 +1928,17 @@ BGD_DECLARE(void) gdImageFillToBorder (gdImagePtr im, int x, int y, int border,
+ 	int i;
+ 	int restoreAlphaBleding;
+ 
+-	if (border < 0) {
++	if (border < 0 || color < 0) {
+ 		/* Refuse to fill to a non-solid border */
+ 		return;
+ 	}
+ 
++	if (!im->trueColor) {
++		if ((color > (im->colorsTotal - 1)) || (border > (im->colorsTotal - 1))) {
++			return;
++		}
++    }
++
+ 	leftLimit = (-1);
+ 
+ 	restoreAlphaBleding = im->alphaBlendingFlag;
+diff --git a/tests/gdimagefilltoborder/.gitignore b/tests/gdimagefilltoborder/.gitignore
+index 65c314a81..384299c6c 100644
+--- a/tests/gdimagefilltoborder/.gitignore
++++ b/tests/gdimagefilltoborder/.gitignore
+@@ -1 +1,2 @@
+ /bug00037
++/github_bug_215
+diff --git a/tests/gdimagefilltoborder/CMakeLists.txt b/tests/gdimagefilltoborder/CMakeLists.txt
+index e6b95fd2b..f03529a60 100644
+--- a/tests/gdimagefilltoborder/CMakeLists.txt
++++ b/tests/gdimagefilltoborder/CMakeLists.txt
+@@ -1,5 +1,6 @@
+ SET(TESTS_FILES
+ 	bug00037
++	github_bug_215
+ )
+ 
+ ADD_GD_TESTS()
+diff --git a/tests/gdimagefilltoborder/Makemodule.am b/tests/gdimagefilltoborder/Makemodule.am
+index 15f4ddeb6..fc7ed3d05 100644
+--- a/tests/gdimagefilltoborder/Makemodule.am
++++ b/tests/gdimagefilltoborder/Makemodule.am
+@@ -1,6 +1,7 @@
+ if HAVE_LIBPNG
+ libgd_test_programs += \
+-	gdimagefilltoborder/bug00037
++	gdimagefilltoborder/bug00037 \
++	gdimagefilltoborder/github_bug_215
+ endif
+ 
+ EXTRA_DIST += \

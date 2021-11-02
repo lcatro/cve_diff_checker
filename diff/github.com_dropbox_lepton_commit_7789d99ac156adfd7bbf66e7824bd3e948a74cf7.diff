@@ -1,0 +1,49 @@
+From 7789d99ac156adfd7bbf66e7824bd3e948a74cf7 Mon Sep 17 00:00:00 2001
+From: Daniel Reiter Horn <danielrh@users.sourceforge.net>
+Date: Wed, 5 Apr 2017 00:04:19 -0700
+Subject: [PATCH] check divide by zero, fixing #86
+
+---
+ src/lepton/uncompressed_components.hh | 10 ++++++++--
+ src/vp8/model/model.hh                |  6 ++++--
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/lepton/uncompressed_components.hh b/src/lepton/uncompressed_components.hh
+index 6fc6602c..e9341c05 100644
+--- a/src/lepton/uncompressed_components.hh
++++ b/src/lepton/uncompressed_components.hh
+@@ -119,9 +119,15 @@ public:
+             int64_t max_cmp_bc = max_number_of_blocks;
+             max_cmp_bc *= header_[cmp].info_.bcv;
+             max_cmp_bc *= header_[cmp].info_.bch;
+-            max_cmp_bc /= total_req_blocks;
++            if (total_req_blocks) {
++                max_cmp_bc /= total_req_blocks;
++            }
+             if (bc_allocated > max_cmp_bc) {
+-                bc_allocated = max_cmp_bc - (max_cmp_bc % header_[cmp].info_.bch);
++                int rem = 0;
++                if (header_[cmp].info_.bch) {
++                    rem = (max_cmp_bc % header_[cmp].info_.bch);
++                }
++                bc_allocated = max_cmp_bc - rem;
+             }
+             if (cmp == desired_cmp) {
+                 framebuffer->init(header_[cmp].info_.bch,
+diff --git a/src/vp8/model/model.hh b/src/vp8/model/model.hh
+index 0f5549f2..3bc0bd17 100644
+--- a/src/vp8/model/model.hh
++++ b/src/vp8/model/model.hh
+@@ -254,8 +254,10 @@ public:
+             1020, 854, 854, 838, 1020, 838, 1020, 838
+         };
+         for (int coord = 0; coord < 64; ++coord) {
+-            freqmax_[(int)color][coord] = (freqmax[coord] + quantization_table_[(int)color][coord] - 1)
+-                / quantization_table_[(int)color][coord];
++            freqmax_[(int)color][coord] = (freqmax[coord] + quantization_table_[(int)color][coord] - 1);
++            if (quantization_table_[(int)color][coord]) {
++                freqmax_[(int)color][coord] /= quantization_table_[(int)color][coord];
++            }
+             uint8_t max_len = uint16bit_length(freqmax_[(int)color][coord]);
+             bitlen_freqmax_[(int)color][coord] = max_len;
+             if (max_len > (int)RESIDUAL_NOISE_FLOOR) {

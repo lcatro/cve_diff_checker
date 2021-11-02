@@ -1,0 +1,41 @@
+From e5bf89efef6d5ea572d66870ffd86560de7830a8 Mon Sep 17 00:00:00 2001
+From: Roman Bruckner <bruckner.roman@gmail.com>
+Date: Mon, 6 Sep 2021 20:20:21 +0200
+Subject: [PATCH] util.setByPath() - prevent prototype pollution (#1514)
+
+---
+ src/util/util.mjs         | 3 +++
+ test/jointjs/core/util.js | 6 +++++-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/util.mjs b/src/util/util.mjs
+index 2f893556c..5c2114d22 100644
+--- a/src/util/util.mjs
++++ b/src/util/util.mjs
+@@ -140,6 +140,9 @@ export const getByPath = function(obj, path, delimiter) {
+ const isGetSafe = function(obj, key) {
+     // Prevent prototype pollution
+     // https://snyk.io/vuln/SNYK-JS-JSON8MERGEPATCH-1038399
++    if (typeof key !== 'string' && typeof key !== 'number') {
++        key = String(key);
++    }
+     if (key === 'constructor' && typeof obj[key] === 'function') {
+         return false;
+     }
+diff --git a/test/jointjs/core/util.js b/test/jointjs/core/util.js
+index 81f5e8ea6..ffd142e56 100644
+--- a/test/jointjs/core/util.js
++++ b/test/jointjs/core/util.js
+@@ -336,7 +336,11 @@ QUnit.module('util', function(hooks) {
+             assert.deepEqual(joint.util.setByPath({ object: {}}, 'object/1', 'property'), { object: { '1': 'property' }}, 'define property');
+         });
+ 
+-        ['__proto__/polluted', 'constructor/prototype/polluted'].forEach(function(path) {
++        [
++            '__proto__/polluted',
++            'constructor/prototype/polluted',
++            [['__proto__'], 'polluted']
++        ].forEach(function(path) {
+             QUnit.test('setting "' + path + '" does not pollute prototype' , function(assert) {
+                 var obj = {};
+                 assert.notOk(obj.polluted);

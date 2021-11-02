@@ -1,0 +1,134 @@
+From 123a83326fb95366e94a3be1a74775df4db97739 Mon Sep 17 00:00:00 2001
+From: arthurprs <arthurprs@gmail.com>
+Date: Sat, 3 Oct 2015 12:35:35 -0300
+Subject: [PATCH] integer parsing should accept leading plus
+
+---
+ src/libcore/num/mod.rs     | 81 +++++++++++++++++++-------------------
+ src/libcoretest/num/mod.rs |  8 ++++
+ 2 files changed, 49 insertions(+), 40 deletions(-)
+
+diff --git a/src/libcore/num/mod.rs b/src/libcore/num/mod.rs
+index 6507bb7bf8c82..56120cdab475f 100644
+--- a/src/libcore/num/mod.rs
++++ b/src/libcore/num/mod.rs
+@@ -1387,50 +1387,51 @@ fn from_str_radix<T: FromStrRadixHelper>(src: &str, radix: u32)
+     // of multi-byte sequences
+     let src = src.as_bytes();
+ 
+-    match (src[0], &src[1..])  {
+-        (b'-', digits) if digits.is_empty() => Err(PIE { kind: Empty }),
+-        (b'-', digits) if is_signed_ty => {
+-            // The number is negative
+-            let mut result = T::from_u32(0);
+-            for &c in digits {
+-                let x = match (c as char).to_digit(radix) {
+-                    Some(x) => x,
+-                    None => return Err(PIE { kind: InvalidDigit }),
+-                };
+-                result = match result.checked_mul(radix) {
+-                    Some(result) => result,
+-                    None => return Err(PIE { kind: Underflow }),
+-                };
+-                result = match result.checked_sub(x) {
+-                    Some(result) => result,
+-                    None => return Err(PIE { kind: Underflow }),
+-                };
+-            }
+-            Ok(result)
+-        },
+-        (c, digits) => {
+-            // The number is signed
+-            let mut result = match (c as char).to_digit(radix) {
+-                Some(x) => T::from_u32(x),
++    let (is_positive, digits) = match src[0] {
++        b'+' => (true, &src[1..]),
++        b'-' if is_signed_ty => (false, &src[1..]),
++        _ => (true, src)
++    };
++
++    if digits.is_empty() {
++        return Err(PIE { kind: Empty });
++    }
++
++    let mut result = T::from_u32(0);
++    if is_positive {
++        // The number is positive
++        for &c in digits {
++            let x = match (c as char).to_digit(radix) {
++                Some(x) => x,
+                 None => return Err(PIE { kind: InvalidDigit }),
+             };
+-            for &c in digits {
+-                let x = match (c as char).to_digit(radix) {
+-                    Some(x) => x,
+-                    None => return Err(PIE { kind: InvalidDigit }),
+-                };
+-                result = match result.checked_mul(radix) {
+-                    Some(result) => result,
+-                    None => return Err(PIE { kind: Overflow }),
+-                };
+-                result = match result.checked_add(x) {
+-                    Some(result) => result,
+-                    None => return Err(PIE { kind: Overflow }),
+-                };
+-            }
+-            Ok(result)
++            result = match result.checked_mul(radix) {
++                Some(result) => result,
++                None => return Err(PIE { kind: Overflow }),
++            };
++            result = match result.checked_add(x) {
++                Some(result) => result,
++                None => return Err(PIE { kind: Overflow }),
++            };
++        }
++    } else {
++        // The number is negative
++        for &c in digits {
++            let x = match (c as char).to_digit(radix) {
++                Some(x) => x,
++                None => return Err(PIE { kind: InvalidDigit }),
++            };
++            result = match result.checked_mul(radix) {
++                Some(result) => result,
++                None => return Err(PIE { kind: Underflow }),
++            };
++            result = match result.checked_sub(x) {
++                Some(result) => result,
++                None => return Err(PIE { kind: Underflow }),
++            };
+         }
+     }
++    Ok(result)
+ }
+ 
+ /// An error which can be returned when parsing an integer.
+diff --git a/src/libcoretest/num/mod.rs b/src/libcoretest/num/mod.rs
+index f57c54faf28dd..2a3ff88fe6da2 100644
+--- a/src/libcoretest/num/mod.rs
++++ b/src/libcoretest/num/mod.rs
+@@ -118,15 +118,23 @@ mod tests {
+         assert_eq!("-9223372036854775809".parse::<i64>().ok(), None);
+     }
+ 
++    #[test]
++    fn test_leading_plus() {
++        assert_eq!("+127".parse::<u8>().ok(), Some(127u8));
++        assert_eq!("+9223372036854775807".parse::<i64>().ok(), Some(9223372036854775807i64));
++    }
++
+     #[test]
+     fn test_invalid() {
+         assert_eq!("--129".parse::<i8>().ok(), None);
++        assert_eq!("++129".parse::<i8>().ok(), None);
+         assert_eq!("Съешь".parse::<u8>().ok(), None);
+     }
+ 
+     #[test]
+     fn test_empty() {
+         assert_eq!("-".parse::<i8>().ok(), None);
++        assert_eq!("+".parse::<i8>().ok(), None);
+         assert_eq!("".parse::<u8>().ok(), None);
+     }
+ }

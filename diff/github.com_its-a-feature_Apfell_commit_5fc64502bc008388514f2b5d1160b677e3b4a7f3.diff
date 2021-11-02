@@ -1,0 +1,40 @@
+From 5fc64502bc008388514f2b5d1160b677e3b4a7f3 Mon Sep 17 00:00:00 2001
+From: Cody Thomas <codybthomas@gmail.com>
+Date: Sun, 19 Apr 2020 09:58:23 -0700
+Subject: [PATCH] fixed an 'Authenticated Cross-Site Scripting' bug on the
+ command help page reported by 'Mohamed A. Baset' of 'Seekurity SA de C.V.' at
+ 'Seekurity.com' on April 17,2020
+
+---
+ apfell-docker/app/routes/api_routes.py | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/apfell-docker/app/routes/api_routes.py b/apfell-docker/app/routes/api_routes.py
+index f4d0aa26..42389ead 100755
+--- a/apfell-docker/app/routes/api_routes.py
++++ b/apfell-docker/app/routes/api_routes.py
+@@ -1,9 +1,10 @@
+-from app import apfell, links, use_ssl
++from app import apfell, links, use_ssl, db_objects
+ from sanic import response
+ from jinja2 import Environment, PackageLoader
+ from sanic_jwt.decorators import scoped, inject_user
+ from app.routes.routes import respect_pivot
+ import urllib.parse
++import app.database_models.model as db_model
+ 
+ env = Environment(loader=PackageLoader('app', 'templates'))
+ 
+@@ -15,7 +16,11 @@ async def apiui_command_help(request, user):
+     template = env.get_template('apiui_command_help.html')
+     if len(request.query_args) != 0:
+         data = urllib.parse.unquote(request.query_args[0][1])
+-        print(data)
++        query = await db_model.payloadtype_query()
++        try:
++            payloadtype = await db_objects.get(query, ptype=data)
++        except Exception as e:
++            data = ""
+     else:
+         data = ""
+     if use_ssl:

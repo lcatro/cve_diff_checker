@@ -1,0 +1,47 @@
+From 474a3db19498765f0118ba3dbc0b1cc90b0097fc Mon Sep 17 00:00:00 2001
+From: Michael Schroeder <mls@suse.de>
+Date: Mon, 10 Aug 2015 13:05:34 +0200
+Subject: [PATCH] [backend] sanity check the result of the external patch
+ command
+
+Simple files only, please.
+---
+ src/backend/bs_srcserver | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/backend/bs_srcserver b/src/backend/bs_srcserver
+index 1a93608aace..223611c1bc5 100755
+--- a/src/backend/bs_srcserver
++++ b/src/backend/bs_srcserver
+@@ -1979,10 +1979,28 @@ sub applylink {
+       die("/usr/bin/patch: $!\n");
+     }
+     waitpid($pid, 0) == $pid || die("waitpid $pid: $!\n");
+-    if ($?) {
+-      $failed = "could not apply patch '$pn'";
+-      last;
++    $failed = "could not apply patch '$pn'" if $?;
++    # clean up patch fallout...
++    for my $f (ls($tmpdir)) {
++      my @s = lstat("$tmpdir/$f");
++      die("$tmpdir/$f: $!\n") unless @s;
++      if (-l _ || ! -f _) {
++        unlink("$tmpdir/$f");
++	$failed = "patch created a non-file";
++	next;
++      }
++      eval {
++	die("cannot create a link from a patch") if $f eq '_link';
++	BSVerify::verify_filename($f) unless $f eq '.log';
++      };
++      if ($@) {
++        unlink("$tmpdir/$f");
++	$failed = "patch created an illegal file";
++	next;
++      }
++      chmod(($s[2] & 077) | 0600, "$tmpdir/$f") if ($s[2] & 07700) != 0600;
+     }
++    last if $failed;
+   }
+   if ($failed) {
+     local *F;

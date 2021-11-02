@@ -1,0 +1,154 @@
+From 0a24f92d081033576bfdd9d4bdec1a54501734c1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 18 Jan 2016 09:24:23 +0100
+Subject: [PATCH] Set correct content type for JSON responses
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ import_status.php                     |  6 +++---
+ libraries/Response.class.php          |  5 +----
+ libraries/core.lib.php                | 20 ++++++++++++++++++++
+ libraries/display_import_ajax.lib.php |  2 +-
+ lint.php                              |  5 +++--
+ normalization.php                     |  2 ++
+ setup/validate.php                    |  2 +-
+ version_check.php                     |  2 +-
+ 8 files changed, 32 insertions(+), 12 deletions(-)
+
+diff --git a/import_status.php b/import_status.php
+index c4b442f4565..e46b24319b8 100644
+--- a/import_status.php
++++ b/import_status.php
+@@ -75,12 +75,12 @@
+ }
+  */
+ 
+-// AJAX requests can't be cached!
+-PMA_noCacheHeader();
+-
+ // $_GET["message"] is used for asking for an import message
+ if (isset($_GET["message"]) && $_GET["message"]) {
+ 
++    // AJAX requests can't be cached!
++    PMA_noCacheHeader();
++
+     header('Content-type: text/html');
+ 
+     // wait 0.3 sec before we check for $_SESSION variable,
+diff --git a/libraries/Response.class.php b/libraries/Response.class.php
+index 49d9087d532..255fb1e8e26 100644
+--- a/libraries/Response.class.php
++++ b/libraries/Response.class.php
+@@ -369,10 +369,7 @@ private function _ajaxResponse()
+ 
+         // Set the Content-Type header to JSON so that jQuery parses the
+         // response correctly.
+-        if (! defined('TESTSUITE')) {
+-            header('Cache-Control: no-cache');
+-            header('Content-Type: application/json');
+-        }
++        PMA_headerJSON();
+ 
+         echo json_encode($this->_JSON);
+     }
+diff --git a/libraries/core.lib.php b/libraries/core.lib.php
+index 3877548c345..d166381c2ca 100644
+--- a/libraries/core.lib.php
++++ b/libraries/core.lib.php
+@@ -630,6 +630,26 @@ function PMA_sendHeaderLocation($uri, $use_refresh = false)
+     }
+ }
+ 
++/**
++ * Outputs application/json headers. This includes no caching.
++ *
++ * @return void
++ */
++function PMA_headerJSON()
++{
++    if (defined('TESTSUITE') && ! defined('PMA_TEST_HEADERS')) {
++        return;
++    }
++    // No caching
++    PMA_noCacheHeader();
++    // MIME type
++    header('Content-Type: application/json; charset=UTF-8');
++    // Disable content sniffing in browser
++    // This is needed in case we include HTML in JSON, browser might assume it's
++    // html to display
++    header('X-Content-Type-Options: nosniff');
++}
++
+ /**
+  * Outputs headers to prevent caching in browser (and on the way).
+  *
+diff --git a/libraries/display_import_ajax.lib.php b/libraries/display_import_ajax.lib.php
+index 4ce10277f73..ea6d3cfc7d6 100644
+--- a/libraries/display_import_ajax.lib.php
++++ b/libraries/display_import_ajax.lib.php
+@@ -121,7 +121,7 @@ function PMA_Import_nopluginCheck()
+   */
+ function PMA_importAjaxStatus($id)
+ {
+-    header('Content-type: application/json');
++    PMA_headerJSON();
+     echo json_encode(
+         $_SESSION[$GLOBALS['SESSION_KEY']]['handler']::getUploadStatus($id)
+     );
+diff --git a/lint.php b/lint.php
+index 9aef982888f..3aee35ba96f 100644
+--- a/lint.php
++++ b/lint.php
+@@ -31,7 +31,8 @@
+ $sql_query = !empty($_POST['sql_query']) ? $_POST['sql_query'] : '';
+ 
+ // Disabling standard response.
+-$response = PMA_Response::getInstance();
+-$response->disable();
++PMA_Response::getInstance()->disable();
++
++PMA_headerJSON();
+ 
+ echo json_encode(PMA_Linter::lint($sql_query));
+diff --git a/normalization.php b/normalization.php
+index a988935c955..4cb95691810 100644
+--- a/normalization.php
++++ b/normalization.php
+@@ -60,6 +60,8 @@
+     $dependencies = json_decode($_REQUEST['pd']);
+     $tables = json_decode($_REQUEST['tables']);
+     $newTables = PMA_getHtmlForNewTables3NF($dependencies, $tables, $db);
++    PMA_Response::getInstance()->disable();
++    PMA_headerJSON();
+     echo json_encode($newTables);
+     exit;
+ }
+diff --git a/setup/validate.php b/setup/validate.php
+index 5759042aa5a..fa26c8566de 100644
+--- a/setup/validate.php
++++ b/setup/validate.php
+@@ -14,7 +14,7 @@
+ $validators = array();
+ require './libraries/config/Validator.class.php';
+ 
+-header('Content-type: application/json');
++PMA_headerJSON();
+ 
+ $ids = isset($_POST['id']) ? $_POST['id'] : null;
+ $vids = explode(',', $ids);
+diff --git a/version_check.php b/version_check.php
+index 0f7f11cafa6..78907903f11 100644
+--- a/version_check.php
++++ b/version_check.php
+@@ -13,7 +13,7 @@
+ require_once 'libraries/VersionInformation.php';
+ 
+ // Always send the correct headers
+-header('Content-type: application/json; charset=UTF-8');
++PMA_headerJSON();
+ 
+ $versionInformation = new VersionInformation();
+ $versionDetails = $versionInformation->getLatestVersion();

@@ -1,0 +1,285 @@
+From 4859d69e07504d4b0a4bdf9bcb4d9e3769ca35ae Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Tue, 2 Aug 2016 12:10:33 +0200
+Subject: [PATCH] Fix invalid read in gdImageCreateFromTiffPtr()
+
+tiff_invalid_read.tiff is corrupt, and causes an invalid read in
+gdImageCreateFromTiffPtr(), but not in gdImageCreateFromTiff(). The culprit
+is dynamicGetbuf(), which doesn't check for out-of-bound reads. In this case,
+dynamicGetbuf() is called with a negative dp->pos, but also positive buffer
+overflows have to be handled, in which case 0 has to be returned (cf. commit
+75e29a9).
+
+Fixing dynamicGetbuf() exhibits that the corrupt TIFF would still create
+the image, because the return value of TIFFReadRGBAImage() is not checked.
+We do that, and let createFromTiffRgba() fail if TIFFReadRGBAImage() fails.
+
+This issue had been reported by Ibrahim El-Sayed to security@libgd.org.
+
+CVE-2016-6911
+---
+ src/gd_io_dp.c                      |  15 ++++---
+ src/gd_tiff.c                       |  29 +++++++------
+ tests/tiff/.gitignore               |   1 +
+ tests/tiff/CMakeLists.txt           |   1 +
+ tests/tiff/Makemodule.am            |   6 ++-
+ tests/tiff/tiff_invalid_read.c      |  61 ++++++++++++++++++++++++++++
+ tests/tiff/tiff_invalid_read_1.tiff | Bin 0 -> 3304 bytes
+ tests/tiff/tiff_invalid_read_2.tiff | Bin 0 -> 429 bytes
+ tests/tiff/tiff_invalid_read_3.tiff | Bin 0 -> 428 bytes
+ 9 files changed, 94 insertions(+), 19 deletions(-)
+ create mode 100644 tests/tiff/tiff_invalid_read.c
+ create mode 100644 tests/tiff/tiff_invalid_read_1.tiff
+ create mode 100644 tests/tiff/tiff_invalid_read_2.tiff
+ create mode 100644 tests/tiff/tiff_invalid_read_3.tiff
+
+diff --git a/src/gd_io_dp.c b/src/gd_io_dp.c
+index 228bfa5cf..eda2eeb05 100644
+--- a/src/gd_io_dp.c
++++ b/src/gd_io_dp.c
+@@ -263,6 +263,7 @@ static void dynamicPutchar(struct gdIOCtx *ctx, int a)
+ 	appendDynamic(dctx->dp, &b, 1);
+ }
+ 
++/* returns the number of bytes actually read; 0 on EOF and error */
+ static int dynamicGetbuf(gdIOCtxPtr ctx, void *buf, int len)
+ {
+ 	int rlen, remain;
+@@ -272,21 +273,25 @@ static int dynamicGetbuf(gdIOCtxPtr ctx, void *buf, int len)
+ 	dctx = (dpIOCtxPtr) ctx;
+ 	dp = dctx->dp;
+ 
++	if (dp->pos < 0 || dp->pos >= dp->realSize) {
++		return 0;
++	}
++
+ 	remain = dp->logicalSize - dp->pos;
+ 	if(remain >= len) {
+ 		rlen = len;
+ 	} else {
+ 		if(remain <= 0) {
+-			/* 2.0.34: EOF is incorrect. We use 0 for
+-			 * errors and EOF, just like fileGetbuf,
+-			 * which is a simple fread() wrapper.
+-			 * TBB. Original bug report: Daniel Cowgill. */
+-			return 0; /* NOT EOF */
++			return 0;
+ 		}
+ 
+ 		rlen = remain;
+ 	}
+ 
++	if (dp->pos + rlen > dp->realSize) {
++		rlen = dp->realSize - dp->pos;
++	}
++
+ 	memcpy(buf, (void *) ((char *)dp->data + dp->pos), rlen);
+ 	dp->pos += rlen;
+ 
+diff --git a/src/gd_tiff.c b/src/gd_tiff.c
+index b4f1e637e..3f20c5b26 100644
+--- a/src/gd_tiff.c
++++ b/src/gd_tiff.c
+@@ -759,6 +759,7 @@ static int createFromTiffRgba(TIFF * tif, gdImagePtr im)
+ 	int height = im->sy;
+ 	uint32 *buffer;
+ 	uint32 rgba;
++	int success;
+ 
+ 	/* switch off colour merging on target gd image just while we write out
+ 	 * content - we want to preserve the alpha data until the user chooses
+@@ -771,18 +772,20 @@ static int createFromTiffRgba(TIFF * tif, gdImagePtr im)
+ 		return GD_FAILURE;
+ 	}
+ 
+-	TIFFReadRGBAImage(tif, width, height, buffer, 0);
+-
+-	for(y = 0; y < height; y++) {
+-		for(x = 0; x < width; x++) {
+-			/* if it doesn't already exist, allocate a new colour,
+-			 * else use existing one */
+-			rgba = buffer[(y * width + x)];
+-			a = (0xff - TIFFGetA(rgba)) / 2;
+-			color = gdTrueColorAlpha(TIFFGetR(rgba), TIFFGetG(rgba), TIFFGetB(rgba), a);
+-
+-			/* set pixel colour to this colour */
+-			gdImageSetPixel(im, x, height - y - 1, color);
++	success = TIFFReadRGBAImage(tif, width, height, buffer, 1);
++
++	if (success) {
++		for(y = 0; y < height; y++) {
++			for(x = 0; x < width; x++) {
++				/* if it doesn't already exist, allocate a new colour,
++				 * else use existing one */
++				rgba = buffer[(y * width + x)];
++				a = (0xff - TIFFGetA(rgba)) / 2;
++				color = gdTrueColorAlpha(TIFFGetR(rgba), TIFFGetG(rgba), TIFFGetB(rgba), a);
++	
++				/* set pixel colour to this colour */
++				gdImageSetPixel(im, x, height - y - 1, color);
++			}
+ 		}
+ 	}
+ 
+@@ -790,7 +793,7 @@ static int createFromTiffRgba(TIFF * tif, gdImagePtr im)
+ 
+ 	/* now reset colour merge for alpha blending routines */
+ 	gdImageAlphaBlending(im, alphaBlendingFlag);
+-	return GD_SUCCESS;
++	return success;
+ }
+ 
+ /*
+diff --git a/tests/tiff/.gitignore b/tests/tiff/.gitignore
+index 7cf35ee88..273e84993 100644
+--- a/tests/tiff/.gitignore
++++ b/tests/tiff/.gitignore
+@@ -1,3 +1,4 @@
+ /tiff_dpi
+ /tiff_im2im
+ /tiff_null
++/tiff_invalid_read
+diff --git a/tests/tiff/CMakeLists.txt b/tests/tiff/CMakeLists.txt
+index 03f630caf..81f230335 100644
+--- a/tests/tiff/CMakeLists.txt
++++ b/tests/tiff/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ IF(TIFF_FOUND)
+ LIST(APPEND TESTS_FILES
+ 	tiff_im2im
++	tiff_invalid_read
+ 	tiff_null
+ 	tiff_dpi
+ )
+diff --git a/tests/tiff/Makemodule.am b/tests/tiff/Makemodule.am
+index fd3969909..670434a7d 100644
+--- a/tests/tiff/Makemodule.am
++++ b/tests/tiff/Makemodule.am
+@@ -2,8 +2,12 @@ if HAVE_LIBTIFF
+ libgd_test_programs += \
+ 	tiff/tiff_dpi \
+ 	tiff/tiff_im2im \
++	tiff/tiff_invalid_read \
+ 	tiff/tiff_null
+ endif
+ 
+ EXTRA_DIST += \
+-	tiff/CMakeLists.txt
++	tiff/CMakeLists.txt \
++	tiff/tiff_invalid_read_1.tiff \
++	tiff/tiff_invalid_read_2.tiff \
++	tiff/tiff_invalid_read_3.tiff
+diff --git a/tests/tiff/tiff_invalid_read.c b/tests/tiff/tiff_invalid_read.c
+new file mode 100644
+index 000000000..bed538914
+--- /dev/null
++++ b/tests/tiff/tiff_invalid_read.c
+@@ -0,0 +1,61 @@
++/*
++We're testing that reading corrupt TIFF files doesn't cause any memory issues,
++and that the operation gracefully fails (i.e. gdImageCreateFromTiffPtr() returns
++NULL).
++*/
++
++#include "gd.h"
++#include "gdtest.h"
++
++
++static void check_file(char *basename);
++static size_t read_test_file(char **buffer, char *basename);
++
++
++int main()
++{
++    check_file("tiff_invalid_read_1.tiff");
++    check_file("tiff_invalid_read_2.tiff");
++    check_file("tiff_invalid_read_3.tiff");
++
++    return gdNumFailures();
++}
++
++
++static void check_file(char *basename)
++{
++    gdImagePtr im;
++    char *buffer;
++    size_t size;
++
++    size = read_test_file(&buffer, basename);
++    im = gdImageCreateFromTiffPtr(size, (void *) buffer);
++    gdTestAssert(im == NULL);
++    free(buffer);
++}
++
++
++static size_t read_test_file(char **buffer, char *basename)
++{
++    char *filename;
++    FILE *fp;
++    size_t exp_size, act_size;
++
++    filename = gdTestFilePath2("tiff", basename);
++    fp = fopen(filename, "rb");
++    gdTestAssert(fp != NULL);
++
++	fseek(fp, 0, SEEK_END);
++	exp_size = ftell(fp);
++	fseek(fp, 0, SEEK_SET);
++
++    *buffer = malloc(exp_size);
++    gdTestAssert(*buffer != NULL);
++    act_size = fread(*buffer, sizeof(**buffer), exp_size, fp);
++    gdTestAssert(act_size == exp_size);
++
++    fclose(fp);
++    free(filename);
++
++    return act_size;
++}
+diff --git a/tests/tiff/tiff_invalid_read_1.tiff b/tests/tiff/tiff_invalid_read_1.tiff
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3877e337b3c0a7ccdee988647a907749d7c8ad7
+GIT binary patch
+literal 3304
+zcmebD)MD`9W?=X~3Q$7e-+vIq1h~X8RSt{@vF;;Q9ld-(u6xMUM=gI*%YJH^LoI&|
+zR&(eTPSm!C+U5}(Ka|=_seWSJNk|>3?jTh?A^WK%Psm+_<f-KjO3gucCpw=}^Xa7@
+z=582GFMFwF54yY2`P8y!)ExXFAi}`F$jrdVz`!5@#EeijKakA?WU~NiKOP1KW~eww
+z9UGL*1Y~m|iSsftG57+-rUBIpGO~cp<fv_%Erz5<6v_sf3lrA@vc;k59e^!*DMnVX
+zUOS*U(onV=kS&8`js_B26UYX+1?YMPJD_?HyA7z`9>`_`vcq~97=obcA?g?yJiw|E
+zv;YGHGH_jA3<|G?hgBgUn&IpjA22;@=1dUXkd~$fqCaTF@Pql%ya6DZA;J=@UOzXl
+zM87C8H?3H|B(=E2P`@}gF()S;i1kg(O-wAzER7N^fzZInC^03~FfGk2CDk-3Dbc{#
+Z$ig_)C?(0#P_MWwU9TiFEsX(80ssaYg@phB
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/tiff/tiff_invalid_read_2.tiff b/tests/tiff/tiff_invalid_read_2.tiff
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9967e542178cfbab902ec55c85479588dfb099e
+GIT binary patch
+literal 429
+zcmYk1u};G<7=+JB6IB%jL0gb0Lnc%hn!2G)%>ay40x1In0}_}fMwOZlBok9!qm1x6
+zWrdkH;0@rn6{J}DeczqVmOY&wV-r9DFPhZb0JFi!n<?2PZ&h-;WQTIMWSh8A=`@*z
+zYswzzqHR_)_tnYon9iH=ol1YVWO%?{*>_Lz3G6dRKc+@ompSI(2Ju1VaIeBg#1{4S
+z7tW}!IimhKvHpk$Tu?=0n_|5#X*B*T9|Lg=v|1E4zTSUn72hv6TJf>IGWxn&X)TmG
+z)Oz>R+cLh}jI`obn7*GbbN^YUD)aLs%ekMWa<RCl@lPg$I2egh81R`CiI8F@hKU>m
+XlB=;)!%#j-9`dmNG*|t6t`z<ND|t=E
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/tiff/tiff_invalid_read_3.tiff b/tests/tiff/tiff_invalid_read_3.tiff
+new file mode 100644
+index 0000000000000000000000000000000000000000..67ca2a7c6e1a7834bee9f15a632a3cf2d7d52819
+GIT binary patch
+literal 428
+zcmYk1F-rqM5QX2~<w6KX(L@Dfag{`iTrOw4EP`4ZP`JXvLeMpLD}ltqyUObRMr{2%
+zT3h=M>@0O=UEvmn_s!$YEHjxLU==_KKN&YVfN&wGH)Xj_y;JdB%O3f4%Pw)Vl4%JC
+zm*m~iqIFR-`x?}5{AFsqf3uR`vJ4;Cwt4#Zdq;T3W|$|s!ZW-=yjvOWRd}D+q2+wS
+z3FVm+%AXSRAwF<M5ylSL{LZNu|22w$GzHpiGMgW-KlIAa=POpczg-x8SuR;it@l{J
+zdN*sP@3s<FTuYM=7LP^nq!v04iYza}AXoGGEmd$h9;DGoj^ZesDw#<or*fF7L8L-`
+Vr1UUW_bQCTxc@NI{bHsyegQctOxyqf
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,33 @@
+From 9e4b8a91384562e3baee724a52b72e30b1aa006d Mon Sep 17 00:00:00 2001
+From: Jo-Philipp Wich <jo@mein.io>
+Date: Thu, 5 Apr 2018 00:33:09 +0200
+Subject: [PATCH] luci-mod-admin-full: fix possible shell injection in bandwith
+ status
+
+Signed-off-by: Jo-Philipp Wich <jo@mein.io>
+---
+ .../luci-mod-admin-full/luasrc/controller/admin/status.lua    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/modules/luci-mod-admin-full/luasrc/controller/admin/status.lua b/modules/luci-mod-admin-full/luasrc/controller/admin/status.lua
+index 22e1b7e173a..4b03a188639 100644
+--- a/modules/luci-mod-admin-full/luasrc/controller/admin/status.lua
++++ b/modules/luci-mod-admin-full/luasrc/controller/admin/status.lua
+@@ -62,7 +62,7 @@ end
+ function action_bandwidth(iface)
+ 	luci.http.prepare_content("application/json")
+ 
+-	local bwc = io.popen("luci-bwc -i %q 2>/dev/null" % iface)
++	local bwc = io.popen("luci-bwc -i '%s' 2>/dev/null" % iface:gsub("'", ""))
+ 	if bwc then
+ 		luci.http.write("[")
+ 
+@@ -80,7 +80,7 @@ end
+ function action_wireless(iface)
+ 	luci.http.prepare_content("application/json")
+ 
+-	local bwc = io.popen("luci-bwc -r %q 2>/dev/null" % iface)
++	local bwc = io.popen("luci-bwc -r '%s' 2>/dev/null" % iface:gsub("'", ""))
+ 	if bwc then
+ 		luci.http.write("[")
+ 

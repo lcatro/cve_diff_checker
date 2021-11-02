@@ -1,0 +1,93 @@
+From 288f81cc4d69d9ff947596fbb48c3446eeee8e2e Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Sun, 27 Sep 2015 13:02:40 +0200
+Subject: [PATCH] Fix CVE-2015-7364
+
+Cross-Site Request Forgery (CSRF)
+---------------------------------
+
+Abdullah Hussam Gazi discovered that the CSRF protection mechanism introduced
+a few years ago to secure the forms generated with the HTML_Quickform library
+(most fo the forms in Revive Adserver's admin UI) could be easily bypassed by
+sending an empty token along with the POST data. The range of malicious actions
+include, but is not limited to, modifying entities like banners and zones and
+altering preferences and settings.
+
+CWE: CWE-352
+CVSSv2: 5.1 (AV:N/AC:H/Au:N/C:P/I:P/A:P)
+---
+ lib/OA/Admin/UI/component/Form.php         | 9 ++++++---
+ lib/pear/HTML/QuickForm/Renderer/Array.php | 5 ++++-
+ lib/pear/HTML/QuickForm/hidden.php         | 6 ++++--
+ 3 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/lib/OA/Admin/UI/component/Form.php b/lib/OA/Admin/UI/component/Form.php
+index 48ad48b655..7d21c5d617 100644
+--- a/lib/OA/Admin/UI/component/Form.php
++++ b/lib/OA/Admin/UI/component/Form.php
+@@ -125,8 +125,11 @@ function __construct($formName='', $method='POST', $action='', $target='', $attr
+         //trim spaces from all data sent by the user
+         $this->applyFilter('__ALL__', 'trim');
+ 
+-        $this->addElement('hidden', 'token', phpAds_SessionGetToken());
+-        $this->addRule('token', 'Invalid request token', 'callback', 'phpAds_SessionValidateToken');
++        if (!defined('phpAds_installing')) {
++            $this->addElement('hidden', 'token', phpAds_SessionGetToken());
++            $this->addRule('token', 'Missing request token', 'required');
++            $this->addRule('token', 'Invalid request token', 'callback', 'phpAds_SessionValidateToken');
++        }
+     }
+ 
+     function validate()
+@@ -136,7 +139,7 @@ function validate()
+         if (!$ret) {
+             // The form returned an error. We need to generate a new CSRF token, in any.
+             $token = $this->getElement('token');
+-            if (!empty($token)) {
++            if (!empty($token) && !PEAR::isError($token)) {
+                 $token->setValue(phpAds_SessionGetToken());
+             }
+         }
+diff --git a/lib/pear/HTML/QuickForm/Renderer/Array.php b/lib/pear/HTML/QuickForm/Renderer/Array.php
+index b837d70f70..075bfff295 100644
+--- a/lib/pear/HTML/QuickForm/Renderer/Array.php
++++ b/lib/pear/HTML/QuickForm/Renderer/Array.php
+@@ -225,13 +225,16 @@ function renderElement(&$element, $required, $error)
+     } // end func renderElement
+ 
+ 
+-    function renderHidden(&$element)
++    function renderHidden(&$element, $required, $error)
+     {
+         if ($this->_collectHidden) {
+             $this->_ary['hidden'] .= $element->toHtml() . "\n";
+         } else {
+             $this->renderElement($element, false, null);
+         }
++        if (!empty($error)) {
++            $this->_ary['errors'][$elAry['name']] = $error;
++        }
+     } // end func renderHidden
+ 
+ 
+diff --git a/lib/pear/HTML/QuickForm/hidden.php b/lib/pear/HTML/QuickForm/hidden.php
+index c869348ef0..eebe574e6d 100644
+--- a/lib/pear/HTML/QuickForm/hidden.php
++++ b/lib/pear/HTML/QuickForm/hidden.php
+@@ -79,12 +79,14 @@ function freeze()
+     * Accepts a renderer
+     *
+     * @param HTML_QuickForm_Renderer    renderer object
++    * @param bool                       Whether an element is required
++    * @param string                     An error message associated with an element
+     * @access public
+     * @return void
+     */
+-    function accept(&$renderer)
++    function accept(&$renderer, $required=false, $error=null)
+     {
+-        $renderer->renderHidden($this);
++        $renderer->renderHidden($this, $required, $error);
+     } // end func accept
+ 
+     // }}}

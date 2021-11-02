@@ -1,0 +1,99 @@
+From 996faf964bba1aec06b153b370a7f20d3dd2bb8b Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Wed, 4 Feb 2015 01:11:00 -0800
+Subject: [PATCH] Update header handling to RFC 7230
+
+---
+ ext/standard/tests/general_functions/bug60227_2.phpt | 7 ++++---
+ ext/standard/tests/general_functions/bug60227_3.phpt | 6 +++---
+ ext/standard/tests/general_functions/bug60227_4.phpt | 6 +++---
+ main/SAPI.c                                          | 9 ++-------
+ 4 files changed, 12 insertions(+), 16 deletions(-)
+
+diff --git a/ext/standard/tests/general_functions/bug60227_2.phpt b/ext/standard/tests/general_functions/bug60227_2.phpt
+index 995c364eea23..2cdde78a4a91 100644
+--- a/ext/standard/tests/general_functions/bug60227_2.phpt
++++ b/ext/standard/tests/general_functions/bug60227_2.phpt
+@@ -1,14 +1,15 @@
+ --TEST--
+ Bug #60227 (header() cannot detect the multi-line header with CR), \r before \n
++--INI--
++expose_php=0
+ --FILE--
+ <?php
+ header("X-foo: e\n foo");
+-header("X-Foo6: e\rSet-Cookie: ID=123\n d");
+ echo 'foo';
+ ?>
+ --EXPECTF--
++
+ Warning: Header may not contain more than a single header, new line detected in %s on line %d
+ foo
+ --EXPECTHEADERS--
+-X-foo: e
+-foo
++Content-type: text/html; charset=UTF-8
+diff --git a/ext/standard/tests/general_functions/bug60227_3.phpt b/ext/standard/tests/general_functions/bug60227_3.phpt
+index 8cba9b8aec67..8246f1743835 100644
+--- a/ext/standard/tests/general_functions/bug60227_3.phpt
++++ b/ext/standard/tests/general_functions/bug60227_3.phpt
+@@ -1,8 +1,9 @@
+ --TEST--
+ Bug #60227 (header() cannot detect the multi-line header with CR), \0 before \n
++--INI--
++expose_php=0
+ --FILE--
+ <?php
+-header("X-foo: e\n foo");
+ header("X-Foo6: e\0Set-Cookie: ID=\n123\n d");
+ echo 'foo';
+ ?>
+@@ -10,5 +11,4 @@ echo 'foo';
+ Warning: Header may not contain NUL bytes in %s on line %d
+ foo
+ --EXPECTHEADERS--
+-X-foo: e
+-foo
++Content-type: text/html; charset=UTF-8
+diff --git a/ext/standard/tests/general_functions/bug60227_4.phpt b/ext/standard/tests/general_functions/bug60227_4.phpt
+index d5e2573d89cd..20dba1a26568 100644
+--- a/ext/standard/tests/general_functions/bug60227_4.phpt
++++ b/ext/standard/tests/general_functions/bug60227_4.phpt
+@@ -1,8 +1,9 @@
+ --TEST--
+ Bug #60227 (header() cannot detect the multi-line header with CR), CRLF
++--INI--
++expose_php=0
+ --FILE--
+ <?php
+-header("X-foo: e\r\n foo");
+ header("X-foo: e\r\nfoo");
+ echo 'foo';
+ ?>
+@@ -10,5 +11,4 @@ echo 'foo';
+ Warning: Header may not contain more than a single header, new line detected in %s on line %d
+ foo
+ --EXPECTHEADERS--
+-X-foo: e
+- foo
++Content-type: text/html; charset=UTF-8
+diff --git a/main/SAPI.c b/main/SAPI.c
+index 714903a86dcb..0dd0b55df548 100644
+--- a/main/SAPI.c
++++ b/main/SAPI.c
+@@ -743,13 +743,8 @@ SAPI_API int sapi_header_op(sapi_header_op_enum op, void *arg TSRMLS_DC)
+ 		/* new line/NUL character safety check */
+ 		int i;
+ 		for (i = 0; i < header_line_len; i++) {
+-			/* RFC 2616 allows new lines if followed by SP or HT */
+-			int illegal_break =
+-					(header_line[i+1] != ' ' && header_line[i+1] != '\t')
+-					&& (
+-						header_line[i] == '\n'
+-						|| (header_line[i] == '\r' && header_line[i+1] != '\n'));
+-			if (illegal_break) {
++			/* RFC 7230 ch. 3.2.4 deprecates folding support */
++			if (header_line[i] == '\n' || header_line[i] == '\r') {
+ 				efree(header_line);
+ 				sapi_module.sapi_error(E_WARNING, "Header may not contain "
+ 						"more than a single header, new line detected");

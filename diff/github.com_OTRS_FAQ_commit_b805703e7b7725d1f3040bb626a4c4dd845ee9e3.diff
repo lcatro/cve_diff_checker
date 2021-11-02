@@ -1,0 +1,336 @@
+From b805703e7b7725d1f3040bb626a4c4dd845ee9e3 Mon Sep 17 00:00:00 2001
+From: Carlos Rodriguez <carlos.rodriguez@otrs.com>
+Date: Mon, 27 Jun 2016 16:28:09 -0500
+Subject: [PATCH] Fixed issue with not correctly quoted search parameters.
+
+---
+ CHANGES-FAQ.md                          |  1 +
+ FAQ.sopm                                |  1 +
+ Kernel/System/FAQSearch.pm              | 73 +++++++++++++++++-----
+ doc/en/FAQ.xml                          |  4 +-
+ scripts/test/FAQSearch.t                | 59 ++++++++++++++++--
+ scripts/test/FAQSearch/InConditionGet.t | 80 +++++++++++++++++++++++++
+ 6 files changed, 196 insertions(+), 22 deletions(-)
+ create mode 100644 scripts/test/FAQSearch/InConditionGet.t
+
+diff --git a/CHANGES-FAQ.md b/CHANGES-FAQ.md
+index ded2da6f..f912f021 100644
+--- a/CHANGES-FAQ.md
++++ b/CHANGES-FAQ.md
+@@ -1,4 +1,5 @@
+ #5.0.4 2016-??-??
++ - 2016-06-27 Fixed issue with not correctly quoted search parameters.
+  - 2016-05-02 Added FileID attribute to the retrieved attachments using Generic Interface PublicFAQGet operation, thanks to Esteban Marin.
+ 
+ #5.0.3 2016-05-17
+diff --git a/FAQ.sopm b/FAQ.sopm
+index ce309597..b158e559 100644
+--- a/FAQ.sopm
++++ b/FAQ.sopm
+@@ -119,6 +119,7 @@
+         <File Permission="644" Location="scripts/test/Console/Command/Admin/FAQ/Import.t"/>
+         <File Permission="644" Location="scripts/webservices/GenericFAQConnectorSOAP.yml"/>
+         <File Permission="644" Location="scripts/test/Console/Command/Maint/FAQ/ContentTypeSet.t"/>
++        <File Permission="644" Location="scripts/test/FAQSearch/InConditionGet.t"/>
+         <File Permission="644" Location="scripts/test/FAQ.t"/>
+         <File Permission="644" Location="scripts/test/FAQSearch.t"/>
+         <File Permission="644" Location="scripts/test/GenericInterface/FAQConnector.t"/>
+diff --git a/Kernel/System/FAQSearch.pm b/Kernel/System/FAQSearch.pm
+index de821f9d..01fc8b40 100644
+--- a/Kernel/System/FAQSearch.pm
++++ b/Kernel/System/FAQSearch.pm
+@@ -217,6 +217,43 @@ sub FAQSearch {
+         Result => 'vrate',
+     );
+ 
++    # check types of given arguments
++    ARGUMENT:
++    for my $Key (qw(LanguageIDs CategoryIDs ValidIDs CreatedUserIDs LastChangedUserIDs)) {
++
++        next ARGUMENT if !$Param{$Key};
++        next ARGUMENT if ref $Param{$Key} eq 'ARRAY' && @{ $Param{$Key} };
++
++        # log error
++        $Kernel::OM->Get('Kernel::System::Log')->Log(
++            Priority => 'error',
++            Message  => "The given param '$Key' is invalid or an empty array reference!",
++        );
++        return;
++    }
++
++    # get database object
++    my $DBObject = $Kernel::OM->Get('Kernel::System::DB');
++
++    # quote id array elements
++    ARGUMENT:
++    for my $Key (qw(LanguageIDs CategoryIDs ValidIDs CreatedUserIDs LastChangedUserIDs)) {
++        next ARGUMENT if !$Param{$Key};
++
++        # quote elements
++        for my $Element ( @{ $Param{$Key} } ) {
++            if ( !defined $DBObject->Quote( $Element, 'Integer' ) ) {
++
++                # log error
++                $Kernel::OM->Get('Kernel::System::Log')->Log(
++                    Priority => 'error',
++                    Message  => "The given param '$Element' in '$Key' is invalid!",
++                );
++                return;
++            }
++        }
++    }
++
+     my $FAQDynamicFields = [];
+     my %ValidDynamicFieldParams;
+     my %FAQDynamicFieldName2Config;
+@@ -297,7 +334,6 @@ sub FAQSearch {
+     my $Ext = '';
+ 
+     # get needed objects
+-    my $DBObject     = $Kernel::OM->Get('Kernel::System::DB');
+     my $ConfigObject = $Kernel::OM->Get('Kernel::Config');
+ 
+     # full-text search
+@@ -441,7 +477,9 @@ sub FAQSearch {
+     # search for states
+     if ( $Param{States} && ref $Param{States} eq 'HASH' && %{ $Param{States} } ) {
+ 
+-        my @States = map {$_} keys %{ $Param{States} };
++        my @States = map { $DBObject->Quote( $_, 'Integer' ) } keys %{ $Param{States} };
++
++        return if scalar @States != keys $Param{States};
+ 
+         my $InString = $Self->_InConditionGet(
+             TableColumn => 's.type_id',
+@@ -1018,16 +1056,20 @@ condition string from an array.
+ sub _InConditionGet {
+     my ( $Self, %Param ) = @_;
+ 
+-    # check needed stuff
+-    for my $Key (qw(TableColumn IDRef)) {
+-        if ( !$Param{$Key} ) {
+-            $Kernel::OM->Get('Kernel::System::Log')->Log(
+-                Priority => 'error',
+-                Message  => "Need $Key!",
+-            );
++    if ( !$Param{TableColumn} ) {
++        $Kernel::OM->Get('Kernel::System::Log')->Log(
++            Priority => 'error',
++            Message  => "Need TableColumn!",
++        );
++        return;
++    }
+ 
+-            return;
+-        }
++    if ( !$Param{IDRef} || ref $Param{IDRef} ne 'ARRAY' || !@{ $Param{IDRef} } ) {
++        $Kernel::OM->Get('Kernel::System::Log')->Log(
++            Priority => 'error',
++            Message  => "Need IDRef!",
++        );
++        return;
+     }
+ 
+     # sort ids to cache the SQL query
+@@ -1036,10 +1078,9 @@ sub _InConditionGet {
+     # get database object
+     my $DBObject = $Kernel::OM->Get('Kernel::System::DB');
+ 
+-    # quote values
+-    for my $Value (@SortedIDs) {
+-        $DBObject->Quote( $Value, 'Integer' );
+-    }
++    # Error out if some values were not integers.
++    @SortedIDs = map { $Kernel::OM->Get('Kernel::System::DB')->Quote( $_, 'Integer' ) } @SortedIDs;
++    return if scalar @SortedIDs != scalar @{ $Param{IDRef} };
+ 
+     # split IN statement with more than 900 elements in more statements combined with OR
+     # because Oracle doesn't support more than 1000 elements in one IN statement.
+@@ -1049,7 +1090,7 @@ sub _InConditionGet {
+ 
+         my @SortedIDsPart = splice @SortedIDs, 0, 900;
+ 
+-        my $IDString = join ',', @SortedIDsPart;
++        my $IDString = join ', ', @SortedIDsPart;
+ 
+         push @SQLStrings, " $Param{TableColumn} IN ($IDString) ";
+     }
+diff --git a/doc/en/FAQ.xml b/doc/en/FAQ.xml
+index eecf381f..2c47a780 100644
+--- a/doc/en/FAQ.xml
++++ b/doc/en/FAQ.xml
+@@ -1561,7 +1561,9 @@ shell> bin/otrs.Console.pl Admin::Package::Install /path/to/$Name-$Version.opm
+             command on the command line:
+         </para>
+         <screen>
+-shell> perl bin/otrs.Console.pl Dev::UnitTest::Run --test FAQ:FAQSearch:GenericInterface/FAQConnector:Console/Command/Admin/FAQ/Import:Console/Command/Maint/FAQ/ContentTypeSet
++shell> perl bin/otrs.Console.pl Dev::UnitTest::Run --test FAQ:FAQSearch:FAQSearch/InConditionGet
++shell> perl bin/otrs.Console.pl Dev::UnitTest::Run --test GenericInterface/FAQConnector
++shell> perl bin/otrs.Console.pl Dev::UnitTest::Run --test Console/Command/Admin/FAQ/Import:Console/Command/Maint/FAQ/ContentTypeSet
+         </screen>
+         <para>Selenium unit tests</para>
+         <para>
+diff --git a/scripts/test/FAQSearch.t b/scripts/test/FAQSearch.t
+index f42e7865..4db09396 100644
+--- a/scripts/test/FAQSearch.t
++++ b/scripts/test/FAQSearch.t
+@@ -480,6 +480,58 @@ for my $Test (@Tests) {
+     );
+ }
+ 
++# other tests
++@Tests = (
++    {
++        Name   => 'States Hash Correct IDs',
++        Config => {
++            %SearchConfigTemplate,
++            States => {
++                1 => 'Internal',
++                2 => 'External',
++                3 => 'Public',
++            },
++        },
++        ExpectedResults => [ $AddedFAQs[0], $AddedFAQs[1] ],
++    },
++    {
++        Name   => 'States Hash Incorrect IDs (Float)',
++        Config => {
++            %SearchConfigTemplate,
++            States => {
++                1.1 => 'Internal',
++                2.2 => 'External',
++                3.3 => 'Public',
++            },
++        },
++        ExpectedResults => [],
++    },
++    {
++        Name   => 'States Hash Incorrect IDs (String)',
++        Config => {
++            %SearchConfigTemplate,
++            States => {
++                'Internal' => 'Internal',
++                'External' => 'External',
++                'Public'   => 'Public',
++            },
++        },
++        ExpectedResults => [],
++    },
++
++);
++
++# execute the tests
++for my $Test (@Tests) {
++    my @FAQIDs = $FAQObject->FAQSearch( %{ $Test->{Config} } );
++
++    $Self->IsDeeply(
++        \@FAQIDs,
++        $Test->{ExpectedResults},
++        "$Test->{Name} FAQSearch()",
++    );
++}
++
+ # time based tests
+ 
+ # update FAQs
+@@ -751,12 +803,9 @@ for my $Test (@Tests) {
+         Name   => 'Wrong LastChangedUserIDs Format',
+         Config => {
+             %SearchConfigTemplate,
+-            CreatedUserIDs => $AddedUsers[2],
++            LastChangedUserIDs => $AddedUsers[2],
+         },
+-        ExpectedResults => [
+-            $AddedFAQs[0],
+-            $AddedFAQs[1],
+-        ],
++        ExpectedResults => [],
+     },
+ );
+ 
+diff --git a/scripts/test/FAQSearch/InConditionGet.t b/scripts/test/FAQSearch/InConditionGet.t
+new file mode 100644
+index 00000000..cd791f40
+--- /dev/null
++++ b/scripts/test/FAQSearch/InConditionGet.t
+@@ -0,0 +1,80 @@
++# --
++# Copyright (C) 2001-2016 OTRS AG, http://otrs.com/
++# --
++# This software comes with ABSOLUTELY NO WARRANTY. For details, see
++# the enclosed file COPYING for license information (AGPL). If you
++# did not receive this file, see http://www.gnu.org/licenses/agpl.txt.
++# --
++
++## no critic (Modules::RequireExplicitPackage)
++use strict;
++use warnings;
++use utf8;
++
++use vars (qw($Self));
++
++# get helper object
++$Kernel::OM->ObjectParamAdd(
++    'Kernel::System::UnitTest::Helper' => {
++        RestoreDatabase => 1,
++    },
++);
++my $Helper = $Kernel::OM->Get('Kernel::System::UnitTest::Helper');
++
++my @Tests = (
++    {
++        Name   => 'No array',
++        Params => {
++            TableColumn => 'test.table',
++            IDRef       => 1,
++        },
++        Result => undef,
++    },
++    {
++        Name   => 'Single Integer',
++        Params => {
++            TableColumn => 'test.table',
++            IDRef       => [1],
++        },
++        Result => ' (  test.table IN (1)  ) ',
++    },
++    {
++        Name   => 'Sorted values',
++        Params => {
++            TableColumn => 'test.table',
++            IDRef       => [ 2, 1, -1, 0 ],
++        },
++        Result => ' (  test.table IN (-1, 0, 1, 2)  ) ',
++    },
++    {
++        Name   => 'Invalid value',
++        Params => {
++            TableColumn => 'test.table',
++            IDRef       => [1.1],
++        },
++        Result => undef,
++    },
++    {
++        Name   => 'Mix of valid and invalid values',
++        Params => {
++            TableColumn => 'test.table',
++            IDRef       => [ 1, 1.1 ],
++        },
++        Result => undef,
++    },
++);
++
++# get FAQ object
++my $FAQObject = $Kernel::OM->Get('Kernel::System::FAQ');
++
++for my $Test (@Tests) {
++    $Self->Is(
++        scalar $FAQObject->_InConditionGet( %{ $Test->{Params} } ),
++        $Test->{Result},
++        "$Test->{Name} _InConditionGet()"
++    );
++}
++
++# cleanup is done by RestoreDatabase.
++
++1;

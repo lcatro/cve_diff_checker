@@ -1,0 +1,76 @@
+From 6e6e54f944a5ebb49e9110bdeff844d00a96c56c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Caol=C3=A1n=20McNamara?= <caolanm@redhat.com>
+Date: Fri, 17 Mar 2017 10:57:03 +0000
+Subject: [PATCH] ofz#889 readjust jpeg import
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: I4e25db429b8dee9265ab2ad468c21cc34a50df6c
+Reviewed-on: https://gerrit.libreoffice.org/35325
+Tested-by: Jenkins <ci@libreoffice.org>
+Reviewed-by: Caolán McNamara <caolanm@redhat.com>
+Tested-by: Caolán McNamara <caolanm@redhat.com>
+---
+ .../data/jpg/{fail => pass}/CVE-2004-0200-1.jpg     | Bin
+ .../data/jpg/{fail => pass}/CVE-2004-0200-4.jpg     | Bin
+ .../data/jpg/{fail => pass}/EDB-24743-2.jpg         | Bin
+ .../data/jpg/{fail => pass}/EDB-24743-3.jpg         | Bin
+ vcl/source/filter/jpeg/jpegc.cxx                    |   7 ++++---
+ 5 files changed, 4 insertions(+), 3 deletions(-)
+ rename vcl/qa/cppunit/graphicfilter/data/jpg/{fail => pass}/CVE-2004-0200-1.jpg (100%)
+ rename vcl/qa/cppunit/graphicfilter/data/jpg/{fail => pass}/CVE-2004-0200-4.jpg (100%)
+ rename vcl/qa/cppunit/graphicfilter/data/jpg/{fail => pass}/EDB-24743-2.jpg (100%)
+ rename vcl/qa/cppunit/graphicfilter/data/jpg/{fail => pass}/EDB-24743-3.jpg (100%)
+
+diff --git a/vcl/qa/cppunit/graphicfilter/data/jpg/fail/CVE-2004-0200-1.jpg b/vcl/qa/cppunit/graphicfilter/data/jpg/pass/CVE-2004-0200-1.jpg
+similarity index 100%
+rename from vcl/qa/cppunit/graphicfilter/data/jpg/fail/CVE-2004-0200-1.jpg
+rename to vcl/qa/cppunit/graphicfilter/data/jpg/pass/CVE-2004-0200-1.jpg
+diff --git a/vcl/qa/cppunit/graphicfilter/data/jpg/fail/CVE-2004-0200-4.jpg b/vcl/qa/cppunit/graphicfilter/data/jpg/pass/CVE-2004-0200-4.jpg
+similarity index 100%
+rename from vcl/qa/cppunit/graphicfilter/data/jpg/fail/CVE-2004-0200-4.jpg
+rename to vcl/qa/cppunit/graphicfilter/data/jpg/pass/CVE-2004-0200-4.jpg
+diff --git a/vcl/qa/cppunit/graphicfilter/data/jpg/fail/EDB-24743-2.jpg b/vcl/qa/cppunit/graphicfilter/data/jpg/pass/EDB-24743-2.jpg
+similarity index 100%
+rename from vcl/qa/cppunit/graphicfilter/data/jpg/fail/EDB-24743-2.jpg
+rename to vcl/qa/cppunit/graphicfilter/data/jpg/pass/EDB-24743-2.jpg
+diff --git a/vcl/qa/cppunit/graphicfilter/data/jpg/fail/EDB-24743-3.jpg b/vcl/qa/cppunit/graphicfilter/data/jpg/pass/EDB-24743-3.jpg
+similarity index 100%
+rename from vcl/qa/cppunit/graphicfilter/data/jpg/fail/EDB-24743-3.jpg
+rename to vcl/qa/cppunit/graphicfilter/data/jpg/pass/EDB-24743-3.jpg
+diff --git a/vcl/source/filter/jpeg/jpegc.cxx b/vcl/source/filter/jpeg/jpegc.cxx
+index 8d9b1626022d9..e73065e668f0a 100644
+--- a/vcl/source/filter/jpeg/jpegc.cxx
++++ b/vcl/source/filter/jpeg/jpegc.cxx
+@@ -132,7 +132,7 @@ void ReadJPEG( JPEGReader* pJPEGReader, void* pInputStream, long* pLines,
+         }
+     }
+ 
+-    jpeg_start_decompress( &cinfo );
++    jpeg_calc_output_dimensions(&cinfo);
+ 
+     long nWidth = cinfo.output_width;
+     long nHeight = cinfo.output_height;
+@@ -161,7 +161,6 @@ void ReadJPEG( JPEGReader* pJPEGReader, void* pInputStream, long* pLines,
+             J_COLOR_SPACE best_out_color_space = JCS_RGB;
+             ScanlineFormat eScanlineFormat = ScanlineFormat::N24BitTcRgb;
+             ScanlineFormat eFinalFormat = pAccess->GetScanlineFormat();
+-
+             if (eFinalFormat == ScanlineFormat::N32BitTcBgra)
+             {
+                 best_out_color_space = JCS_EXT_BGRA;
+@@ -190,10 +189,12 @@ void ReadJPEG( JPEGReader* pJPEGReader, void* pInputStream, long* pLines,
+                 cinfo.out_color_space != JCS_GRAYSCALE &&
+                 cinfo.out_color_space != best_out_color_space)
+             {
+-                SAL_WARN("vcl.filter", "jpg with unknown out color space, forcing to :" << best_out_color_space);
++                SAL_WARN("vcl.filter", "jpg with unknown out color space, forcing to :" << best_out_color_space << " gray ");
+                 cinfo.out_color_space = best_out_color_space;
+             }
+ 
++            jpeg_start_decompress(&cinfo);
++
+             JSAMPLE* aRangeLimit = cinfo.sample_range_limit;
+ 
+             std::vector<sal_uInt8> pScanLineBuffer(nWidth * (bGray ? 1 : nPixelSize));

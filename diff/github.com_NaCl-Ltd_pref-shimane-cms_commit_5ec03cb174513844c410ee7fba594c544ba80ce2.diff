@@ -1,0 +1,104 @@
+From 5ec03cb174513844c410ee7fba594c544ba80ce2 Mon Sep 17 00:00:00 2001
+From: Yusuke Anno <anno@netlab.jp>
+Date: Wed, 7 Oct 2015 13:13:11 +0900
+Subject: [PATCH] =?UTF-8?q?SQL=E3=82=A4=E3=83=B3=E3=82=B8=E3=82=A7?=
+ =?UTF-8?q?=E3=82=AF=E3=82=B7=E3=83=A7=E3=83=B3=E3=81=AB=E3=82=88=E3=82=8A?=
+ =?UTF-8?q?=E3=80=81=E6=83=85=E5=A0=B1=E3=82=92=E4=B8=8D=E6=AD=A3=E5=8F=96?=
+ =?UTF-8?q?=E5=BE=97=E3=81=A7=E3=81=8D=E3=81=A6=E3=81=97=E3=81=BE=E3=81=86?=
+ =?UTF-8?q?=E4=B8=8D=E5=85=B7=E5=90=88=E3=82=92=E4=BF=AE=E6=AD=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ pref-shimane-cms/CHANGELOG.md                 | 11 ++++++
+ .../concerns/susanoo/pages_controller.rb      | 37 ++++++++++++++++++-
+ .../config/initializers/version.rb            |  2 +-
+ 3 files changed, 48 insertions(+), 2 deletions(-)
+ create mode 100644 pref-shimane-cms/CHANGELOG.md
+
+diff --git a/pref-shimane-cms/CHANGELOG.md b/pref-shimane-cms/CHANGELOG.md
+new file mode 100644
+index 0000000..4eb0b0c
+--- /dev/null
++++ b/pref-shimane-cms/CHANGELOG.md
+@@ -0,0 +1,11 @@
++# Changelog
++
++## Version 2.0.1 (2015/10/7)
++
++* Bugfix
++
++  * SQLインジェクションにより、情報を不正取得できてしまう不具合を修正
++
++## Version 2.0.0 (2014/9/6)
++
++* 初期リリース
+\ No newline at end of file
+diff --git a/pref-shimane-cms/app/controllers/concerns/susanoo/pages_controller.rb b/pref-shimane-cms/app/controllers/concerns/susanoo/pages_controller.rb
+index 7850dfe..79c8e07 100644
+--- a/pref-shimane-cms/app/controllers/concerns/susanoo/pages_controller.rb
++++ b/pref-shimane-cms/app/controllers/concerns/susanoo/pages_controller.rb
+@@ -254,7 +254,6 @@ def initialize(attr = {})
+           super
+         end
+ 
+-
+         #
+         #=== 検索を実施する
+         #
+@@ -278,7 +277,43 @@ def last_modified_sortable?
+             false
+           end
+         end
++
++        #
++        #=== ソート順を返す
++        #
++        def order_by
++          order_option = ''
++          if valid_order_params?
++            direction = self.order_direction || 'ASC'
++            order_option = "#{self.order_column} #{direction}"
++          end
++          order_option.present? ? order_option : @@default_order
++        end
++
++        #
++        #=== ソートパラメータを検証する
++        #
++        def valid_order_params?
++          if self.order_column.blank?
++            return false
++          end
++
++          permit_column_params = ['pages.name', 'page_contents.last_modified']
++          permit_dir_params = ['ASC', 'DESC']
++
++          unless permit_column_params.include?(self.order_column)
++            return false
++          end
++
++          if self.order_direction.present? &&
++            !permit_dir_params.include?(self.order_direction.upcase)
++            return false
++          end
++
++          return true
++        end
+       end
++
+   end
+ end
+ 
+diff --git a/pref-shimane-cms/config/initializers/version.rb b/pref-shimane-cms/config/initializers/version.rb
+index cf364a6..23cc027 100644
+--- a/pref-shimane-cms/config/initializers/version.rb
++++ b/pref-shimane-cms/config/initializers/version.rb
+@@ -1,5 +1,5 @@
+ module PrefShimaneCms
+   class Application
+-    VERSION = '2.0.0'
++    VERSION = '2.0.1'
+   end
+ end

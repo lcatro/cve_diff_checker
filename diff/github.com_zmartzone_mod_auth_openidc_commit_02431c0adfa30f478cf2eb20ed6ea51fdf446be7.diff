@@ -1,0 +1,28 @@
+From 2d20c58597c9f7065e5362e603a5c348141c45ea Mon Sep 17 00:00:00 2001
+From: AIMOTO NORIHITO <aimoto@osstech.co.jp>
+Date: Tue, 12 Nov 2019 17:09:23 +0900
+Subject: [PATCH] Fix open redirect starting with a slash and backslash
+
+---
+ src/mod_auth_openidc.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/mod_auth_openidc.c b/src/mod_auth_openidc.c
+index 2467a42b..b47a6973 100644
+--- a/src/mod_auth_openidc.c
++++ b/src/mod_auth_openidc.c
+@@ -3063,6 +3063,14 @@ static apr_byte_t oidc_validate_post_logout_url(request_rec *r, const char *url,
+                                                 url);
+                 oidc_error(r, "%s: %s", *err_str, *err_desc);
+                 return FALSE;
++        } else if ((uri.hostname == NULL) && (strstr(url, "/\\") == url)) {
++                *err_str = apr_pstrdup(r->pool, "Malformed URL");
++                *err_desc =
++                                apr_psprintf(r->pool,
++                                                "No hostname was parsed and starting with '/\\': %s",
++                                                url);
++                oidc_error(r, "%s: %s", *err_str, *err_desc);
++                return FALSE;
+ 	}
+ 
+ 	/* validate the URL to prevent HTTP header splitting */

@@ -1,0 +1,41 @@
+From 33a03e9afb8fb00c9d8f480424d549311fe03d40 Mon Sep 17 00:00:00 2001
+From: plegall <plg@piwigo.org>
+Date: Mon, 18 Dec 2017 14:02:52 +0100
+Subject: [PATCH] (cp 1da9d6a) fixes #823 add input user check to avoid SQLi on
+ users list
+
+---
+ admin/user_list_backend.php | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/admin/user_list_backend.php b/admin/user_list_backend.php
+index e4fa40af43..50673fae0c 100644
+--- a/admin/user_list_backend.php
++++ b/admin/user_list_backend.php
+@@ -67,8 +67,7 @@
+ $sLimit = "";
+ if ( isset( $_REQUEST['iDisplayStart'] ) && $_REQUEST['iDisplayLength'] != '-1' )
+ {
+-  $sLimit = "LIMIT ".pwg_db_real_escape_string( $_REQUEST['iDisplayStart'] ).", ".
+-    pwg_db_real_escape_string( $_REQUEST['iDisplayLength'] );
++  $sLimit = "LIMIT ".$_REQUEST['iDisplayStart'].", ".$_REQUEST['iDisplayLength'];
+ }
+ 	
+ 	
+@@ -80,10 +79,13 @@
+   $sOrder = "ORDER BY  ";
+   for ( $i=0 ; $i<intval( $_REQUEST['iSortingCols'] ) ; $i++ )
+   {
+-    if ( $_REQUEST[ 'bSortable_'.intval($_REQUEST['iSortCol_'.$i]) ] == "true" )
++    check_input_parameter('iSortCol_'.$i, $_REQUEST, false, PATTERN_ID);
++
++    if ( $_REQUEST[ 'bSortable_'.$_REQUEST['iSortCol_'.$i] ] == "true" )
+     {
+-      $sOrder .= $aColumns[ intval( $_REQUEST['iSortCol_'.$i] ) ]."
+-				 	".pwg_db_real_escape_string( $_REQUEST['sSortDir_'.$i] ) .", ";
++      check_input_parameter('sSortDir_'.$i, $_REQUEST, false, '/^(asc|desc)$/');
++
++      $sOrder .= $aColumns[ $_REQUEST['iSortCol_'.$i] ].' '.$_REQUEST['sSortDir_'.$i].', ';
+     }
+   }
+ 		

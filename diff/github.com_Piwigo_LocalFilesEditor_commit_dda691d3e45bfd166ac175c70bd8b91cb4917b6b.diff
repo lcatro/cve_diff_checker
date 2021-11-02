@@ -1,0 +1,34 @@
+From dda691d3e45bfd166ac175c70bd8b91cb4917b6b Mon Sep 17 00:00:00 2001
+From: plegall <plg@piwigo.org>
+Date: Fri, 23 Apr 2021 15:19:13 +0200
+Subject: [PATCH] fixes #2 strongly check the input parameter to avoid
+ unexpected files to be displayed.
+
+Privately reported by Harry Goodman from NCC
+---
+ show_default.php | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/show_default.php b/show_default.php
+index 2234e9e..26afe87 100644
+--- a/show_default.php
++++ b/show_default.php
+@@ -28,14 +28,16 @@
+ load_language('plugin.lang', LOCALEDIT_PATH);
+ check_status(ACCESS_WEBMASTER);
+ 
++check_input_parameter('file', $_GET, false, '/^(include\/config_default\.inc\.php|language\/[a-z]+_[A-Z]+\/(common|admin)\.lang\.php)$/');
++
+ if (isset($_GET['file']))
+ {
+   $path = $_GET['file'];
+-  if (!is_admin() or (!substr_count($path, 'config_default.inc.php') and !substr_count($path, '.lang.php')))
++  if (!is_admin())
+   {
+   	die('Hacking attempt!');
+   }
+-    
++
+   $template->set_filename('show_default', dirname(__FILE__) . '/template/show_default.tpl');
+   
+   $file = file_get_contents(PHPWG_ROOT_PATH . $path);

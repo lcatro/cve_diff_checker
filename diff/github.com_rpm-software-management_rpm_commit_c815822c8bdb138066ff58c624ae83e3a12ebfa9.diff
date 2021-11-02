@@ -1,0 +1,124 @@
+From c815822c8bdb138066ff58c624ae83e3a12ebfa9 Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Wed, 27 Sep 2017 13:45:17 +0300
+Subject: [PATCH] Make verification match the new restricted directory symlink
+ behavior
+
+Only follow directory symlinks owned by target directory owner or root
+during verification to match the behavior of fsmVerify() in the new
+CVE-2017-7500 world order.
+
+The code is klunkier than it should and the logic should use common code
+with fsmVerify() instead of duplicating it here, but that needs more
+changes than is comfortable to backport so starting with this.
+
+Also worth noting that the previous "follow the link" logic from
+commit 3ccd774255b8215733e0bdfdf5a683da9dd10923 was not quite right,
+it'd fail with RPMVERIFY_LSTATFAIL on a broken symlink when it should've
+ran verification on the symlink itself. This behavior is fixed here too.
+
+Finally, once again fakechroot gets in the way and forces the related
+verify testcase to be changed to be able to create a valid link. Reuse
+the replacement testcase for the purpose and add another case for
+verifying an invalid link.
+---
+ lib/verify.c       | 15 ++++++++++---
+ tests/rpmverify.at | 56 ++++++++++++++++++++++++++++++++++++++--------
+ 2 files changed, 59 insertions(+), 12 deletions(-)
+
+diff --git a/lib/verify.c b/lib/verify.c
+index 0eac812ae3..62eec08617 100644
+--- a/lib/verify.c
++++ b/lib/verify.c
+@@ -94,9 +94,18 @@ rpmVerifyAttrs rpmfilesVerify(rpmfiles fi, int ix, rpmVerifyAttrs omitMask)
+     }
+ 
+     /* If we expected a directory but got a symlink to one, follow the link */
+-    if (S_ISDIR(fmode) && S_ISLNK(sb.st_mode) && stat(fn, &sb) != 0) {
+-	vfy |= RPMVERIFY_LSTATFAIL;
+-	goto exit;
++    if (S_ISDIR(fmode) && S_ISLNK(sb.st_mode)) {
++	struct stat dsb;
++	/* ...if it actually points to a directory  */
++	if (stat(fn, &dsb) == 0 && S_ISDIR(dsb.st_mode)) {
++	    uid_t fuid;
++	    /* ...and is by a legit user, to match fsmVerify() behavior */
++	    if (sb.st_uid == 0 ||
++			(rpmugUid(rpmfilesFUser(fi, ix), &fuid) == 0 &&
++			 sb.st_uid == fuid)) {
++		sb = dsb; /* struct assignment */
++	    }
++	}
+     }
+ 
+     /* Links have no mode, other types have no linkto */
+diff --git a/tests/rpmverify.at b/tests/rpmverify.at
+index 8e29382592..c5530de69c 100644
+--- a/tests/rpmverify.at
++++ b/tests/rpmverify.at
+@@ -69,18 +69,56 @@ AT_KEYWORDS([verify])
+ AT_CHECK([
+ RPMDB_CLEAR
+ RPMDB_INIT
++tf="${RPMTEST}"/opt/foo
++rm -rf "${RPMTEST}"/opt/*
++rm -rf "${TOPDIR}"
+ 
+-runroot rpm -U --nodeps --noscripts --ignorearch --ignoreos \
+-	/data/RPMS/hello-1.0-1.i386.rpm
+-mv "${RPMTEST}"/usr/share/doc/hello-1.0 "${RPMTEST}"/usr/share/doc/hello-1.0.orig
+-ln -s hello-1.0.orig "${RPMTEST}"/usr/share/doc/hello-1.0
+-runroot rpm -Vva --nodeps --nouser --nogroup
+-rm -rf "${RPMTEST}"/usr/share/doc/
++runroot rpmbuild --quiet -bb \
++        --define "ver 1.0" \
++        --define "filetype datadir" \
++        --define "filedata README1" \
++        --define "user $(id -u -n)" \
++          /data/SPECS/replacetest.spec
++
++runroot rpm -U /build/RPMS/noarch/replacetest-1.0-1.noarch.rpm
++mv "${RPMTEST}"/opt/foo "${RPMTEST}"/opt/was
++ln -s was "${RPMTEST}"/opt/foo
++runroot rpm -Vv replacetest
+ ],
+ [0],
+-[.........    /usr/local/bin/hello
+-.........    /usr/share/doc/hello-1.0
+-.........  d /usr/share/doc/hello-1.0/FAQ
++[.........    /opt/foo
++.........    /opt/foo/README1
++.........    /opt/goo
++.........    /opt/zoo
++],
++[])
++AT_CLEANUP
++
++AT_SETUP([directory replaced with an invalid directory symlink])
++AT_KEYWORDS([verify])
++AT_CHECK([
++RPMDB_CLEAR
++RPMDB_INIT
++tf="${RPMTEST}"/opt/foo
++rm -rf "${RPMTEST}"/opt/*
++rm -rf "${TOPDIR}"
++
++runroot rpmbuild --quiet -bb \
++        --define "ver 1.0" \
++        --define "filetype datadir" \
++        --define "filedata README1" \
++          /data/SPECS/replacetest.spec
++
++runroot rpm -U /build/RPMS/noarch/replacetest-1.0-1.noarch.rpm
++mv "${RPMTEST}"/opt/foo "${RPMTEST}"/opt/was
++ln -s was "${RPMTEST}"/opt/foo
++runroot rpm -Vv --nouser --nogroup replacetest
++],
++[1],
++[....L....    /opt/foo
++.........    /opt/foo/README1
++.........    /opt/goo
++.........    /opt/zoo
+ ],
+ [])
+ AT_CLEANUP

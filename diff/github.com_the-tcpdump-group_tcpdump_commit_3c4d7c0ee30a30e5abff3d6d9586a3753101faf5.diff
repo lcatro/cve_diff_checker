@@ -1,0 +1,33 @@
+From 3c4d7c0ee30a30e5abff3d6d9586a3753101faf5 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sat, 4 Feb 2017 03:18:44 -0800
+Subject: [PATCH] CVE-2017-13725/IPv6 R.H.: Check for the existence of all
+ fields before fetching them.
+
+Don't fetch the length field from the header until after we've checked
+for the existence of a field at or after that field.
+
+(Found by code inspection, not by a capture.)
+---
+ print-rt6.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/print-rt6.c b/print-rt6.c
+index 35dbed981..0395791d7 100644
+--- a/print-rt6.c
++++ b/print-rt6.c
+@@ -45,13 +45,13 @@ rt6_print(netdissect_options *ndo, register const u_char *bp, const u_char *bp2
+ 	register const struct in6_addr *addr;
+ 
+ 	dp = (const struct ip6_rthdr *)bp;
+-	len = dp->ip6r_len;
+ 
+ 	/* 'ep' points to the end of available data. */
+ 	ep = ndo->ndo_snapend;
+ 
+ 	ND_TCHECK(dp->ip6r_segleft);
+ 
++	len = dp->ip6r_len;
+ 	ND_PRINT((ndo, "srcrt (len=%d", dp->ip6r_len));	/*)*/
+ 	ND_PRINT((ndo, ", type=%d", dp->ip6r_type));
+ 	ND_PRINT((ndo, ", segleft=%d", dp->ip6r_segleft));

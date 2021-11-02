@@ -1,0 +1,203 @@
+From 8dca25d26c7ca2caf6138267f6f17111212c156e Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 23 Aug 2017 21:08:42 -0700
+Subject: [PATCH] CVE-2017-13690/IKEv2: Fix some bounds checks.
+
+Use a pointer of the correct type in ND_TCHECK(), or use ND_TCHECK2()
+and provide the correct length.
+
+While we're at it, remove the blank line between some checks and the
+UNALIGNED_MEMCPY()s they protect.
+
+Also, note the places where we print the entire payload.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-isakmp.c                 |  21 ++++++++++++++-------
+ tests/TESTLIST                 |   1 +
+ tests/isakmp-various-oobr.out  |   5 +++++
+ tests/isakmp-various-oobr.pcap | Bin 0 -> 206 bytes
+ 4 files changed, 20 insertions(+), 7 deletions(-)
+ create mode 100644 tests/isakmp-various-oobr.out
+ create mode 100644 tests/isakmp-various-oobr.pcap
+
+diff --git a/print-isakmp.c b/print-isakmp.c
+index fbc6c5420..04374b0b3 100644
+--- a/print-isakmp.c
++++ b/print-isakmp.c
+@@ -1313,6 +1313,7 @@ ikev1_ke_print(netdissect_options *ndo, u_char tpay _U_,
+ 	UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 	ND_PRINT((ndo," key len=%d", ntohs(e.len) - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < ntohs(e.len)) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -1515,6 +1516,7 @@ ikev1_cert_print(netdissect_options *ndo, u_char tpay _U_,
+ 	ND_PRINT((ndo," len=%d", item_len - 4));
+ 	ND_PRINT((ndo," type=%s", STR_OR_ID((cert.encode), certstr)));
+ 	if (2 < ndo->ndo_vflag && 4 < item_len) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), item_len - 4))
+ 			goto trunc;
+@@ -1547,6 +1549,7 @@ ikev1_cr_print(netdissect_options *ndo, u_char tpay _U_,
+ 	ND_PRINT((ndo," len=%d", item_len - 4));
+ 	ND_PRINT((ndo," type=%s", STR_OR_ID((cert.encode), certstr)));
+ 	if (2 < ndo->ndo_vflag && 4 < item_len) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), item_len - 4))
+ 			goto trunc;
+@@ -1571,6 +1574,7 @@ ikev1_hash_print(netdissect_options *ndo, u_char tpay _U_,
+ 	UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 	ND_PRINT((ndo," len=%d", ntohs(e.len) - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < ntohs(e.len)) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -1595,6 +1599,7 @@ ikev1_sig_print(netdissect_options *ndo, u_char tpay _U_,
+ 	UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 	ND_PRINT((ndo," len=%d", ntohs(e.len) - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < ntohs(e.len)) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -1850,6 +1855,7 @@ ikev1_vid_print(netdissect_options *ndo, u_char tpay _U_,
+ 	UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 	ND_PRINT((ndo," len=%d", ntohs(e.len) - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < ntohs(e.len)) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -1884,6 +1890,7 @@ ikev2_gen_print(netdissect_options *ndo, u_char tpay,
+ 
+ 	ND_PRINT((ndo," len=%d", ntohs(e.len) - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < ntohs(e.len)) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -2022,7 +2029,6 @@ ikev2_p_print(netdissect_options *ndo, u_char tpay _U_, int pcount _U_,
+ 		if (prop_length < sizeof(*ext))
+ 			goto toolong;
+ 		ND_TCHECK(*ext);
+-
+ 		UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 
+ 		/*
+@@ -2109,7 +2115,6 @@ ikev2_sa_print(netdissect_options *ndo, u_char tpay,
+ 		if (sa_length < sizeof(*ext))
+ 			goto toolong;
+ 		ND_TCHECK(*ext);
+-
+ 		UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 
+ 		/*
+@@ -2170,7 +2175,7 @@ ikev2_ke_print(netdissect_options *ndo, u_char tpay,
+ 	const struct ikev2_ke *k;
+ 
+ 	k = (const struct ikev2_ke *)ext;
+-	ND_TCHECK(*ext);
++	ND_TCHECK(*k);
+ 	UNALIGNED_MEMCPY(&ke, ext, sizeof(ke));
+ 	ikev2_pay_print(ndo, NPSTR(tpay), ke.h.critical);
+ 
+@@ -2195,12 +2200,14 @@ ikev2_ID_print(netdissect_options *ndo, u_char tpay,
+ 		uint32_t phase _U_, uint32_t doi _U_,
+ 		uint32_t proto _U_, int depth _U_)
+ {
++	const struct ikev2_id *idp;
+ 	struct ikev2_id id;
+ 	int id_len, idtype_len, i;
+ 	unsigned int dumpascii, dumphex;
+ 	const unsigned char *typedata;
+ 
+-	ND_TCHECK(*ext);
++	idp = (const struct ikev2_id *)ext;
++	ND_TCHECK(*idp);
+ 	UNALIGNED_MEMCPY(&id, ext, sizeof(id));
+ 	ikev2_pay_print(ndo, NPSTR(tpay), id.h.critical);
+ 
+@@ -2208,6 +2215,7 @@ ikev2_ID_print(netdissect_options *ndo, u_char tpay,
+ 
+ 	ND_PRINT((ndo," len=%d", id_len - 4));
+ 	if (2 < ndo->ndo_vflag && 4 < id_len) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), id_len - 4))
+ 			goto trunc;
+@@ -2303,7 +2311,7 @@ ikev2_auth_print(netdissect_options *ndo, u_char tpay,
+ 	const u_char *authdata = (const u_char*)ext + sizeof(a);
+ 	unsigned int len;
+ 
+-	ND_TCHECK(*ext);
++	ND_TCHECK2(*ext, sizeof(a));
+ 	UNALIGNED_MEMCPY(&a, ext, sizeof(a));
+ 	ikev2_pay_print(ndo, NPSTR(tpay), a.h.critical);
+ 	len = ntohs(a.h.len);
+@@ -2599,6 +2607,7 @@ ikev2_vid_print(netdissect_options *ndo, u_char tpay,
+ 		else ND_PRINT((ndo, "."));
+ 	}
+ 	if (2 < ndo->ndo_vflag && 4 < len) {
++		/* Print the entire payload in hex */
+ 		ND_PRINT((ndo," "));
+ 		if (!rawprint(ndo, (const uint8_t *)(ext + 1), ntohs(e.len) - 4))
+ 			goto trunc;
+@@ -2764,7 +2773,6 @@ ikev1_sub_print(netdissect_options *ndo,
+ 
+ 	while (np) {
+ 		ND_TCHECK(*ext);
+-
+ 		UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 
+ 		ND_TCHECK2(*ext, ntohs(e.len));
+@@ -2932,7 +2940,6 @@ ikev2_sub_print(netdissect_options *ndo,
+ 	cp = (const u_char *)ext;
+ 	while (np) {
+ 		ND_TCHECK(*ext);
+-
+ 		UNALIGNED_MEMCPY(&e, ext, sizeof(e));
+ 
+ 		ND_TCHECK2(*ext, ntohs(e.len));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 0e7097210..bd6073d71 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -578,6 +578,7 @@ isis-extd-isreach-oobr	isis-extd-isreach-oobr.pcap	isis-extd-isreach-oobr.out -v
+ olsr-oobr-1		olsr-oobr-1.pcap		olsr-oobr-1.out	-v
+ olsr-oobr-2		olsr-oobr-2.pcap		olsr-oobr-2.out	-v
+ ikev1_id_ipv6_addr_subnet-oobr	ikev1_id_ipv6_addr_subnet-oobr.pcap	ikev1_id_ipv6_addr_subnet-oobr.out	-v
++isakmp-various-oobr	isakmp-various-oobr.pcap	isakmp-various-oobr.out	-v
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/isakmp-various-oobr.out b/tests/isakmp-various-oobr.out
+new file mode 100644
+index 000000000..cf1b1e046
+--- /dev/null
++++ b/tests/isakmp-various-oobr.out
+@@ -0,0 +1,5 @@
++IP (tos 0xfb,CE, ttl 17, id 21263, offset 0, flags [+, DF, rsvd], proto UDP (17), length 296, bad cksum 1ff (->f67d)!)
++    16.0.128.20.500 > 12.251.225.45.49152: isakmp 1.0 msgid 10101010: phase 2/others ? #16[]:
++    ( [|v2ke]) (len mismatch: isakmp 2130706432/ip 268)
++IP (tos 0x12,ECT(0), ttl 17, id 21263, offset 4096, flags [DF, rsvd], proto UDP (17), length 296, bad cksum 1ff (->939f)!)
++    0.0.0.5 > 0.0.0.0: ip-proto-17
+diff --git a/tests/isakmp-various-oobr.pcap b/tests/isakmp-various-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b81d3f5d372f1c34439b23c5cdfcfc1e296e9b46
+GIT binary patch
+literal 206
+zcmca|c+)~A1{MZR2?j9m29k_G99SUED#p&h0OFf5Fo-ko{AM`8$Z+()g4J_57+ild
+zY6SB?U=S2!{4c=JAj0$ep)TW>0}S=w7(f62Uk}$&&nO_EBme>R5R+LMc((yr4LFS!
+w0vUY>Y&1|ED-Z*L02{j%gM(Geqy-CD7?vzpumC9bQ9Z>*7)ZmE6f)EU0GZ+}%K!iX
+
+literal 0
+HcmV?d00001
+

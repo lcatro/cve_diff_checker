@@ -1,0 +1,55 @@
+From beecf80a6deecbaf5d264d4f864451bde4fe98b8 Mon Sep 17 00:00:00 2001
+From: Werner Lemberg <wl@gnu.org>
+Date: Fri, 16 Dec 2016 08:52:03 +0100
+Subject: [cff] Fix heap buffer overflow (#49858).
+
+* src/cff/cffparse.c (cff_parser_run): Add one more stack size
+check.
+---
+ ChangeLog          |  7 +++++++
+ src/cff/cffparse.c | 10 +++++++---
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 77899d438..1243bd4bb 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,10 @@
++2016-12-16  Werner Lemberg  <wl@gnu.org>
++
++	[cff] Fix heap buffer overflow (#49858).
++
++	* src/cff/cffparse.c (cff_parser_run): Add one more stack size
++	check.
++
+ 2016-12-15  Werner Lemberg  <wl@gnu.org>
+ 
+ 	Fix clang warnings.
+diff --git a/src/cff/cffparse.c b/src/cff/cffparse.c
+index 022c28951..9b5ad72ca 100644
+--- a/src/cff/cffparse.c
++++ b/src/cff/cffparse.c
+@@ -1422,13 +1422,17 @@
+         /* and look for it in our current list.                            */
+ 
+         FT_UInt                   code;
+-        FT_UInt                   num_args = (FT_UInt)
+-                                             ( parser->top - parser->stack );
++        FT_UInt                   num_args;
+         const CFF_Field_Handler*  field;
+ 
+ 
++        if ( (FT_UInt)( parser->top - parser->stack ) >= parser->stackSize )
++          goto Stack_Overflow;
++
++        num_args     = (FT_UInt)( parser->top - parser->stack );
+         *parser->top = p;
+-        code = v;
++        code         = v;
++
+         if ( v == 12 )
+         {
+           /* two byte operator */
+-- 
+cgit v1.2.1
+

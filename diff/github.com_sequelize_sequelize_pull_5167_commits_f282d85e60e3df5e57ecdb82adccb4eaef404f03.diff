@@ -1,0 +1,212 @@
+From f282d85e60e3df5e57ecdb82adccb4eaef404f03 Mon Sep 17 00:00:00 2001
+From: Mick Hansen <mick.kasper.hansen@gmail.com>
+Date: Wed, 6 Jan 2016 17:48:11 +0100
+Subject: [PATCH] critical(sql): escape limit and order by arguments to counter
+ possible injection attack
+
+---
+ changelog.md                             |  5 ++
+ lib/dialects/abstract/query-generator.js |  6 +-
+ lib/dialects/mssql/query-generator.js    |  4 +-
+ lib/dialects/postgres/query-generator.js |  4 +-
+ lib/dialects/sqlite/query-generator.js   | 15 -----
+ test/unit/sql/offset-limit.test.js       | 76 ++++++++++++++++++++++++
+ test/unit/sql/select.test.js             |  9 ++-
+ 7 files changed, 95 insertions(+), 24 deletions(-)
+ create mode 100644 test/unit/sql/offset-limit.test.js
+
+diff --git a/changelog.md b/changelog.md
+index c17f47b907..8bb0418921 100644
+--- a/changelog.md
++++ b/changelog.md
+@@ -1,3 +1,8 @@
++# Future
++- [CRITICAL] Fixed injection vulnerability for order/limit
++- [FIXED] MySQL throws error when null GEOMETRY data results in empty buffer [#4953](https://github.com/sequelize/sequelize/issues/4953)
++- [ADDED] Support for benchmarking the execution time for SQL queries [#488](https://github.com/sequelize/sequelize/issues/488)
++
+ # 3.13.0
+ - [FIXED] timestamp columns are no longer undefined for associations loaded with `separate`. [#4740](https://github.com/sequelize/sequelize/issues/4740)
+ - [FIXED] Mark unscoped model as `.scoped`, to prevent injection of default scope on includes [#4663](https://github.com/sequelize/sequelize/issues/4663)
+diff --git a/lib/dialects/abstract/query-generator.js b/lib/dialects/abstract/query-generator.js
+index 5936d3bb04..fc39077fd6 100644
+--- a/lib/dialects/abstract/query-generator.js
++++ b/lib/dialects/abstract/query-generator.js
+@@ -1742,12 +1742,12 @@ var QueryGenerator = {
+   addLimitAndOffset: function(options, model) {
+     var fragment = '';
+     if (options.offset && !options.limit) {
+-      fragment += ' LIMIT ' + options.offset + ', ' + 18440000000000000000;
++      fragment += ' LIMIT ' + this.escape(options.offset) + ', ' + 18440000000000000000;
+     } else if (options.limit) {
+       if (options.offset) {
+-        fragment += ' LIMIT ' + options.offset + ', ' + options.limit;
++        fragment += ' LIMIT ' + this.escape(options.offset) + ', ' + this.escape(options.limit);
+       } else {
+-        fragment += ' LIMIT ' + options.limit;
++        fragment += ' LIMIT ' + this.escape(options.limit);
+       }
+     }
+ 
+diff --git a/lib/dialects/mssql/query-generator.js b/lib/dialects/mssql/query-generator.js
+index 808cfa0a79..91bd835bf5 100644
+--- a/lib/dialects/mssql/query-generator.js
++++ b/lib/dialects/mssql/query-generator.js
+@@ -590,11 +590,11 @@ var QueryGenerator = {
+       }
+ 
+       if (options.offset || options.limit) {
+-        fragment += ' OFFSET ' + offset + ' ROWS';
++        fragment += ' OFFSET ' + this.escape(offset) + ' ROWS';
+       }
+ 
+       if (options.limit) {
+-        fragment += ' FETCH NEXT ' + options.limit + ' ROWS ONLY';
++        fragment += ' FETCH NEXT ' + this.escape(options.limit) + ' ROWS ONLY';
+       }
+     }
+ 
+diff --git a/lib/dialects/postgres/query-generator.js b/lib/dialects/postgres/query-generator.js
+index 4c7825eb21..efdea4a34e 100644
+--- a/lib/dialects/postgres/query-generator.js
++++ b/lib/dialects/postgres/query-generator.js
+@@ -422,8 +422,8 @@ var QueryGenerator = {
+ 
+   addLimitAndOffset: function(options) {
+     var fragment = '';
+-    if (options.limit) fragment += ' LIMIT ' + options.limit;
+-    if (options.offset) fragment += ' OFFSET ' + options.offset;
++    if (options.limit) fragment += ' LIMIT ' + this.escape(options.limit);
++    if (options.offset) fragment += ' OFFSET ' + this.escape(options.offset);
+ 
+     return fragment;
+   },
+diff --git a/lib/dialects/sqlite/query-generator.js b/lib/dialects/sqlite/query-generator.js
+index a984e4b7b4..5875436284 100644
+--- a/lib/dialects/sqlite/query-generator.js
++++ b/lib/dialects/sqlite/query-generator.js
+@@ -89,21 +89,6 @@ var QueryGenerator = {
+     return !!value ? 1 : 0;
+   },
+ 
+-  addLimitAndOffset: function(options){
+-    var fragment = '';
+-    if (options.offset && !options.limit) {
+-      fragment += ' LIMIT ' + options.offset + ', ' + 10000000000000;
+-    } else if (options.limit) {
+-      if (options.offset) {
+-        fragment += ' LIMIT ' + options.offset + ', ' + options.limit;
+-      } else {
+-        fragment += ' LIMIT ' + options.limit;
+-      }
+-    }
+-
+-    return fragment;
+-  },
+-
+   addColumnQuery: function(table, key, dataType) {
+     var query = 'ALTER TABLE <%= table %> ADD <%= attribute %>;'
+       , attributes = {};
+diff --git a/test/unit/sql/offset-limit.test.js b/test/unit/sql/offset-limit.test.js
+new file mode 100644
+index 0000000000..45f644bcdc
+--- /dev/null
++++ b/test/unit/sql/offset-limit.test.js
+@@ -0,0 +1,76 @@
++'use strict';
++
++/* jshint -W110 */
++var Support   = require(__dirname + '/../support')
++  , DataTypes = require(__dirname + '/../../../lib/data-types')
++  , Model = require(__dirname + '/../../../lib/model')
++  , util = require('util')
++  , expectsql = Support.expectsql
++  , current   = Support.sequelize
++  , sql       = current.dialect.QueryGenerator;
++
++// Notice: [] will be replaced by dialect specific tick/quote character when there is not dialect specific expectation but only a default expectation
++
++suite(Support.getTestDialectTeaser('SQL'), function() {
++  suite('offset/limit', function () {
++    var testsql = function (options, expectation) {
++      var model = options.model;
++
++      test(util.inspect(options, {depth: 2}), function () {
++        return expectsql(
++          sql.addLimitAndOffset(
++            options,
++            model
++          ),
++          expectation
++        );
++      });
++    };
++
++    testsql({
++      limit: 10,
++      order: [
++        ['email', 'DESC'] // for MSSQL
++      ]
++    }, {
++      default: ' LIMIT 10',
++      mssql: ' OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY'
++    });
++
++    testsql({
++      limit: 10,
++      offset: 20,
++      order: [
++        ['email', 'DESC'] // for MSSQL
++      ]
++    }, {
++      default: ' LIMIT 20, 10',
++      postgres: ' LIMIT 10 OFFSET 20',
++      mssql: ' OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY'
++    });
++
++    testsql({
++      limit: "';DELETE FROM user",
++      order: [
++        ['email', 'DESC'] // for MSSQL
++      ]
++    }, {
++      default: " LIMIT ''';DELETE FROM user'",
++      mysql: " LIMIT '\\';DELETE FROM user'",
++      mssql: " OFFSET 0 ROWS FETCH NEXT N''';DELETE FROM user' ROWS ONLY"
++    });
++
++    testsql({
++      limit: 10,
++      offset: "';DELETE FROM user",
++      order: [
++        ['email', 'DESC'] // for MSSQL
++      ]
++    }, {
++      sqlite: " LIMIT ''';DELETE FROM user', 10",
++      postgres: " LIMIT 10 OFFSET ''';DELETE FROM user'",
++      mysql: " LIMIT '\\';DELETE FROM user', 10",
++      mssql: " OFFSET N''';DELETE FROM user' ROWS FETCH NEXT 10 ROWS ONLY"
++    });
++  });
++});
+diff --git a/test/unit/sql/select.test.js b/test/unit/sql/select.test.js
+index 30601491d0..1584bd0298 100644
+--- a/test/unit/sql/select.test.js
++++ b/test/unit/sql/select.test.js
+@@ -36,9 +36,14 @@ suite(Support.getTestDialectTeaser('SQL'), function() {
+       ],
+       where: {
+         email: 'jon.snow@gmail.com'
+-      }
++      },
++      order: [
++        ['email', 'DESC']
++      ],
++      limit: 10
+     }, {
+-      default: "SELECT [email], [first_name] AS [firstName] FROM [User] WHERE [User].[email] = 'jon.snow@gmail.com';"
++      default: "SELECT [email], [first_name] AS [firstName] FROM [User] WHERE [User].[email] = 'jon.snow@gmail.com' ORDER BY [email] DESC LIMIT 10;",
++      mssql: "SELECT [email], [first_name] AS [firstName] FROM [User] WHERE [User].[email] = N'jon.snow@gmail.com' ORDER BY [email] DESC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;"
+     });
+ 
+     testsql({

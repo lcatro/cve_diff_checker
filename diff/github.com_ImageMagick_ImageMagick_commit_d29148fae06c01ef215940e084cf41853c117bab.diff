@@ -1,0 +1,41 @@
+From d29148fae06c01ef215940e084cf41853c117bab Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Tue, 18 Jun 2019 14:13:42 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/1603
+
+---
+ MagickCore/composite.c | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/MagickCore/composite.c b/MagickCore/composite.c
+index 78d6dff921..99e91d1470 100644
+--- a/MagickCore/composite.c
++++ b/MagickCore/composite.c
+@@ -654,18 +654,19 @@ MagickExport MagickBooleanType CompositeImage(Image *image,
+               q+=GetPixelChannels(image);
+               continue;
+             }
+-          for (i=0; i < (ssize_t) GetPixelChannels(image); i++)
++          for (i=0; i < (ssize_t) GetPixelChannels(source_image); i++)
+           {
+-            PixelChannel channel = GetPixelChannelChannel(image,i);
+-            PixelTrait traits = GetPixelChannelTraits(image,channel);
+-            PixelTrait source_traits=GetPixelChannelTraits(source_image,
++            PixelChannel channel = GetPixelChannelChannel(source_image,i);
++            PixelTrait source_traits = GetPixelChannelTraits(source_image,
+               channel);
+-            if (traits == UndefinedPixelTrait)
++            PixelTrait traits = GetPixelChannelTraits(image,channel);
++            if (source_traits == UndefinedPixelTrait)
+               continue;
+-            if (source_traits != UndefinedPixelTrait)
++            if (traits != UndefinedPixelTrait)
+               SetPixelChannel(image,channel,p[i],q);
+-            else if (channel == AlphaPixelChannel)
+-              SetPixelChannel(image,channel,OpaqueAlpha,q);
++            else
++              if (channel == AlphaPixelChannel)
++                SetPixelChannel(image,channel,OpaqueAlpha,q);
+           }
+           p+=GetPixelChannels(source_image);
+           q+=GetPixelChannels(image);

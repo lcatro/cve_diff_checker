@@ -1,0 +1,26 @@
+From 506e9d6c2d4baaf580d489fff0690c0ff2ff588f Mon Sep 17 00:00:00 2001
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 11 Jan 2016 13:34:17 +0100
+Subject: [PATCH] virDomainGetTime: Deny on RO connections
+
+We have a policy that if API may end up talking to a guest agent
+it should require RW connection. We don't obey the rule in
+virDomainGetTime().
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/libvirt-domain.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index 02fc4df45d1..94918457585 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -10934,6 +10934,7 @@ virDomainGetTime(virDomainPtr dom,
+     virResetLastError();
+ 
+     virCheckDomainReturn(dom, -1);
++    virCheckReadOnlyGoto(dom->conn->flags, error);
+ 
+     if (dom->conn->driver->domainGetTime) {
+         int ret = dom->conn->driver->domainGetTime(dom, seconds,

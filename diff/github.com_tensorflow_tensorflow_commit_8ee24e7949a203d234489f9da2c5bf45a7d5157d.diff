@@ -1,0 +1,28 @@
+From 8ee24e7949a203d234489f9da2c5bf45a7d5157d Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 18 Sep 2020 14:19:26 -0700
+Subject: [PATCH] [tflite] Ensure `MatchingDim` does not allow buffer overflow.
+
+We check in `MatchingDim` that both arguments have the same dimensionality, however that is a `DCHECK` only enabled if building in debug mode. Hence, it could be possible to cause buffer overflows by passing in a tensor with larger dimensions as the second argument. To fix, we now make `MatchingDim` return the minimum of the two sizes.
+
+A much better fix would be to return a status object but that requires refactoring a large part of the codebase for minor benefits.
+
+PiperOrigin-RevId: 332526127
+Change-Id: If627d0d2c80a685217b6e0d1e64b0872dbf1c5e4
+---
+ tensorflow/lite/kernels/internal/types.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tensorflow/lite/kernels/internal/types.h b/tensorflow/lite/kernels/internal/types.h
+index 9db742ddf0376..b077686dc1570 100644
+--- a/tensorflow/lite/kernels/internal/types.h
++++ b/tensorflow/lite/kernels/internal/types.h
+@@ -438,7 +438,7 @@ int MatchingArraySize(const ArrayType1& array1, int index1,
+ inline int MatchingDim(const RuntimeShape& shape1, int index1,
+                        const RuntimeShape& shape2, int index2) {
+   TFLITE_DCHECK_EQ(shape1.Dims(index1), shape2.Dims(index2));
+-  return shape1.Dims(index1);
++  return std::min(shape1.Dims(index1), shape2.Dims(index2));
+ }
+ 
+ template <typename... Args>

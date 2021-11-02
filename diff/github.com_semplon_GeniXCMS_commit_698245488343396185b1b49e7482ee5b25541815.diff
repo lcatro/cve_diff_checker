@@ -1,0 +1,2888 @@
+From 698245488343396185b1b49e7482ee5b25541815 Mon Sep 17 00:00:00 2001
+From: Puguh Wijayanto <hangbowl@gmail.com>
+Date: Tue, 10 Mar 2015 08:54:35 +0700
+Subject: [PATCH] Security FIX, Bug FIX
+
+---
+ gxadmin/inc/categories.php                    |  42 ++-
+ gxadmin/inc/menus.php                         |  35 ++-
+ gxadmin/inc/menus_form.php                    |  30 +++
+ gxadmin/inc/menus_form_edit.php               |  38 ++-
+ gxadmin/inc/pages.php                         | 176 +++++++------
+ gxadmin/inc/pages_form.php                    |  46 +++-
+ gxadmin/inc/posts.php                         |  13 +-
+ gxadmin/inc/posts_form.php                    | 100 +++----
+ gxadmin/inc/settings.php                      |  46 +++-
+ gxadmin/inc/user.php                          |   9 +-
+ gxadmin/inc/user_form.php                     |  51 ++--
+ inc/lib/Categories.class.php                  |   5 +-
+ inc/lib/Control.class.php                     |   4 +-
+ .../Control/Backend/categories.control.php    |  55 +++-
+ inc/lib/Control/Backend/menus.control.php     | 245 +++++++++++-------
+ inc/lib/Control/Backend/pages.control.php     | 128 ++++++---
+ inc/lib/Control/Backend/posts.control.php     | 137 +++++++---
+ inc/lib/Control/Backend/settings.control.php  |  78 +++---
+ inc/lib/Control/Backend/users.control.php     |  26 +-
+ inc/lib/Control/Error/db.control.php          |   8 +
+ inc/lib/Control/Error/unknown.control.php     |  10 +
+ inc/lib/Control/Frontend/cat.control.php      |   5 +-
+ inc/lib/Control/Frontend/default.control.php  |   3 +-
+ inc/lib/Control/Frontend/page.control.php     |  11 +-
+ inc/lib/Control/Frontend/post.control.php     |   9 +-
+ inc/lib/Control/Install/default.control.php   |   1 +
+ inc/lib/Db.class.php                          |  21 +-
+ inc/lib/GxMain.class.php                      |   2 +
+ inc/lib/Install.class.php                     |  16 +-
+ inc/lib/Mail.class.php                        |   2 +-
+ inc/lib/Menus.class.php                       |  98 ++++---
+ inc/lib/Options.class.php                     |  21 +-
+ inc/lib/Posts.class.php                       |   4 +-
+ inc/lib/Rss.class.php                         |   6 +-
+ inc/lib/Site.class.php                        |  44 ++--
+ inc/lib/System.class.php                      |  27 +-
+ inc/lib/Token.class.php                       | 119 +++++++++
+ inc/lib/Upload.class.php                      |   2 +-
+ inc/lib/Url.class.php                         |  20 +-
+ 39 files changed, 1165 insertions(+), 528 deletions(-)
+ create mode 100644 inc/lib/Control/Error/db.control.php
+ create mode 100644 inc/lib/Control/Error/unknown.control.php
+ create mode 100644 inc/lib/Token.class.php
+
+diff --git a/gxadmin/inc/categories.php b/gxadmin/inc/categories.php
+index 4f12fd0b..b520411b 100644
+--- a/gxadmin/inc/categories.php
++++ b/gxadmin/inc/categories.php
+@@ -12,7 +12,35 @@
+ * @copyright 2014-2015 Puguh Wijayanto
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+-*/?>
++*/
++
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertgreen'] as $alert) {
++        # code...
++        echo "$alert\n";
++    }
++    echo "</div>";
++}
++if (isset($data['alertred'])) {
++    # code...
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "$alert\n";
++    }
++    echo "</div>";
++}
++?>
+ <div class="row">
+     <div class="col-md-12">
+         <h1><i class="fa fa-cubes"></i>  Categories 
+@@ -34,12 +62,12 @@
+                         // echo "<td>".$c->parent."</td>";
+                         // echo "<td></td>";
+ 
+-                        if($c->parent == ""){
++                        if($c->parent == "" || $c->parent == 0){
+                             echo "<div class=\"col-md-4 item\" >
+                             <div class=\"panel panel-default\">
+                                 <div class=\"panel-heading\">
+                                   <h3 class=\"panel-title\">{$c->name} 
+-                                  <a href=\"?page=categories&act=del&id={$c->id}\" class=\"pull-right\"
++                                  <a href=\"?page=categories&act=del&id={$c->id}&token=".TOKEN."\" class=\"pull-right\"
+                                   onclick=\"return confirm('Are you sure you want to delete this item?');\">
+                                   <span class=\"glyphicon glyphicon-remove\"></span></a></h3>
+                                 </div>
+@@ -48,13 +76,14 @@
+                                 foreach ($data['cat'] as $c2) {
+                                     if($c2->parent == $c->id){
+                                         echo "<li class=\"list-group-item\">
+-                                        <form action=\"\" method=\"POST\" name=\"updatecat\">
++                                        <form action=\"index.php?page=categories\" method=\"POST\" name=\"updatecat\">
+                                         <div class=\"input-group\">
+-                                            <a href=\"?page=categories&act=del&id={$c2->id}\" class=\"input-group-addon\"
++                                            <a href=\"?page=categories&act=del&id={$c2->id}&token=".TOKEN."\" class=\"input-group-addon\"
+                                             onclick=\"return confirm('Are you sure you want to delete this item?');\"
+                                             ><span class=\"glyphicon glyphicon-remove\"></span></a>
+                                             <input type=\"text\" name=\"cat\" class=\"form-control\" value=\"{$c2->name}\">
+                                             <input type=\"hidden\" name=\"id\" value=\"{$c2->id}\">
++                                            <input type=\"hidden\" name=\"token\" value=\"".TOKEN."\">
+                                             <span class=\"input-group-btn\">
+                                                 <button class=\"btn btn-default\" type=\"submit\" name=\"updatecat\">Go!</button>
+                                             </span>
+@@ -92,7 +121,7 @@
+                     <label>Parent</label>
+                     <?php
+                         $vars = array(
+-                                    'parent' => '',
++                                    'parent' => '0',
+                                     'name' => 'parent',
+                                     'sort' => 'ASC',
+                                     'order_by' => 'name'
+@@ -107,6 +136,7 @@
+             
+           </div>
+           <div class="modal-footer">
++            <input type="hidden" name="token" value="<?=TOKEN;?>">
+             <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+             <button type="submit" class="btn btn-success" name="addcat">Save changes</button>
+           </div>
+diff --git a/gxadmin/inc/menus.php b/gxadmin/inc/menus.php
+index 0339104e..e79aac03 100644
+--- a/gxadmin/inc/menus.php
++++ b/gxadmin/inc/menus.php
+@@ -12,7 +12,37 @@
+ * @copyright 2014-2015 Puguh Wijayanto
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+-*/?>
++*/
++
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertgreen'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}elseif (isset($data['alertred'])) {
++    # code...
++    //print_r($data['alertred']);
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}
++?>
+ <div class="row">
+     <div class="col-md-12">
+ 
+@@ -84,7 +114,7 @@
+                                           </div>
+                                           <div class=\"tab-pane\" id=\"{$k}additem\">
+                                           ";
+-                                              $data['parent'] = Menus::getParent('', $k);
++                                              $data['parent'] = Menus::isHadParent('', $k);
+                                               //print_r($data['parent']);
+                                               $data['menuid'] = $k;
+                                               System::inc('menus_form', $data);
+@@ -146,6 +176,7 @@
+ 
+           </div>
+           <div class="modal-footer">
++            <input type="hidden" name="token" value="<?=TOKEN;?>">
+             <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+             <button type="submit" class="btn btn-success" name="submit">Save changes</button>
+           </div>
+diff --git a/gxadmin/inc/menus_form.php b/gxadmin/inc/menus_form.php
+index 970a1dc8..d2db913e 100644
+--- a/gxadmin/inc/menus_form.php
++++ b/gxadmin/inc/menus_form.php
+@@ -19,6 +19,35 @@
+     }else{
+         $menuid = $data['menuid'];
+     }
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertgreen'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}elseif (isset($data['alertred'])) {
++    # code...
++    //print_r($data['alertred']);
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}
++
+ ?>
+ <form action="" method="POST">
+ <h1><i class="fa fa-sitemap"></i> Add Menu
+@@ -142,4 +171,5 @@
+         </div>
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=TOKEN;?>">
+ </form>
+\ No newline at end of file
+diff --git a/gxadmin/inc/menus_form_edit.php b/gxadmin/inc/menus_form_edit.php
+index 8c4ddcb6..d2a6716b 100644
+--- a/gxadmin/inc/menus_form_edit.php
++++ b/gxadmin/inc/menus_form_edit.php
+@@ -21,12 +21,34 @@
+     }
+ 
+     //print_r($data['menus']);
+-    if(isset($data['alertgreen']) ) {
+-        echo "<div class=\"alert alert-success\">";
+-            foreach ($data['alertgreen'] as $alert) {
+-                echo "$alert"; 
+-            }
+-        echo "</div>"; }
++    if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertgreen'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}elseif (isset($data['alertred'])) {
++    # code...
++    //print_r($data['alertred']);
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}
+ ?>
+ <form action="" method="POST">
+ <div class="row">
+@@ -48,11 +70,12 @@
+     <div class="col-sm-4">
+         <div class="form-group">
+             <label>Parent Menu</label>
++            
+             <select class="form-control" name="parent">
+                 <option></option>
+             <?php
+                //echo($data['abc']);
+-                //print_r($data['parent']);
++                //print_r($data['menus']);
+                 foreach ($data['parent'] as $p) {
+                     # code...
+                     if($data['menus'][0]->parent == $p->id){
+@@ -183,5 +206,6 @@
+         </div>
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=$_GET['token'];?>">
+ </form>
+ </div>
+\ No newline at end of file
+diff --git a/gxadmin/inc/pages.php b/gxadmin/inc/pages.php
+index 36fde2a7..82319cb0 100644
+--- a/gxadmin/inc/pages.php
++++ b/gxadmin/inc/pages.php
+@@ -13,32 +13,32 @@
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+ */
+-    if (isset($data['alertgreen'])) {
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertgreen'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-success\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>";
+-        foreach ($data['alertgreen'] as $alert) {
+-            # code...
+-            echo "$alert\n";
+-        }
+-        echo "</div>";
++        echo "$alert\n";
+     }
+-    if (isset($data['alertred'])) {
++    echo "</div>";
++}
++if (isset($data['alertred'])) {
++    # code...
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertred'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-danger\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>";
+-        foreach ($data['alertred'] as $alert) {
+-            # code...
+-            echo "$alert\n";
+-        }
+-        echo "</div>";
++        echo "$alert\n";
+     }
++    echo "</div>";
++}
+ ?>
+ <div class="row">
+     <div class="col-md-12">
+@@ -46,68 +46,80 @@
+         <hr />
+     </div>
+     <div class="col-md-12">
+-        <div class="table-responsive">
+-            <table class="table table-hover">
+-                <thead>
+-                    <tr>
+-                        <th>ID</th>
+-                        <th>Title</th>
+-                        <th>Date</th>
+-                        <th>Edit/Delete</th>
+-                        <th>All <input type="checkbox" id="selectall"></th>
+-                    </tr>
+-                </thead>
+-                <tbody>
+-                    <?php
+-                        //print_r($data);
+-                    if($data['num'] > 0){
+-                        foreach ($data['posts'] as $p) {
+-                            # code...
+-                            //echo $p->id;
++        <form action="" method="post">
++            <div class="table-responsive">
++                <table class="table table-hover">
++                    <thead>
++                        <tr>
++                            <th>ID</th>
++                            <th>Title</th>
++                            <th>Date</th>
++                            <th>Status</th>
++                            <th>Edit/Delete</th>
++                            <th>All <input type="checkbox" id="selectall"></th>
++                        </tr>
++                    </thead>
++                    <tbody>
++                        <?php
++                            //print_r($data);
++                        if($data['num'] > 0){
++                            foreach ($data['posts'] as $p) {
++                                # code...
++                                //echo $p->id;
++                                if($p->status == '0'){
++                                    $status = "UnPublished";
++                                }else{
++                                    $status = "Published";
++                                }
++                                echo "
++                                <tr>
++                                    <td>{$p->id}</td>
++                                    <td><a href=\"".Url::page($p->id)."\" target=\"_new\">{$p->title}</a></td>
++                                    <td>{$p->date}</td>
++                                    <td>{$status}</td>
++                                    <td>
++                                        <a href=\"index.php?page=pages&act=edit&id={$p->id}&token=".TOKEN."\" class=\"label label-success\">Edit</a> 
++                                        <a href=\"index.php?page=pages&act=del&id={$p->id}&token=".TOKEN."\" class=\"label label-danger\" 
++                                        onclick=\"return confirm('Are you sure you want to delete this item?');\">Delete</a>
++                                    </td>
++                                        <td>
++                                        <input type=\"checkbox\" name=\"post_id[]\" value=\"{$p->id}\" id=\"select\">
++                                    </td>
++                                </tr>
++                                ";
++                            }
++                        }else{
+                             echo "
+-                            <tr>
+-                                <td>{$p->id}</td>
+-                                <td><a href=\"".Url::page($p->id)."\" target=\"_new\">{$p->title}</a></td>
+-                                <td>{$p->date}</td>
+-                                <td>
+-                                    <a href=\"index.php?page=pages&act=edit&id={$p->id}\" class=\"label label-success\">Edit</a> 
+-                                    <a href=\"index.php?page=pages&act=del&id={$p->id}\" class=\"label label-danger\" 
+-                                    onclick=\"return confirm('Are you sure you want to delete this item?');\">Delete</a>
+-                                </td>
++                                <tr>
+                                     <td>
+-                                    <input type=\"checkbox\" name=\"post_id[]\" value=\"{$p->id}\" id=\"select\">
+-                                </td>
+-                            </tr>
+-                            ";
++                                        No Pages Found 
++                                    </td>
++                                </tr>";
+                         }
+-                    }else{
+-                        echo "
+-                            <tr>
+-                                <td>
+-                                    No Pages Found 
+-                                </td>
+-                            </tr>";
+-                    }
+-                    ?>
+-                </tbody>
+-                <tfoot>
+-                    <th>ID</th>
+-                    <th>Title</th>
+-                    <th>Date</th>
+-                    <th>
+-                    <select name="action" class="form-control">
+-                        <option value="publish">Publish</option>
+-                        <option value="unpublish">UnPublish</option>
+-                        <option value="delete">Delete</option>
+-                    </select>
+-                    </th>
+-                    <th>
+-                        <button type="submit" name="doaction" class="btn btn-danger">
+-                            Submit
+-                        </button>
+-                    </th>
+-                </tfoot>
+-            </table>
+-        </div>
++                        ?>
++                    </tbody>
++                    <tfoot>
++                        <th>ID</th>
++                        <th>Title</th>
++                        <th>Date</th>
++                        <th>Status</th>
++                        <th>
++                        <select name="action" class="form-control">
++                            <option value="publish">Publish</option>
++                            <option value="unpublish">UnPublish</option>
++                            <option value="delete">Delete</option>
++                        </select>
++                        <input type="hidden" name="token" value="<?=TOKEN;?>">
++                        </th>
++                        <th>
++                            <button type="submit" name="doaction" class="btn btn-danger">
++                                Submit
++                            </button>
++                        </th>
++                    </tfoot>
++                </table>
++            </div>
++        </form>
++        
+     </div>
+ </div>
+\ No newline at end of file
+diff --git a/gxadmin/inc/pages_form.php b/gxadmin/inc/pages_form.php
+index 75b649b6..c07949f7 100644
+--- a/gxadmin/inc/pages_form.php
++++ b/gxadmin/inc/pages_form.php
+@@ -13,20 +13,39 @@
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+ */
+-    if (isset($data['alertgreen'])) {
++
++isset($_GET['token'])? $token = $_GET['token']: $token = TOKEN;
++($_GET['act'] == "edit")? $pagetitle = "Edit": $pagetitle = "New";
++($_GET['act'] == "edit")? $act = "edit&id={$_GET['id']}&token={$_GET['token']}": $act = "add";
++
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    ";
++    foreach ($data['alertgreen'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-success\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>
+-        ";
+-        foreach ($data['alertgreen'] as $alert) {
+-            # code...
+-            echo "$alert\n";
+-        }
+-        echo "</div>";
++        echo "$alert\n";
++    }
++    echo "</div>";
++}
++
++if (isset($data['alertred'])) {
++    # code...
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "$alert\n";
+     }
++    echo "</div>";
++}
+ 
+     if(isset($data['post'])) {
+         foreach ($data['post'] as $p) {
+@@ -54,7 +73,7 @@
+         $unpub = "";
+     }
+ ?>
+-<form action="" method="post" role="form" class="">
++<form action="index.php?page=pages&act=<?=$act?>" method="post" role="form" class="">
+ <div class="row">
+     <div class="col-md-12">
+         <h1><i class="fa fa-file-o"></i> New Page 
+@@ -114,5 +133,6 @@
+         
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=$token;?>">
+ </form>
+ 
+diff --git a/gxadmin/inc/posts.php b/gxadmin/inc/posts.php
+index 51287dc6..a3d29e02 100644
+--- a/gxadmin/inc/posts.php
++++ b/gxadmin/inc/posts.php
+@@ -55,6 +55,7 @@
+                 <th>Title</th>
+                 <th>Category</th>
+                 <th>Date</th>
++                <th>Status</th>
+                 <th>Edit/Delete</th>
+                 <th>All <input type="checkbox" id="selectall"></th>
+             </tr>
+@@ -66,15 +67,21 @@
+                     foreach ($data['posts'] as $p) {
+                         # code...
+                         //echo $p->id;
++                        if($p->status == '0'){
++                            $status = "UnPublished";
++                        }else{
++                            $status = "Published";
++                        }
+                         echo "
+                         <tr>
+                             <td>{$p->id}</td>
+                             <td><a href=\"".Url::post($p->id)."\" target=\"_new\">{$p->title}</a></td>
+                             <td>".Categories::name($p->cat)."</td>
+                             <td>{$p->date}</td>
++                            <td>{$status}</td>
+                             <td>
+-                                <a href=\"index.php?page=posts&act=edit&id={$p->id}\" class=\"label label-success\">Edit</a> 
+-                                <a href=\"index.php?page=posts&act=del&id={$p->id}\" class=\"label label-danger\" 
++                                <a href=\"index.php?page=posts&act=edit&id={$p->id}&token=".TOKEN."\" class=\"label label-success\">Edit</a> 
++                                <a href=\"index.php?page=posts&act=del&id={$p->id}&token=".TOKEN."\" class=\"label label-danger\" 
+                                 onclick=\"return confirm('Are you sure you want to delete this item?');\">Delete</a>
+                             </td>
+                             <td>
+@@ -98,12 +105,14 @@
+             <th>Title</th>
+             <th>Category</th>
+             <th>Date</th>
++            <th>Status</th>
+             <th>
+             <select name="action" class="form-control">
+                 <option value="publish">Publish</option>
+                 <option value="unpublish">UnPublish</option>
+                 <option value="delete">Delete</option>
+             </select>
++            <input type="hidden" name="token" value="<?=TOKEN;?>">
+             </th>
+             <th>
+                 <button type="submit" name="doaction" class="btn btn-danger">
+diff --git a/gxadmin/inc/posts_form.php b/gxadmin/inc/posts_form.php
+index b8a7e31a..c02f862a 100644
+--- a/gxadmin/inc/posts_form.php
++++ b/gxadmin/inc/posts_form.php
+@@ -13,63 +13,66 @@
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+ */
+-    if (isset($data['alertgreen'])) {
++isset($_GET['token'])? $token = $_GET['token']: $token = TOKEN;
++($_GET['act'] == "edit")? $pagetitle = "Edit": $pagetitle = "New";
++($_GET['act'] == "edit")? $act = "edit&id={$_GET['id']}&token={$_GET['token']}": $act = "add";
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertgreen'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-success\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>";
+-        foreach ($data['alertgreen'] as $alert) {
+-            # code...
+-            echo "$alert\n";
+-        }
+-        echo "</div>";
++        echo "$alert\n";
+     }
+-    if (isset($data['alertred'])) {
++    echo "</div>";
++}
++if (isset($data['alertred'])) {
++    # code...
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertred'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-danger\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>";
+-        foreach ($data['alertred'] as $alert) {
+-            # code...
+-            echo "$alert\n";
+-        }
+-        echo "</div>";
++        echo "$alert\n";
+     }
++    echo "</div>";
++}
+ 
+-    if(isset($data['post'])) {
+-        foreach ($data['post'] as $p) {
+-            # code...
+-            $title = $p->title;
+-            $content = $p->content;
+-            $date = $p->date;
+-            $status = $p->status;
+-            $cat = $p->cat;
+-        }
+-        if($status == 1) {
+-            $pub = "SELECTED"; 
+-            $unpub = ""; 
+-        }elseif ($status == 0) {
+-            $pub = ""; 
+-            $unpub = "SELECTED";
+-        }
+-    }else{
+-        $title = "";
+-        $content = "";
+-        $date = "";
+-        $status = "";
+-        $cat = "";
+-        $pub = "";
+-        $unpub = "";
++if(isset($data['post'])) {
++    foreach ($data['post'] as $p) {
++        # code...
++        $title = $p->title;
++        $content = $p->content;
++        $date = $p->date;
++        $status = $p->status;
++        $cat = $p->cat;
++    }
++    if($status == 1) {
++        $pub = "SELECTED"; 
++        $unpub = ""; 
++    }elseif ($status == 0) {
++        $pub = ""; 
++        $unpub = "SELECTED";
+     }
++}else{
++    $title = "";
++    $content = "";
++    $date = "";
++    $status = "";
++    $cat = "";
++    $pub = "";
++    $unpub = "";
++}
+ ?>
+-<form action="" method="post" role="form" class="">
++<form action="index.php?page=posts&act=<?=$act?>" method="post" role="form" class="">
+ <div class="row">
+     <div class="col-md-12">
+-        <h1><i class="fa fa-file-text-o"></i> New Post
++        <h1><i class="fa fa-file-text-o"></i> <?=$pagetitle;?> Post
+             <div class="pull-right">
+                 <button type="submit" name="submit" class="btn btn-success">
+                     <span class="glyphicon glyphicon-ok"></span>
+@@ -141,5 +144,6 @@
+         
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=$token;?>">
+ </form>
+ 
+diff --git a/gxadmin/inc/settings.php b/gxadmin/inc/settings.php
+index 1310439a..2d5362fe 100644
+--- a/gxadmin/inc/settings.php
++++ b/gxadmin/inc/settings.php
+@@ -12,7 +12,38 @@
+ * @copyright 2014-2015 Puguh Wijayanto
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+-*/?>
++*/
++
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    ";
++    foreach ($data['alertgreen'] as $alert) {
++        # code...
++        echo "$alert\n";
++    }
++    echo "</div>";
++}
++
++if (isset($data['alertred'])) {
++    # code...
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>";
++    foreach ($data['alertred'] as $alert) {
++        # code...
++        echo "$alert\n";
++    }
++    echo "</div>";
++}
++
++?>
+ <form action="" method="POST" enctype="multipart/form-data">
+ <div class="row">
+     <div class="col-md-12">
+@@ -50,7 +81,7 @@
+                   <div class="row">
+                       <div class="col-sm-6 form-group">
+                           <label>Website Name</label>
+-                          <input type="text" name="sitename" value="<?=Options::get('sitename');?>" class="form-control">
++                          <input type="text" name="sitename" value="<?=Site::$name;?>" class="form-control">
+                           <small>Your Website Name, Title</small>
+                       </div>
+                       <div class="col-sm-6 form-group">
+@@ -66,12 +97,12 @@
+                   <div class="row">
+                       <div class="col-sm-6 form-group">
+                           <label>Website Domain</label>
+-                          <input type="text" name="sitedomain" value="<?=Options::get('sitedomain');?>" class="form-control">
++                          <input type="text" name="sitedomain" value="<?=Site::$domain;?>" class="form-control">
+                           <small>Your Domain, eg: example.org</small>
+                       </div>
+                       <div class="col-sm-6 form-group">
+                           <label>Website URL</label>
+-                          <input type="text" name="siteurl" value="<?=Options::get('siteurl');?>" class="form-control">
++                          <input type="text" name="siteurl" value="<?=Site::$url;?>" class="form-control">
+                           <small>Your Website URL, eg: http://www.example.org</small>
+                       </div>
+                   </div>
+@@ -82,12 +113,12 @@
+                   <div class="row">
+                       <div class="col-sm-6 form-group">
+                           <label>Website Keywords</label>
+-                          <input type="text" name="sitekeywords" value="<?=Options::get('sitekeywords');?>" class="form-control">
++                          <input type="text" name="sitekeywords" value="<?=Site::$key;?>" class="form-control">
+                           <small>Your Website Keywords, type your website main keywords.</small>
+                       </div>
+                       <div class="col-sm-6 form-group">
+                           <label>Website Description</label>
+-                          <textarea  name="sitedesc" class="form-control"><?=Options::get('sitedesc');?></textarea>
++                          <textarea  name="sitedesc" class="form-control"><?=Site::$desc;?></textarea>
+                           <small>Your Website Description, describe your website.</small>
+                       </div>
+                   </div>
+@@ -224,7 +255,7 @@
+                               if($is_logourl == 'on' && $logourl != ''){
+                                 $logoimg = "<img src=\"".Options::get('logourl')."\" class=\"clearfix\">";
+                               }elseif($is_logourl == 'off' && $logo != ''){
+-                                $logoimg = "<img src=\"".Options::get('siteurl').Options::get('logo')."\" class=\"clearfix\">";
++                                $logoimg = "<img src=\"".Site::$url.Options::get('logo')."\" class=\"clearfix\">";
+                               }else{
+                                 $logoimg = '';
+                               }
+@@ -562,6 +593,7 @@ class="form-control disable" placeholder="Bootstrap Validator Version"
+ 
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=TOKEN;?>">
+ </form>
+ <script>
+ $('#myTab a').click(function (e) {
+diff --git a/gxadmin/inc/user.php b/gxadmin/inc/user.php
+index 670826e9..55136afd 100644
+--- a/gxadmin/inc/user.php
++++ b/gxadmin/inc/user.php
+@@ -75,9 +75,9 @@
+                         <td>{$p->userid}</td>
+                         <td>{$p->email}</td>
+                         <td>
+-                            <a href=\"index.php?page=users&act=edit&id={$p->id}\" class=\"label label-success\">Edit</a> 
+-                            <a href=\"index.php?page=users&act=del&id={$p->id}\" class=\"label label-danger\" 
+-                            onclick=\"return confirm('Are you sure you want to delete this item?');\">Delete</a>
++                            <a href=\"index.php?page=users&act=edit&id={$p->id}&token=".TOKEN."\" class=\"label label-success\">Edit</a> 
++                            <a href=\"index.php?page=users&act=del&id={$p->id}&token=".TOKEN."\" class=\"label label-danger\" 
++                            onclick=\"return confirm('Are you sure you want to delete this?');\">Delete</a>
+                         </td>
+                     </tr>
+                     ";
+@@ -114,7 +114,7 @@
+                 </div>
+                 <div class="form-group">
+                     <label>E-Mail</label>
+-                    <input type="password" name="email" class="form-control">
++                    <input type="email" name="email" class="form-control">
+                 </div>
+                 <div class="form-group">
+                     <label>Group Level</label>
+@@ -129,6 +129,7 @@
+             <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+             <button type="submit" class="btn btn-success" name="adduser">Save changes</button>
+           </div>
++          <input type="hidden" name="token" value="<?=TOKEN;?>">
+           </form>
+         </div><!-- /.modal-content -->
+       </div><!-- /.modal-dialog -->
+diff --git a/gxadmin/inc/user_form.php b/gxadmin/inc/user_form.php
+index 0b6b7539..b692e1e9 100644
+--- a/gxadmin/inc/user_form.php
++++ b/gxadmin/inc/user_form.php
+@@ -13,34 +13,34 @@
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+ */
+-    if (isset($data['alertgreen'])) {
++if (isset($data['alertgreen'])) {
++    # code...
++    echo "<div class=\"alert alert-success\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertgreen'] as $alert) {
+         # code...
+-        echo "<div class=\"alert alert-success\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>
+-        <ul>";
+-        foreach ($data['alertgreen'] as $alert) {
+-            # code...
+-            echo "<li>$alert</li>\n";
+-        }
+-        echo "</ul></div>";
+-    }elseif (isset($data['alertred'])) {
++        echo "<li>$alert</li>\n";
++    }
++    echo "</ul></div>";
++}elseif (isset($data['alertred'])) {
++    # code...
++    //print_r($data['alertred']);
++    echo "<div class=\"alert alert-danger\" >
++    <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
++        <span aria-hidden=\"true\">&times;</span>
++        <span class=\"sr-only\">Close</span>
++    </button>
++    <ul>";
++    foreach ($data['alertred'] as $alert) {
+         # code...
+-        //print_r($data['alertred']);
+-        echo "<div class=\"alert alert-danger\" >
+-        <button type=\"button\" class=\"close\" data-dismiss=\"alert\">
+-            <span aria-hidden=\"true\">&times;</span>
+-            <span class=\"sr-only\">Close</span>
+-        </button>
+-        <ul>";
+-        foreach ($data['alertred'] as $alert) {
+-            # code...
+-            echo "<li>$alert</li>\n";
+-        }
+-        echo "</ul></div>";
++        echo "<li>$alert</li>\n";
+     }
++    echo "</ul></div>";
++}
+ ?>
+ <form action="" method="post">
+ <div class="row">
+@@ -109,4 +109,5 @@
+     </div>
+     </div>
+ </div>
++<input type="hidden" name="token" value="<?=$_GET['token'];?>">
+ </form>
+diff --git a/inc/lib/Categories.class.php b/inc/lib/Categories.class.php
+index 6ae6fd4d..2e675240 100644
+--- a/inc/lib/Categories.class.php
++++ b/inc/lib/Categories.class.php
+@@ -68,14 +68,17 @@ public static function dropdown($vars) {
+             }
+             if (isset($vars['sort'])) {
+                 $sort = " {$vars['sort']}";
++            }else{
++                $sort = " ASC";
+             }
+         }
+         $cat = Db::result("SELECT * FROM `cat` {$where} {$order_by} {$sort}");
++        //print_r($cat);
+         $drop = "<select name=\"{$name}\" class=\"form-control\"><option></option>";
+         if(Db::$num_rows > 0 ){
+             foreach ($cat as $c) {
+                 # code...
+-                if($c->parent == ''){
++                if($c->parent == null || $c->parent == '0' ){
+                     if(isset($vars['selected']) && $c->id == $vars['selected']) $sel = "SELECTED"; else $sel = "";
+                     $drop .= "<option value=\"{$c->id}\" $sel style=\"padding-left: 10px;\">{$c->name}</option>";
+                     foreach ($cat as $c2) {
+diff --git a/inc/lib/Control.class.php b/inc/lib/Control.class.php
+index 78b39dd9..ae1ff495 100644
+--- a/inc/lib/Control.class.php
++++ b/inc/lib/Control.class.php
+@@ -145,11 +145,11 @@ public static function backend($vars="") {
+     * @author Puguh Wijayanto (www.metalgenix.com)
+     * @since 0.0.1 
+     */
+-    public static function error ($vars="") {
++    public static function error ($vars="", $val='') {
+         if( isset($vars) && $vars != "" ) {
+             include(GX_PATH.'/inc/lib/Control/Error/'.$vars.'.control.php');
+         }else{
+-            include(GX_PATH.'/inc/lib/Control/Error/404.control.php');
++            include(GX_PATH.'/inc/lib/Control/Error/unknown.control.php');
+         }
+     }
+ 
+diff --git a/inc/lib/Control/Backend/categories.control.php b/inc/lib/Control/Backend/categories.control.php
+index 1fb8242f..598dedcb 100644
+--- a/inc/lib/Control/Backend/categories.control.php
++++ b/inc/lib/Control/Backend/categories.control.php
+@@ -16,8 +16,23 @@
+ switch (isset($_POST['addcat'])) {
+     case true:
+         # code...
+-        $slug = Typo::slugify($_POST['cat']);
+-        $cat = Db::insert("INSERT INTO `cat` VALUES ('', '{$_POST['cat']}', '{$slug}', '{$_POST['parent']}', '' )");
++        if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++            // VALIDATE ALL
++            $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++        }
++        if(isset($alertred)){
++            $data['alertred'] = $alertred;
++        }else{
++            $slug = Typo::slugify(Typo::cleanX($_POST['cat']));
++            $cat = Typo::cleanX($_POST['cat']);
++            $cat = Db::insert(
++                        sprintf("INSERT INTO `cat` VALUES (null, '%s', '%s', '%d', '' )", 
++                            $cat, $slug, $_POST['parent']
++                        )
++                    );
++            //print_r($cat);
++            $data['alertgreen'][] = "Category Added: ".$_POST['cat'];
++        }
+         break;
+     
+     default:
+@@ -28,14 +43,23 @@
+ switch (isset($_POST['updatecat'])) {
+     case true:
+         # code...
+-        $vars = array(
+-                    'table' => 'cat',
+-                    'id' => $_POST['id'],
+-                    'key' => array(
+-                                'name' => $_POST['cat']
+-                            )
+-                );
+-        $cat = Db::update($vars);
++        if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++            // VALIDATE ALL
++            $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++        }
++        if(isset($alertred)){
++            $data['alertred'] = $alertred;
++        }else{
++            $vars = array(
++                        'table' => 'cat',
++                        'id' => $_POST['id'],
++                        'key' => array(
++                                    'name' => Typo::cleanX($_POST['cat'])
++                                )
++                    );
++            $cat = Db::update($vars);
++            $data['alertgreen'][] = "Category Updated: ".$_POST['cat'];
++        }
+         break;
+     
+     default:
+@@ -44,7 +68,16 @@
+ }
+ 
+ if(isset($_GET['act']) == 'del'){
+-    Categories::delete($_GET['id']);
++    if (!isset($_GET['token']) || !Token::isExist($_GET['token'])) {
++        // VALIDATE ALL
++        $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++    }
++    if(isset($alertred)){
++        $data['alertred'] = $alertred;
++    }else{
++        Categories::delete($_GET['id']);
++        $data['alertgreen'][] = "Category Removed";
++    }
+ }
+ $data['cat'] = Db::result("SELECT * FROM `cat` ORDER BY `id` DESC");
+ $data['num'] = Db::$num_rows;
+diff --git a/inc/lib/Control/Backend/menus.control.php b/inc/lib/Control/Backend/menus.control.php
+index 87dd97c5..f1a71252 100644
+--- a/inc/lib/Control/Backend/menus.control.php
++++ b/inc/lib/Control/Backend/menus.control.php
+@@ -27,61 +27,69 @@
+         switch ($submit) {
+             case true:
+                 # code...
+-                $menus = Options::get('menus');
+-                $menus = json_decode(Options::get('menus'), true);
+-                echo "<pre>"; print_r($menus); echo "</pre>";
+-                // $menu = array(
+-                //                 $_POST['id']  =>  array(
+-                //                             'name' => $menus[$_POST['id']]['name'],
+-                //                             'class' => $menus[$_POST['id']]['class'],
+-                //                             'menu' => array(
+-                //                                     'parent' => $_POST['parent'],
+-                //                                     'menuid' => $_POST['id'],
+-                //                                     'type' => $_POST['type'],
+-                //                                     'value' => $_POST[$_POST['type']]
+-                //                                 )
+-                //                         )
+-                //                 );
+-                
+-                // if(is_array($menus)){
+-                //     $menu = array_merge($menus, $menu);
+-                // }
+-                // echo "<pre>"; print_r($menu); echo "</pre>";
+-                //$menu = $menus;
+-                $menu[$_POST['id']]['menu'] = $menus[$_POST['id']]['menu'];
+-                $menu[$_POST['id']]['menu'][] = array(
+-                                                    'parent' => $_POST['parent'],
+-                                                    'menuid' => $_POST['id'],
+-                                                    'name' => $_POST['name'],
+-                                                    'type' => $_POST['type'],
+-                                                    'value' => $_POST[$_POST['type']],
+-                                                    'sub' => ''
+-                                                );
+-                 $menu = array(
+-                                $_POST['id']  =>  array(
+-                                            'name' => $menus[$_POST['id']]['name'],
+-                                            'class' => $menus[$_POST['id']]['class'],
+-                                            'menu' => $menu[$_POST['id']]['menu']    
+-                                        )
+-                                );
+-                if(is_array($menus)){
+-                    $menu = array_merge($menus, $menu);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    $menus = Options::get('menus');
++                    $menus = json_decode(Options::get('menus'), true);
++                   //echo "<pre>"; print_r($menus); echo "</pre>";
++                    // $menu = array(
++                    //                 $_POST['id']  =>  array(
++                    //                             'name' => $menus[$_POST['id']]['name'],
++                    //                             'class' => $menus[$_POST['id']]['class'],
++                    //                             'menu' => array(
++                    //                                     'parent' => $_POST['parent'],
++                    //                                     'menuid' => $_POST['id'],
++                    //                                     'type' => $_POST['type'],
++                    //                                     'value' => $_POST[$_POST['type']]
++                    //                                 )
++                    //                         )
++                    //                 );
++                    
++                    // if(is_array($menus)){
++                    //     $menu = array_merge($menus, $menu);
++                    // }
++                    // echo "<pre>"; print_r($menu); echo "</pre>";
++                    //$menu = $menus;
++                    $menu[$_POST['id']]['menu'] = $menus[$_POST['id']]['menu'];
++                    $menu[$_POST['id']]['menu'][] = array(
++                                                        'parent' => $_POST['parent'],
++                                                        'menuid' => $_POST['id'],
++                                                        'name' => Typo::cleanX($_POST['name']),
++                                                        'type' => $_POST['type'],
++                                                        'value' => $_POST[$_POST['type']],
++                                                        'sub' => ''
++                                                    );
++                     $menu = array(
++                                    $_POST['id']  =>  array(
++                                                'name' => $menus[$_POST['id']]['name'],
++                                                'class' => $menus[$_POST['id']]['class'],
++                                                'menu' => $menu[$_POST['id']]['menu']    
++                                            )
++                                    );
++                    if(is_array($menus)){
++                        $menu = array_merge($menus, $menu);
++                    }
++                    //echo "<pre>"; print_r($menu); echo "</pre>";
++                    $menu = json_encode($menu);
++                    //echo "<pre>"; print_r($menu); echo "</pre>";
++                    //Options::update('menus', $menu);
++
++                    $vars = array(
++                                'parent' => $_POST['parent'],
++                                'menuid' => $_POST['id'],
++                                'name' => Typo::cleanX($_POST['name']),
++                                'class' => Typo::cleanX($_POST['class']),
++                                'type' => $_POST['type'],
++                                'value' => $_POST[$_POST['type']]
++                            );
++                    Menus::insert($vars);
++                    $data['alertgreen'][] = 'Menu Added';
+                 }
+-                 echo "<pre>"; print_r($menu); echo "</pre>";
+-                $menu = json_encode($menu);
+-                echo "<pre>"; print_r($menu); echo "</pre>";
+-                //Options::update('menus', $menu);
+-
+-                $vars = array(
+-                            'parent' => $_POST['parent'],
+-                            'menuid' => $_POST['id'],
+-                            'name' => $_POST['name'],
+-                            'class' => $_POST['class'],
+-                            'type' => $_POST['type'],
+-                            'value' => $_POST[$_POST['type']]
+-                        );
+-                Menus::insert($vars);
+-                $data['alertgreen'][] = 'Menu Added';
+                 break;
+             
+             default:
+@@ -95,7 +103,7 @@
+         }else{
+             $menuid = '';
+         }
+-        $data['parent'] = Menus::getParent('', $menuid);
++        $data['parent'] = Menus::isHadParent('', $menuid);
+         //echo "<pre>"; print_r($data); echo "</pre>";
+         System::inc('menus_form', $data);
+         break;
+@@ -110,22 +118,29 @@
+         }
+         switch ($submit) {
+             case true:
+-                
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
+ 
+-                $vars = array(
+-                            // 'parent' => $_POST['parent'],
+-                            'menuid' => $_POST['id'],
+-                            'name' => $_POST['name'],
+-                            'class' => $_POST['class'],
+-                            'type' => $_POST['type'],
+-                            'value' => $_POST[$_POST['type']]
+-                        );
+-                $vars = array(
+-                            'id' => $_GET['itemid'],
+-                            'key' => $vars
+-                        );
+-                Menus::update($vars);
+-                $data['alertgreen'][] = 'Menu Updated';
++                    $vars = array(
++                                'parent' => $_POST['parent'],
++                                'menuid' => $_POST['id'],
++                                'name' => Typo::cleanX($_POST['name']),
++                                'class' => Typo::cleanX($_POST['class']),
++                                'type' => $_POST['type'],
++                                'value' => $_POST[$_POST['type']]
++                            );
++                    $vars = array(
++                                'id' => $_GET['itemid'],
++                                'key' => $vars
++                            );
++                    Menus::update($vars);
++                    $data['alertgreen'][] = 'Menu Updated';
++                }
+                 break;
+             
+             default:
+@@ -140,13 +155,21 @@
+             $menuid = '';
+         }
+         $data['menus'] = Menus::getId($_GET['itemid']);
+-        $data['parent'] = Menus::getParent('', $menuid);
++        $data['parent'] = Menus::isHadParent('', $menuid);
+         System::inc('menus_form_edit', $data);
+         break;
+     case 'del':
+         if(isset($_GET['itemid'])){
+-            Menus::delete($_GET['itemid']);
+-            $data['alertgreen'][] = 'Menu Deleted';
++            if (!isset($_GET['token']) || !Token::isExist($_GET['token'])) {
++                // VALIDATE ALL
++                $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++            }
++            if(isset($alertred)){
++                $data['alertred'] = $alertred;
++            }else{
++                Menus::delete($_GET['itemid']);
++                $data['alertgreen'][] = 'Menu Deleted';
++            }
+         }else{
+             $data['alertred'][] = 'No ID Selected.';
+         }
+@@ -162,20 +185,28 @@
+         switch ($submit) {
+             case true:
+                 # code...
+-                $menu = array(
+-                                $_POST['id']  =>  array(
+-                                            'name' => $_POST['name'],
+-                                            'class' => $_POST['class'],
+-                                            'menu' => array()
+-                                        )
+-                                );
+-                $menus = json_decode(Options::get('menus'), true);
+-                if(is_array($menus)){
+-                    $menu = array_merge($menus, $menu);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    $menu = array(
++                                    $_POST['id']  =>  array(
++                                                'name' => Typo::cleanX($_POST['name']),
++                                                'class' => Typo::cleanX($_POST['class']),
++                                                'menu' => array()
++                                            )
++                                    );
++                    $menus = json_decode(Options::get('menus'), true);
++                    if(is_array($menus)){
++                        $menu = array_merge($menus, $menu);
++                    }
++                    
++                    $menu = json_encode($menu);
++                    Options::update('menus', $menu);
+                 }
+-                
+-                $menu = json_encode($menu);
+-                Options::update('menus', $menu);
+                 break;
+             
+             default:
+@@ -196,17 +227,24 @@
+         switch ($submit) {
+             case true:
+                 
+-
+-                $vars = array(
+-                            'parent' => $_POST['parent'],
+-                            'menuid' => $_POST['id'],
+-                            'name' => $_POST['name'],
+-                            'class' => $_POST['class'],
+-                            'type' => $_POST['type'],
+-                            'value' => $_POST[$_POST['type']]
+-                        );
+-                Menus::insert($vars);
+-                $data['alertgreen'][] = 'Menu Item Added';
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    $vars = array(
++                                'parent' => $_POST['parent'],
++                                'menuid' => $_POST['id'],
++                                'name' => Typo::cleanX($_POST['name']),
++                                'class' => Typo::cleanX($_POST['class']),
++                                'type' => $_POST['type'],
++                                'value' => $_POST[$_POST['type']]
++                            );
++                    Menus::insert($vars);
++                    $data['alertgreen'][] = 'Menu Item Added';
++                }
+                 break;
+             
+             default:
+@@ -230,9 +268,16 @@
+                 // echo "<pre>";
+                 // print_r($_POST['order']);
+                 // echo "</pre>";
+-
+-                Menus::updateMenuOrder($_POST['order']);
+-                $data['alertgreen'][] = 'Menu Order Changed';
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    Menus::updateMenuOrder($_POST['order']);
++                    $data['alertgreen'][] = 'Menu Order Changed';
++                }
+                 break;
+             
+             default:
+diff --git a/inc/lib/Control/Backend/pages.control.php b/inc/lib/Control/Backend/pages.control.php
+index afcb27ad..f6f62ec8 100644
+--- a/inc/lib/Control/Backend/pages.control.php
++++ b/inc/lib/Control/Backend/pages.control.php
+@@ -23,23 +23,31 @@
+         switch (isset($_POST['submit'])) {
+             case true:
+                 # code...
+-                if (!isset($_POST['date']) || $_POST['date'] == "") {
+-                    # code...
+-                    $date = date("Y-m-d H:i:s");
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
+                 }else{
+-                    $date = $_POST['date'];
++                    if (!isset($_POST['date']) || $_POST['date'] == "") {
++                        # code...
++                        $date = date("Y-m-d H:i:s");
++                    }else{
++                        $date = $_POST['date'];
++                    }
++                    $vars = array(
++                                    'title' => Typo::cleanX($_POST['title']),
++                                    'content' => Typo::cleanX($_POST['content']),
++                                    'date' => $date,
++                                    'type' => 'page',
++                                    'author' => Session::val('username'),
++                                    'status' => $_POST['status'],
++                                );
++                    //print_r($vars);
++                    Posts::insert($vars);
++                    $data['alertgreen'][] = "Page : {$_POST['title']} Added.";
+                 }
+-                $vars = array(
+-                                'title' => Typo::cleanX($_POST['title']),
+-                                'content' => Typo::cleanX($_POST['content']),
+-                                'date' => $date,
+-                                'type' => 'page',
+-                                'author' => Session::val('username'),
+-                                'status' => $_POST['status'],
+-                            );
+-                //print_r($vars);
+-                Posts::insert($vars);
+-                $data['alertgreen'][] = "Page : {$_POST['title']} Added.";
+                 break;
+             
+             default:
+@@ -55,23 +63,31 @@
+         switch (isset($_POST['submit'])) {
+             case true:
+                 # code...
+-                if (!isset($_POST['date']) || $_POST['date'] == "") {
+-                    # code...
+-                    $date = date("Y-m-d H:i:s");
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
+                 }else{
+-                    $date = $_POST['date'];
++                    if (!isset($_POST['date']) || $_POST['date'] == "") {
++                        # code...
++                        $date = date("Y-m-d H:i:s");
++                    }else{
++                        $date = $_POST['date'];
++                    }
++                    $moddate = date("Y-m-d H:i:s");
++                    $vars = array(
++                                    'title' => Typo::cleanX($_POST['title']),
++                                    'content' => Typo::cleanX($_POST['content']),
++                                    'modified' => $moddate,
++                                    'date' => $date,
++                                    'status' => $_POST['status'],
++                                );
++                    //print_r($vars);
++                    Posts::update($vars);
++                    $data['alertgreen'][] = "Page : {$_POST['title']} Updated.";
+                 }
+-                $moddate = date("Y-m-d H:i:s");
+-                $vars = array(
+-                                'title' => Typo::cleanX($_POST['title']),
+-                                'content' => Typo::cleanX($_POST['content']),
+-                                'modified' => $moddate,
+-                                'date' => $date,
+-                                'status' => $_POST['status'],
+-                            );
+-                //print_r($vars);
+-                Posts::update($vars);
+-                $data['alertgreen'][] = "Page : {$_POST['title']} Updated.";
+                 break;
+             
+             default:
+@@ -91,7 +107,15 @@
+         if(isset($_GET['act']) && $_GET['act'] == 'del'){
+             if(isset($_GET['id'])){
+                 $title = Posts::title($_GET['id']);
+-                $del = Posts::delete($_GET['id']);
++                if (!isset($_GET['token']) || !Token::isExist($_GET['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    $del = Posts::delete($_GET['id']);
++                }
+                 //echo $title['error'];
+                 if(isset($del['error'])){
+                     $data['alertred'][] = $del['error'];
+@@ -114,23 +138,47 @@
+             
+             case 'publish':
+                 # code...
+-                foreach ($post_id as $id) {
+-                    # code...
+-                    Posts::publish($id);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::publish($id);
++                    }
+                 }
+                 break;
+             case 'unpublish':
+                 # code...
+-                foreach ($post_id as $id) {
+-                    # code...
+-                    Posts::unpublish($id);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::unpublish($id);
++                    }
+                 }
+                 break;
+             case 'delete':
+                 # code...
+-                foreach ($post_id as $id) {
+-                    # code...
+-                    Posts::delete($id);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::delete($id);
++                    }
+                 }
+                 break;
+             
+diff --git a/inc/lib/Control/Backend/posts.control.php b/inc/lib/Control/Backend/posts.control.php
+index 60846938..ce17feba 100644
+--- a/inc/lib/Control/Backend/posts.control.php
++++ b/inc/lib/Control/Backend/posts.control.php
+@@ -23,24 +23,33 @@
+         switch (isset($_POST['submit'])) {
+             case true:
+                 # code...
+-                if (!isset($_POST['date']) || $_POST['date'] == "") {
+-                    # code...
+-                    $date = date("Y-m-d H:i:s");
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if(isset($alertred)){
++                    $data['alertred'] = $alertred;
+                 }else{
+-                    $date = $_POST['date'];
++                    if (!isset($_POST['date']) || $_POST['date'] == "") {
++                        # code...
++                        $date = date("Y-m-d H:i:s");
++                    }else{
++                        $date = $_POST['date'];
++                    }
++                    $vars = array(
++                                    'title' => Typo::cleanX($_POST['title']),
++                                    'cat' => $_POST['cat'],
++                                    'content' => Typo::cleanX($_POST['content']),
++                                    'date' => $date,
++                                    'type' => 'post',
++                                    'author' => Session::val('username'),
++                                    'status' => $_POST['status'],
++                                );
++                    //print_r($vars);
++                    Posts::insert($vars);
++                    $data['alertgreen'][] = "Post : {$_POST['title']} Added.";
+                 }
+-                $vars = array(
+-                                'title' => Typo::cleanX($_POST['title']),
+-                                'cat' => $_POST['cat'],
+-                                'content' => Typo::cleanX($_POST['content']),
+-                                'date' => $date,
+-                                'type' => 'post',
+-                                'author' => Session::val('username'),
+-                                'status' => $_POST['status'],
+-                            );
+-                //print_r($vars);
+-                Posts::insert($vars);
+-                $data['alertgreen'][] = "Post : {$_POST['title']} Added.";
++                    
+                 break;
+             
+             default:
+@@ -57,20 +66,29 @@
+         switch (isset($_POST['submit'])) {
+             case true:
+                 # code...
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if (isset($alertred)) {
++                    # code...
++                    $data['alertred'] = $alertred;
++                }else{
++                    $moddate = date("Y-m-d H:i:s");
++                    $vars = array(
++                                    'title' => Typo::cleanX($_POST['title']),
++                                    'cat' => $_POST['cat'],
++                                    'content' => Typo::cleanX($_POST['content']),
++                                    'modified' => $moddate,
++                                    'date' => $_POST['date'],
++                                    'status' => $_POST['status'],
++                                );
++                    //print_r($vars);
++                    
++                    Posts::update($vars);
++                    $data['alertgreen'][] = "Post : <b>{$_POST['title']}</b> Updated.";
++                }
+                 
+-                $moddate = date("Y-m-d H:i:s");
+-                $vars = array(
+-                                'title' => Typo::cleanX($_POST['title']),
+-                                'cat' => $_POST['cat'],
+-                                'content' => Typo::cleanX($_POST['content']),
+-                                'modified' => $moddate,
+-                                'date' => $_POST['date'],
+-                                'status' => $_POST['status'],
+-                            );
+-                //print_r($vars);
+-                
+-                Posts::update($vars);
+-                $data['alertgreen'][] = "Post : <b>{$_POST['title']}</b> Updated.";
+                 break;
+             
+             default:
+@@ -89,13 +107,23 @@
+         # code...
+         if(isset($_GET['act']) && $_GET['act'] == 'del'){
+             if(isset($_GET['id'])){
+-                $title = Posts::title($_GET['id']);
+-                $del = Posts::delete($_GET['id']);
+-                //echo $title['error'];
+-                if(isset($del['error'])){
+-                    $data['alertred'][] = $del['error'];
++                if (!isset($_GET['token']) || !Token::isExist($_GET['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if (isset($alertred)) {
++                    # code...
++                    $data['alertred'] = $alertred;
+                 }else{
+-                    $data['alertgreen'][] = 'Post <b>'.$title.'</b> Removed';
++
++                    $title = Posts::title($_GET['id']);
++                    $del = Posts::delete($_GET['id']);
++                    //echo $title['error'];
++                    if(isset($del['error'])){
++                        $data['alertred'][] = $del['error'];
++                    }else{
++                        $data['alertgreen'][] = 'Post <b>'.$title.'</b> Removed';
++                    }
+                 }
+                 
+             }else{
+@@ -113,23 +141,50 @@
+ 
+             case 'publish':
+                 # code...
+-                foreach ($post_id as $id) {
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if (isset($alertred)) {
+                     # code...
+-                    Posts::publish($id);
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::publish($id);
++                    }
+                 }
+                 break;
+             case 'unpublish':
+                 # code...
+-                foreach ($post_id as $id) {
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if (isset($alertred)) {
+                     # code...
+-                    Posts::unpublish($id);
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::unpublish($id);
++                    }
+                 }
+                 break;
+             case 'delete':
+                 # code...
+-                foreach ($post_id as $id) {
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
++                if (isset($alertred)) {
+                     # code...
+-                    Posts::delete($id);
++                    $data['alertred'] = $alertred;
++                }else{
++                    foreach ($post_id as $id) {
++                        # code...
++                        Posts::delete($id);
++                    }
+                 }
+                 break;
+             
+diff --git a/inc/lib/Control/Backend/settings.control.php b/inc/lib/Control/Backend/settings.control.php
+index cdb543f2..beb5b246 100644
+--- a/inc/lib/Control/Backend/settings.control.php
++++ b/inc/lib/Control/Backend/settings.control.php
+@@ -14,48 +14,56 @@
+ *
+ */
+ 
+-
++$data = "";
+ switch (isset($_POST['change'])) {
+     case '1':
+         # code...
+-        $vars = array();
+-        if(isset($_FILES['logo']) && $_FILES['logo'] != ''){
+-            $path = "/assets/images/";
+-            $allowed = array('png', 'jpg', 'gif');
+-            $upload = Upload::go('logo', $path, $allowed );
+-            if(isset($upload['error']) != ''){
+-                echo $upload['error'];
++        if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++            // VALIDATE ALL
++            $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++        }
++        if(isset($alertred)){
++            $data['alertred'] = $alertred;
++        }else{
++            $vars = array();
++            if(isset($_FILES['logo']) && $_FILES['logo'] != ''){
++                $path = "/assets/images/";
++                $allowed = array('png', 'jpg', 'gif');
++                $upload = Upload::go('logo', $path, $allowed );
++                if(isset($upload['error']) != ''){
++                    echo $upload['error'];
++                }else{
++                    $vars['logo'] = $upload['path'];
++                }
+             }else{
+-                $vars['logo'] = $upload['path'];
++                unset($_POST['logo']);
+             }
+-        }else{
+-            unset($_POST['logo']);
+-        }
+ 
+-        
+-        
+-        //print_r($_POST);
+-        $flip = array_flip($_POST);
+-        $sql = "SELECT * FROM `options` WHERE `value` = 'on'";        
+-        $q = Db::result($sql);
+-        foreach($q as $ob) {
+-            if( isset( $flip[$ob->name] ) ) {
+-                $vars[$ob->name] = 'on';
+-                //echo $ob->name;
+-            }else{
+-                $vars[$ob->name] = 'off';
+-                //echo $ob->name;
++            
++            
++            //print_r($_POST);
++            $flip = array_flip($_POST);
++            $sql = "SELECT * FROM `options` WHERE `value` = 'on'";        
++            $q = Db::result($sql);
++            foreach($q as $ob) {
++                if( isset( $flip[$ob->name] ) ) {
++                    $vars[$ob->name] = 'on';
++                    //echo $ob->name;
++                }else{
++                    $vars[$ob->name] = 'off';
++                    //echo $ob->name;
++                }
+             }
++            //print_r($ob);
++            foreach ($_POST as $key => $val) {
++                # code...
++                $vars[$key] = $val;
++            }
++            unset($vars['change']);
++            //print_r($vars);
++            Options::update($vars);
++            $data['alertgreen'][] = "New Settings Saved.";
+         }
+-        //print_r($ob);
+-        foreach ($_POST as $key => $val) {
+-            # code...
+-            $vars[$key] = $val;
+-        }
+-        unset($vars['change']);
+-        //print_r($vars);
+-        Options::update($vars);
+-
+         break;
+     
+     default:
+@@ -63,7 +71,7 @@
+         //print_r($data);
+         break;
+ }
+-System::inc('settings');
++System::inc('settings',$data);
+ 
+ /* End of file settings.control.php */
+ /* Location: ./inc/lib/Control/Backend/settings.control.php */
+\ No newline at end of file
+diff --git a/inc/lib/Control/Backend/users.control.php b/inc/lib/Control/Backend/users.control.php
+index e5c94818..09787ca9 100644
+--- a/inc/lib/Control/Backend/users.control.php
++++ b/inc/lib/Control/Backend/users.control.php
+@@ -23,6 +23,11 @@
+         switch (isset($_POST['edituser'])) {
+             case true:
+                 # code...
++                //check token first 
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
+                 // VALIDATE ALL
+                 if(!User::is_exist($_POST['userid'])){
+                     $alertred[] = "User Exist!! Choose another userid.";
+@@ -59,6 +64,8 @@
+                 }else{
+                     $data['alertred'] = $alertred;
+                 }
++                
++                
+                 break;
+             
+             default:
+@@ -70,8 +77,14 @@
+     case 'del':
+             if(isset($_GET['id'])){
+                 $user = User::userid($_GET['id']);
+-                User::delete($_GET['id']);
+-                $data['alertgreen'][] = "User : ".$user." Removed";
++                if (!isset($_GET['token']) || !Token::isExist($_GET['token'])) {
++                    // VALIDATE ALL
++                    $data['alertred'][] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }else{
++                    User::delete($_GET['id']);
++                    $data['alertgreen'][] = "User : ".$user." Removed";
++                }
++                
+             }else{
+                 $data['alertred'][] = "No ID selected";
+             }
+@@ -85,7 +98,12 @@
+         switch (isset($_POST['adduser'])) {
+             case true:
+                 # code...
+-                // VALIDATE ALL
++                // CHECK TOKEN FIRST 
++                //echo Token::isExist($_POST['token']);
++                if (!isset($_POST['token']) || !Token::isExist($_POST['token'])) {
++                    // VALIDATE ALL
++                    $alertred[] = "Token not exist, or your time has expired. Please refresh your browser to get a new token.";
++                }
+                 if(!User::is_exist($_POST['userid'])){
+                     $alertred[] = "User Exist!! Choose another userid.";
+                 }
+@@ -108,9 +126,11 @@
+                                     
+                                 );   
+                     User::create($vars);
++                    Token::remove(TOKEN);
+                 }else{
+                     $data['alertred'] = $alertred;
+                 }
++
+                 break;
+             
+             default:
+diff --git a/inc/lib/Control/Error/db.control.php b/inc/lib/Control/Error/db.control.php
+new file mode 100644
+index 00000000..ad9ef52d
+--- /dev/null
++++ b/inc/lib/Control/Error/db.control.php
+@@ -0,0 +1,8 @@
++<h2>Database Error</h2>
++Something went wrong with the database.<br />
++<span style="border-radius: 7px; border: 3px solid #cc0000; line-height: 35px; 
++height: 50px; background-color: #aa0000; color: #fff; padding: 5px;">
++<?php
++echo $val;
++?>
++</span>
+\ No newline at end of file
+diff --git a/inc/lib/Control/Error/unknown.control.php b/inc/lib/Control/Error/unknown.control.php
+new file mode 100644
+index 00000000..da0ad168
+--- /dev/null
++++ b/inc/lib/Control/Error/unknown.control.php
+@@ -0,0 +1,10 @@
++<h2>Unknown Error Occured</h2>
++<?php if(isset($val)) {?>
++<div class="alert alert-danger">
++<?=$val;?>
++</div>
++
++<?php
++    }
++    Site::footer();
++?>
+\ No newline at end of file
+diff --git a/inc/lib/Control/Frontend/cat.control.php b/inc/lib/Control/Frontend/cat.control.php
+index b6b34c7a..bf976afd 100644
+--- a/inc/lib/Control/Frontend/cat.control.php
++++ b/inc/lib/Control/Frontend/cat.control.php
+@@ -26,6 +26,7 @@
+                         sprintf("SELECT * FROM `posts` 
+                             WHERE `type` = 'post' 
+                             AND `cat` = '%d'
++                            AND `status` = '1'
+                             ORDER BY `date` 
+                             DESC LIMIT %d, %d",
+                             $_GET['cat'], $offset, $data['max']
+@@ -33,11 +34,13 @@
+                         );
+ $data['num'] = Db::$num_rows;
+ if($data['num'] > 0) {
+-    Theme::theme('header');
++    Theme::theme('header',$data);
+     Theme::theme('cat', $data);
+     Theme::footer();
++    exit;
+ }else{
+     Control::error('404');
++    exit;
+ }
+ 
+ /* End of file cat.control.php */
+diff --git a/inc/lib/Control/Frontend/default.control.php b/inc/lib/Control/Frontend/default.control.php
+index 160c9f76..bf4f3a82 100644
+--- a/inc/lib/Control/Frontend/default.control.php
++++ b/inc/lib/Control/Frontend/default.control.php
+@@ -24,13 +24,14 @@
+ $data['posts'] = Db::result(
+                         sprintf("SELECT * FROM `posts` 
+                             WHERE `type` = 'post' 
++                            AND `status` = '1'
+                             ORDER BY `date` 
+                             DESC LIMIT %d, %d",
+                             $offset, $data['max']
+                             )
+                         );
+ $data['num'] = Db::$num_rows;
+-Theme::theme('header');
++Theme::theme('header',$data);
+ Theme::theme('index', $data);
+ Theme::footer();
+ 
+diff --git a/inc/lib/Control/Frontend/page.control.php b/inc/lib/Control/Frontend/page.control.php
+index efa5431d..70628ab2 100644
+--- a/inc/lib/Control/Frontend/page.control.php
++++ b/inc/lib/Control/Frontend/page.control.php
+@@ -18,6 +18,7 @@
+     case 'sitemap':
+         # code...
+         Sitemap::create();
++        exit;
+         break;
+     
+     default:
+@@ -25,20 +26,22 @@
+         $page = $_GET['page'];
+         $data['posts'] = Db::result(
+                             sprintf("SELECT * FROM `posts` 
+-                                    WHERE `id` = '%d' 
++                                    WHERE (`id` = '%d' OR `slug` = '%s')
+                                     AND `type` = 'page'
+-                                    OR `slug` = '%s' 
++                                    AND `status` = '1'
+                                     LIMIT 1", 
+                                     $page, 
+-                                    $page
++                                    Typo::cleanX($page)
+                                     )
+                             );
+         if(Db::$num_rows > 0) {
+-            Theme::theme('header');
++            Theme::theme('header',$data);
+             Theme::theme('page', $data);
+             Theme::footer();
++            exit;
+         }else{
+             Control::error('404');
++            exit;
+         }
+         break;
+ }
+diff --git a/inc/lib/Control/Frontend/post.control.php b/inc/lib/Control/Frontend/post.control.php
+index 1277cf4d..b474f7d4 100644
+--- a/inc/lib/Control/Frontend/post.control.php
++++ b/inc/lib/Control/Frontend/post.control.php
+@@ -17,17 +17,22 @@
+ $post = $_GET[$vars];
+ $data['posts'] = Db::result(
+                     sprintf("SELECT * FROM `posts` 
+-                            WHERE `id` = '%d' AND `type` = 'post' LIMIT 1",
++                            WHERE `id` = '%d' 
++                            AND `type` = 'post'
++                            AND `status` = '1' 
++                            LIMIT 1",
+                             $post
+                             )
+                 );
+ 
+ if(Db::$num_rows > 0) {
+-    Theme::theme('header');
++    Theme::theme('header',$data);
+     Theme::theme('single', $data);
+     Theme::footer();
++    exit;
+ }else{
+     Control::error('404');
++    exit;
+ }
+ 
+ 
+diff --git a/inc/lib/Control/Install/default.control.php b/inc/lib/Control/Install/default.control.php
+index 94af95f7..7dca8bcd 100644
+--- a/inc/lib/Control/Install/default.control.php
++++ b/inc/lib/Control/Install/default.control.php
+@@ -95,6 +95,7 @@ class=\"btn btn-danger\">Back Button</a>.";
+                 <br>
+                 After You had set the permission, please refresh this page. 
+                 <br>
++                <br>
+                 or <a href=\"?step=4\" class=\"btn btn-primary\">Click Here</a>";
+             }
+         }catch (exception $e) {
+diff --git a/inc/lib/Db.class.php b/inc/lib/Db.class.php
+index e00cbb48..a7b27057 100644
+--- a/inc/lib/Db.class.php
++++ b/inc/lib/Db.class.php
+@@ -48,8 +48,19 @@ public function __construct () {
+             mysql_connect(DB_HOST, DB_USER, DB_PASS);
+             mysql_select_db(DB_NAME);
+         }elseif(DB_DRIVER == 'mysqli') {
+-            self::$mysqli = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+-            return self::$mysqli;
++            try {
++                self::$mysqli = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
++                if (self::$mysqli->connect_error) {
++                    Control::error('db', self::$mysqli->connect_error);
++                    exit;
++                }else{
++                    return true;
++                }
++            } catch (exception $e) {
++                Control::error('db', $e->getMessage() );
++            }
++            
++            //return self::$mysqli;
+         }
+     }
+ 
+@@ -93,8 +104,7 @@ public static function query ($vars) {
+         elseif(DB_DRIVER == 'mysqli') {
+             $q = self::$mysqli->query($vars) ;
+             if($q === false) {
+-                user_error("Query failed: ".self::$mysqli->error."<br />\n$vars"); 
+-                return false; 
++                Control::error('db',"Query failed: ".self::$mysqli->error."<br />\n"); 
+             }
+         }
+         
+@@ -265,7 +275,8 @@ public static function insert ($vars) {
+         }elseif(DB_DRIVER == 'mysqli'){
+             try {
+                 if(!self::query($sql)){
+-                    printf("<div class=\"alert alert-danger\">Errormessage: %s</div>\n", self::$mysqli->error);
++                    // printf("<div class=\"alert alert-danger\">Errormessage: %s</div>\n", self::$mysqli->error);
++                    //Control::error('db',self::$mysqli->error);
+                 }else{
+                     self::$last_id = self::$mysqli->insert_id;
+                 }
+diff --git a/inc/lib/GxMain.class.php b/inc/lib/GxMain.class.php
+index a76f2c47..0312d618 100644
+--- a/inc/lib/GxMain.class.php
++++ b/inc/lib/GxMain.class.php
+@@ -38,6 +38,8 @@ public function __construct() {
+         if (System::existConf()) {
+             new System();
+             new Db();
++            new Site();
++            Token::create();
+         }else{
+             $this->install();
+         }
+diff --git a/inc/lib/Install.class.php b/inc/lib/Install.class.php
+index 1ca5f841..0882c859 100644
+--- a/inc/lib/Install.class.php
++++ b/inc/lib/Install.class.php
+@@ -52,7 +52,7 @@ public static function makeConfig ($file) {
+ * @copyright 2014-2015 Puguh Wijayanto
+ * @license http://www.opensource.org/licenses/mit-license.php MIT
+ *
+-*/
++*/error_reporting(0);
+ 
+ // DB CONFIG
+ define('DB_HOST', '".Session::val('dbhost')."');
+@@ -66,6 +66,15 @@ public static function makeConfig ($file) {
+ define('GX_LANG', 'english');
+ define('SMART_URL', false); //set 'true' if you want use SMART URL (SEO Friendly URL)
+ define('GX_URL_PREFIX', '.html');
++
++
++
++
++
++
++
++
++// DON't REMOVE or EDIT THIS.
+ define('SECURITY', '".Typo::getToken(200)."'); // for security purpose, will be used for creating password
+ 
+         ";
+@@ -191,7 +200,7 @@ public static function createTable () {
+         $user_detail = "CREATE TABLE IF NOT EXISTS `user_detail` (
+                 `id` bigint(20) NOT NULL,
+                   `userid` varchar(32) COLLATE latin1_general_ci NOT NULL,
+-                  `fname` varchar(32) COLLATE latin1_general_ci NOT NULL,
++                  `fname` varchar(32) COLLATE latin1_general_ci NULL,
+                   `lname` varchar(255) COLLATE latin1_general_ci DEFAULT NULL,
+                   `sex` varchar(2) COLLATE latin1_general_ci DEFAULT NULL,
+                   `birthplace` varchar(32) COLLATE latin1_general_ci DEFAULT NULL,
+@@ -272,7 +281,8 @@ public static function insertData () {
+             (null, 'ppsandbox', 'off'),
+             (null, 'ppuser', ''),
+             (null, 'pppass', ''),
+-            (null, 'ppsign', '')";
++            (null, 'ppsign', ''),
++            (null, 'tokens', '')";
+         $db->query($options);
+     }
+ }
+\ No newline at end of file
+diff --git a/inc/lib/Mail.class.php b/inc/lib/Mail.class.php
+index e20359ec..b08088c1 100644
+--- a/inc/lib/Mail.class.php
++++ b/inc/lib/Mail.class.php
+@@ -27,7 +27,7 @@ class Mail
+     static $siteemail   = "";
+     static $sitename    = "";
+     
+-    function __construct()
++    public function __construct()
+     {
+         # code...
+         self::$smtphost    = Options::get('smtphost');
+diff --git a/inc/lib/Menus.class.php b/inc/lib/Menus.class.php
+index 3ab23e08..c8ee3722 100644
+--- a/inc/lib/Menus.class.php
++++ b/inc/lib/Menus.class.php
+@@ -1,36 +1,68 @@
+ <?php if(!defined('GX_LIB')) die("Direct Access Not Allowed!");
+-/*
+-*    GeniXCMS - Content Management System
+-*    ============================================================
+-*    Build          : 20140925
+-*    Version        : 0.0.1 pre
+-*    Developed By   : Puguh Wijayanto (www.metalgenix.com)
+-*    License        : MIT License
+-*    ------------------------------------------------------------
+-* filename : Menus.class.php
+-* version : 0.0.1 pre
+-* build : 20141007
++/**
++* GeniXCMS - Content Management System
++* 
++* PHP Based Content Management System and Framework
++*
++* @package GeniXCMS
++* @since 0.0.1 build date 20141007
++* @version 0.0.1
++* @link https://github.com/semplon/GeniXCMS
++* @author Puguh Wijayanto (www.metalgenix.com)
++* @copyright 2014-2015 Puguh Wijayanto
++* @license http://www.opensource.org/licenses/mit-license.php MIT
++*
++*/
++
++/**
++* Menus Class.
++* This class is for managing the menu at the dasboard. 
++*
++* @author Puguh Wijayanto (www.metalgenix.com)
++* @since 0.0.1
+ */
+ class Menus
+ {
+-
++    /**
++    * Menus Constructor.
++    * Nothing to construct
++    * @since 0.0.1
++    *
++    */
+     public function __construct(){
+-
+     }
+ 
+-    public static function getParent($parent='', $menuid = ''){
++
++    /**
++    * isHadParent Function
++    * 
++    * This function is to get the list of parent in certain conditions. There are 
++    * two paramaters to be inserted. 
++    * @param int $parent
++    * @param string $menuid
++    * 
++    * @author Puguh Wijayanto (www.metalgenix.com)
++    * @since 0.0.1
++    */
++    public static function isHadParent($parent='', $menuid = ''){
+         if(isset($menuid)){
+             $where = " AND `menuid` = '{$menuid}'";
+         }else{
+             $where = '';
+         }
+-        $sql = sprintf("SELECT * FROM `menus` WHERE `parent` = '%s' %s", $parent, $where);
++        if(isset($parent)){
++            $parent = " `parent` = '{$parent}'";
++        }else{
++            $parent = '1';
++        }
++        $sql = sprintf("SELECT * FROM `menus` WHERE %s %s", $parent, $where);
+         $menu = Db::result($sql);
+         return $menu;
+     }
+ 
+-    public static function isHadSub($parent, $menuid =''){
+-        $sql = sprintf("SELECT * FROM `menus` WHERE `parent` = '%s' %s", $parent, $where);
++    public static function getParent($id){
++        $q = self::getId($id);
++        return $q[0]->parent;
+     }
+ 
+ 
+@@ -50,7 +82,7 @@ public static function getMenu($menuid, $class='', $bsnav=false){
+             foreach ($menus as $m) {
+                 # code...
+                 if($m->parent == ''){
+-                    $parent = self::getParent($m->id, $menuid);
++                    $parent = self::isHadParent($m->id, $menuid);
+                     $n = Db::$num_rows;
+                     if($n > 0 && $bsnav) { 
+                         $class = "class=\"dropdown\"";
+@@ -70,7 +102,7 @@ public static function getMenu($menuid, $class='', $bsnav=false){
+                         $menu .= "<ul class=\"submenu {$class}\" role=\"dropdown\">";
+                             foreach ($menus as $m2) {
+                                 if($m2->parent == $m->id){
+-                                    $parent = self::getParent($m2->id, $menuid);
++                                    $parent = self::isHadParent($m2->id, $menuid);
+                                     $n = Db::$num_rows;
+                                     if($n > 0 && $bsnav) { 
+                                         $class = "class=\"dropdown\"";
+@@ -88,7 +120,7 @@ public static function getMenu($menuid, $class='', $bsnav=false){
+                                             $menu .= "<ul class=\"submenu {$class}\">";
+                                             foreach ($menus as $m3) {
+                                                 if($m3->parent == $m2->id){
+-                                                    $parent = self::getParent($m3->id, $menuid);
++                                                    $parent = self::isHadParent($m3->id, $menuid);
+                                                     $n = Db::$num_rows;
+                                                     if($n > 0 && $bsnav) { 
+                                                         $class = "class=\"dropdown\"";
+@@ -107,7 +139,7 @@ public static function getMenu($menuid, $class='', $bsnav=false){
+                                                             $menu .= "<ul class=\"submenu {$class}\">";
+                                                             foreach ($menus as $m4) {
+                                                                 if($m4->parent == $m3->id){
+-                                                                    $parent = self::getParent($m4->id, $menuid);
++                                                                    $parent = self::isHadParent($m4->id, $menuid);
+                                                                     $n = Db::$num_rows;
+                                                                     if($n > 0 && $bsnav) { 
+                                                                         $class = "class=\"dropdown\"";
+@@ -167,10 +199,10 @@ public static function getMenuAdmin($menuid, $class=''){
+                     $menu .= "<li clas=\"form-inline\"><div class=\"row\">";
+                     $menu .= "
+                             <h4 class=\"col-md-10\">".$m->name." 
+-                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m->id}\" class=\"label label-primary pull-right\" >
++                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m->id}&token=".TOKEN."\" class=\"label label-primary pull-right\" >
+                                     <span class=\"glyphicon glyphicon-edit\"></span>
+                                 </a>
+-                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m->id}\" class=\"label label-danger pull-right\" >
++                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m->id}&token=".TOKEN."\" class=\"label label-danger pull-right\" >
+                                     <span class=\"glyphicon glyphicon-remove\"></span>
+                                 </a>
+                             </h4>
+@@ -183,7 +215,7 @@ public static function getMenuAdmin($menuid, $class=''){
+                     
+                     $parent = $m->id;
+                     //echo $parent;
+-                    $parent = self::getParent($m->id, $menuid);
++                    $parent = self::isHadParent($m->id, $menuid);
+                     $n = Db::$num_rows;
+                     if($n > 0){
+                         $menu .= "<ul class=\"submenu {$class}\">";
+@@ -191,10 +223,10 @@ public static function getMenuAdmin($menuid, $class=''){
+                                 if($m2->parent == $m->id){
+                                     $menu .= "<li><div class=\"row\">";
+                                     $menu .= "<h5 class=\"col-md-10\">".$m2->name."
+-                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m2->id}\" class=\"label label-primary pull-right\" >
++                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m2->id}&token=".TOKEN."\" class=\"label label-primary pull-right\" >
+                                                     <span class=\"glyphicon glyphicon-edit\"></span>
+                                                 </a>
+-                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m2->id}\" class=\"label label-danger pull-right\" >
++                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m2->id}&token=".TOKEN."\" class=\"label label-danger pull-right\" >
+                                                     <span class=\"glyphicon glyphicon-remove\"></span>
+                                                 </a>
+ 
+@@ -207,7 +239,7 @@ public static function getMenuAdmin($menuid, $class=''){
+                                         </div>
+                                         
+                                                 ";
+-                                        $parent = self::getParent($m2->id, $menuid);
++                                        $parent = self::isHadParent($m2->id, $menuid);
+                                         $n = Db::$num_rows;
+                                         if($n > 0){
+                                             $menu .= "<ul class=\"submenu {$class}\">";
+@@ -215,10 +247,10 @@ public static function getMenuAdmin($menuid, $class=''){
+                                                 if($m3->parent == $m2->id){
+                                                     $menu .= "<li><div class=\"row\">";
+                                                     $menu .= "<h6 class=\"col-md-10\">".$m3->name."
+-                                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m3->id}\" class=\"label label-primary pull-right\" >
++                                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m3->id}&token=".TOKEN."\" class=\"label label-primary pull-right\" >
+                                                                     <span class=\"glyphicon glyphicon-edit\"></span>
+                                                                 </a>
+-                                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m3->id}\" class=\"label label-danger pull-right\" >
++                                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m3->id}&token=".TOKEN."\" class=\"label label-danger pull-right\" >
+                                                                     <span class=\"glyphicon glyphicon-remove\"></span>
+                                                                 </a>
+                                                             </h6>";
+@@ -228,7 +260,7 @@ public static function getMenuAdmin($menuid, $class=''){
+                                                             </div>
+                                                         </div>
+                                                                 ";
+-                                                        $parent = self::getParent($m3->id, $menuid);
++                                                        $parent = self::isHadParent($m3->id, $menuid);
+                                                         $n = Db::$num_rows;
+                                                         if($n > 0){
+                                                             $menu .= "<ul class=\"submenu {$class}\">";
+@@ -236,10 +268,10 @@ public static function getMenuAdmin($menuid, $class=''){
+                                                                 if($m4->parent == $m3->id){
+                                                                     $menu .= "<li><div class=\"row\">";
+                                                                     $menu .= "<h6 class=\"col-md-10\">".$m4->name."
+-                                                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m4->id}\" class=\"label label-primary pull-right\" >
++                                                                                <a href=\"index.php?page=menus&act=edit&id={$menuid}&itemid={$m4->id}&token=".TOKEN."\" class=\"label label-primary pull-right\" >
+                                                                                     <span class=\"glyphicon glyphicon-edit\"></span>
+                                                                                 </a>
+-                                                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m4->id}\" class=\"label label-primary pull-right\" >
++                                                                                <a href=\"index.php?page=menus&act=del&id={$menuid}&itemid={$m4->id}&token=".TOKEN."\" class=\"label label-primary pull-right\" >
+                                                                                     <span class=\"glyphicon glyphicon-remove\"></span>
+                                                                                 </a>
+                                                                             </h6>";
+@@ -299,7 +331,7 @@ public static function getMenuRaw($menuid){
+ 
+     public static function getId($id=''){
+         if(isset($id)){
+-            $sql = sprintf("SELECT * FROM `menus` WHERE `id` = '%d' ORDER BY `order` ASC", $id);
++            $sql = sprintf("SELECT * FROM `menus` WHERE `id` = '%d'", $id);
+             $menus = Db::result($sql);
+             $n = Db::$num_rows;
+         }else{
+diff --git a/inc/lib/Options.class.php b/inc/lib/Options.class.php
+index 073cd93a..a6a426c9 100644
+--- a/inc/lib/Options.class.php
++++ b/inc/lib/Options.class.php
+@@ -22,26 +22,21 @@ public function __construct() {
+     }
+ 
+     // $vars = array(
+-    //             'title' => '',
+-    //             'cat' => '',
+-    //             'content' => '',
+-    //             'date' => '',
+-    //             'author' => '',
+-    //             'type' => '',
+-    //             'status' => ''
++    //             'name' => '',
++    //             'value' => ''
+     //         );
+     public static function insert($vars) {
+         if(is_array($vars)) {
+-            $slug = Typo::slugify($vars['title']);
+-            $vars = array_merge($vars, array('slug' => $slug));
+-            //print_r($vars);
+             $ins = array(
+                         'table' => 'options',
+-                        'key' => $vars
++                        'name' => $vars['name'],
++                        'value' => $vars['value']
+                     );
+-            $post = Db::insert($ins);
++            $opt = Db::insert($ins);
++        }else{
++            Control::error('unknown','Format not Found, please in array');
+         }
+-        return $post;
++        return $opt;
+     }
+ 
+     public static function update($key, $val = '') {
+diff --git a/inc/lib/Posts.class.php b/inc/lib/Posts.class.php
+index 92a69287..3b9ddb16 100644
+--- a/inc/lib/Posts.class.php
++++ b/inc/lib/Posts.class.php
+@@ -121,7 +121,7 @@ public static function content($vars) {
+     }
+ 
+     public static function recent($vars, $type = 'post') {
+-        $sql = "SELECT * FROM `posts` WHERE `type` = '{$type}' ORDER BY `date` DESC LIMIT {$vars}";
++        $sql = "SELECT * FROM `posts` WHERE `type` = '{$type}' AND `status` = '1' ORDER BY `date` DESC LIMIT {$vars}";
+         $posts = Db::result($sql);
+         if(isset($posts['error'])){
+             $posts['error'] = "No Posts found.";
+@@ -167,7 +167,7 @@ public static function dropdown($vars){
+         if(is_array($vars)){
+             //print_r($vars);
+             $name = $vars['name'];
+-            $where = "WHERE ";
++            $where = "WHERE `status` = '1' AND ";
+             if(isset($vars['type'])) {
+                 $where .= " `type` = '{$vars['type']}' AND ";
+             }else{
+diff --git a/inc/lib/Rss.class.php b/inc/lib/Rss.class.php
+index d34addec..205a30b3 100644
+--- a/inc/lib/Rss.class.php
++++ b/inc/lib/Rss.class.php
+@@ -27,9 +27,9 @@ public static function create ($url = 'post', $type='post', $count='20') {
+         $xml .= "
+             <rss version=\"2.0\">
+                 <channel>
+-                    <title>".Options::get('sitename')."</title>
+-                    <link>".Options::get('siteurl')."</link>
+-                    <description>".Options::get('sitedesc')."</description>
++                    <title>".Site::$name."</title>
++                    <link>".Site::$url."</link>
++                    <description>".Site::$desc."</description>
+             ";
+         foreach ($posts as $p) {
+             # code...
+diff --git a/inc/lib/Site.class.php b/inc/lib/Site.class.php
+index 36124b16..b294db83 100644
+--- a/inc/lib/Site.class.php
++++ b/inc/lib/Site.class.php
+@@ -19,11 +19,21 @@ class Site
+ {
+     static $editors;
+     static $data;
++    static $url;
++    static $domain;
++    static $name;
++    static $key;
++    static $desc;
+ 
+     public function __construct() {
+         global $GLOBALS, $data;
+         self::$editors =& $GLOBALS;
+         self::$data =& $data;
++        self::$url = Options::get('siteurl');
++        self::$domain = Options::get('sitedomain');
++        self::$name = Options::get('sitename');
++        self::$key = Options::get('sitekeywords');
++        self::$desc = Options::get('sitedesc');
+     }
+ 
+     /* Call all Website Meta at Header
+@@ -36,7 +46,7 @@ public static function meta($cont_title='', $cont_desc='', $pre =''){
+ 
+         if(is_array($data) && isset($data['posts'][0]->title)){
+             
+-            $sitenamelength = strlen(Options::get('sitename'));
++            $sitenamelength = strlen(self::$name);
+             $limit = 70-$sitenamelength-6;
+             $cont_title = substr(Typo::Xclean(Typo::strip($data['posts'][0]->title)),0,$limit);
+             $titlelength = strlen($data['posts'][0]->title);
+@@ -54,8 +64,8 @@ public static function meta($cont_title='', $cont_desc='', $pre =''){
+         $meta = "
+     <!--// Start Meta: Generated Automaticaly by GeniXCMS -->
+     <!-- SEO: Title stripped 70chars for SEO Purpose -->
+-    <title>{$cont_title}".Options::get('sitename')."</title>
+-    <meta name=\"Keyword\" content=\"".Options::get('sitekeywords')."\">
++    <title>{$cont_title}".self::$name."</title>
++    <meta name=\"Keyword\" content=\"".self::$key."\">
+     <!-- SEO: Description stripped 150chars for SEO Purpose -->
+     <meta name=\"Description\" content=\"".self::desc($desc)."\">
+     <meta name=\"Author\" content=\"Puguh Wijayanto | MetalGenix IT Solutions - www.metalgenix.com\">
+@@ -77,7 +87,7 @@ public static function footer(){
+         $bs = Options::get('use_bootstrap');
+         if($bs == 'on'){
+             $foot .= "
+-    <link href=\"".Options::get('siteurl')."/assets/css/bootstrap.min.css\" rel=\"stylesheet\">\n";
++    <link href=\"".self::$url."/assets/css/bootstrap.min.css\" rel=\"stylesheet\">\n";
+         }
+ 
+         $jquery = Options::get('use_jquery');
+@@ -91,8 +101,8 @@ public static function footer(){
+         if($bs == 'on'){
+             $foot .= "
+             <!-- These files are included by default by GeniXCMS. You can set it at the dashboard -->
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/bootstrap.min.js\"></script>
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/ie10-viewport-bug-workaround.js\"></script>";
++            \t<script src=\"".self::$url."/assets/js/bootstrap.min.js\"></script>
++            \t<script src=\"".self::$url."/assets/js/ie10-viewport-bug-workaround.js\"></script>";
+         }
+ 
+         $fa = Options::get('use_fontawesome');
+@@ -111,11 +121,11 @@ public static function footer(){
+             \t<script src=\"http://cdnjs.cloudflare.com/ajax/libs/codemirror/3.20.0/mode/xml/xml.min.js\"></script>
+             \t<script src=\"http://cdnjs.cloudflare.com/ajax/libs/codemirror/2.36.0/formatting.min.js\"></script>
+ 
+-            \t<link href=\"".Options::get('siteurl')."/assets/css/summernote.css\" rel=\"stylesheet\">
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/summernote.min.js\"></script>
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/plugins/summernote-ext-fontstyle.js\"></script>
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/plugins/summernote-ext-hello.js\"></script>
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/plugins/summernote-ext-video.js\"></script>
++            \t<link href=\"".self::$url."/assets/css/summernote.css\" rel=\"stylesheet\">
++            \t<script src=\"".self::$url."/assets/js/summernote.min.js\"></script>
++            \t<script src=\"".self::$url."/assets/js/plugins/summernote-ext-fontstyle.js\"></script>
++            \t<script src=\"".self::$url."/assets/js/plugins/summernote-ext-hello.js\"></script>
++            \t<script src=\"".self::$url."/assets/js/plugins/summernote-ext-video.js\"></script>
+             \t<script>
+               \t$(document).ready(function() {
+                 \t$('.editor').summernote({
+@@ -168,8 +178,8 @@ public static function footer(){
+ 
+         if(isset($GLOBALS['validator']) && $GLOBALS['validator'] == true){
+             $foot .= "
+-            \t<link href=\"".Options::get('siteurl')."/assets/css/bootstrapValidator.min.css\" rel=\"stylesheet\">
+-            \t<script src=\"".Options::get('siteurl')."/assets/js/bootstrapValidator.min.js\"></script>
++            \t<link href=\"".self::$url."/assets/css/bootstrapValidator.min.css\" rel=\"stylesheet\">
++            \t<script src=\"".self::$url."/assets/js/bootstrapValidator.min.js\"></script>
+             ";
+ 
+             $foot .= $GLOBALS['validator_js'];
+@@ -182,9 +192,9 @@ public static function footer(){
+ 
+     public static function desc($vars){
+         if(!empty($vars)){
+-            $desc = substr(strip_tags(htmlspecialchars_decode($vars).". ".Options::get('sitedesc')),0,150);
++            $desc = substr(strip_tags(htmlspecialchars_decode($vars).". ".self::$desc),0,150);
+         }else{
+-            $desc = substr(Options::get('sitedesc'),0,150);
++            $desc = substr(self::$desc,0,150);
+         }
+         
+         return $desc;
+@@ -193,10 +203,10 @@ public static function desc($vars){
+     public static function logo ($width='', $height='') {
+         // check which logo is used, logourl or uploaded files.
+         if( Options::get('is_logourl') == "on" && Options::get('logourl') != "" ) {
+-            $logo = "<img src=\"".Options::get('siteurl').Options::get('logourl')."\"
++            $logo = "<img src=\"".self::$url.Options::get('logourl')."\"
+                     style=\"width: $width; height: $height; margin: 1px;\">";
+         }elseif( Options::get('is_logourl') == "off" && Options::get('logo') != "" ){
+-            $logo = "<img src=\"".Options::get('siteurl').Options::get('logo')."\"
++            $logo = "<img src=\"".self::$url.Options::get('logo')."\"
+                     style=\"width: $width; height: $height; margin: 1px;\">";
+         }else{
+             $logo = "<span class=\"mg genixcms-logo\"></span>";
+diff --git a/inc/lib/System.class.php b/inc/lib/System.class.php
+index 135ccd9d..a853c205 100644
+--- a/inc/lib/System.class.php
++++ b/inc/lib/System.class.php
+@@ -17,21 +17,42 @@
+ 
+ class System
+ {
+-
++    /** 
++    * GeniXCMS Version Variable 
++    * @return double
++    */
+     static $version          = "0.0.1";
++
++    /** 
++    * GeniXCMS Version Release 
++    * @return string
++    */
+     static $v_release        = "";
+ 
++    /**
++    * System Constructor.
++    * Initializing the system, check the config file, if exist run the config
++    * loader. 
++    * @author Puguh Wijayanto (www.metalgenix.com)
++    * @since 0.0.1
++    */
+     public function __construct () {
+         if (self::existConf()) {
+             # code...
+             self::config('config');
+-            self::lang(GX_LANG);
++            self::lang(GX_LANG);            
+         }else{
+             GxMain::install();
+         }
+         
+     }
+ 
++    /**
++    * System Library Loader.
++    * This will include library which is called.
++    * @author Puguh Wijayanto (www.metalgenix.com)
++    * @since 0.0.1
++    */
+     public static function lib($var) {
+         include(GX_LIB.$var.'.class.php');
+     }
+@@ -109,4 +130,4 @@ public static function v () {
+ }
+ 
+ /* End of file system.class.php */
+-/* Location: ./inc/lib/system.class.php */
+\ No newline at end of file
++/* Location: ./inc/lib/system.class.php */
+diff --git a/inc/lib/Token.class.php b/inc/lib/Token.class.php
+new file mode 100644
+index 00000000..ae155b78
+--- /dev/null
++++ b/inc/lib/Token.class.php
+@@ -0,0 +1,119 @@
++<?php
++/**
++* GeniXCMS - Content Management System
++* 
++* PHP Based Content Management System and Framework
++*
++* @package GeniXCMS
++* @since 0.0.2 build date 20150309
++* @version 0.0.2
++* @link https://github.com/semplon/GeniXCMS
++* @author Puguh Wijayanto (www.metalgenix.com)
++* @copyright 2014-2015 Puguh Wijayanto
++* @license http://www.opensource.org/licenses/mit-license.php MIT
++*
++*/
++
++
++/**
++* Token Class
++*
++* @author Puguh Wijayanto (www.metalgenix.com)
++* @since 0.0.2
++*/
++class Token
++{
++    public function __construct () {
++
++    }
++
++    public static function create() {
++        self::ridOld();
++        $length = "80";
++        $token = "";
++        $codeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
++        $codeAlphabet.= "abcdefghijklmnopqrstuvwxyz";
++        $codeAlphabet.= "0123456789";
++        $codeAlphabet.= SECURITY;
++        for($i=0;$i<$length;$i++){
++            $token .= $codeAlphabet[Typo::crypto_rand_secure(0,strlen($codeAlphabet))];
++        }
++        $url = $_SERVER['REQUEST_URI'];
++        $url = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
++        $ip = $_SERVER['REMOTE_ADDR'];
++        $time = time();
++        define('TOKEN', $token);
++        define('TOKEN_URL', $url);
++        define('TOKEN_IP', $ip);
++        define('TOKEN_TIME', $time);
++        $json = self::json();
++        Options::update('tokens',$json);
++        return $token;
++    }
++
++    /**
++    * Json Token Function
++    *
++    * $token = [{'time','ip','url',token'},]
++    */
++    public static function json() {
++        $token = Options::get('tokens');
++        $token = json_decode($token, true);
++        $newtoken = array(
++                        TOKEN => array(
++                            'time' => TOKEN_TIME,
++                            'ip' => TOKEN_IP,
++                            'url' => TOKEN_URL
++                            )
++                    );
++        if(is_array($token)){
++            $newtoken = array_merge($token, $newtoken);
++        }
++
++        $newtoken = json_encode($newtoken);
++        return $newtoken;
++    }
++
++    public static function isExist($token){
++        $json = Options::get('tokens');
++        $tokens = json_decode($json, true);
++        if(array_key_exists($token, $tokens)){
++            $call = true;
++        }else{
++            $call = false;
++        }
++        return $call;
++    }
++
++    public static function remove($token){
++        $json = Options::get('tokens');
++        $tokens = json_decode($json, true);
++        unset($tokens[$token]);
++        $tokens = json_encode($tokens);
++        if(Options::update('tokens',$tokens)){
++            return true;
++        }else{
++            return false;
++        }
++    }
++
++    public static function ridOld() {
++        $json = Options::get('tokens');
++        $tokens = json_decode($json, true);
++        $time = time();
++        foreach ($tokens as $token => $value) {
++            # code...
++            //print_r($token);
++            if ($time - $value['time'] > 600) {
++                # code...
++                unset($tokens[$token]);
++            }
++        }
++        $tokens = json_encode($tokens);
++        if(Options::update('tokens',$tokens)){
++            return true;
++        }else{
++            return false;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/inc/lib/Upload.class.php b/inc/lib/Upload.class.php
+index aa6c7c4c..cfa5ba3d 100644
+--- a/inc/lib/Upload.class.php
++++ b/inc/lib/Upload.class.php
+@@ -69,7 +69,7 @@ public static function go($input, $path, $allowed='', $uniq=false, $size='', $wi
+                     $result['filename'] = $uniqfile.$filename;
+                     $result['path'] = $path.$uniqfile.$filename;
+                     $result['filepath'] = $filepath;
+-                    $result['fileurl'] = Options::get('siteurl').$path.$uniqfile.$filename;
++                    $result['fileurl'] = Site::$url.$path.$uniqfile.$filename;
+ 
+                 }else{
+                     $result['error'] = 'Cannot upload to directory, please check 
+diff --git a/inc/lib/Url.class.php b/inc/lib/Url.class.php
+index 386e3101..688d1e3b 100644
+--- a/inc/lib/Url.class.php
++++ b/inc/lib/Url.class.php
+@@ -41,12 +41,12 @@ public static function post($vars) {
+         switch (SMART_URL) {
+             case true:
+                 # code...
+-                $url = Options::get('siteurl')."/".self::slug($vars)."/{$vars}";
++                $url = Site::$url."/".self::slug($vars)."/{$vars}";
+                 break;
+             
+             default:
+                 # code...
+-                $url = Options::get('siteurl')."/index.php?post={$vars}";
++                $url = Site::$url."/index.php?post={$vars}";
+                 break;
+ 
+         }
+@@ -66,12 +66,12 @@ public static function page($vars) {
+         switch (SMART_URL) {
+             case true:
+                 # code...
+-                $url = Options::get('siteurl')."/".self::slug($vars).GX_URL_PREFIX;
++                $url = Site::$url."/".self::slug($vars).GX_URL_PREFIX;
+                 break;
+             
+             default:
+                 # code...
+-                $url = Options::get('siteurl')."/index.php?page={$vars}";
++                $url = Site::$url."/index.php?page={$vars}";
+                 break;
+ 
+         }
+@@ -92,12 +92,12 @@ public static function cat($vars) {
+         switch (SMART_URL) {
+             case true:
+                 # code...
+-                $url = Options::get('siteurl')."/".$vars."/".Typo::slugify(Categories::name($vars));
++                $url = Site::$url."/".$vars."/".Typo::slugify(Categories::name($vars));
+                 break;
+             
+             default:
+                 # code...
+-                $url = Options::get('siteurl')."/index.php?cat={$vars}";
++                $url = Site::$url."/index.php?cat={$vars}";
+                 break;
+ 
+         }
+@@ -129,12 +129,12 @@ public static function sitemap() {
+         switch (SMART_URL) {
+             case true:
+                 # code...
+-                $url = Options::get('siteurl')."/sitemap".GX_URL_PREFIX;
++                $url = Site::$url."/sitemap".GX_URL_PREFIX;
+                 break;
+             
+             default:
+                 # code...
+-                $url = Options::get('siteurl')."/index.php?page=sitemap";
++                $url = Site::$url."/index.php?page=sitemap";
+                 break;
+ 
+         }
+@@ -154,12 +154,12 @@ public static function rss() {
+         switch (SMART_URL) {
+             case true:
+                 # code...
+-                $url = Options::get('siteurl')."/rss".GX_URL_PREFIX;
++                $url = Site::$url."/rss".GX_URL_PREFIX;
+                 break;
+             
+             default:
+                 # code...
+-                $url = Options::get('siteurl')."/index.php?rss";
++                $url = Site::$url."/index.php?rss";
+                 break;
+ 
+         }

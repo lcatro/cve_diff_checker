@@ -1,0 +1,35 @@
+From 6711dae8ef70caf0e94cec434498012a2ccd86b8 Mon Sep 17 00:00:00 2001
+From: Luke Towers <github@luketowers.ca>
+Date: Tue, 31 Mar 2020 04:09:18 -0600
+Subject: [PATCH] Improve asset file path handling when moving assets
+
+---
+ modules/cms/widgets/AssetList.php | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/modules/cms/widgets/AssetList.php b/modules/cms/widgets/AssetList.php
+index 0fcd63c730..3dda5d1b35 100644
+--- a/modules/cms/widgets/AssetList.php
++++ b/modules/cms/widgets/AssetList.php
+@@ -333,13 +333,20 @@ public function onMove()
+ 
+             $basename = basename($path);
+             $originalFullPath = $this->getFullPath($path);
+-            $newFullPath = rtrim($destinationFullPath, '/').'/'.$basename;
++            $newFullPath = realpath(rtrim($destinationFullPath, '/')) . '/' . $basename;
+             $safeDir = $this->getAssetsPath();
+ 
+             if ($originalFullPath == $newFullPath) {
+                 continue;
+             }
+ 
++            if (!starts_with($newFullPath, $safeDir)) {
++                throw new ApplicationException(Lang::get(
++                    'cms::lang.asset.error_moving_file',
++                    ['file' => $basename]
++                ));
++            }
++
+             if (is_file($originalFullPath)) {
+                 if (!@File::move($originalFullPath, $newFullPath)) {
+                     throw new ApplicationException(Lang::get(

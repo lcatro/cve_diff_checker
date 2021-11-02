@@ -1,0 +1,120 @@
+From bf9db85886b12a20c8374f55b7c4a610e8ae9220 Mon Sep 17 00:00:00 2001
+From: Jacob Persson <jacob.persson@gmail.com>
+Date: Fri, 7 May 2021 14:53:00 +0200
+Subject: [PATCH] Merge pull request from GHSA-hjfc-36rw-8gvp
+
+---
+ .../ZMConversation+Participants.swift         | 11 +++++++---
+ .../ZMConversation+SecurityLevel.swift        |  8 +++++---
+ .../ZMConversationTests+SecurityLevel.swift   | 20 +++++++++++++++++--
+ .../Model/User/ZMUserLegalHoldTests.swift     |  4 +---
+ 4 files changed, 32 insertions(+), 11 deletions(-)
+
+diff --git a/Source/Model/Conversation/ZMConversation+Participants.swift b/Source/Model/Conversation/ZMConversation+Participants.swift
+index c54285033..e6e5f5b33 100644
+--- a/Source/Model/Conversation/ZMConversation+Participants.swift
++++ b/Source/Model/Conversation/ZMConversation+Participants.swift
+@@ -173,7 +173,7 @@ extension ZMConversation {
+         
+         if !addedRoles.isEmpty {
+             self.checkIfArchivedStatusChanged(addedSelfUser: addedSelfUser)
+-            self.checkIfVerificationLevelChanged(addedUsers: Set(addedRoles.map { $0.user}))
++            self.checkIfVerificationLevelChanged(addedUsers: Set(addedRoles.map { $0.user}),  addedSelfUser: addedSelfUser)
+         }
+     }
+ 
+@@ -216,8 +216,13 @@ extension ZMConversation {
+         }
+     }
+     
+-    private func checkIfVerificationLevelChanged(addedUsers: Set<ZMUser>) {
+-        self.decreaseSecurityLevelIfNeededAfterDiscovering(clients: Set(addedUsers.flatMap { $0.clients }), causedBy: addedUsers)
++    private func checkIfVerificationLevelChanged(addedUsers: Set<ZMUser>, addedSelfUser: Bool) {
++        let clients = Set(addedUsers.flatMap { $0.clients })
++        self.decreaseSecurityLevelIfNeededAfterDiscovering(clients: clients, causedBy: addedUsers)
++
++        if addedSelfUser {
++            self.increaseSecurityLevelIfNeededAfterTrusting(clients: clients)
++        }
+     }
+     
+     /// Remove participants to the conversation. The method will decide on its own whether
+diff --git a/Source/Model/Conversation/ZMConversation+SecurityLevel.swift b/Source/Model/Conversation/ZMConversation+SecurityLevel.swift
+index f97b16479..5d8adf9b5 100644
+--- a/Source/Model/Conversation/ZMConversation+SecurityLevel.swift
++++ b/Source/Model/Conversation/ZMConversation+SecurityLevel.swift
+@@ -206,11 +206,13 @@ extension ZMConversation {
+     }
+ 
+     private func increaseSecurityLevelIfNeeded(for cause: SecurityChangeCause) {
+-        guard securityLevel != .secure &&
++        guard
++            securityLevel != .secure &&
+             allUsersTrusted &&
+             allParticipantsHaveClients &&
+-            conversationType != .connection else {
+-                return
++            conversationType.isOne(of: .group, .oneOnOne, .invalid)
++        else {
++            return
+         }
+ 
+         securityLevel = .secure
+diff --git a/Tests/Source/Model/Conversation/ZMConversationTests+SecurityLevel.swift b/Tests/Source/Model/Conversation/ZMConversationTests+SecurityLevel.swift
+index 17bf7a2ad..d47ff7376 100644
+--- a/Tests/Source/Model/Conversation/ZMConversationTests+SecurityLevel.swift
++++ b/Tests/Source/Model/Conversation/ZMConversationTests+SecurityLevel.swift
+@@ -977,7 +977,7 @@ class ZMConversationTests_SecurityLevel: ZMConversationTestsBase {
+         let otherUnverifiedUsers = self.setupUnverifiedUsers(count: 1)
+         
+         // THEN
+-        XCTAssertEqual(conversation.allMessages.count, 2)
++        XCTAssertEqual(conversation.allMessages.count, 4)
+         guard let lastMessage1 = conversation.lastMessage as? ZMSystemMessage else {
+             return XCTFail()
+         }
+@@ -988,7 +988,7 @@ class ZMConversationTests_SecurityLevel: ZMConversationTestsBase {
+         _ = self.simulateAdding(users: otherUnverifiedUsers, conversation: conversation, by: selfUser)
+         
+         // THEN
+-        XCTAssertEqual(conversation.allMessages.count, 3)
++        XCTAssertEqual(conversation.allMessages.count, 5)
+         guard let lastMessage2 = conversation.lastMessage as? ZMSystemMessage else {
+             return XCTFail()
+         }
+@@ -1012,4 +1012,20 @@ class ZMConversationTests_SecurityLevel: ZMConversationTestsBase {
+         XCTAssertEqual(conversation.securityLevel, .secure)
+     }
+ 
++    func testThatSecurityLevelIsIncreased_WhenAddingSelfUserToAnExistingConversation() {
++        // given
++        let selfUser = ZMUser.selfUser(in: self.uiMOC)
++        self.createSelfClient(onMOC: self.uiMOC)
++        let conversation = ZMConversation.insertNewObject(in: self.uiMOC)
++        conversation.conversationType = .group
++        conversation.remoteIdentifier = UUID()
++
++
++        // when
++        conversation.addParticipantAndUpdateConversationState(user: selfUser, role: nil)
++
++        // then
++        XCTAssertEqual(conversation.securityLevel, .secure)
++    }
++
+ }
+diff --git a/Tests/Source/Model/User/ZMUserLegalHoldTests.swift b/Tests/Source/Model/User/ZMUserLegalHoldTests.swift
+index 184e69f21..1876eca8a 100644
+--- a/Tests/Source/Model/User/ZMUserLegalHoldTests.swift
++++ b/Tests/Source/Model/User/ZMUserLegalHoldTests.swift
+@@ -90,9 +90,7 @@ class ZMUserLegalHoldTests: ModelObjectsTests {
+         // THEN
+         XCTAssertEqual(selfUser.legalHoldStatus, .enabled)
+         XCTAssertTrue(selfUser.needsToAcknowledgeLegalHoldStatus)
+-
+-        let lastMessage = conversation.lastMessage as? ZMSystemMessage
+-        XCTAssertEqual(lastMessage?.systemMessageType, .legalHoldEnabled)
++        XCTAssertTrue(conversation.allMessages.contains(where: { ($0 as? ZMSystemMessage)?.systemMessageType == .legalHoldEnabled }))
+         XCTAssertTrue(conversation.isUnderLegalHold)
+     }
+ 

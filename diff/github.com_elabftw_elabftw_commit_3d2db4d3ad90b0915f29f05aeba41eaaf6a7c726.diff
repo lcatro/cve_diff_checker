@@ -1,0 +1,46 @@
+From 3d2db4d3ad90b0915f29f05aeba41eaaf6a7c726 Mon Sep 17 00:00:00 2001
+From: Nicolas CARPi <nico-git@deltablot.email>
+Date: Fri, 11 Jun 2021 21:29:33 +0200
+Subject: [PATCH] security: prevent blind ssrf in pdf generation
+
+Issue: one could set the src attribute of an img tag to anything they
+want and the pdf generation will happily GET it. This means that one can
+do arbitrary HTTP GET requests from the server itself. This doesn't work
+in the browser context because of the restrictive CSP policy, which is
+not applied during the pdf generation.
+
+This is a MINOR vulnerability as other security measures in the PHP
+configuration prevents prospective escalation.
+
+The vulnerability was reported by @mgrRaf and @xoffense. Thank to them
+for responsible disclosure. A bounty has been awarded.
+---
+ src/services/MakePdf.php | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/services/MakePdf.php b/src/services/MakePdf.php
+index 25f541c3da..3f1384d989 100644
+--- a/src/services/MakePdf.php
++++ b/src/services/MakePdf.php
+@@ -137,7 +137,11 @@ public function getContent(): string
+             'useCjk' => $this->Entity->Users->userData['cjk_fonts'],
+         );
+ 
+-        return $this->getTwig(Config::getConfig())->render('pdf.html', $renderArr);
++        $html = $this->getTwig(Config::getConfig())->render('pdf.html', $renderArr);
++
++        // now remove any img src pointing to outside world
++        // prevent blind ssrf (thwarted by CSP on webpage, but not in pdf)
++        return preg_replace('/img src=("|\')(ht|f|)tp/i', 'nope', $html);
+     }
+ 
+     /**
+@@ -218,7 +222,7 @@ public function tex2svg(Mpdf $mpdf, string $content): string
+         $contentDecode = html_entity_decode($content, ENT_HTML5, 'UTF-8');
+         file_put_contents($filename, $contentDecode);
+ 
+-        // apsolute path to tex2svg app
++        // absolute path to tex2svg app
+         $appDir = dirname(__DIR__, 2) . '/src/node';
+ 
+         // convert tex to svg with mathjax nodejs script

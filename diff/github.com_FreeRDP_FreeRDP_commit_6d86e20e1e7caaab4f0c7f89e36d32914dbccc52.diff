@@ -1,0 +1,34 @@
+From 6d86e20e1e7caaab4f0c7f89e36d32914dbccc52 Mon Sep 17 00:00:00 2001
+From: akallabeth <akallabeth@posteo.net>
+Date: Mon, 25 May 2020 14:03:12 +0200
+Subject: [PATCH] Fixed double free
+
+---
+ server/shadow/shadow_server.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/server/shadow/shadow_server.c b/server/shadow/shadow_server.c
+index 30a63c9fa03..259f22ecd14 100644
+--- a/server/shadow/shadow_server.c
++++ b/server/shadow/shadow_server.c
+@@ -586,14 +586,19 @@ int shadow_server_start(rdpShadowServer* server)
+ 		char** list = CommandLineParseCommaSeparatedValuesEx(NULL, server->ipcSocket, &count);
+ 		if (!list || (count <= 1))
+ 		{
+-			free(list);
+ 			if (server->ipcSocket == NULL)
+ 			{
+ 				if (!open_port(server, NULL))
++				{
++					free(list);
+ 					return -1;
++				}
+ 			}
+ 			else
++			{
++				free(list);
+ 				return -1;
++			}
+ 		}
+ 
+ 		for (x = 1; x < count; x++)

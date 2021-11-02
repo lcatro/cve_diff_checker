@@ -1,0 +1,25 @@
+From b9a52d6532c8514254c7cc1d8e18710dbedc41ff Mon Sep 17 00:00:00 2001
+From: apple502j <33279053+apple502j@users.noreply.github.com>
+Date: Mon, 23 Nov 2020 23:56:17 +0900
+Subject: [PATCH] SECURITY: Fix DOM XSS in More Links addon
+
+---
+ addons/more-links/userscript.js | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/addons/more-links/userscript.js b/addons/more-links/userscript.js
+index 211d721fa2..79c08efc8e 100644
+--- a/addons/more-links/userscript.js
++++ b/addons/more-links/userscript.js
+@@ -15,7 +15,10 @@ export default async function ({ addon, console }) {
+           let element = await addon.tab.waitForElement(".project-description", { markAsSeen: true });
+           // Need to convert #[numbers] to solve conflict between tags and external Scratch player links.
+           document.querySelectorAll(".project-description a").forEach((element) => {
+-            if (/\d+/.test(element.textContent)) element.outerHTML = element.textContent;
++              if (/^#\d+$/.test(element.textContent) && element.previousSibling instanceof Text) {
++                  element.previousSibling.textContent += element.textContent;
++                  element.remove();
++              }
+           });
+           element.normalize();
+           linkifyElement(element);

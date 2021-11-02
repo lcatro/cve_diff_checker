@@ -1,0 +1,75 @@
+From 43c0b81a818640429317c80fea1e66771e85024b Mon Sep 17 00:00:00 2001
+From: erouault <erouault>
+Date: Sat, 8 Oct 2016 15:04:31 +0000
+Subject: [PATCH] * tools/tiffcp.c: fix read of undefined variable in case of
+ missing required tags. Found on test case of MSVR 35100. * tools/tiffcrop.c:
+ fix read of undefined buffer in readContigStripsIntoBuffer() due to uint16
+ overflow. Probably not a security issue but I can be wrong. Reported as MSVR
+ 35100 by Axel Souchet from the MSRC Vulnerabilities & Mitigations team.
+
+---
+ ChangeLog        | 9 +++++++++
+ tools/tiffcp.c   | 4 ++--
+ tools/tiffcrop.c | 9 ++++++---
+ 3 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index c76f832c..8f54f286 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,12 @@
++2016-10-08 Even Rouault <even.rouault at spatialys.com>
++
++	* tools/tiffcp.c: fix read of undefined variable in case of missing
++	required tags. Found on test case of MSVR 35100.
++	* tools/tiffcrop.c: fix read of undefined buffer in
++	readContigStripsIntoBuffer() due to uint16 overflow. Probably not a
++	security issue but I can be wrong. Reported as MSVR 35100 by Axel
++	Souchet from the MSRC Vulnerabilities & Mitigations team.
++
+ 2016-09-25  Bob Friesenhahn  <bfriesen@simple.dallas.tx.us>
+ 
+ 	* html: Change as many remotesensing.org broken links to a working
+diff --git a/tools/tiffcp.c b/tools/tiffcp.c
+index ba2b715c..4ad74d39 100644
+--- a/tools/tiffcp.c
++++ b/tools/tiffcp.c
+@@ -592,8 +592,8 @@ static	copyFunc pickCopyFunc(TIFF*, TIFF*, uint16, uint16);
+ static int
+ tiffcp(TIFF* in, TIFF* out)
+ {
+-	uint16 bitspersample, samplesperpixel;
+-	uint16 input_compression, input_photometric;
++	uint16 bitspersample, samplesperpixel = 1;
++	uint16 input_compression, input_photometric = PHOTOMETRIC_MINISBLACK;
+ 	copyFunc cf;
+ 	uint32 width, length;
+ 	struct cpTag* p;
+diff --git a/tools/tiffcrop.c b/tools/tiffcrop.c
+index 76855665..eb6de77c 100644
+--- a/tools/tiffcrop.c
++++ b/tools/tiffcrop.c
+@@ -3628,7 +3628,7 @@ static int readContigStripsIntoBuffer (TIFF* in, uint8* buf)
+ {
+         uint8* bufp = buf;
+         int32  bytes_read = 0;
+-        uint16 strip, nstrips   = TIFFNumberOfStrips(in);
++        uint32 strip, nstrips   = TIFFNumberOfStrips(in);
+         uint32 stripsize = TIFFStripSize(in);
+         uint32 rows = 0;
+         uint32 rps = TIFFGetFieldDefaulted(in, TIFFTAG_ROWSPERSTRIP, &rps);
+@@ -4711,9 +4711,12 @@ static int readSeparateStripsIntoBuffer (TIFF *in, uint8 *obuf, uint32 length,
+                                          uint32 width, uint16 spp,
+                                          struct dump_opts *dump)
+   {
+-  int i, j, bytes_per_sample, bytes_per_pixel, shift_width, result = 1;
++  int i, bytes_per_sample, bytes_per_pixel, shift_width, result = 1;
++  uint32 j;
+   int32  bytes_read = 0;
+-  uint16 bps, nstrips, planar, strips_per_sample;
++  uint16 bps, planar;
++  uint32 nstrips;
++  uint32 strips_per_sample;
+   uint32 src_rowsize, dst_rowsize, rows_processed, rps;
+   uint32 rows_this_strip = 0;
+   tsample_t s;

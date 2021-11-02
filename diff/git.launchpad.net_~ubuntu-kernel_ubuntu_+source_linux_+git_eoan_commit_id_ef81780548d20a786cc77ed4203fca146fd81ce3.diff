@@ -1,0 +1,64 @@
+From ef81780548d20a786cc77ed4203fca146fd81ce3 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Thu, 7 Nov 2019 10:08:24 -0600
+Subject: UBUNTU: SAUCE: shiftfs: Restore vm_file value when lower fs mmap
+ fails
+
+BugLink: https://bugs.launchpad.net/bugs/1850994
+
+shiftfs_mmap() overwrites vma->vm_file before calling the lower
+filesystem mmap but does not restore the original value on
+failure. This means it is giving a pointer to the lower fs file
+back to the caller with no reference, which is a bad practice.
+However, it does not lead to any issues with upstream kernels as
+no caller accesses vma->vm_file after call_mmap().
+
+With the aufs patches applied the story is different. Whereas
+mmap_region() previously fput a local variable containing the
+file it assigned to vm_file, it now calls vma_fput() which will
+fput vm_file, for which it has no reference, and the reference
+for the original vm_file is not put.
+
+Fix this by restoring vma->vm_file to the original value when the
+mmap call into the lower fs fails.
+
+CVE-2019-15794
+
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Tyler Hicks <tyhicks@canonical.com>
+Signed-off-by: Khalid Elmously <khalid.elmously@canonical.com>
+---
+ fs/shiftfs.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/fs/shiftfs.c b/fs/shiftfs.c
+index 279fc64..cea42fc 100644
+--- a/fs/shiftfs.c
++++ b/fs/shiftfs.c
+@@ -1296,10 +1296,17 @@ static int shiftfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 
+ 	shiftfs_file_accessed(file);
+ 
+-	if (ret)
+-		fput(realfile); /* Drop refcount from new vm_file value */
+-	else
+-		fput(file); /* Drop refcount from previous vm_file value */
++	if (ret) {
++		/*
++		 * Drop refcount from new vm_file value and restore original
++		 * vm_file value
++		 */
++		vma->vm_file = file;
++		fput(realfile);
++	} else {
++		/* Drop refcount from previous vm_file value */
++		fput(file);
++	}
+ 
+ 	return ret;
+ }
+-- 
+cgit v1.1
+

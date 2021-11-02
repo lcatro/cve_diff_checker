@@ -1,0 +1,40 @@
+From 0cf716250b3645a5974c80d8336dcdf885749dff Mon Sep 17 00:00:00 2001
+From: Simon Urli <simon.urli@xwiki.com>
+Date: Wed, 3 Mar 2021 18:29:23 +0100
+Subject: [PATCH] XWIKI-18400: Wrong message after reset password
+
+---
+ .../org/xwiki/administration/test/ui/ResetPasswordIT.java   | 6 +++++-
+ .../src/main/webapp/templates/resetpasswordinline.vm        | 2 +-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/xwiki-platform-core/xwiki-platform-administration/xwiki-platform-administration-test/xwiki-platform-administration-test-docker/src/test/it/org/xwiki/administration/test/ui/ResetPasswordIT.java b/xwiki-platform-core/xwiki-platform-administration/xwiki-platform-administration-test/xwiki-platform-administration-test-docker/src/test/it/org/xwiki/administration/test/ui/ResetPasswordIT.java
+index 46e0440e7ee..e3f095fa50d 100644
+--- a/xwiki-platform-core/xwiki-platform-administration/xwiki-platform-administration-test/xwiki-platform-administration-test-docker/src/test/it/org/xwiki/administration/test/ui/ResetPasswordIT.java
++++ b/xwiki-platform-core/xwiki-platform-administration/xwiki-platform-administration-test/xwiki-platform-administration-test-docker/src/test/it/org/xwiki/administration/test/ui/ResetPasswordIT.java
+@@ -138,7 +138,11 @@ public void resetForgottenPassword(TestUtils setup) throws Exception
+         // Actually reset the user's password
+         resetPasswordPage = ResetPasswordPage.gotoPage();
+         resetPasswordPage.setUserName(userName);
+-        resetPasswordPage.clickResetPassword();
++        ResetPasswordPage newResetPasswordPage = resetPasswordPage.clickResetPassword();
++        assertTrue(newResetPasswordPage.getMessage().contains("An e-mail was sent"),
++            "Actual message: " + newResetPasswordPage.getMessage());
++        assertFalse(newResetPasswordPage.getMessage().contains("foo@bar.com"),
++            "Actual message: " + newResetPasswordPage.getMessage());
+ 
+         // Check the result
+         assertTrue(resetPasswordPage.isResetPasswordSent());
+diff --git a/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/resetpasswordinline.vm b/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/resetpasswordinline.vm
+index 36d977abcf6..c86a6dd840f 100644
+--- a/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/resetpasswordinline.vm
++++ b/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/resetpasswordinline.vm
+@@ -84,7 +84,7 @@ $services.localization.render('xe.admin.passwordReset.instructions')
+             #displayResetPasswordException()
+         #else
+             #resetPasswordBoxStart("default")
+-            $services.localization.render('xe.admin.passwordReset.emailSent', ["$email"])
++            $services.localization.render('xe.admin.passwordReset.emailSent', ["$services.mail.general.obfuscate($email)"])
+         #end
+     #end
+   <div>

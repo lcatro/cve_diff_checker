@@ -1,0 +1,26 @@
+From 201329abce4e92ae9071b9ded81e267aae159fbd Mon Sep 17 00:00:00 2001
+From: Oleg Lobanov <oleg@lobanov.me>
+Date: Mon, 26 Jul 2021 11:08:39 +0200
+Subject: [PATCH] chore: add Content-Security-Policy header
+
+---
+ http/http.go | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/http/http.go b/http/http.go
+index bc79856125..88acea75b3 100644
+--- a/http/http.go
++++ b/http/http.go
+@@ -25,6 +25,12 @@ func NewHandler(
+ 	server.Clean()
+ 
+ 	r := mux.NewRouter()
++	r.Use(func(next http.Handler) http.Handler {
++		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			w.Header().Set("Content-Security-Policy", `default-src 'self'`)
++			next.ServeHTTP(w, r)
++		})
++	})
+ 	index, static := getStaticHandlers(store, server, assetsFs)
+ 
+ 	// NOTE: This fixes the issue where it would redirect if people did not put a

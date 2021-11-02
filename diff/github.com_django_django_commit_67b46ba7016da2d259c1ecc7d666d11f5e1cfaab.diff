@@ -1,0 +1,400 @@
+From 67b46ba7016da2d259c1ecc7d666d11f5e1cfaab Mon Sep 17 00:00:00 2001
+From: Florian Apolloner <florian@apolloner.eu>
+Date: Sat, 13 Feb 2016 21:09:46 +0100
+Subject: [PATCH] Fixed CVE-2016-2513 -- Fixed user enumeration timing attack
+ during login.
+
+This is a security fix.
+---
+ django/contrib/auth/hashers.py   | 77 +++++++++++++++++++++++---------
+ docs/releases/1.8.10.txt         | 33 ++++++++++++++
+ docs/releases/1.9.3.txt          | 33 ++++++++++++++
+ docs/topics/auth/passwords.txt   | 31 +++++++++++++
+ tests/auth_tests/test_hashers.py | 58 +++++++++++++++++++++++-
+ 5 files changed, 211 insertions(+), 21 deletions(-)
+
+diff --git a/django/contrib/auth/hashers.py b/django/contrib/auth/hashers.py
+index 5136110fa1a0..ad0045267c74 100644
+--- a/django/contrib/auth/hashers.py
++++ b/django/contrib/auth/hashers.py
+@@ -4,6 +4,7 @@
+ import binascii
+ import hashlib
+ import importlib
++import warnings
+ from collections import OrderedDict
+ 
+ from django.conf import settings
+@@ -46,10 +47,17 @@ def check_password(password, encoded, setter=None, preferred='default'):
+     preferred = get_hasher(preferred)
+     hasher = identify_hasher(encoded)
+ 
+-    must_update = hasher.algorithm != preferred.algorithm
+-    if not must_update:
+-        must_update = preferred.must_update(encoded)
++    hasher_changed = hasher.algorithm != preferred.algorithm
++    must_update = hasher_changed or preferred.must_update(encoded)
+     is_correct = hasher.verify(password, encoded)
++
++    # If the hasher didn't change (we don't protect against enumeration if it
++    # does) and the password should get updated, try to close the timing gap
++    # between the work factor of the current encoded password and the default
++    # work factor.
++    if not is_correct and not hasher_changed and must_update:
++        hasher.harden_runtime(password, encoded)
++
+     if setter and is_correct and must_update:
+         setter(password)
+     return is_correct
+@@ -216,6 +224,19 @@ def safe_summary(self, encoded):
+     def must_update(self, encoded):
+         return False
+ 
++    def harden_runtime(self, password, encoded):
++        """
++        Bridge the runtime gap between the work factor supplied in `encoded`
++        and the work factor suggested by this hasher.
++
++        Taking PBKDF2 as an example, if `encoded` contains 20000 iterations and
++        `self.iterations` is 30000, this method should run password through
++        another 10000 iterations of PBKDF2. Similar approaches should exist
++        for any hasher that has a work factor. If not, this method should be
++        defined as a no-op to silence the warning.
++        """
++        warnings.warn('subclasses of BasePasswordHasher should provide a harden_runtime() method')
++
+ 
+ class PBKDF2PasswordHasher(BasePasswordHasher):
+     """
+@@ -258,6 +279,12 @@ def must_update(self, encoded):
+         algorithm, iterations, salt, hash = encoded.split('$', 3)
+         return int(iterations) != self.iterations
+ 
++    def harden_runtime(self, password, encoded):
++        algorithm, iterations, salt, hash = encoded.split('$', 3)
++        extra_iterations = self.iterations - int(iterations)
++        if extra_iterations > 0:
++            self.encode(password, salt, extra_iterations)
++
+ 
+ class PBKDF2SHA1PasswordHasher(PBKDF2PasswordHasher):
+     """
+@@ -305,23 +332,8 @@ def encode(self, password, salt):
+     def verify(self, password, encoded):
+         algorithm, data = encoded.split('$', 1)
+         assert algorithm == self.algorithm
+-        bcrypt = self._load_library()
+-
+-        # Hash the password prior to using bcrypt to prevent password
+-        # truncation as described in #20138.
+-        if self.digest is not None:
+-            # Use binascii.hexlify() because a hex encoded bytestring is
+-            # Unicode on Python 3.
+-            password = binascii.hexlify(self.digest(force_bytes(password)).digest())
+-        else:
+-            password = force_bytes(password)
+-
+-        # Ensure that our data is a bytestring
+-        data = force_bytes(data)
+-        # force_bytes() necessary for py-bcrypt compatibility
+-        hashpw = force_bytes(bcrypt.hashpw(password, data))
+-
+-        return constant_time_compare(data, hashpw)
++        encoded_2 = self.encode(password, force_bytes(data))
++        return constant_time_compare(encoded, encoded_2)
+ 
+     def safe_summary(self, encoded):
+         algorithm, empty, algostr, work_factor, data = encoded.split('$', 4)
+@@ -338,6 +350,16 @@ def must_update(self, encoded):
+         algorithm, empty, algostr, rounds, data = encoded.split('$', 4)
+         return int(rounds) != self.rounds
+ 
++    def harden_runtime(self, password, encoded):
++        _, data = encoded.split('$', 1)
++        salt = data[:29]  # Length of the salt in bcrypt.
++        rounds = data.split('$')[2]
++        # work factor is logarithmic, adding one doubles the load.
++        diff = 2**(self.rounds - int(rounds)) - 1
++        while diff > 0:
++            self.encode(password, force_bytes(salt))
++            diff -= 1
++
+ 
+ class BCryptPasswordHasher(BCryptSHA256PasswordHasher):
+     """
+@@ -385,6 +407,9 @@ def safe_summary(self, encoded):
+             (_('hash'), mask_hash(hash)),
+         ])
+ 
++    def harden_runtime(self, password, encoded):
++        pass
++
+ 
+ class MD5PasswordHasher(BasePasswordHasher):
+     """
+@@ -413,6 +438,9 @@ def safe_summary(self, encoded):
+             (_('hash'), mask_hash(hash)),
+         ])
+ 
++    def harden_runtime(self, password, encoded):
++        pass
++
+ 
+ class UnsaltedSHA1PasswordHasher(BasePasswordHasher):
+     """
+@@ -445,6 +473,9 @@ def safe_summary(self, encoded):
+             (_('hash'), mask_hash(hash)),
+         ])
+ 
++    def harden_runtime(self, password, encoded):
++        pass
++
+ 
+ class UnsaltedMD5PasswordHasher(BasePasswordHasher):
+     """
+@@ -478,6 +509,9 @@ def safe_summary(self, encoded):
+             (_('hash'), mask_hash(encoded, show=3)),
+         ])
+ 
++    def harden_runtime(self, password, encoded):
++        pass
++
+ 
+ class CryptPasswordHasher(BasePasswordHasher):
+     """
+@@ -512,3 +546,6 @@ def safe_summary(self, encoded):
+             (_('salt'), salt),
+             (_('hash'), mask_hash(data, show=3)),
+         ])
++
++    def harden_runtime(self, password, encoded):
++        pass
+diff --git a/docs/releases/1.8.10.txt b/docs/releases/1.8.10.txt
+index 73c7cc04a4df..d57afc470d3f 100644
+--- a/docs/releases/1.8.10.txt
++++ b/docs/releases/1.8.10.txt
+@@ -22,6 +22,39 @@ redirecting to this URL sends the user to ``attacker.com``.
+ Also, if a developer relies on ``is_safe_url()`` to provide safe redirect
+ targets and puts such a URL into a link, they could suffer from an XSS attack.
+ 
++CVE-2016-2513: User enumeration through timing difference on password hasher work factor upgrade
++================================================================================================
++
++In each major version of Django since 1.6, the default number of iterations for
++the ``PBKDF2PasswordHasher`` and its subclasses has increased. This improves
++the security of the password as the speed of hardware increases, however, it
++also creates a timing difference between a login request for a user with a
++password encoded in an older number of iterations and login request for a
++nonexistent user (which runs the default hasher's default number of iterations
++since Django 1.6).
++
++This only affects users who haven't logged in since the iterations were
++increased. The first time a user logs in after an iterations increase, their
++password is updated with the new iterations and there is no longer a timing
++difference.
++
++The new ``BasePasswordHasher.harden_runtime()`` method allows hashers to bridge
++the runtime gap between the work factor (e.g. iterations) supplied in existing
++encoded passwords and the default work factor of the hasher. This method
++is implemented for ``PBKDF2PasswordHasher``  and ``BCryptPasswordHasher``.
++The number of rounds for the latter hasher hasn't changed since Django 1.4, but
++some projects may subclass it and increase the work factor as needed.
++
++A warning will be emitted for any :ref:`third-party password hashers that don't
++implement <write-your-own-password-hasher>` a ``harden_runtime()`` method.
++
++If you have different password hashes in your database (such as SHA1 hashes
++from users who haven't logged in since the default hasher switched to PBKDF2
++in Django 1.4), the timing difference on a login request for these users may be
++even greater and this fix doesn't remedy that difference (or any difference
++when changing hashers). You may be able to :ref:`upgrade those hashes
++<wrapping-password-hashers>` to prevent a timing attack for that case.
++
+ Bugfixes
+ ========
+ 
+diff --git a/docs/releases/1.9.3.txt b/docs/releases/1.9.3.txt
+index 056122b16e39..355eaf96e962 100644
+--- a/docs/releases/1.9.3.txt
++++ b/docs/releases/1.9.3.txt
+@@ -22,6 +22,39 @@ redirecting to this URL sends the user to ``attacker.com``.
+ Also, if a developer relies on ``is_safe_url()`` to provide safe redirect
+ targets and puts such a URL into a link, they could suffer from an XSS attack.
+ 
++CVE-2016-2513: User enumeration through timing difference on password hasher work factor upgrade
++================================================================================================
++
++In each major version of Django since 1.6, the default number of iterations for
++the ``PBKDF2PasswordHasher`` and its subclasses has increased. This improves
++the security of the password as the speed of hardware increases, however, it
++also creates a timing difference between a login request for a user with a
++password encoded in an older number of iterations and login request for a
++nonexistent user (which runs the default hasher's default number of iterations
++since Django 1.6).
++
++This only affects users who haven't logged in since the iterations were
++increased. The first time a user logs in after an iterations increase, their
++password is updated with the new iterations and there is no longer a timing
++difference.
++
++The new ``BasePasswordHasher.harden_runtime()`` method allows hashers to bridge
++the runtime gap between the work factor (e.g. iterations) supplied in existing
++encoded passwords and the default work factor of the hasher. This method
++is implemented for ``PBKDF2PasswordHasher``  and ``BCryptPasswordHasher``.
++The number of rounds for the latter hasher hasn't changed since Django 1.4, but
++some projects may subclass it and increase the work factor as needed.
++
++A warning will be emitted for any :ref:`third-party password hashers that don't
++implement <write-your-own-password-hasher>` a ``harden_runtime()`` method.
++
++If you have different password hashes in your database (such as SHA1 hashes
++from users who haven't logged in since the default hasher switched to PBKDF2
++in Django 1.4), the timing difference on a login request for these users may be
++even greater and this fix doesn't remedy that difference (or any difference
++when changing hashers). You may be able to :ref:`upgrade those hashes
++<wrapping-password-hashers>` to prevent a timing attack for that case.
++
+ Bugfixes
+ ========
+ 
+diff --git a/docs/topics/auth/passwords.txt b/docs/topics/auth/passwords.txt
+index ecddeddbfa00..47d6486dd90d 100644
+--- a/docs/topics/auth/passwords.txt
++++ b/docs/topics/auth/passwords.txt
+@@ -186,6 +186,14 @@ unmentioned algorithms won't be able to upgrade. Hashed passwords will be
+ updated when increasing (or decreasing) the number of PBKDF2 iterations or
+ bcrypt rounds.
+ 
++Be aware that if all the passwords in your database aren't encoded in the
++default hasher's algorithm, you may be vulnerable to a user enumeration timing
++attack due to a difference between the duration of a login request for a user
++with a password encoded in a non-default algorithm and the duration of a login
++request for a nonexistent user (which runs the default hasher). You may be able
++to mitigate this by :ref:`upgrading older password hashes
++<wrapping-password-hashers>`.
++
+ .. versionchanged:: 1.9
+ 
+     Passwords updates when changing the number of bcrypt rounds was added.
+@@ -310,6 +318,29 @@ The corresponding algorithm names are:
+ * ``unsalted_md5``
+ * ``crypt``
+ 
++.. _write-your-own-password-hasher:
++
++Writing your own hasher
++-----------------------
++
++.. versionadded:: 1.9.3
++
++If you write your own password hasher that contains a work factor such as a
++number of iterations, you should implement a
++``harden_runtime(self, password, encoded)`` method to bridge the runtime gap
++between the work factor supplied in the ``encoded`` password and the default
++work factor of the hasher. This prevents a user enumeration timing attack due
++to  difference between a login request for a user with a password encoded in an
++older number of iterations and a nonexistent user (which runs the default
++hasher's default number of iterations).
++
++Taking PBKDF2 as example, if ``encoded`` contains 20,000 iterations and the
++hasher's default ``iterations`` is 30,000, the method should run ``password``
++through another 10,000 iterations of PBKDF2.
++
++If your hasher doesn't have a work factor, implement the method as a no-op
++(``pass``).
++
+ Manually managing a user's password
+ ===================================
+ 
+diff --git a/tests/auth_tests/test_hashers.py b/tests/auth_tests/test_hashers.py
+index d79a2462769c..ecd3f276a922 100644
+--- a/tests/auth_tests/test_hashers.py
++++ b/tests/auth_tests/test_hashers.py
+@@ -10,9 +10,10 @@
+     check_password, get_hasher, identify_hasher, is_password_usable,
+     make_password,
+ )
+-from django.test import SimpleTestCase
++from django.test import SimpleTestCase, mock
+ from django.test.utils import override_settings
+ from django.utils import six
++from django.utils.encoding import force_bytes
+ 
+ try:
+     import crypt
+@@ -214,6 +215,28 @@ def setter(password):
+         finally:
+             hasher.rounds = old_rounds
+ 
++    @skipUnless(bcrypt, "bcrypt not installed")
++    def test_bcrypt_harden_runtime(self):
++        hasher = get_hasher('bcrypt')
++        self.assertEqual('bcrypt', hasher.algorithm)
++
++        with mock.patch.object(hasher, 'rounds', 4):
++            encoded = make_password('letmein', hasher='bcrypt')
++
++        with mock.patch.object(hasher, 'rounds', 6), \
++                mock.patch.object(hasher, 'encode', side_effect=hasher.encode):
++            hasher.harden_runtime('wrong_password', encoded)
++
++            # Increasing rounds from 4 to 6 means an increase of 4 in workload,
++            # therefore hardening should run 3 times to make the timing the
++            # same (the original encode() call already ran once).
++            self.assertEqual(hasher.encode.call_count, 3)
++
++            # Get the original salt (includes the original workload factor)
++            algorithm, data = encoded.split('$', 1)
++            expected_call = (('wrong_password', force_bytes(data[:29])),)
++            self.assertEqual(hasher.encode.call_args_list, [expected_call] * 3)
++
+     def test_unusable(self):
+         encoded = make_password(None)
+         self.assertEqual(len(encoded), len(UNUSABLE_PASSWORD_PREFIX) + UNUSABLE_PASSWORD_SUFFIX_LENGTH)
+@@ -337,6 +360,25 @@ def setter(password):
+         finally:
+             hasher.iterations = old_iterations
+ 
++    def test_pbkdf2_harden_runtime(self):
++        hasher = get_hasher('default')
++        self.assertEqual('pbkdf2_sha256', hasher.algorithm)
++
++        with mock.patch.object(hasher, 'iterations', 1):
++            encoded = make_password('letmein')
++
++        with mock.patch.object(hasher, 'iterations', 6), \
++                mock.patch.object(hasher, 'encode', side_effect=hasher.encode):
++            hasher.harden_runtime('wrong_password', encoded)
++
++            # Encode should get called once ...
++            self.assertEqual(hasher.encode.call_count, 1)
++
++            # ... with the original salt and 5 iterations.
++            algorithm, iterations, salt, hash = encoded.split('$', 3)
++            expected_call = (('wrong_password', salt, 5),)
++            self.assertEqual(hasher.encode.call_args, expected_call)
++
+     def test_pbkdf2_upgrade_new_hasher(self):
+         hasher = get_hasher('default')
+         self.assertEqual('pbkdf2_sha256', hasher.algorithm)
+@@ -365,6 +407,20 @@ def setter(password):
+             self.assertTrue(check_password('letmein', encoded, setter))
+             self.assertTrue(state['upgraded'])
+ 
++    def test_check_password_calls_harden_runtime(self):
++        hasher = get_hasher('default')
++        encoded = make_password('letmein')
++
++        with mock.patch.object(hasher, 'harden_runtime'), \
++                mock.patch.object(hasher, 'must_update', return_value=True):
++            # Correct password supplied, no hardening needed
++            check_password('letmein', encoded)
++            self.assertEqual(hasher.harden_runtime.call_count, 0)
++
++            # Wrong password supplied, hardening needed
++            check_password('wrong_password', encoded)
++            self.assertEqual(hasher.harden_runtime.call_count, 1)
++
+     def test_load_library_no_algorithm(self):
+         with self.assertRaises(ValueError) as e:
+             BasePasswordHasher()._load_library()

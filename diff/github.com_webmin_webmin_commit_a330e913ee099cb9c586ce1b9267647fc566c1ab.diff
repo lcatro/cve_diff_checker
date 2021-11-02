@@ -1,0 +1,48 @@
+From a330e913ee099cb9c586ce1b9267647fc566c1ab Mon Sep 17 00:00:00 2001
+From: Jamie Cameron <jcameron@webmin.com>
+Date: Mon, 12 Jun 2017 14:01:10 -0700
+Subject: [PATCH] Escape untrusted params
+
+---
+ man/view_man.cgi | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/man/view_man.cgi b/man/view_man.cgi
+index b6150f5ac3..e0f101ad72 100755
+--- a/man/view_man.cgi
++++ b/man/view_man.cgi
+@@ -43,8 +43,8 @@ SECT: foreach $sec (@sects) {
+ 		}
+ 	}
+ if (!$found) {
+-	print "<p><b>",&text('man_noentry', "<tt>$in{'page'}</tt>"),
+-	      "</b><p>\n";
++	print "<p><b>",&text('man_noentry',
++		     "<tt>".&html_escape($in{'page'})."</tt>"),"</b><p>\n";
+ 	}
+ else {
+ 	if (&has_command($config{'man2html_path'})) {
+@@ -86,13 +86,19 @@ else {
+ 			$out =~ s/<A HREF="file:[^"]+">([^<]+)<\/a>/$1/ig;
+ 			$out =~ s/<A HREF="view_man.cgi">/<A HREF=\"\">/i;
+ 			}
+-		&show_view_table(&text('man_header', $in{'page'}, $in{'sec'}),
+-				 $out);
++		&show_view_table(
++			&text('man_header',
++			      &html_escape($in{'page'}),
++			      &html_escape($in{'sec'})),
++			$out);
+ 	} else {
+ 		$out =~ s/.\010//g;
+ 		$out =~ s/^(man:\s*)?(re)?formatting.*//i;
+-		&show_view_table(&text('man_header', $in{'page'}, $in{'sec'}),
+-				 "<pre>".&html_escape($out)."</pre>");
++		&show_view_table(
++			&text('man_header',
++			      &html_escape($in{'page'}),
++			      &html_escape($in{'sec'})),
++			"<pre>".&html_escape($out)."</pre>");
+ 		}
+ 	}
+ 

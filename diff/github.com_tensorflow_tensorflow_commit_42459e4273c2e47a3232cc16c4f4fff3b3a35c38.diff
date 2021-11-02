@@ -1,0 +1,37 @@
+From 42459e4273c2e47a3232cc16c4f4fff3b3a35c38 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 22:25:05 -0700
+Subject: [PATCH] Prevent CHECK-fail/heap OOB in UpperBound and LowerBound
+
+PiperOrigin-RevId: 387738073
+Change-Id: Iee74de95ddad18440d052a75a5a1cb67544f490a
+---
+ tensorflow/core/kernels/searchsorted_op.cc | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tensorflow/core/kernels/searchsorted_op.cc b/tensorflow/core/kernels/searchsorted_op.cc
+index 01e221dc471c4..5f075a6a540e9 100644
+--- a/tensorflow/core/kernels/searchsorted_op.cc
++++ b/tensorflow/core/kernels/searchsorted_op.cc
+@@ -86,6 +86,10 @@ class UpperBoundOp : public OpKernel {
+     const Tensor& sorted_inputs_t = ctx->input(0);
+     const Tensor& values_t = ctx->input(1);
+ 
++    // inputs must be at least a matrix
++    OP_REQUIRES(
++        ctx, sorted_inputs_t.shape().dims() >= 2,
++        errors::InvalidArgument("sorted input argument must be a matrix"));
+     // must have same batch dim_size for both
+     OP_REQUIRES(ctx, sorted_inputs_t.dim_size(0) == values_t.dim_size(0),
+                 Status(error::INVALID_ARGUMENT,
+@@ -127,6 +131,10 @@ class LowerBoundOp : public OpKernel {
+     const Tensor& sorted_inputs_t = ctx->input(0);
+     const Tensor& values_t = ctx->input(1);
+ 
++    // inputs must be at least a matrix
++    OP_REQUIRES(
++        ctx, sorted_inputs_t.shape().dims() >= 2,
++        errors::InvalidArgument("sorted input argument must be a matrix"));
+     // must have same batch dim_size for both
+     OP_REQUIRES(ctx, sorted_inputs_t.dim_size(0) == values_t.dim_size(0),
+                 Status(error::INVALID_ARGUMENT,

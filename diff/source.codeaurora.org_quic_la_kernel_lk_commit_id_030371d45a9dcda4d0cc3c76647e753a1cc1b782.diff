@@ -1,0 +1,43 @@
+From 030371d45a9dcda4d0cc3c76647e753a1cc1b782 Mon Sep 17 00:00:00 2001
+From: vijay kumar <vpendo@codeaurora.org>
+Date: Wed, 9 Dec 2015 18:36:09 +0530
+Subject: app: aboot: check for integer overflow
+
+Added integer overflow check in aboot code.
+
+Change-Id: I6f3f52747a3e777fbd8c5024160785164e102f40
+---
+ app/aboot/aboot.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
+index 7f421d6..7e2fc40 100755
+--- a/app/aboot/aboot.c
++++ b/app/aboot/aboot.c
+@@ -1091,6 +1091,12 @@ int boot_linux_from_flash(void)
+ 
+ #if DEVICE_TREE
+ 		dt_actual = ROUND_TO_PAGE(hdr->dt_size, page_mask);
++
++		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ (uint64_t)dt_actual + page_size)) {
++			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
++			return -1;
++		}
++
+ 		imagesize_actual = (page_size + kernel_actual + ramdisk_actual + dt_actual);
+ 
+ 		if (check_aboot_addr_range_overlap(hdr->tags_addr, hdr->dt_size))
+@@ -1099,6 +1105,10 @@ int boot_linux_from_flash(void)
+ 			return -1;
+ 		}
+ #else
++		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ page_size)) {
++			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
++			return -1;
++		}
+ 		imagesize_actual = (page_size + kernel_actual + ramdisk_actual);
+ #endif
+ 
+-- 
+cgit v1.1
+

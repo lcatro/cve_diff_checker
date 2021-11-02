@@ -1,0 +1,33 @@
+From 00e8181bd97c834fe60751b0c511d4bb97875f78 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Wed, 27 Jun 2018 16:59:13 +0200
+Subject: [PATCH] avcodec/ac3_parser: Check init_get_bits8() for failure
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: null pointer dereference
+Fixes: ffmpeg_crash_6.avi
+
+Found-by: Thuan Pham, Marcel Böhme, Andrew Santosa and Alexandru Razvan Caciulescu with AFLSmart
+Reviewed-by: Paul B Mahol <onemda@gmail.com>
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavcodec/ac3_parser.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/ac3_parser.c b/libavcodec/ac3_parser.c
+index f4618bf215ee..1e203ae6ac23 100644
+--- a/libavcodec/ac3_parser.c
++++ b/libavcodec/ac3_parser.c
+@@ -162,7 +162,9 @@ int avpriv_ac3_parse_header(AC3HeaderInfo **phdr, const uint8_t *buf,
+         return AVERROR(ENOMEM);
+     hdr = *phdr;
+ 
+-    init_get_bits8(&gb, buf, size);
++    err = init_get_bits8(&gb, buf, size);
++    if (err < 0)
++        return AVERROR_INVALIDDATA;
+     err = ff_ac3_parse_header(&gb, hdr);
+     if (err < 0)
+         return AVERROR_INVALIDDATA;

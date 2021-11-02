@@ -1,0 +1,469 @@
+From 4601c685e7fd19c3724d5e499c69b8d3ec49933e Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 21:49:45 -0700
+Subject: [PATCH] CVE-2017-13019: Clean up PGM option processing.
+
+Add #defines for option lengths or the lengths of the fixed-length part
+of the option.  Sometimes those #defines differ from what was there
+before; what was there before was wrong, probably because the option
+lengths given in RFC 3208 were sometimes wrong - some lengths included
+the length of the option header, some lengths didn't.
+
+Don't use "sizeof(uintXX_t)" for sizes in the packet, just use the
+number of bytes directly.
+
+For the options that include an IPv4 or IPv6 address, check the option
+length against the length of what precedes the address before fetching
+any of that data.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-pgm.c                | 210 +++++++++++++++++++++++--------------
+ tests/TESTLIST             |   1 +
+ tests/pgm_opts_asan_2.out  |   2 +
+ tests/pgm_opts_asan_2.pcap | Bin 0 -> 135 bytes
+ 4 files changed, 133 insertions(+), 80 deletions(-)
+ create mode 100644 tests/pgm_opts_asan_2.out
+ create mode 100644 tests/pgm_opts_asan_2.pcap
+
+diff --git a/print-pgm.c b/print-pgm.c
+index 9bd6eac53..c22b188b7 100644
+--- a/print-pgm.c
++++ b/print-pgm.c
+@@ -479,112 +479,130 @@ pgm_print(netdissect_options *ndo,
+ 
+ 		switch (opt_type & PGM_OPT_MASK) {
+ 		case PGM_OPT_LENGTH:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_LENGTH option, length %u != 4]", opt_len));
++#define PGM_OPT_LENGTH_LEN	(2+2)
++		    if (opt_len != PGM_OPT_LENGTH_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_LENGTH option, length %u != %u]",
++			    opt_len, PGM_OPT_LENGTH_LEN));
+ 			return;
+ 		    }
+ 		    ND_PRINT((ndo, " OPTS LEN (extra?) %d", EXTRACT_16BITS(bp)));
+-		    bp += sizeof(uint16_t);
+-		    opts_len -= 4;
++		    bp += 2;
++		    opts_len -= PGM_OPT_LENGTH_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_FRAGMENT:
+-		    if (opt_len != 16) {
+-			ND_PRINT((ndo, "[Bad OPT_FRAGMENT option, length %u != 16]", opt_len));
++#define PGM_OPT_FRAGMENT_LEN	(2+2+4+4+4)
++		    if (opt_len != PGM_OPT_FRAGMENT_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_FRAGMENT option, length %u != %u]",
++			    opt_len, PGM_OPT_FRAGMENT_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    seq = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    offset = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    len = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " FRAG seq %u off %u len %u", seq, offset, len));
+-		    opts_len -= 16;
++		    opts_len -= PGM_OPT_FRAGMENT_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_NAK_LIST:
+ 		    bp += 2;
+-		    opt_len -= sizeof(uint32_t);	/* option header */
++		    opt_len -= 4;	/* option header */
+ 		    ND_PRINT((ndo, " NAK LIST"));
+ 		    while (opt_len) {
+-			if (opt_len < sizeof(uint32_t)) {
++			if (opt_len < 4) {
+ 			    ND_PRINT((ndo, "[Option length not a multiple of 4]"));
+ 			    return;
+ 			}
+-			ND_TCHECK2(*bp, sizeof(uint32_t));
++			ND_TCHECK2(*bp, 4);
+ 			ND_PRINT((ndo, " %u", EXTRACT_32BITS(bp)));
+-			bp += sizeof(uint32_t);
+-			opt_len -= sizeof(uint32_t);
+-			opts_len -= sizeof(uint32_t);
++			bp += 4;
++			opt_len -= 4;
++			opts_len -= 4;
+ 		    }
+ 		    break;
+ 
+ 		case PGM_OPT_JOIN:
+-		    if (opt_len != 8) {
+-			ND_PRINT((ndo, "[Bad OPT_JOIN option, length %u != 8]", opt_len));
++#define PGM_OPT_JOIN_LEN	(2+2+4)
++		    if (opt_len != PGM_OPT_JOIN_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_JOIN option, length %u != %u]",
++			    opt_len, PGM_OPT_JOIN_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    seq = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " JOIN %u", seq));
+-		    opts_len -= 8;
++		    opts_len -= PGM_OPT_JOIN_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_NAK_BO_IVL:
+-		    if (opt_len != 12) {
+-			ND_PRINT((ndo, "[Bad OPT_NAK_BO_IVL option, length %u != 12]", opt_len));
++#define PGM_OPT_NAK_BO_IVL_LEN	(2+2+4+4)
++		    if (opt_len != PGM_OPT_NAK_BO_IVL_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_NAK_BO_IVL option, length %u != %u]",
++			    opt_len, PGM_OPT_NAK_BO_IVL_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    offset = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    seq = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " BACKOFF ivl %u ivlseq %u", offset, seq));
+-		    opts_len -= 12;
++		    opts_len -= PGM_OPT_NAK_BO_IVL_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_NAK_BO_RNG:
+-		    if (opt_len != 12) {
+-			ND_PRINT((ndo, "[Bad OPT_NAK_BO_RNG option, length %u != 12]", opt_len));
++#define PGM_OPT_NAK_BO_RNG_LEN	(2+2+4+4)
++		    if (opt_len != PGM_OPT_NAK_BO_RNG_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_NAK_BO_RNG option, length %u != %u]",
++			    opt_len, PGM_OPT_NAK_BO_RNG_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    offset = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    seq = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " BACKOFF max %u min %u", offset, seq));
+-		    opts_len -= 12;
++		    opts_len -= PGM_OPT_NAK_BO_RNG_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_REDIRECT:
++#define PGM_OPT_REDIRECT_FIXED_LEN	(2+2+2+2)
++		    if (opt_len < PGM_OPT_REDIRECT_FIXED_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_REDIRECT option, length %u < %u]",
++			    opt_len, PGM_OPT_REDIRECT_FIXED_LEN));
++			return;
++		    }
+ 		    bp += 2;
+ 		    nla_afnum = EXTRACT_16BITS(bp);
+-		    bp += (2 * sizeof(uint16_t));
++		    bp += 2+2;
+ 		    switch (nla_afnum) {
+ 		    case AFNUM_INET:
+-			if (opt_len != 4 + sizeof(struct in_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_REDIRECT option, length %u != 4 + address size]", opt_len));
++			if (opt_len != PGM_OPT_REDIRECT_FIXED_LEN + sizeof(struct in_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_REDIRECT option, length %u != %u + address size]",
++			        opt_len, PGM_OPT_REDIRECT_FIXED_LEN));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in_addr));
+ 			addrtostr(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in_addr);
+-			opts_len -= 4 + sizeof(struct in_addr);
++			opts_len -= PGM_OPT_REDIRECT_FIXED_LEN + sizeof(struct in_addr);
+ 			break;
+ 		    case AFNUM_INET6:
+-			if (opt_len != 4 + sizeof(struct in6_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_REDIRECT option, length %u != 4 + address size]", opt_len));
++			if (opt_len != PGM_OPT_REDIRECT_FIXED_LEN + sizeof(struct in6_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_REDIRECT option, length %u != %u + address size]",
++			        PGM_OPT_REDIRECT_FIXED_LEN, opt_len));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in6_addr));
+ 			addrtostr6(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in6_addr);
+-			opts_len -= 4 + sizeof(struct in6_addr);
++			opts_len -= PGM_OPT_REDIRECT_FIXED_LEN + sizeof(struct in6_addr);
+ 			break;
+ 		    default:
+ 			goto trunc;
+@@ -595,49 +613,57 @@ pgm_print(netdissect_options *ndo,
+ 		    break;
+ 
+ 		case PGM_OPT_PARITY_PRM:
+-		    if (opt_len != 8) {
+-			ND_PRINT((ndo, "[Bad OPT_PARITY_PRM option, length %u != 8]", opt_len));
++#define PGM_OPT_PARITY_PRM_LEN	(2+2+4)
++		    if (opt_len != PGM_OPT_PARITY_PRM_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_PARITY_PRM option, length %u != %u]",
++			    opt_len, PGM_OPT_PARITY_PRM_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    len = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " PARITY MAXTGS %u", len));
+-		    opts_len -= 8;
++		    opts_len -= PGM_OPT_PARITY_PRM_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_PARITY_GRP:
+-		    if (opt_len != 8) {
+-			ND_PRINT((ndo, "[Bad OPT_PARITY_GRP option, length %u != 8]", opt_len));
++#define PGM_OPT_PARITY_GRP_LEN	(2+2+4)
++		    if (opt_len != PGM_OPT_PARITY_GRP_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_PARITY_GRP option, length %u != %u]",
++			    opt_len, PGM_OPT_PARITY_GRP_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    seq = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " PARITY GROUP %u", seq));
+-		    opts_len -= 8;
++		    opts_len -= PGM_OPT_PARITY_GRP_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_CURR_TGSIZE:
+-		    if (opt_len != 8) {
+-			ND_PRINT((ndo, "[Bad OPT_CURR_TGSIZE option, length %u != 8]", opt_len));
++#define PGM_OPT_CURR_TGSIZE_LEN	(2+2+4)
++		    if (opt_len != PGM_OPT_CURR_TGSIZE_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_CURR_TGSIZE option, length %u != %u]",
++			    opt_len, PGM_OPT_CURR_TGSIZE_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    len = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    ND_PRINT((ndo, " PARITY ATGS %u", len));
+-		    opts_len -= 8;
++		    opts_len -= PGM_OPT_CURR_TGSIZE_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_NBR_UNREACH:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_NBR_UNREACH option, length %u != 4]", opt_len));
++#define PGM_OPT_NBR_UNREACH_LEN	(2+2)
++		    if (opt_len != PGM_OPT_NBR_UNREACH_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_NBR_UNREACH option, length %u != %u]",
++			    opt_len, PGM_OPT_NBR_UNREACH_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    ND_PRINT((ndo, " NBR_UNREACH"));
+-		    opts_len -= 4;
++		    opts_len -= PGM_OPT_NBR_UNREACH_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_PATH_NLA:
+@@ -647,33 +673,39 @@ pgm_print(netdissect_options *ndo,
+ 		    break;
+ 
+ 		case PGM_OPT_SYN:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_SYN option, length %u != 4]", opt_len));
++#define PGM_OPT_SYN_LEN	(2+2)
++		    if (opt_len != PGM_OPT_SYN_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_SYN option, length %u != %u]",
++			    opt_len, PGM_OPT_SYN_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    ND_PRINT((ndo, " SYN"));
+-		    opts_len -= 4;
++		    opts_len -= PGM_OPT_SYN_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_FIN:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_FIN option, length %u != 4]", opt_len));
++#define PGM_OPT_FIN_LEN	(2+2)
++		    if (opt_len != PGM_OPT_FIN_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_FIN option, length %u != %u]",
++			    opt_len, PGM_OPT_FIN_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    ND_PRINT((ndo, " FIN"));
+-		    opts_len -= 4;
++		    opts_len -= PGM_OPT_FIN_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_RST:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_RST option, length %u != 4]", opt_len));
++#define PGM_OPT_RST_LEN	(2+2)
++		    if (opt_len != PGM_OPT_RST_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_RST option, length %u != %u]",
++			    opt_len, PGM_OPT_RST_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    ND_PRINT((ndo, " RST"));
+-		    opts_len -= 4;
++		    opts_len -= PGM_OPT_RST_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_CR:
+@@ -683,41 +715,51 @@ pgm_print(netdissect_options *ndo,
+ 		    break;
+ 
+ 		case PGM_OPT_CRQST:
+-		    if (opt_len != 4) {
+-			ND_PRINT((ndo, "[Bad OPT_CRQST option, length %u != 4]", opt_len));
++#define PGM_OPT_CRQST_LEN	(2+2)
++		    if (opt_len != PGM_OPT_CRQST_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_CRQST option, length %u != %u]",
++			    opt_len, PGM_OPT_CRQST_LEN));
+ 			return;
+ 		    }
+ 		    bp += 2;
+ 		    ND_PRINT((ndo, " CRQST"));
+-		    opts_len -= 4;
++		    opts_len -= PGM_OPT_CRQST_LEN;
+ 		    break;
+ 
+ 		case PGM_OPT_PGMCC_DATA:
++#define PGM_OPT_PGMCC_DATA_FIXED_LEN	(2+2+4+2+2)
++		    if (opt_len < PGM_OPT_PGMCC_DATA_FIXED_LEN) {
++			ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u < %u]",
++			    opt_len, PGM_OPT_PGMCC_DATA_FIXED_LEN));
++			return;
++		    }
+ 		    bp += 2;
+ 		    offset = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    nla_afnum = EXTRACT_16BITS(bp);
+-		    bp += (2 * sizeof(uint16_t));
++		    bp += 2+2;
+ 		    switch (nla_afnum) {
+ 		    case AFNUM_INET:
+-			if (opt_len != 12 + sizeof(struct in_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != 12 + address size]", opt_len));
++			if (opt_len != PGM_OPT_PGMCC_DATA_FIXED_LEN + sizeof(struct in_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != %u + address size]",
++			        opt_len, PGM_OPT_PGMCC_DATA_FIXED_LEN));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in_addr));
+ 			addrtostr(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in_addr);
+-			opts_len -= 12 + sizeof(struct in_addr);
++			opts_len -= PGM_OPT_PGMCC_DATA_FIXED_LEN + sizeof(struct in_addr);
+ 			break;
+ 		    case AFNUM_INET6:
+-			if (opt_len != 12 + sizeof(struct in6_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != 12 + address size]", opt_len));
++			if (opt_len != PGM_OPT_PGMCC_DATA_FIXED_LEN + sizeof(struct in6_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != %u + address size]",
++			        opt_len, PGM_OPT_PGMCC_DATA_FIXED_LEN));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in6_addr));
+ 			addrtostr6(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in6_addr);
+-			opts_len -= 12 + sizeof(struct in6_addr);
++			opts_len -= PGM_OPT_PGMCC_DATA_FIXED_LEN + sizeof(struct in6_addr);
+ 			break;
+ 		    default:
+ 			goto trunc;
+@@ -728,31 +770,39 @@ pgm_print(netdissect_options *ndo,
+ 		    break;
+ 
+ 		case PGM_OPT_PGMCC_FEEDBACK:
++#define PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN	(2+2+4+2+2)
++		    if (opt_len < PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN) {
++			ND_PRINT((ndo, "[Bad PGM_OPT_PGMCC_FEEDBACK option, length %u < %u]",
++			    opt_len, PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN));
++			return;
++		    }
+ 		    bp += 2;
+ 		    offset = EXTRACT_32BITS(bp);
+-		    bp += sizeof(uint32_t);
++		    bp += 4;
+ 		    nla_afnum = EXTRACT_16BITS(bp);
+-		    bp += (2 * sizeof(uint16_t));
++		    bp += 2+2;
+ 		    switch (nla_afnum) {
+ 		    case AFNUM_INET:
+-			if (opt_len != 12 + sizeof(struct in_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != 12 + address size]", opt_len));
++			if (opt_len != PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN + sizeof(struct in_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_PGMCC_FEEDBACK option, length %u != %u + address size]",
++			        opt_len, PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in_addr));
+ 			addrtostr(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in_addr);
+-			opts_len -= 12 + sizeof(struct in_addr);
++			opts_len -= PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN + sizeof(struct in_addr);
+ 			break;
+ 		    case AFNUM_INET6:
+-			if (opt_len != 12 + sizeof(struct in6_addr)) {
+-			    ND_PRINT((ndo, "[Bad OPT_PGMCC_DATA option, length %u != 12 + address size]", opt_len));
++			if (opt_len != PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN + sizeof(struct in6_addr)) {
++			    ND_PRINT((ndo, "[Bad OPT_PGMCC_FEEDBACK option, length %u != %u + address size]",
++			        opt_len, PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN));
+ 			    return;
+ 			}
+ 			ND_TCHECK2(*bp, sizeof(struct in6_addr));
+ 			addrtostr6(bp, nla_buf, sizeof(nla_buf));
+ 			bp += sizeof(struct in6_addr);
+-			opts_len -= 12 + sizeof(struct in6_addr);
++			opts_len -= PGM_OPT_PGMCC_FEEDBACK_FIXED_LEN + sizeof(struct in6_addr);
+ 			break;
+ 		    default:
+ 			goto trunc;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 68617bf44..942372328 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -520,6 +520,7 @@ esis_snpa_asan-4	esis_snpa_asan-4.pcap		esis_snpa_asan-4.out	-v
+ esis_snpa_asan-5	esis_snpa_asan-5.pcap		esis_snpa_asan-5.out	-v
+ dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
+ pgm_opts_asan		pgm_opts_asan.pcap		pgm_opts_asan.out	-v
++pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/pgm_opts_asan_2.out b/tests/pgm_opts_asan_2.out
+new file mode 100644
+index 000000000..7e948d412
+--- /dev/null
++++ b/tests/pgm_opts_asan_2.out
+@@ -0,0 +1,2 @@
++IP (tos 0x41,ECT(1), id 0, offset 0, flags [none], proto PGM (113), length 32639, options (unknown 89 [bad length 232]), bad cksum 5959 (->96b9)!)
++    128.121.89.107 > 89.89.16.63: 128.121.89.107.4 > 89.89.16.63.225: PGM, length 0 0x3414eb1f0022 UNKNOWN type 0x1f OPTS LEN 225 OPT_1F [13]  OPT_06 [26] [Bad OPT_PGMCC_DATA option, length 4 < 12]
+diff --git a/tests/pgm_opts_asan_2.pcap b/tests/pgm_opts_asan_2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..28773fd9e8be45fcef242ce74cfd715c8fa9b72e
+GIT binary patch
+literal 135
+zcmca|c+)~A1{MY&U<48IFor-uFf%WsGKl}bp3!OTN?y;IareI*STK7I2ZOs~eLYAu
+zLt$iOLuF)kWTb$7<O}E3cbT3r01bO6&#S-RMC7$RgAzy)51W(#g8+!da9idUh>G~X
+T$bo_3G6TaxCLtCEIYtHm)ng!A
+
+literal 0
+HcmV?d00001
+

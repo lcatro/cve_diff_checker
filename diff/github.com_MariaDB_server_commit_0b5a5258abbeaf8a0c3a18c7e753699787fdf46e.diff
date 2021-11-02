@@ -1,0 +1,61 @@
+From 0b5a5258abbeaf8a0c3a18c7e753699787fdf46e Mon Sep 17 00:00:00 2001
+From: sjaakola <seppo.jaakola@iki.fi>
+Date: Fri, 6 Oct 2017 09:49:42 +0300
+Subject: [PATCH] MW-416 DDL replication moved after acl checking
+
+galera_events test shows a regression with the original fix for MW-416
+Reason was that Events::drop_event() can be called also from inside event
+execution, and there we have a speacial treatment for event, which executes
+"DROP EVENT" statement, and runs TOI replication inside the event processing body.
+This resulted in executing WSREP_TO_ISOLATION two times for such DROP EVENT statement.
+Fix is to call WSREP_TO_ISOLATION_BEGIN only in Events::drop_event()
+---
+ sql/event_data_objects.cc | 30 ++++++++++++++++++++++--------
+ 1 file changed, 22 insertions(+), 8 deletions(-)
+
+diff --git a/sql/event_data_objects.cc b/sql/event_data_objects.cc
+index e494b4a429bca..90e839debb549 100644
+--- a/sql/event_data_objects.cc
++++ b/sql/event_data_objects.cc
+@@ -1472,19 +1472,33 @@ Event_job_data::execute(THD *thd, bool drop)
+       bool save_tx_read_only= thd->tx_read_only;
+       thd->tx_read_only= false;
+ 
+-      if (WSREP(thd))
+-      {
++      /*
++         This code is processing event execution and does not have client
++         connection. Here, event execution will now execute a prepared
++         DROP EVENT statement, but thd->lex->sql_command is set to
++         SQLCOM_CREATE_PROCEDURE
++         DROP EVENT will be logged in binlog, and we have to
++         replicate it to make all nodes have consistent event definitions
++         Wsrep DDL replication is triggered inside Events::drop_event(),
++         and here we need to prepare the THD so that DDL replication is
++         possible, essentially it requires setting sql_command to
++         SQLCOMM_DROP_EVENT, we will switch sql_command for the duration
++         of DDL replication only.
++      */
++      const enum_sql_command sql_command_save= thd->lex->sql_command;
++      const bool sql_command_set= WSREP(thd);
++
++      if (sql_command_set)
+         thd->lex->sql_command = SQLCOM_DROP_EVENT;
+-        WSREP_TO_ISOLATION_BEGIN(WSREP_MYSQL_DB, NULL, NULL);
+-      }
+ 
+       ret= Events::drop_event(thd, dbname, name, FALSE);
+ 
+-      WSREP_TO_ISOLATION_END;
++      if (sql_command_set)
++      {
++        WSREP_TO_ISOLATION_END;
++        thd->lex->sql_command = sql_command_save;
++      }
+ 
+-#ifdef WITH_WSREP
+-  error:
+-#endif
+       thd->tx_read_only= save_tx_read_only;
+       thd->security_ctx->master_access= saved_master_access;
+     }

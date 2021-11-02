@@ -1,0 +1,59 @@
+From 114cd3d0aac8bd1aeaf4b33840feb0163d342d5b Mon Sep 17 00:00:00 2001
+From: Andrey Ryabinin <ryabinin.a.a@gmail.com>
+Date: Tue, 10 Apr 2018 15:28:10 +0300
+Subject: [PATCH] hfs: fix keylen check in hfs_cat_traverse()
+
+If key->key_len is 65535, calculating "uint16_t keylen' would
+cause an overflow:
+
+   uint16_t keylen;
+   ...
+   keylen = 2 + tsk_getu16(hfs->fs_info.endian, key->key_len)
+
+so the code bypasses the sanity check "if (keylen > nodesize)"
+which results in crash later:
+
+    ./toolfs/fstools/fls -b 512 -f hfs <image>
+    =================================================================
+    ==16==ERROR: AddressSanitizer: SEGV on unknown address 0x6210000256a4 (pc 0x00000054812b bp 0x7ffca548a8f0 sp 0x7ffca548a480 T0)
+    ==16==The signal is caused by a READ memory access.
+        #0 0x54812a in hfs_dir_open_meta_cb /fuzzing/sleuthkit/tsk/fs/hfs_dent.c:237:20
+        #1 0x51a96c in hfs_cat_traverse /fuzzing/sleuthkit/tsk/fs/hfs.c:1082:21
+        #2 0x547785 in hfs_dir_open_meta /fuzzing/sleuthkit/tsk/fs/hfs_dent.c:480:9
+        #3 0x50f57d in tsk_fs_dir_open_meta /fuzzing/sleuthkit/tsk/fs/fs_dir.c:290:14
+        #4 0x54af17 in tsk_fs_path2inum /fuzzing/sleuthkit/tsk/fs/ifind_lib.c:237:23
+        #5 0x522266 in hfs_open /fuzzing/sleuthkit/tsk/fs/hfs.c:6579:9
+        #6 0x508e89 in main /fuzzing/sleuthkit/tools/fstools/fls.cpp:267:19
+        #7 0x7f9daf67c2b0 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x202b0)
+        #8 0x41d679 in _start (/fuzzing/sleuthkit/tools/fstools/fls+0x41d679)
+
+Make 'keylen' int type to prevent the overflow and fix that.
+Now, I get proper error message instead of crash:
+    ./toolfs/fstools/fls -b 512 -f hfs <image>
+    General file system error (hfs_cat_traverse: length of key 3 in leaf node 1 too large (65537 vs 4096))
+---
+ tsk/fs/hfs.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tsk/fs/hfs.c b/tsk/fs/hfs.c
+index 12b284eae3..3f5450ac0b 100644
+--- a/tsk/fs/hfs.c
++++ b/tsk/fs/hfs.c
+@@ -937,7 +937,7 @@ hfs_cat_traverse(HFS_INFO * hfs,
+                 size_t rec_off;
+                 hfs_btree_key_cat *key;
+                 uint8_t retval;
+-                uint16_t keylen;
++                int keylen;
+ 
+                 // get the record offset in the node
+                 rec_off =
+@@ -1042,7 +1042,7 @@ hfs_cat_traverse(HFS_INFO * hfs,
+                 size_t rec_off;
+                 hfs_btree_key_cat *key;
+                 uint8_t retval;
+-                uint16_t keylen;
++                int keylen;
+ 
+                 // get the record offset in the node
+                 rec_off =

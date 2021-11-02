@@ -1,0 +1,79 @@
+From 38a29e2f4f5f060a73974626952501cee05fda73 Mon Sep 17 00:00:00 2001
+From: Bernhard Rusch <bernhard.rusch@elements.at>
+Date: Tue, 19 Mar 2019 15:58:50 +0100
+Subject: [PATCH] [Object] optimized bulk import
+
+---
+ .../Admin/DataObject/ClassController.php        | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/bundles/AdminBundle/Controller/Admin/DataObject/ClassController.php b/bundles/AdminBundle/Controller/Admin/DataObject/ClassController.php
+index 5bd3b66ef6a..115f172244a 100644
+--- a/bundles/AdminBundle/Controller/Admin/DataObject/ClassController.php
++++ b/bundles/AdminBundle/Controller/Admin/DataObject/ClassController.php
+@@ -24,9 +24,11 @@
+ use Pimcore\Model\Asset;
+ use Pimcore\Model\DataObject;
+ use Pimcore\Model\Document;
++use Pimcore\Tool\Session;
+ use Symfony\Component\EventDispatcher\GenericEvent;
+ use Symfony\Component\HttpFoundation\Request;
+ use Symfony\Component\HttpFoundation\Response;
++use Symfony\Component\HttpFoundation\Session\Attribute\AttributeBagInterface;
+ use Symfony\Component\HttpKernel\Event\FilterControllerEvent;
+ use Symfony\Component\HttpKernel\Event\FilterResponseEvent;
+ use Symfony\Component\Routing\Annotation\Route;
+@@ -1347,9 +1349,13 @@ public function bulkImportAction(Request $request)
+         $tmpName = $_FILES['Filedata']['tmp_name'];
+         $json = file_get_contents($tmpName);
+ 
+-        $tmpName = PIMCORE_SYSTEM_TEMP_DIRECTORY . '/bulk-import.tmp';
++        $tmpName = PIMCORE_SYSTEM_TEMP_DIRECTORY . '/bulk-import-' . uniqid() . '.tmp';
+         file_put_contents($tmpName, $json);
+ 
++        Session::useSession(function (AttributeBagInterface $session) use ($tmpName) {
++            $session->set('class_bulk_import_file', $tmpName);
++        }, 'pimcore_objects');
++
+         $json = json_decode($json, true);
+ 
+         foreach ($json as $groupName => $group) {
+@@ -1363,7 +1369,7 @@ public function bulkImportAction(Request $request)
+                     $className = $groupItem['className'];
+ 
+                     $layoutData = ['className' => $className, 'name' => $groupItem['name']];
+-                    $name = serialize($layoutData);
++                    $name = json_encode($layoutData);
+                     $displayName = $className . ' / ' . $groupItem['name'];
+                     $icon = 'database_lightning';
+                 } else {
+@@ -1382,7 +1388,7 @@ public function bulkImportAction(Request $request)
+             }
+         }
+ 
+-        $response = $this->adminJson(['success' => true, 'filename' => $tmpName, 'data' => $result]);
++        $response = $this->adminJson(['success' => true, 'data' => $result]);
+         $response->headers->set('Content-Type', 'text/html');
+ 
+         return $response;
+@@ -1404,9 +1410,10 @@ public function bulkImportAction(Request $request)
+      */
+     public function bulkCommitAction(Request $request)
+     {
+-        $filename = $request->get('filename');
+         $data = json_decode($request->get('data'), true);
+ 
++        $session = Session::get('pimcore_objects');
++        $filename = $session->get('class_bulk_import_file');
+         $json = @file_get_contents($filename);
+         $json = json_decode($json, true);
+ 
+@@ -1451,7 +1458,7 @@ public function bulkCommitAction(Request $request)
+ 
+                 return $this->adminJson(['success' => $success !== false]);
+             } elseif ($type == 'customlayout') {
+-                $layoutData = unserialize($data['name']);
++                $layoutData = json_decode($data['name'], true);
+                 $className = $layoutData['className'];
+                 $layoutName = $layoutData['name'];
+ 

@@ -1,0 +1,44 @@
+From 66191f780863ea8c66ace4040d0d04a8842e8432 Mon Sep 17 00:00:00 2001
+From: radare <pancake@nopcode.org>
+Date: Wed, 21 Nov 2018 17:50:58 +0100
+Subject: [PATCH] Fix #12239 - crash in the x86.nz assembler ##asm (#12252)
+
+---
+ libr/asm/p/asm_x86_nz.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/libr/asm/p/asm_x86_nz.c b/libr/asm/p/asm_x86_nz.c
+index 4a23062ee6c..42e079932c4 100644
+--- a/libr/asm/p/asm_x86_nz.c
++++ b/libr/asm/p/asm_x86_nz.c
+@@ -4295,21 +4295,26 @@ LookupTable oplookup[] = {
+ };
+ 
+ static x86newTokenType getToken(const char *str, size_t *begin, size_t *end) {
++	if (*begin > strlen (str)) {
++		return TT_EOF;
++	}
+ 	// Skip whitespace
+-	while (begin && isspace ((ut8)str[*begin])) {
++	while (begin && str[*begin] && isspace ((ut8)str[*begin])) {
+ 		++(*begin);
+ 	}
+ 
+ 	if (!str[*begin]) {                // null byte
+ 		*end = *begin;
+ 		return TT_EOF;
+-	} else if (isalpha ((ut8)str[*begin])) {   // word token
++	}
++	if (isalpha ((ut8)str[*begin])) {   // word token
+ 		*end = *begin;
+-		while (end && isalnum ((ut8)str[*end])) {
++		while (end && str[*end] && isalnum ((ut8)str[*end])) {
+ 			++(*end);
+ 		}
+ 		return TT_WORD;
+-	} else if (isdigit ((ut8)str[*begin])) {   // number token
++	}
++	if (isdigit ((ut8)str[*begin])) {   // number token
+ 		*end = *begin;
+ 		while (end && isalnum ((ut8)str[*end])) {     // accept alphanumeric characters, because hex.
+ 			++(*end);

@@ -1,0 +1,274 @@
+From a49feeae76d41959d85ee733925a4cf40bac61b2 Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Tue, 16 Aug 2016 17:40:23 +0200
+Subject: [PATCH] Fix double-free in gdImageWebPtr()
+
+The issue is that gdImageWebpCtx() (which is called by gdImageWebpPtr() and
+the other WebP output functions to do the real work) does not return whether
+it succeeded or failed, so this is not checked in gdImageWebpPtr() and the
+function wrongly assumes everything is okay, which is not, in this case,
+because there is a size limitation for WebP, namely that the width and
+height must by less than 16383.
+
+We can't change the signature of gdImageWebpCtx() for API compatibility
+reasons, so we introduce the static helper _gdImageWebpCtx() which returns
+success respective failure, so gdImageWebpPtr() and gdImageWebpPtrEx() can
+check the return value. We leave it solely to libwebp for now to report
+warnings regarding the failing write.
+
+This issue had been reported by Ibrahim El-Sayed to security@libgd.org.
+
+CVE-2016-6912
+---
+ src/gd_webp.c                  |  74 ++++++++++++++++++++-------------
+ tests/webp/.gitignore          |   1 +
+ tests/webp/CMakeLists.txt      |   1 +
+ tests/webp/Makemodule.am       |   6 ++-
+ tests/webp/bug_double_free.c   |  29 +++++++++++++
+ tests/webp/bug_double_free.jpg | Bin 0 -> 576 bytes
+ 6 files changed, 81 insertions(+), 30 deletions(-)
+ create mode 100644 tests/webp/bug_double_free.c
+ create mode 100644 tests/webp/bug_double_free.jpg
+
+diff --git a/src/gd_webp.c b/src/gd_webp.c
+index 988639921..b5ee26426 100644
+--- a/src/gd_webp.c
++++ b/src/gd_webp.c
+@@ -162,37 +162,24 @@ BGD_DECLARE(gdImagePtr) gdImageCreateFromWebpCtx (gdIOCtx * infile)
+ 	return im;
+ }
+ 
+-/*
+-  Function: gdImageWebpCtx
+-
+-    Write the image as WebP data via a <gdIOCtx>. See <gdImageWebpEx>
+-    for more details.
+-
+-  Parameters:
+-
+-    im      - The image to write.
+-    outfile - The output sink.
+-    quality - Image quality.
+ 
+-  Returns:
+-
+-    Nothing.
+-*/
+-BGD_DECLARE(void) gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
++/* returns 0 on success, 1 on failure */
++static int _gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
+ {
+ 	uint8_t *argb;
+ 	int x, y;
+ 	uint8_t *p;
+ 	uint8_t *out;
+ 	size_t out_size;
++    int ret = 0;
+ 
+ 	if (im == NULL) {
+-		return;
++		return 1;
+ 	}
+ 
+ 	if (!gdImageTrueColor(im)) {
+-		gd_error("Paletter image not supported by webp");
+-		return;
++		gd_error("Palette image not supported by webp");
++		return 1;
+ 	}
+ 
+ 	if (quality == -1) {
+@@ -200,16 +187,16 @@ BGD_DECLARE(void) gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
+ 	}
+ 
+ 	if (overflow2(gdImageSX(im), 4)) {
+-		return;
++		return 1;
+ 	}
+ 
+ 	if (overflow2(gdImageSX(im) * 4, gdImageSY(im))) {
+-		return;
++		return 1;
+ 	}
+ 
+ 	argb = (uint8_t *)gdMalloc(gdImageSX(im) * 4 * gdImageSY(im));
+ 	if (!argb) {
+-		return;
++		return 1;
+ 	}
+ 	p = argb;
+ 	for (y = 0; y < gdImageSY(im); y++) {
+@@ -232,6 +219,7 @@ BGD_DECLARE(void) gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
+ 	out_size = WebPEncodeRGBA(argb, gdImageSX(im), gdImageSY(im), gdImageSX(im) * 4, quality, &out);
+ 	if (out_size == 0) {
+ 		gd_error("gd-webp encoding failed");
++        ret = 1;
+ 		goto freeargb;
+ 	}
+ 	gdPutBuf(out, out_size, outfile);
+@@ -239,6 +227,30 @@ BGD_DECLARE(void) gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
+ 
+ freeargb:
+ 	gdFree(argb);
++
++    return ret;
++}
++
++
++/*
++  Function: gdImageWebpCtx
++
++    Write the image as WebP data via a <gdIOCtx>. See <gdImageWebpEx>
++    for more details.
++
++  Parameters:
++
++    im      - The image to write.
++    outfile - The output sink.
++    quality - Image quality.
++
++  Returns:
++
++    Nothing.
++*/
++BGD_DECLARE(void) gdImageWebpCtx (gdImagePtr im, gdIOCtx * outfile, int quality)
++{
++	_gdImageWebpCtx(im, outfile, quality);
+ }
+ 
+ /*
+@@ -278,7 +290,7 @@ BGD_DECLARE(void) gdImageWebpEx (gdImagePtr im, FILE * outFile, int quality)
+ 	if (out == NULL) {
+ 		return;
+ 	}
+-	gdImageWebpCtx(im, out, quality);
++	_gdImageWebpCtx(im, out, quality);
+ 	out->gd_free(out);
+ }
+ 
+@@ -302,7 +314,7 @@ BGD_DECLARE(void) gdImageWebp (gdImagePtr im, FILE * outFile)
+ 	if (out == NULL) {
+ 		return;
+ 	}
+-	gdImageWebpCtx(im, out, -1);
++	_gdImageWebpCtx(im, out, -1);
+ 	out->gd_free(out);
+ }
+ 
+@@ -318,8 +330,11 @@ BGD_DECLARE(void *) gdImageWebpPtr (gdImagePtr im, int *size)
+ 	if (out == NULL) {
+ 		return NULL;
+ 	}
+-	gdImageWebpCtx(im, out, -1);
+-	rv = gdDPExtractData(out, size);
++	if (_gdImageWebpCtx(im, out, -1)) {
++		rv = NULL;
++	} else {
++		rv = gdDPExtractData(out, size);
++	}
+ 	out->gd_free(out);
+ 
+ 	return rv;
+@@ -337,8 +352,11 @@ BGD_DECLARE(void *) gdImageWebpPtrEx (gdImagePtr im, int *size, int quality)
+ 	if (out == NULL) {
+ 		return NULL;
+ 	}
+-	gdImageWebpCtx(im, out, quality);
+-	rv = gdDPExtractData(out, size);
++	if (_gdImageWebpCtx(im, out, quality)) {
++        rv = NULL;
++    } else {
++        rv = gdDPExtractData(out, size);
++    }
+ 	out->gd_free(out);
+ 	return rv;
+ }
+diff --git a/tests/webp/.gitignore b/tests/webp/.gitignore
+index 56a059301..569ccda8b 100644
+--- a/tests/webp/.gitignore
++++ b/tests/webp/.gitignore
+@@ -1 +1,2 @@
+ /bug00111
++/bug_double_free
+diff --git a/tests/webp/CMakeLists.txt b/tests/webp/CMakeLists.txt
+index 6af76babd..ec27127b1 100644
+--- a/tests/webp/CMakeLists.txt
++++ b/tests/webp/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ IF(WEBP_FOUND)
+ LIST(APPEND TESTS_FILES
+ 	bug00111
++	bug_double_free
+ )
+ ENDIF(WEBP_FOUND)
+ 
+diff --git a/tests/webp/Makemodule.am b/tests/webp/Makemodule.am
+index b03db6e23..f01f9e672 100644
+--- a/tests/webp/Makemodule.am
++++ b/tests/webp/Makemodule.am
+@@ -1,7 +1,9 @@
+ if HAVE_LIBWEBP
+ libgd_test_programs += \
+-	webp/bug00111
++	webp/bug00111 \
++	webp/bug_double_free
+ endif
+ 
+ EXTRA_DIST += \
+-	webp/CMakeLists.txt
++	webp/CMakeLists.txt \
++	webp/bug_double_free.jpg
+diff --git a/tests/webp/bug_double_free.c b/tests/webp/bug_double_free.c
+new file mode 100644
+index 000000000..43eececfc
+--- /dev/null
++++ b/tests/webp/bug_double_free.c
+@@ -0,0 +1,29 @@
++/**
++ * Test that a too large image doesn't trigger an double-free when written
++ * to memory.
++ */
++
++
++#include "gd.h"
++#include "gdtest.h"
++
++
++int main()
++{
++    gdImagePtr im1, im2;
++    FILE *fp;
++    int size;
++
++    fp = gdTestFileOpen2("webp", "bug_double_free.jpg");
++    gdTestAssert(fp != NULL);
++    im1 = gdImageCreateFromJpeg(fp);
++    gdTestAssert(im1 != NULL);
++    fclose(fp);
++
++    im2 = gdImageWebpPtr(im1, &size);
++    gdTestAssert(im2 == NULL);
++
++    gdImageDestroy(im1);
++
++    return gdNumFailures();
++}
+diff --git a/tests/webp/bug_double_free.jpg b/tests/webp/bug_double_free.jpg
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b792fb4a7d17578b445af1ba530e4df7ac47df1
+GIT binary patch
+literal 576
+zcmex=<NpH&0WUXCHwH#VCI&wsWcdG&!NV;xCsm<1zqBYh)k-0wq@=(~Uq3lNH#a}8
+zSg$-YJ2N*mB{NYkzbIWF#M1{Uw{j`U%*)QqOOG#4EJ-cW%PL6!f1AOXfsKWgjg^Is
+zjg^g^osEM_fQyThlS_n;pGQDkL_$JbL`+OdR#jd~T3JR+OhHFMSxsG2OH)!_*Faap
+zKvhFi17rvzJ3BiU2bVAxm#~JEn3M+5fE%jv{{aR;4u=2rGR%xh3`~NI%z}*nk1$9w
+zFfcJQG9Up~c4ihf4xp5Q00Sd4GZPCl8#`2*k%^gwRZx*Zh>cy?&@phLh>}rIVxy?C
+zaZ+K^L7)x^Mn(oy!<ZPDSwPmv3IeSGAvgdAHM63i5YU|ew-|VUx|jr+1sUuaob_HF
+zKf~w7)_?nLb3^Xzthd(FvnLtl|90DQZIy|so641wolM@3en`E3n_QilSDauH!BAA-
+zD0P&pX!f_MwYg4bxBC5F@WN0ud0F%hZYiT#;l7JEGitqmc%y8i*zb5(nYy*l7x+%j
+ze;no_E4J5#U3`Yge}-6x<AUlA3W9Y{67G9XbGWu!@zRTeC)NE6rKX;<UcA!f=6zq?
+f=bKX-^dFcl58S~Jp13eIedCSEeT&uq-{b-SCsLl(
+
+literal 0
+HcmV?d00001
+

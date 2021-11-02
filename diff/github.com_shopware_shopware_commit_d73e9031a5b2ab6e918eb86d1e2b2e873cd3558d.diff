@@ -1,0 +1,107 @@
+From d73e9031a5b2ab6e918eb86d1e2b2e873cd3558d Mon Sep 17 00:00:00 2001
+From: Benjamin Cremer <bc@shopware.com>
+Date: Wed, 6 Apr 2016 13:12:44 +0200
+Subject: [PATCH] SW-14719 - Improve input validation in ScriptRenderer
+
+This issue has been identified by David Vieira-Kurz (@secalert) on behalf of
+Immobilien Scout GmbH.
+---
+ .../Plugins/ScriptRenderer/Bootstrap.php      | 21 ++++++++++------
+ engine/Shopware/Controllers/Backend/ExtJs.php | 24 +++++++++++++------
+ 2 files changed, 31 insertions(+), 14 deletions(-)
+
+diff --git a/engine/Library/Enlight/Controller/Plugins/ScriptRenderer/Bootstrap.php b/engine/Library/Enlight/Controller/Plugins/ScriptRenderer/Bootstrap.php
+index 951896d71c2..eddc5a9d0ad 100644
+--- a/engine/Library/Enlight/Controller/Plugins/ScriptRenderer/Bootstrap.php
++++ b/engine/Library/Enlight/Controller/Plugins/ScriptRenderer/Bootstrap.php
+@@ -170,28 +170,35 @@ public function getTemplateName()
+         }
+ 
+         $templateNames = array();
+-
+         foreach ($fileNames as $fileName) {
++            // Remove unwanted characters
++            $fileName = preg_replace('/[^a-z0-9\/_-]/i', '', $fileName);
++
++            // Replace multiple forward slashes
++            $fileName = preg_replace('#/+#', '/', $fileName);
++
++            // Remove leading and trailing forward slash
++            $fileName = trim($fileName, '/');
++
+             // if string starts with "m/" replace with "model/"
+             $fileName = preg_replace('/^m\//', 'model/', $fileName);
+             $fileName = preg_replace('/^c\//', 'controller/', $fileName);
+             $fileName = preg_replace('/^v\//', 'view/', $fileName);
+ 
+-            $fileName = ltrim(dirname($fileName) . '/' . basename($fileName, '.js'), '/.');
+-
+             if (empty($fileName)) {
+                 continue;
+             }
+ 
+-            $templateNames[] = $inflector->filter(array(
++            $fileName = $inflector->filter(array(
+                 'module'     => $moduleName,
+                 'controller' => $controllerName,
+-                'file'       => $fileName)
+-            );
++                'file'       => $fileName
++            ));
++
++            $templateNames[]  = $fileName;
+         }
+ 
+         $count = count($templateNames);
+-
+         if ($count === 0) {
+             return null;
+         } elseif ($count === 1) {
+diff --git a/engine/Shopware/Controllers/Backend/ExtJs.php b/engine/Shopware/Controllers/Backend/ExtJs.php
+index 426859541d4..eaa10e138b5 100644
+--- a/engine/Shopware/Controllers/Backend/ExtJs.php
++++ b/engine/Shopware/Controllers/Backend/ExtJs.php
+@@ -208,26 +208,36 @@ public function extendsAction()
+         $this->View()->Engine()->setCompileId($this->View()->Engine()->getCompileId() . '_' . $this->Request()->getControllerName());
+ 
+         foreach ($fileNames as $fileName) {
++            // Remove unwanted characters
++            $fileName = preg_replace('/[^a-z0-9\/_-]/i', '', $fileName);
++
++            // Replace multiple forward slashes
++            $fileName = preg_replace('#/+#', '/', $fileName);
++
++            // Remove leading and trailing forward slash
++            $fileName = trim($fileName, '/');
++
+             // if string starts with "m/" replace with "model/"
+             $fileName = preg_replace('/^m\//', 'model/', $fileName);
+             $fileName = preg_replace('/^c\//', 'controller/', $fileName);
+             $fileName = preg_replace('/^v\//', 'view/', $fileName);
+ 
+-            $fileName = ltrim(dirname($fileName) . '/' . basename($fileName, '.js'), '/.');
+             if (empty($fileName)) {
+                 continue;
+             }
++
+             $templateBase = $inflector->filter(array(
+-                'module' => $moduleName,
++                'module'     => $moduleName,
+                 'controller' => $controllerName,
+-                'file' => $fileName)
+-            );
++                'file'       => $fileName
++            ));
+ 
+             $templateExtend = $inflector->filter(array(
+-                'module' => $moduleName,
++                'module'     => $moduleName,
+                 'controller' => $this->Request()->getControllerName(),
+-                'file' => $fileName)
+-            );
++                'file'       => $fileName
++            ));
++
+             if ($this->View()->templateExists($templateBase)) {
+                 $template .= '{include file="' . $templateBase. '"}' . "\n";
+             }

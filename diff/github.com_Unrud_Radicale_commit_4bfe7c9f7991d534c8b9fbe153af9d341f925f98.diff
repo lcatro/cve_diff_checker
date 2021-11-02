@@ -1,0 +1,26 @@
+From 4bfe7c9f7991d534c8b9fbe153af9d341f925f98 Mon Sep 17 00:00:00 2001
+From: Unrud <Unrud@users.noreply.github.com>
+Date: Wed, 23 Dec 2015 07:05:20 +0100
+Subject: [PATCH] Prevent "regex injection"
+
+If an attacker is able to authenticate with a user name like .* he can bypass limitations imposed by "owner_write" and "owner_only".
+---
+ radicale/rights/regex.py | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/radicale/rights/regex.py b/radicale/rights/regex.py
+index 35e5893c..39c39ae3 100644
+--- a/radicale/rights/regex.py
++++ b/radicale/rights/regex.py
+@@ -65,7 +65,10 @@ def _read_from_sections(user, collection_url, permission):
+     """Get regex sections."""
+     filename = os.path.expanduser(config.get("rights", "file"))
+     rights_type = config.get("rights", "type").lower()
+-    regex = ConfigParser({"login": user, "path": collection_url})
++    # Prevent "regex injection"
++    user_escaped = re.escape(user)
++    collection_url_escaped = re.escape(collection_url)
++    regex = ConfigParser({"login": user_escaped, "path": collection_url_escaped})
+     if rights_type in DEFINED_RIGHTS:
+         log.LOGGER.debug("Rights type '%s'" % rights_type)
+         regex.readfp(StringIO(DEFINED_RIGHTS[rights_type]))

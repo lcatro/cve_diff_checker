@@ -1,0 +1,90 @@
+From 63f3012b390ff1519a84100df9e5dff5058bb926 Mon Sep 17 00:00:00 2001
+From: MTRNord <mtrnord1@gmail.com>
+Date: Mon, 2 Nov 2020 22:52:30 +0100
+Subject: [PATCH] fix: Possible Path Traversal Attack issue.
+
+---
+ Cargo.lock    |  2 +-
+ Cargo.toml    |  2 +-
+ src/errors.rs |  8 ++++++++
+ src/main.rs   | 11 +++++++++++
+ 4 files changed, 21 insertions(+), 2 deletions(-)
+ create mode 100644 src/errors.rs
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 2af57c7..8c48fc3 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1158,7 +1158,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "keymaker"
+-version = "0.1.0"
++version = "0.2.0"
+ dependencies = [
+  "actix-files",
+  "actix-web",
+diff --git a/Cargo.toml b/Cargo.toml
+index 5c421a2..7e0c50f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "keymaker"
+-version = "0.1.0"
++version = "0.2.0"
+ authors = ["MTRNord <mtrnord1@gmail.com>"]
+ edition = "2018"
+ 
+diff --git a/src/errors.rs b/src/errors.rs
+new file mode 100644
+index 0000000..d8a3858
+--- /dev/null
++++ b/src/errors.rs
+@@ -0,0 +1,8 @@
++use thiserror::Error;
++
++#[derive(Error, Debug)]
++pub enum ServerError {
++    #[error("Possible Directory/Path Traversal Attack detected")]
++    PathTraversal,
++}
++
+diff --git a/src/main.rs b/src/main.rs
+index 8422cc2..d60df3d 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -11,8 +11,11 @@ use sqlx::PgPool;
+ use std::env;
+ use std::path::{Path, PathBuf};
+ use tracing::{info, instrument, Level};
++use std::ffi::OsStr;
++use crate::errors::ServerError;
+ 
+ mod models;
++mod errors;
+ 
+ #[derive(Template, Debug)]
+ #[template(path = "index.html")]
+@@ -97,6 +100,10 @@ async fn servers() -> impl Responder {
+ #[instrument]
+ async fn css(req: HttpRequest) -> ActixResult<NamedFile> {
+     let path: PathBuf = req.match_info().query("filename").parse().unwrap();
++    if path.extension()
++        .and_then(OsStr::to_str) != "css" {
++        Err(ServerError::PathTraversal)
++    }
+     let real_path = Path::new("assets/css/").join(path);
+     Ok(NamedFile::open(real_path)?)
+ }
+@@ -104,6 +111,10 @@ async fn css(req: HttpRequest) -> ActixResult<NamedFile> {
+ #[instrument]
+ async fn js(req: HttpRequest) -> ActixResult<NamedFile> {
+     let path: PathBuf = req.match_info().query("filename").parse().unwrap();
++    if path.extension()
++        .and_then(OsStr::to_str) != "js" {
++        Err(ServerError::PathTraversal)
++    }
+     let real_path = Path::new("assets/js/").join(path);
+     Ok(NamedFile::open(real_path)?)
+ }

@@ -1,0 +1,36 @@
+From e3058617f384cb6709f3878f753fa17aca9e3a30 Mon Sep 17 00:00:00 2001
+From: Werner Lemberg <wl@gnu.org>
+Date: Sun, 13 Sep 2015 08:41:43 +0200
+Subject: [type1] Fix potential buffer overflow (#45923).
+
+* src/type1/t1parse.c (T1_Get_Private_Dict): Assure `cur' doesn't
+point to end of file buffer.
+---
+ src/type1/t1parse.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+(limited to 'src/type1/t1parse.c')
+
+diff --git a/src/type1/t1parse.c b/src/type1/t1parse.c
+index c73b2b25d..d8d4df205 100644
+--- a/src/type1/t1parse.c
++++ b/src/type1/t1parse.c
+@@ -389,6 +389,15 @@
+ 
+       cur   = limit;
+       limit = parser->base_dict + parser->base_len;
++
++      if ( cur >= limit )
++      {
++        FT_ERROR(( "T1_Get_Private_Dict:"
++                   " premature end in private dictionary\n" ));
++        error = FT_THROW( Invalid_File_Format );
++        goto Exit;
++      }
++
+       goto Again;
+ 
+       /* now determine where to write the _encrypted_ binary private  */
+-- 
+cgit v1.2.1
+

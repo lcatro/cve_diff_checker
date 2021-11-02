@@ -1,0 +1,35 @@
+From a7401e638bf0c03102039e216ab1081922f140ae Mon Sep 17 00:00:00 2001
+From: Simon McVittie <smcv@collabora.com>
+Date: Fri, 5 Mar 2021 13:51:33 +0000
+Subject: [PATCH] dir: Refuse to export .desktop files with suspicious uses of
+ @@ tokens
+
+This is either a malicious/compromised app trying to do an attack, or
+a mistake that will break handling of %f, %u and so on. Either way,
+if we refuse to export the .desktop file, resulting in installation
+failing, then it makes the rejection more obvious than quietly
+removing the magic tokens.
+
+Signed-off-by: Simon McVittie <smcv@collabora.com>
+(cherry picked from commit 46b3ede5241561c7d588951048c687c5075a3eac)
+---
+ common/flatpak-dir.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/common/flatpak-dir.c b/common/flatpak-dir.c
+index 19d2fb7814..94a86f4afb 100644
+--- a/common/flatpak-dir.c
++++ b/common/flatpak-dir.c
+@@ -7140,7 +7140,11 @@ export_desktop_file (const char         *app,
+               else if (strcasecmp (arg, "%u") == 0)
+                 g_string_append_printf (new_exec, " @@u %s @@", arg);
+               else if (g_str_has_prefix (arg, "@@"))
+-                g_print (_("Skipping invalid Exec argument %s\n"), arg);
++                {
++                  flatpak_fail_error (error, FLATPAK_ERROR_EXPORT_FAILED,
++                                     _("Invalid Exec argument %s"), arg);
++                  goto out;
++                }
+               else
+                 g_string_append_printf (new_exec, " %s", arg);
+             }

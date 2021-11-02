@@ -1,0 +1,32 @@
+From f24d5521295a2152c286abb0a45a1e1e2bd275bd Mon Sep 17 00:00:00 2001
+From: Evan Phoenix <evan@phx.io>
+Date: Mon, 18 May 2020 16:01:53 -0700
+Subject: [PATCH] Better handle client input
+
+---
+ lib/puma/client.rb | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/lib/puma/client.rb b/lib/puma/client.rb
+index 6795b4ea0..a6107cc94 100644
+--- a/lib/puma/client.rb
++++ b/lib/puma/client.rb
+@@ -285,8 +285,16 @@ def setup_body
+ 
+       te = @env[TRANSFER_ENCODING2]
+ 
+-      if te && CHUNKED.casecmp(te) == 0
+-        return setup_chunked_body(body)
++      if te
++        if te.include?(",")
++          te.split(",").each do |part|
++            if CHUNKED.casecmp(part.strip) == 0
++              return setup_chunked_body(body)
++            end
++          end
++        elsif CHUNKED.casecmp(te) == 0
++          return setup_chunked_body(body)
++        end
+       end
+ 
+       @chunked_body = false

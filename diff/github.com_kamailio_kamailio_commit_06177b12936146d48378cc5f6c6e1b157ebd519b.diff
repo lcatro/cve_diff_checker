@@ -1,0 +1,176 @@
+From 084e68b337f3afbc841347a6d27398bacfaf191b Mon Sep 17 00:00:00 2001
+From: Victor Seva <linuxmaniac@torreviejawireless.org>
+Date: Tue, 17 Feb 2015 10:02:20 +0100
+Subject: [PATCH 1/4] ctl: use RUN_DIR env to set DEFAULT_CTL_SOCKET
+
+---
+ modules/ctl/ctl_defaults.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/modules/ctl/ctl_defaults.h b/modules/ctl/ctl_defaults.h
+index 01b6680c3a..10498e39a5 100644
+--- a/modules/ctl/ctl_defaults.h
++++ b/modules/ctl/ctl_defaults.h
+@@ -4,10 +4,10 @@
+ /*listen by default on: */
+ #ifdef SRNAME
+ /* this is used when compiling sercmd tool */
+-#define DEFAULT_CTL_SOCKET  "unixs:/tmp/" SRNAME "_ctl"
++#define DEFAULT_CTL_SOCKET  "unixs:" RUN_DIR "/" SRNAME "/" SRNAME "_ctl"
+ #else
+ /* this is used when compiling sip server */
+-#define DEFAULT_CTL_SOCKET  "unixs:/tmp/" NAME "_ctl"
++#define DEFAULT_CTL_SOCKET  "unixs:" RUN_DIR "/" NAME "_ctl"
+ #endif
+ /* port used by default for tcp/udp if no port is explicitely specified */
+ #define DEFAULT_CTL_PORT 2049
+
+From 850320cac86e6c5cee6f8d936340678eb32412d3 Mon Sep 17 00:00:00 2001
+From: Victor Seva <linuxmaniac@torreviejawireless.org>
+Date: Tue, 17 Feb 2015 10:03:35 +0100
+Subject: [PATCH 2/4] etc: set ctl "binrpc" to new /var/run/kamailio default
+ value
+
+---
+ etc/kamailio-basic.cfg | 2 ++
+ etc/kamailio-oob.cfg   | 2 ++
+ etc/kamailio.cfg       | 2 ++
+ 3 files changed, 6 insertions(+)
+
+diff --git a/etc/kamailio-basic.cfg b/etc/kamailio-basic.cfg
+index 17d7bcba59..4a978ff2de 100644
+--- a/etc/kamailio-basic.cfg
++++ b/etc/kamailio-basic.cfg
+@@ -193,6 +193,8 @@ loadmodule "debugger.so"
+ # ----- mi_fifo params -----
+ modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
+ 
++# ----- ctl params -----
++modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")
+ 
+ # ----- tm params -----
+ # auto-discard branches from previous serial forking leg
+diff --git a/etc/kamailio-oob.cfg b/etc/kamailio-oob.cfg
+index 6a16763db5..258b972e96 100644
+--- a/etc/kamailio-oob.cfg
++++ b/etc/kamailio-oob.cfg
+@@ -317,6 +317,8 @@ loadmodule "xhttp_pi.so"
+ # ----- mi_fifo params -----
+ modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
+ 
++# ----- ctl params -----
++modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")
+ 
+ # ----- tm params -----
+ # auto-discard branches from previous serial forking leg
+diff --git a/etc/kamailio.cfg b/etc/kamailio.cfg
+index 0644e6ae07..ca3dbb5bae 100644
+--- a/etc/kamailio.cfg
++++ b/etc/kamailio.cfg
+@@ -290,6 +290,8 @@ loadmodule "debugger.so"
+ # ----- mi_fifo params -----
+ modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
+ 
++# ----- ctl params -----
++modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")
+ 
+ # ----- tm params -----
+ # auto-discard branches from previous serial forking leg
+
+From be486988bc2e27ba44961f1c4d2af48cecf06da3 Mon Sep 17 00:00:00 2001
+From: Victor Seva <linuxmaniac@torreviejawireless.org>
+Date: Tue, 17 Feb 2015 10:07:06 +0100
+Subject: [PATCH 3/4] utils/kamctl: change fifo default path to
+ /var/run/kamailio
+
+---
+ utils/kamctl/kamctl.fifo | 2 +-
+ utils/kamctl/kamctlrc    | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/utils/kamctl/kamctl.fifo b/utils/kamctl/kamctl.fifo
+index e57c7df2de..c94a5cc724 100644
+--- a/utils/kamctl/kamctl.fifo
++++ b/utils/kamctl/kamctl.fifo
+@@ -25,7 +25,7 @@ fi
+ #
+ if [ -z "$FIFOPATH" ]; then
+ 	if [ -z "$OSER_FIFO" ]; then
+-		FIFOPATH=/tmp/kamailio_fifo
++		FIFOPATH=/var/run/kamailio/kamailio_fifo
+ 	else
+ 		FIFOPATH=$OSER_FIFO
+ 	fi
+diff --git a/utils/kamctl/kamctlrc b/utils/kamctl/kamctlrc
+index b8b241bdbc..f96cab6f12 100644
+--- a/utils/kamctl/kamctlrc
++++ b/utils/kamctl/kamctlrc
+@@ -124,7 +124,7 @@
+ # CTLENGINE="FIFO"
+ 
+ ## path to FIFO file
+-# FIFOPATH="/tmp/kamailio_fifo"
++# FIFOPATH="/var/run/kamailio/kamailio_fifo"
+ 
+ ## check ACL names; default on (1); off (0)
+ # VERIFY_ACL=1
+@@ -142,7 +142,7 @@
+ 
+ ## Kamailio START Options
+ ## PID file path - default is: /var/run/kamailio.pid
+-# PID_FILE=/var/run/kamailio.pid
++# PID_FILE=/var/run/kamailio/kamailio.pid
+ 
+ ## Extra start options - default is: not set
+ # example: start Kamailio with 64MB share memory: STARTOPTIONS="-m 64"
+
+From 6909de08ab5b51c90fe226b325a2492905d3fa40 Mon Sep 17 00:00:00 2001
+From: Victor Seva <linuxmaniac@torreviejawireless.org>
+Date: Tue, 17 Feb 2015 10:08:18 +0100
+Subject: [PATCH 4/4] etc: change fifo default to /var/run/kamailio
+
+---
+ etc/kamailio-basic.cfg | 2 +-
+ etc/kamailio-oob.cfg   | 2 +-
+ etc/kamailio.cfg       | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/etc/kamailio-basic.cfg b/etc/kamailio-basic.cfg
+index 4a978ff2de..55685d57d0 100644
+--- a/etc/kamailio-basic.cfg
++++ b/etc/kamailio-basic.cfg
+@@ -191,7 +191,7 @@ loadmodule "debugger.so"
+ 
+ 
+ # ----- mi_fifo params -----
+-modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
++modparam("mi_fifo", "fifo_name", "/var/run/kamailio/kamailio_fifo")
+ 
+ # ----- ctl params -----
+ modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")
+diff --git a/etc/kamailio-oob.cfg b/etc/kamailio-oob.cfg
+index 258b972e96..db786d0b03 100644
+--- a/etc/kamailio-oob.cfg
++++ b/etc/kamailio-oob.cfg
+@@ -315,7 +315,7 @@ loadmodule "xhttp_pi.so"
+ 
+ 
+ # ----- mi_fifo params -----
+-modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
++modparam("mi_fifo", "fifo_name", "/var/run/kamailio/kamailio_fifo")
+ 
+ # ----- ctl params -----
+ modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")
+diff --git a/etc/kamailio.cfg b/etc/kamailio.cfg
+index ca3dbb5bae..78f6ee13ed 100644
+--- a/etc/kamailio.cfg
++++ b/etc/kamailio.cfg
+@@ -288,7 +288,7 @@ loadmodule "debugger.so"
+ 
+ 
+ # ----- mi_fifo params -----
+-modparam("mi_fifo", "fifo_name", "/tmp/kamailio_fifo")
++modparam("mi_fifo", "fifo_name", "/var/run/kamailio/kamailio_fifo")
+ 
+ # ----- ctl params -----
+ modparam("ctl", "binrpc", "unix:/var/run/kamailio/kamailio_ctl")

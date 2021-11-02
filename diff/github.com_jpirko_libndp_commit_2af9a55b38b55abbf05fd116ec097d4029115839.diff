@@ -1,0 +1,70 @@
+From 2af9a55b38b55abbf05fd116ec097d4029115839 Mon Sep 17 00:00:00 2001
+From: Lubomir Rintel <lkundrak@v3.sk>
+Date: Tue, 17 May 2016 12:17:54 +0200
+Subject: [PATCH] libndb: reject redirect and router advertisements from
+ non-link-local
+
+RFC4861 suggests that these messages should only originate from
+link-local addresses in 6.1.2 (RA) and 8.1. (redirect):
+
+Mitigates CVE-2016-3698.
+
+Signed-off-by: Lubomir Rintel <lkundrak@v3.sk>
+Signed-off-by: Jiri Pirko <jiri@mellanox.com>
+---
+ libndp/libndp.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/libndp/libndp.c b/libndp/libndp.c
+index 5472c86..b7172fa 100644
+--- a/libndp/libndp.c
++++ b/libndp/libndp.c
+@@ -333,6 +333,7 @@ struct ndp_msg_type_info {
+ 	uint8_t raw_type;
+ 	size_t raw_struct_size;
+ 	void (*addrto_adjust)(struct in6_addr *addr);
++	bool (*addrto_validate)(struct in6_addr *addr);
+ };
+ 
+ static void ndp_msg_addrto_adjust_all_nodes(struct in6_addr *addr)
+@@ -359,6 +360,11 @@ static void ndp_msg_addrto_adjust_all_routers(struct in6_addr *addr)
+ 	addr->s6_addr32[3] = htonl(0x2);
+ }
+ 
++static bool ndp_msg_addrto_validate_link_local(struct in6_addr *addr)
++{
++	return IN6_IS_ADDR_LINKLOCAL (addr);
++}
++
+ static struct ndp_msg_type_info ndp_msg_type_info_list[] =
+ {
+ 	[NDP_MSG_RS] = {
+@@ -371,6 +377,7 @@ static struct ndp_msg_type_info ndp_msg_type_info_list[] =
+ 		.strabbr = "RA",
+ 		.raw_type = ND_ROUTER_ADVERT,
+ 		.raw_struct_size = sizeof(struct nd_router_advert),
++		.addrto_validate = ndp_msg_addrto_validate_link_local,
+ 	},
+ 	[NDP_MSG_NS] = {
+ 		.strabbr = "NS",
+@@ -387,6 +394,7 @@ static struct ndp_msg_type_info ndp_msg_type_info_list[] =
+ 		.strabbr = "R",
+ 		.raw_type = ND_REDIRECT,
+ 		.raw_struct_size = sizeof(struct nd_redirect),
++		.addrto_validate = ndp_msg_addrto_validate_link_local,
+ 	},
+ };
+ 
+@@ -418,7 +426,11 @@ static bool ndp_msg_check_valid(struct ndp_msg *msg)
+ 
+ 	if (len < ndp_msg_type_info(msg_type)->raw_struct_size)
+ 		return false;
+-	return true;
++
++	if (ndp_msg_type_info(msg_type)->addrto_validate)
++		return ndp_msg_type_info(msg_type)->addrto_validate(&msg->addrto);
++	else
++		return true;
+ }
+ 
+ static struct ndp_msg *ndp_msg_alloc(void)

@@ -1,0 +1,68 @@
+From 3ab838b83c5f565fba50e0c6f66fe4517f98eed3 Mon Sep 17 00:00:00 2001
+From: Nick Charlton <nick@nickcharlton.net>
+Date: Fri, 13 Mar 2020 12:15:54 +0000
+Subject: [PATCH] Merge pull request from GHSA-2p5p-m353-833w
+
+Previously, order parameters were passed directly through to the query.
+This meant that passing in `foo` via a URL string would try and sort by
+`foo`.
+---
+ lib/administrate/order.rb           |  8 ++++++--
+ spec/lib/administrate/order_spec.rb | 11 +++++++++++
+ 2 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/lib/administrate/order.rb b/lib/administrate/order.rb
+index 25f9d19602..575a8b9b73 100644
+--- a/lib/administrate/order.rb
++++ b/lib/administrate/order.rb
+@@ -2,7 +2,7 @@ module Administrate
+   class Order
+     def initialize(attribute = nil, direction = nil)
+       @attribute = attribute
+-      @direction = direction || :asc
++      @direction = sanitize_direction(direction)
+     end
+ 
+     def apply(relation)
+@@ -34,6 +34,10 @@ def order_params_for(attr)
+ 
+     attr_reader :attribute
+ 
++    def sanitize_direction(direction)
++      %w[asc desc].include?(direction.to_s) ? direction.to_sym : :asc
++    end
++
+     def reversed_direction_param_for(attr)
+       if ordered_by?(attr)
+         opposite_direction
+@@ -43,7 +47,7 @@ def reversed_direction_param_for(attr)
+     end
+ 
+     def opposite_direction
+-      direction.to_sym == :asc ? :desc : :asc
++      direction == :asc ? :desc : :asc
+     end
+ 
+     def order_by_association(relation)
+diff --git a/spec/lib/administrate/order_spec.rb b/spec/lib/administrate/order_spec.rb
+index 1522e23787..7899926ef9 100644
+--- a/spec/lib/administrate/order_spec.rb
++++ b/spec/lib/administrate/order_spec.rb
+@@ -51,6 +51,17 @@
+         expect(relation).to have_received(:reorder).with("table_name.name desc")
+         expect(ordered).to eq(relation)
+       end
++
++      it "sanitizes arbitary direction parameters" do
++        order = Administrate::Order.new(:name, :foo)
++        relation = relation_with_column(:name)
++        allow(relation).to receive(:reorder).and_return(relation)
++
++        ordered = order.apply(relation)
++
++        expect(relation).to have_received(:reorder).with("table_name.name asc")
++        expect(ordered).to eq(relation)
++      end
+     end
+ 
+     context "when relation has_many association" do

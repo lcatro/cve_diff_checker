@@ -1,0 +1,61 @@
+From 25c0e3817eb332660dd63d1d4522e63dcc94e79a Mon Sep 17 00:00:00 2001
+From: Yonghua Huang <yonghua.huang@intel.com>
+Date: Wed, 2 Jun 2021 15:19:15 +0800
+Subject: [PATCH] hv: validate input for dmar_free_irte function
+
+ Malicious input 'index' may trigger buffer
+ overflow on array 'irte_alloc_bitmap[]'.
+
+ This patch validate that 'index' shall be
+ less than 'CONFIG_MAX_IR_ENTRIES' and also
+ remove unnecessary check on 'index' in
+ 'ptirq_free_irte()' function with this fix.
+
+Tracked-On: #6132
+Signed-off-by: Yonghua Huang <yonghua.huang@intel.com>
+---
+ hypervisor/arch/x86/guest/assign.c | 16 +++++++---------
+ hypervisor/arch/x86/vtd.c          |  2 +-
+ 2 files changed, 8 insertions(+), 10 deletions(-)
+
+diff --git a/hypervisor/arch/x86/guest/assign.c b/hypervisor/arch/x86/guest/assign.c
+index fef5927580..f97c9721cf 100644
+--- a/hypervisor/arch/x86/guest/assign.c
++++ b/hypervisor/arch/x86/guest/assign.c
+@@ -72,16 +72,14 @@ static void ptirq_free_irte(const struct ptirq_remapping_info *entry)
+ {
+ 	struct intr_source intr_src;
+ 
+-	if (entry->irte_idx < CONFIG_MAX_IR_ENTRIES) {
+-		if (entry->intr_type == PTDEV_INTR_MSI) {
+-			intr_src.is_msi = true;
+-			intr_src.src.msi.value = entry->phys_sid.msi_id.bdf;
+-		} else {
+-			intr_src.is_msi = false;
+-			intr_src.src.ioapic_id = ioapic_irq_to_ioapic_id(entry->allocated_pirq);
+-		}
+-		dmar_free_irte(&intr_src, entry->irte_idx);
++	if (entry->intr_type == PTDEV_INTR_MSI) {
++		intr_src.is_msi = true;
++		intr_src.src.msi.value = entry->phys_sid.msi_id.bdf;
++	} else {
++		intr_src.is_msi = false;
++		intr_src.src.ioapic_id = ioapic_irq_to_ioapic_id(entry->allocated_pirq);
+ 	}
++	dmar_free_irte(&intr_src, entry->irte_idx);
+ }
+ 
+ /*
+diff --git a/hypervisor/arch/x86/vtd.c b/hypervisor/arch/x86/vtd.c
+index 323ea7ea2e..961439b0b8 100644
+--- a/hypervisor/arch/x86/vtd.c
++++ b/hypervisor/arch/x86/vtd.c
+@@ -1398,7 +1398,7 @@ void dmar_free_irte(const struct intr_source *intr_src, uint16_t index)
+ 		dmar_unit = ioapic_to_dmaru(intr_src->src.ioapic_id, &sid);
+ 	}
+ 
+-	if (is_dmar_unit_valid(dmar_unit, sid)) {
++	if (is_dmar_unit_valid(dmar_unit, sid) && (index < CONFIG_MAX_IR_ENTRIES)) {
+ 		ir_table = (union dmar_ir_entry *)hpa2hva(dmar_unit->ir_table_addr);
+ 		ir_entry = ir_table + index;
+ 		ir_entry->bits.remap.present = 0x0UL;

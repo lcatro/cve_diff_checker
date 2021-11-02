@@ -1,0 +1,51 @@
+From ed0f0db5fa0aff04594cb0f973ae4c22b17a175a Mon Sep 17 00:00:00 2001
+From: Joas Schilling <coding@schilljs.com>
+Date: Thu, 1 Sep 2016 10:06:06 +0200
+Subject: [PATCH] Filter out %0A from paths
+
+---
+ apps/files/js/filelist.js           | 7 ++++++-
+ apps/files/tests/js/filelistSpec.js | 3 ++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/apps/files/js/filelist.js b/apps/files/js/filelist.js
+index 14a5edb2d701..32de261ea624 100644
+--- a/apps/files/js/filelist.js
++++ b/apps/files/js/filelist.js
+@@ -1400,6 +1400,10 @@
+ 			return OC.linkTo('files', 'index.php')+"?dir="+ encodeURIComponent(dir).replace(/%2F/g, '/');
+ 		},
+ 
++		/**
++		 * @param {string} path
++		 * @returns {boolean}
++		 */
+ 		_isValidPath: function(path) {
+ 			var sections = path.split('/');
+ 			for (var i = 0; i < sections.length; i++) {
+@@ -1407,7 +1411,8 @@
+ 					return false;
+ 				}
+ 			}
+-			return true;
++
++			return path.toLowerCase().indexOf(decodeURI('%0a')) === -1;
+ 		},
+ 
+ 		/**
+diff --git a/apps/files/tests/js/filelistSpec.js b/apps/files/tests/js/filelistSpec.js
+index 99a2ff9a5e20..fd11a58b68ce 100644
+--- a/apps/files/tests/js/filelistSpec.js
++++ b/apps/files/tests/js/filelistSpec.js
+@@ -1379,9 +1379,10 @@ describe('OCA.Files.FileList tests', function() {
+ 				'/abc/..',
+ 				'/abc/../',
+ 				'/../abc/',
++				'/foo%0Abar/',
+ 				'/another\\subdir/../foo\\../bar\\..\\file/..\\folder/../'
+ 			], function(path) {
+-				fileList.changeDirectory(path);
++				fileList.changeDirectory(decodeURI(path));
+ 				expect(fileList.getCurrentDirectory()).toEqual('/');
+ 			});
+ 		});

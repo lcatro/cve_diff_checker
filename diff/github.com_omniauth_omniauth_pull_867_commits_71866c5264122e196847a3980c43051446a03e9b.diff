@@ -1,0 +1,63 @@
+From 71866c5264122e196847a3980c43051446a03e9b Mon Sep 17 00:00:00 2001
+From: Lalith Rallabhandi <lalith.rallabhandi@shopify.com>
+Date: Tue, 10 Jan 2017 23:04:18 -0500
+Subject: [PATCH] security issue in returning post parameters from session in
+ callback phase
+
+---
+ lib/omniauth/strategy.rb       |  4 ++--
+ spec/omniauth/strategy_spec.rb | 13 ++++++++++++-
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/lib/omniauth/strategy.rb b/lib/omniauth/strategy.rb
+index ca0b60d2..81f7c66a 100644
+--- a/lib/omniauth/strategy.rb
++++ b/lib/omniauth/strategy.rb
+@@ -198,7 +198,7 @@ def request_call # rubocop:disable CyclomaticComplexity, MethodLength, Perceived
+       setup_phase
+       log :info, 'Request phase initiated.'
+       # store query params from the request url, extracted in the callback_phase
+-      session['omniauth.params'] = request.params
++      session['omniauth.params'] = request.GET
+       OmniAuth.config.before_request_phase.call(env) if OmniAuth.config.before_request_phase
+       if options.form.respond_to?(:call)
+         log :info, 'Rendering form from supplied Rack endpoint.'
+@@ -265,7 +265,7 @@ def mock_call!(*)
+     def mock_request_call
+       setup_phase
+ 
+-      session['omniauth.params'] = request.params
++      session['omniauth.params'] = request.GET
+       OmniAuth.config.before_request_phase.call(env) if OmniAuth.config.before_request_phase
+       if request.params['origin']
+         @env['rack.session']['omniauth.origin'] = request.params['origin']
+diff --git a/spec/omniauth/strategy_spec.rb b/spec/omniauth/strategy_spec.rb
+index 4a4a4c8a..7a0d8108 100644
+--- a/spec/omniauth/strategy_spec.rb
++++ b/spec/omniauth/strategy_spec.rb
+@@ -685,13 +685,24 @@ def make_env(path = '/auth/test', props = {})
+         expect(strategy.env['foobar']).to eq('baz')
+       end
+ 
+-      it 'sets omniauth.params on the request phase' do
++      it 'sets omniauth.params with query params on the request phase' do
+         OmniAuth.config.mock_auth[:test] = {}
+ 
+         strategy.call(make_env('/auth/test', 'QUERY_STRING' => 'foo=bar'))
+         expect(strategy.env['rack.session']['omniauth.params']).to eq('foo' => 'bar')
+       end
+ 
++      it 'does not set body parameters of POST request on the request phase' do
++        OmniAuth.config.mock_auth[:test] = {}
++
++        props = {
++          'REQUEST_METHOD' => 'POST',
++          'rack.input' => StringIO.new('foo=bar')
++        }
++        strategy.call(make_env('/auth/test', props))
++        expect(strategy.env['rack.session']['omniauth.params']).to eq({})
++      end
++
+       it 'executes request hook on the request phase' do
+         OmniAuth.config.mock_auth[:test] = {}
+         OmniAuth.config.before_request_phase do |env|

@@ -1,0 +1,66 @@
+From 5a252d537411fdd0127714d66c1d76069dc7e190 Mon Sep 17 00:00:00 2001
+From: Brian Kephart <briantkephart@gmail.com>
+Date: Tue, 12 Oct 2021 00:02:51 -0500
+Subject: [PATCH] Disallow uploads from localhost
+
+---
+ .../camaleon_cms/admin/media_controller.rb    | 19 ++++++++++++++++++-
+ config/locales/camaleon_cms/admin/en.yml      |  1 +
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/app/controllers/camaleon_cms/admin/media_controller.rb b/app/controllers/camaleon_cms/admin/media_controller.rb
+index ae3240705..9f86988dd 100644
+--- a/app/controllers/camaleon_cms/admin/media_controller.rb
++++ b/app/controllers/camaleon_cms/admin/media_controller.rb
+@@ -4,6 +4,15 @@ class CamaleonCms::Admin::MediaController < CamaleonCms::AdminController
+   skip_before_action :verify_authenticity_token, only: :upload, raise: false
+   before_action :init_media_vars, except: :download_private_file
+ 
++  LOCALHOST_DOMAIN_MATCHER = %r{
++    localhost|
++    127\.0\.0\.1|
++    0\.0\.0\.0|
++    0x7f\.0x0\.0x0\.0x1| # hex encoding
++    0177\.0\.0\.01| # octal encoding
++    2130706433 # dword encoding
++  }x
++
+   # render media section
+   def index
+     authorize! :manage, :media
+@@ -67,7 +76,11 @@ def actions
+         unless params[:url].start_with?('data:')
+           params[:url] = (params[:url].start_with?('http') ? '' : current_site.the_url(locale: nil)) + params[:url]
+         end
+-        r = cama_tmp_upload( params[:url], formats: params[:formats], name: params[:name])
++        r = if local_url?(params[:url])
++              { error: t("camaleon_cms.admin.media.local_upload_denied") }
++            else
++              cama_tmp_upload( params[:url], formats: params[:formats], name: params[:name])
++            end
+         unless r[:error].present?
+           params[:file_upload] = r[:file_path]
+           sett = {remove_source: true}
+@@ -80,6 +93,10 @@ def actions
+     end
+   end
+ 
++  def local_url?(url)
++    url.try :match?, LOCALHOST_DOMAIN_MATCHER
++  end
++
+   # upload files from media uploader
+   def upload(settings = {})
+     params[:dimension] = nil if params[:skip_auto_crop].present?
+diff --git a/config/locales/camaleon_cms/admin/en.yml b/config/locales/camaleon_cms/admin/en.yml
+index 0526000aa..c18310e3a 100644
+--- a/config/locales/camaleon_cms/admin/en.yml
++++ b/config/locales/camaleon_cms/admin/en.yml
+@@ -212,6 +212,7 @@ en:
+         reload: 'Reload'
+         clear_cache: 'Clear Cache'
+         name_required: 'File name is required'
++        local_upload_denied: 'Cannot upload from localhost'
+       menus:
+         menus: Menus
+         link_url: 'Link URL'

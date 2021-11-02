@@ -1,0 +1,195 @@
+From 78f9ad1faba7193ca7f0acccbc13b1ff6ebf9072 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Borgstr=C3=B6m?= <jonas@borgstrom.se>
+Date: Mon, 6 Apr 2015 23:07:10 +0200
+Subject: [PATCH] Require approval before accessing previously unknown
+ unencrypted repositories
+
+Closes #271
+---
+ CHANGES                     |  1 +
+ attic/archiver.py           |  1 +
+ attic/cache.py              | 27 ++++++++++++++++++++--
+ attic/testsuite/archiver.py | 45 ++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/CHANGES b/CHANGES
+index 2263a54..0183a56 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -7,6 +7,7 @@ Version 0.15
+ ------------
+ 
+ (feature release, released on X)
++- Require approval before accessing previously unknown unencrypted repositories (#271)
+ - Fix issue with hash index files larger than 2GB.
+ - Fix Python 3.2 compatibility issue with noatime open() (#164)
+ - Include missing pyx files in dist files (#168)
+diff --git a/attic/archiver.py b/attic/archiver.py
+index 47650c2..7295ac0 100644
+--- a/attic/archiver.py
++++ b/attic/archiver.py
+@@ -62,6 +62,7 @@ def do_init(self, args):
+         manifest.key = key
+         manifest.write()
+         repository.commit()
++        Cache(repository, key, manifest, warn_if_unencrypted=False)
+         return self.exit_code
+ 
+     def do_check(self, args):
+diff --git a/attic/cache.py b/attic/cache.py
+index acbc766..626c2c9 100644
+--- a/attic/cache.py
++++ b/attic/cache.py
+@@ -2,9 +2,11 @@
+ from attic.remote import cache_if_remote
+ import msgpack
+ import os
++import sys
+ from binascii import hexlify
+ import shutil
+ 
++from .key import PlaintextKey
+ from .helpers import Error, get_cache_dir, decode_dict, st_mtime_ns, unhexlify, UpgradableLock, int_to_bigint, \
+     bigint_to_int
+ from .hashindex import ChunkIndex
+@@ -16,7 +18,16 @@ class Cache(object):
+     class RepositoryReplay(Error):
+         """Cache is newer than repository, refusing to continue"""
+ 
+-    def __init__(self, repository, key, manifest, path=None, sync=True):
++    class CacheInitAbortedError(Error):
++        """Cache initialization aborted"""
++
++
++    class EncryptionMethodMismatch(Error):
++        """Repository encryption method changed since last acccess, refusing to continue
++        """
++
++    def __init__(self, repository, key, manifest, path=None, sync=True, warn_if_unencrypted=True):
++        self.lock = None
+         self.timestamp = None
+         self.txn_active = False
+         self.repository = repository
+@@ -24,12 +35,21 @@ def __init__(self, repository, key, manifest, path=None, sync=True):
+         self.manifest = manifest
+         self.path = path or os.path.join(get_cache_dir(), hexlify(repository.id).decode('ascii'))
+         if not os.path.exists(self.path):
++            if warn_if_unencrypted and isinstance(key, PlaintextKey):
++                if 'ATTIC_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK' not in os.environ:
++                    print("""Warning: Attempting to access a previously unknown unencrypted repository\n""", file=sys.stderr)
++                    answer = input('Do you want to continue? [yN] ')
++                    if not (answer and answer in 'Yy'):
++                        raise self.CacheInitAbortedError()
+             self.create()
+         self.open()
+         if sync and self.manifest.id != self.manifest_id:
+             # If repository is older than the cache something fishy is going on
+             if self.timestamp and self.timestamp > manifest.timestamp:
+                 raise self.RepositoryReplay()
++            # Make sure an encrypted repository has not been swapped for an unencrypted repository
++            if self.key_type is not None and self.key_type != str(key.TYPE):
++                raise self.EncryptionMethodMismatch()
+             self.sync()
+             self.commit()
+ 
+@@ -65,11 +85,13 @@ def open(self):
+         self.id = self.config.get('cache', 'repository')
+         self.manifest_id = unhexlify(self.config.get('cache', 'manifest'))
+         self.timestamp = self.config.get('cache', 'timestamp', fallback=None)
++        self.key_type = self.config.get('cache', 'key_type', fallback=None)
+         self.chunks = ChunkIndex.read(os.path.join(self.path, 'chunks').encode('utf-8'))
+         self.files = None
+ 
+     def close(self):
+-        self.lock.release()
++        if self.lock:
++            self.lock.release()
+ 
+     def _read_files(self):
+         self.files = {}
+@@ -111,6 +133,7 @@ def commit(self):
+                         msgpack.pack((path_hash, item), fd)
+         self.config.set('cache', 'manifest', hexlify(self.manifest.id).decode('ascii'))
+         self.config.set('cache', 'timestamp', self.manifest.timestamp)
++        self.config.set('cache', 'key_type', str(self.key.TYPE))
+         with open(os.path.join(self.path, 'config'), 'w') as fd:
+             self.config.write(fd)
+         self.chunks.write(os.path.join(self.path, 'chunks').encode('utf-8'))
+diff --git a/attic/testsuite/archiver.py b/attic/testsuite/archiver.py
+index 382fcc8..ba03b87 100644
+--- a/attic/testsuite/archiver.py
++++ b/attic/testsuite/archiver.py
+@@ -1,3 +1,5 @@
++from binascii import hexlify
++from configparser import RawConfigParser
+ import os
+ from io import StringIO
+ import stat
+@@ -11,6 +13,7 @@
+ from attic import xattr
+ from attic.archive import Archive, ChunkBuffer
+ from attic.archiver import Archiver
++from attic.cache import Cache
+ from attic.crypto import bytes_to_long, num_aes_blocks
+ from attic.helpers import Manifest
+ from attic.remote import RemoteRepository, PathNotAllowed
+@@ -41,6 +44,22 @@ def __exit__(self, *args, **kw):
+         os.chdir(self.old)
+ 
+ 
++class environment_variable:
++    def __init__(self, **values):
++        self.values = values
++        self.old_values = {}
++
++    def __enter__(self):
++        for k, v in self.values.items():
++            self.old_values[k] = os.environ.get(k)
++            os.environ[k] = v
++
++    def __exit__(self, *args, **kw):
++        for k, v in self.old_values.items():
++            if v is not None:
++                os.environ[k] = v
++
++
+ class ArchiverTestCaseBase(AtticTestCase):
+ 
+     prefix = ''
+@@ -161,11 +180,35 @@ def test_basic_functionality(self):
+         info_output = self.attic('info', self.repository_location + '::test')
+         self.assert_in('Number of files: 4', info_output)
+         shutil.rmtree(self.cache_path)
+-        info_output2 = self.attic('info', self.repository_location + '::test')
++        with environment_variable(ATTIC_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK='1'):
++            info_output2 = self.attic('info', self.repository_location + '::test')
+         # info_output2 starts with some "initializing cache" text but should
+         # end the same way as info_output
+         assert info_output2.endswith(info_output)
+ 
++    def _extract_repository_id(self, path):
++        return Repository(self.repository_path).id
++
++    def _set_repository_id(self, path, id):
++        config = RawConfigParser()
++        config.read(os.path.join(path, 'config'))
++        config.set('repository', 'id', hexlify(id).decode('ascii'))
++        with open(os.path.join(path, 'config'), 'w') as fd:
++            config.write(fd)
++        return Repository(self.repository_path).id
++
++    def test_repository_swap_detection(self):
++        self.create_test_files()
++        os.environ['ATTIC_PASSPHRASE'] = 'passphrase'
++        self.attic('init', '--encryption=passphrase', self.repository_location)
++        repository_id = self._extract_repository_id(self.repository_path)
++        self.attic('create', self.repository_location + '::test', 'input')
++        shutil.rmtree(self.repository_path)
++        self.attic('init', '--encryption=none', self.repository_location)
++        self._set_repository_id(self.repository_path, repository_id)
++        self.assert_equal(repository_id, self._extract_repository_id(self.repository_path))
++        self.assert_raises(Cache.EncryptionMethodMismatch, lambda :self.attic('create', self.repository_location + '::test.2', 'input'))
++
+     def test_strip_components(self):
+         self.attic('init', self.repository_location)
+         self.create_regular_file('dir/file')

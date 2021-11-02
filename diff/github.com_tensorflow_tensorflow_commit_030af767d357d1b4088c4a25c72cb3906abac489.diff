@@ -1,0 +1,37 @@
+From 030af767d357d1b4088c4a25c72cb3906abac489 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 13 Apr 2021 14:25:01 -0700
+Subject: [PATCH] Fix `tf.raw_ops.ResourceCountUpTo` null pointer dereference.
+
+PiperOrigin-RevId: 368294347
+Change-Id: I2c16fbfc9b4966c402c3d8e311f0d665a9c852d8
+---
+ tensorflow/python/lib/core/ndarray_tensor.cc | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tensorflow/python/lib/core/ndarray_tensor.cc b/tensorflow/python/lib/core/ndarray_tensor.cc
+index 03fbea397485e..6cf51ceebbdaa 100644
+--- a/tensorflow/python/lib/core/ndarray_tensor.cc
++++ b/tensorflow/python/lib/core/ndarray_tensor.cc
+@@ -16,6 +16,7 @@ limitations under the License.
+ #include "tensorflow/python/lib/core/ndarray_tensor.h"
+ 
+ #include <cstring>
++#include <optional>
+ 
+ #include "tensorflow/c/eager/tfe_context_internal.h"
+ #include "tensorflow/c/tf_tensor_internal.h"
+@@ -74,6 +75,13 @@ Status PyArrayDescr_to_TF_DataType(PyArray_Descr* descr,
+   PyObject* key;
+   PyObject* value;
+   Py_ssize_t pos = 0;
++
++  // Return an error if the fields attribute is null.
++  // Occurs with an improper conversion attempt to resource.
++  if (descr->fields == nullptr) {
++    return errors::Internal("Unexpected numpy data type");
++  }
++
+   if (PyDict_Next(descr->fields, &pos, &key, &value)) {
+     // In Python 3, the keys of numpy custom struct types are unicode, unlike
+     // Python 2, where the keys are bytes.

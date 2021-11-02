@@ -1,0 +1,26 @@
+From 4504a081af71514bb1828048363e6540f797005b Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 5 May 2021 17:33:47 -0700
+Subject: [PATCH] Fix OOB read issue with `tf.raw_ops.CTCLoss`.
+
+PiperOrigin-RevId: 372242187
+Change-Id: I347228ed8c04e1d2eb9d2479ae52f51d1b512c6e
+---
+ tensorflow/core/kernels/ctc_loss_op.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ctc_loss_op.cc b/tensorflow/core/kernels/ctc_loss_op.cc
+index 6358e82fdda85..b0e298a0f329f 100644
+--- a/tensorflow/core/kernels/ctc_loss_op.cc
++++ b/tensorflow/core/kernels/ctc_loss_op.cc
+@@ -100,6 +100,10 @@ class CTCLossOp : public OpKernel {
+                 errors::InvalidArgument("sequence_length is not a vector"));
+     OP_REQUIRES(ctx, TensorShapeUtils::IsMatrix(labels_indices->shape()),
+                 errors::InvalidArgument("labels_indices is not a matrix"));
++    OP_REQUIRES(ctx, labels_indices->dim_size(1) > 1,
++                errors::InvalidArgument(
++                    "labels_indices second dimension must be >= 1. Received ",
++                    labels_indices->dim_size(1)));
+     OP_REQUIRES(ctx, TensorShapeUtils::IsVector(labels_values->shape()),
+                 errors::InvalidArgument("labels_values is not a vector"));
+ 

@@ -1,0 +1,437 @@
+From 8004ee0c384daae0b28478ff8193d1990c397f57 Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Tue, 7 Jul 2015 10:28:35 +0900
+Subject: [PATCH] Reinforcement of security. Signed-off-by: MORITA Shintaro
+ <shin@sysphonic.com>
+
+---
+ app/controllers/application_controller.rb     | 20 +++++--------
+ app/controllers/mail_filters_controller.rb    | 22 +++++++++-----
+ app/controllers/mail_folders_controller.rb    | 30 ++++++++++++++-----
+ app/controllers/workflows_controller.rb       |  1 +
+ app/helpers/mail_filters_helper.rb            |  6 +++-
+ app/models/address.rb                         | 15 ++++++++--
+ app/models/comment.rb                         |  4 +--
+ app/models/email.rb                           |  2 +-
+ app/models/item.rb                            |  6 +++-
+ app/models/toy.rb                             | 18 +++++------
+ app/models/user.rb                            |  6 +++-
+ .../mail_filters/_mail_filter_form.html.erb   |  3 +-
+ 12 files changed, 84 insertions(+), 49 deletions(-)
+
+diff --git a/app/controllers/application_controller.rb b/app/controllers/application_controller.rb
+index 1e45ce1..9b83a1a 100644
+--- a/app/controllers/application_controller.rb
++++ b/app/controllers/application_controller.rb
+@@ -75,18 +75,18 @@ def render(action=nil, options={}, &blk)
+   #=== paginate_by_sql
+   #
+   def paginate_by_sql(model, sql, per_page, options={})
+-    if options[:count]
++    if options[:count].blank?
++      total = model.count_by_sql_wrapping_select_query(sql)
++    else
+       if options[:count].is_a?(Integer)
+         total = options[:count]
+-      else
+-        total = model.count_by_sql(options[:count])
++      #else
++      #  total = model.count_by_sql(options[:count])
+       end
+-    else
+-      total = model.count_by_sql_wrapping_select_query(sql)
+     end
+ 
++    SqlHelper.validate_token([params['page']])
+     object_pages = model.paginate_by_sql(sql, {:page => params['page'], :per_page => per_page})
+-    #objects = model.find_by_sql_with_limit(sql, object_pages.current.to_sql[1], per_page)
+     return [object_pages, object_pages, total]
+   end
+ 
+@@ -99,7 +99,7 @@ def gate_process
+ 
+     HistoryHelper.keep_last(request)
+ 
+-    @login_user = User.find_by_id(session[:login_user_id])
++    @login_user = User.find(session[:login_user_id])
+ 
+     begin
+       if @login_user.nil? \
+@@ -118,12 +118,6 @@ def gate_process
+ 
+ module ActiveRecord
+   class Base
+-    def self.find_by_sql_with_limit(sql, offset, limit)
+-      sql = sanitize_sql(sql)
+-      add_limit!(sql, {:limit => limit, :offset => offset})
+-      find_by_sql(sql)
+-    end
+-
+     def self.count_by_sql_wrapping_select_query(sql)
+       sql = sanitize_sql(sql)
+       count_by_sql("select count(*) from (#{sql}) as my_table")
+diff --git a/app/controllers/mail_filters_controller.rb b/app/controllers/mail_filters_controller.rb
+index c1ee6aa..7654294 100644
+--- a/app/controllers/mail_filters_controller.rb
++++ b/app/controllers/mail_filters_controller.rb
+@@ -108,7 +108,10 @@ def show
+       Log.add_info(request, params.inspect)
+     end
+ 
+-    @mail_filter = MailFilter.find_by_id(params[:id])
++    begin
++      @mail_filter = MailFilter.find(params[:id])
++    rescue => evar
++    end
+     if @mail_filter.nil?
+       render(:text => 'ERROR:' + t('msg.already_deleted', :name => MailFilter.model_name.human))
+       return
+@@ -225,8 +228,8 @@ def destroy
+   def do_execute
+     Log.add_info(request, params.inspect)
+ 
+-    mail_account = MailAccount.find_by_id(params[:mail_account_id])
+-    mail_folder = MailFolder.find_by_id(params[:mail_folder_id])
++    mail_account = MailAccount.find(params[:mail_account_id])
++    mail_folder = MailFolder.find(params[:mail_folder_id])
+ 
+     if mail_account.user_id != @login_user.id \
+         or mail_folder.user_id != @login_user.id
+@@ -258,8 +261,9 @@ def get_order
+     Log.add_info(request, params.inspect)
+ 
+     mail_account_id = params[:mail_account_id]
++    SqlHelper.validate_token([mail_account_id])
+ 
+-    @mail_account = MailAccount.find_by_id(mail_account_id)
++    @mail_account = MailAccount.find(mail_account_id)
+ 
+     if @mail_account.user_id != @login_user.id
+       flash[:notice] = t('msg.need_to_be_owner')
+@@ -285,9 +289,11 @@ def update_order
+     Log.add_info(request, params.inspect)
+ 
+     mail_account_id = params[:mail_account_id]
+-    order_ary = params[:mail_filters_order]
++    order_arr = params[:mail_filters_order]
++
++    SqlHelper.validate_token([mail_account_id])
+ 
+-    @mail_account = MailAccount.find_by_id(mail_account_id)
++    @mail_account = MailAccount.find(mail_account_id)
+ 
+     if @mail_account.user_id != @login_user.id
+       render(:text => 'ERROR:' + t('msg.need_to_be_owner'))
+@@ -301,8 +307,8 @@ def update_order
+       id_a = filter_a.id.to_s
+       id_b = filter_b.id.to_s
+ 
+-      idx_a = order_ary.index(id_a)
+-      idx_b = order_ary.index(id_b)
++      idx_a = order_arr.index(id_a)
++      idx_b = order_arr.index(id_b)
+ 
+       if idx_a.nil? or idx_b.nil?
+         idx_a = filters.index(id_a)
+diff --git a/app/controllers/mail_folders_controller.rb b/app/controllers/mail_folders_controller.rb
+index 0b355d2..dd67e47 100644
+--- a/app/controllers/mail_folders_controller.rb
++++ b/app/controllers/mail_folders_controller.rb
+@@ -302,7 +302,7 @@ def get_mail_attachments
+ 
+     email_id = params[:id]
+ 
+-    email = Email.find_by_id(email_id)
++    email = Email.find(email_id)
+     if email.nil? or email.user_id != @login_user.id
+       render(:text => '')
+       return
+@@ -327,14 +327,20 @@ def get_mail_attachment
+     Log.add_info(request, params.inspect)
+ 
+     attached_id = params[:id].to_i
+-    mail_attach = MailAttachment.find_by_id(attached_id)
++    begin
++      mail_attach = MailAttachment.find(attached_id)
++    rescue => evar
++    end
+ 
+     if mail_attach.nil?
+       redirect_to(THETIS_RELATIVE_URL_ROOT + '/404.html')
+       return
+     end
+ 
+-    email = Email.find_by_id(mail_attach.email_id)
++    begin
++      email = Email.find(mail_attach.email_id)
++    rescue => evar
++    end
+     if email.nil? or email.user_id != @login_user.id
+       render(:text => '')
+       return
+@@ -438,7 +444,10 @@ def ajax_delete_mails
+       params[:check_mail].each do |email_id, value|
+         next if value != '1'
+ 
+-        email = Email.find_by_id(email_id)
++        begin
++          email = Email.find(email_id)
++        rescue => evar
++        end
+         next if email.nil? or (email.user_id != @login_user.id)
+ 
+         if trash_folder.nil? \
+@@ -473,7 +482,11 @@ def ajax_move_mails
+     Log.add_info(request, params.inspect)
+ 
+     folder_id = params[:thetisBoxSelKeeper].split(':').last
+-    mail_folder = MailFolder.find_by_id(folder_id)
++    SqlHelper.validate_token([folder_id])
++    begin
++      mail_folder = MailFolder.find(folder_id)
++    rescue => evar
++    end
+ 
+     if folder_id == '0' \
+         or mail_folder.nil? \
+@@ -541,15 +554,16 @@ def get_folders_order
+   def update_folders_order
+     Log.add_info(request, params.inspect)
+ 
+-    order_ary = params[:folders_order]
++    order_arr = params[:folders_order]
+ 
++    SqlHelper.validate_token([params[:id]])
+     folders = MailFolder.get_childs(params[:id], false, false)
+     # folders must be ordered by xorder ASC.
+ 
+     folders.sort! { |id_a, id_b|
+ 
+-      idx_a = order_ary.index(id_a)
+-      idx_b = order_ary.index(id_b)
++      idx_a = order_arr.index(id_a)
++      idx_b = order_arr.index(id_b)
+ 
+       if idx_a.nil? or idx_b.nil?
+         idx_a = folders.index(id_a)
+diff --git a/app/controllers/workflows_controller.rb b/app/controllers/workflows_controller.rb
+index d2885a5..9d415ea 100644
+--- a/app/controllers/workflows_controller.rb
++++ b/app/controllers/workflows_controller.rb
+@@ -103,6 +103,7 @@ def move
+ 
+     unless params[:thetisBoxSelKeeper].nil?
+       folder_id = params[:thetisBoxSelKeeper].split(':').last
++      SqlHelper.validate_token([folder_id])
+ 
+       workflow = Workflow.find(params[:id])
+ 
+diff --git a/app/helpers/mail_filters_helper.rb b/app/helpers/mail_filters_helper.rb
+index 56a9a9e..62cb009 100644
+--- a/app/helpers/mail_filters_helper.rb
++++ b/app/helpers/mail_filters_helper.rb
+@@ -413,8 +413,12 @@ def self.execute_actions(mail_filter, email, actions)
+   def self.execute_action_move(mail_filter, email, val)
+ 
+     mail_folder_id = val
++    SqlHelper.validate_token([mail_folder_id])
+ 
+-    mail_folder = MailFolder.find_by_id(mail_folder_id)
++    begin
++      mail_folder = MailFolder.find(mail_folder_id)
++    rescue => evar
++    end
+     if !mail_folder.nil? and (mail_folder.user_id == email.user_id)
+       email.update_attribute(:mail_folder_id, mail_folder_id)
+     end
+diff --git a/app/models/address.rb b/app/models/address.rb
+index 20e9159..18c6b15 100644
+--- a/app/models/address.rb
++++ b/app/models/address.rb
+@@ -210,7 +210,8 @@ def self.check_csv_header(row, book)
+   def self.parse_csv_row(row, book, idxs, user)
+ 
+     imp_id = (idxs[0].nil? or row[idxs[0]].nil?)?(nil):(row[idxs[0]].strip)
+-    unless imp_id.nil? or imp_id.empty?
++    SqlHelper.validate_token([imp_id])
++    unless imp_id.blank?
+       org_address = Address.find_by_id(imp_id)
+     end
+ 
+@@ -305,7 +306,11 @@ def check_import(mode, address_names)    #, address_emails
+       if (/^|([0-9]+|)+$/ =~ self.groups) == 0
+ 
+         self.get_groups_a.each do |group_id|
+-          group = Group.find_by_id(group_id)
++          begin
++            group = Group.find(group_id)
++          rescue => evar
++            group = nil
++          end
+           if group.nil?
+             err_msgs << I18n.t('address.import.not_valid_groups') + ': '+group_id.to_s
+             break
+@@ -322,7 +327,11 @@ def check_import(mode, address_names)    #, address_emails
+       if (/^|([0-9]+|)+$/ =~ self.teams) == 0
+ 
+         self.get_teams_a.each do |team_id|
+-          team = Team.find_by_id(team_id)
++          begin
++            team = Team.find(team_id)
++          rescue => evar
++            team = nil
++          end
+           if team.nil?
+             err_msgs << I18n.t('address.import.not_valid_teams') + ': '+team_id.to_s
+             break
+diff --git a/app/models/comment.rb b/app/models/comment.rb
+index a5c8aad..7cfdcdb 100644
+--- a/app/models/comment.rb
++++ b/app/models/comment.rb
+@@ -104,8 +104,7 @@ def attachments_without_content
+     rescue => evar
+       Log.add_error(nil, evar)
+     end
+-    attachments = [] if attachments.nil?
+-    return attachments
++    return (attachments || [])
+   end
+ 
+   #=== self.get_toys
+@@ -160,5 +159,4 @@ def self.get_feeds(user, root_url, users_cache = nil)
+     end
+     return entries
+   end
+-
+ end
+diff --git a/app/models/email.rb b/app/models/email.rb
+index 8d5f026..0c0c1f6 100644
+--- a/app/models/email.rb
++++ b/app/models/email.rb
+@@ -53,7 +53,7 @@ class Email < ActiveRecord::Base
+ # FEATURE_MAIL_STRICT_CAPACITY >>>
+     if (email.status != Email::STATUS_TEMPORARY) \
+         and (email.size > org_size)
+-      mail_account = MailAccount.find_by_id(email.mail_account_id)
++      mail_account = MailAccount.find(email.mail_account_id)
+       max_size = mail_account.get_capacity_mb * 1024 * 1024
+       con = "(id != #{email.id})" unless email.id.nil?
+       cur_size = MailAccount.get_using_size(mail_account.id, con)
+diff --git a/app/models/item.rb b/app/models/item.rb
+index ca2f3b4..038d73b 100644
+--- a/app/models/item.rb
++++ b/app/models/item.rb
+@@ -68,7 +68,11 @@ def is_a_copy?(folder_obj_cache=nil)
+     return false if self.source_id.nil?
+ 
+     # Exclude those created from system templates.
+-    src_item = Item.find_by_id(self.source_id)
++    begin
++      src_item = Item.find(self.source_id)
++    rescue => evar
++      src_item = nil
++    end
+     if src_item.nil?
+       return true
+     else
+diff --git a/app/models/toy.rb b/app/models/toy.rb
+index a0bf852..dcc5c54 100644
+--- a/app/models/toy.rb
++++ b/app/models/toy.rb
+@@ -125,7 +125,7 @@ def self.get_for_user(user)
+     return [] if user.nil?
+ 
+     toys = Toy.where("user_id=#{user.id}").to_a
+-    deleted_ary = []
++    deleted_arr = []
+ 
+     return [] if toys.nil?
+ 
+@@ -134,7 +134,7 @@ def self.get_for_user(user)
+         when Toy::XTYPE_ITEM
+           item = Item.find_by_id(toy.target_id)
+           if item.nil?
+-            deleted_ary << toy
++            deleted_arr << toy
+             next
+           end
+           Toy.copy(toy, item)
+@@ -142,7 +142,7 @@ def self.get_for_user(user)
+         when Toy::XTYPE_COMMENT
+           comment = Comment.find_by_id(toy.target_id)
+           if comment.nil?
+-            deleted_ary << toy
++            deleted_arr << toy
+             next
+           end
+           Toy.copy(toy, comment)
+@@ -150,7 +150,7 @@ def self.get_for_user(user)
+         when Toy::XTYPE_WORKFLOW
+           workflow = Workflow.find_by_id(toy.target_id)
+           if workflow.nil?
+-            deleted_ary << toy
++            deleted_arr << toy
+             next
+           end
+           Toy.copy(toy, workflow)
+@@ -158,7 +158,7 @@ def self.get_for_user(user)
+         when Toy::XTYPE_SCHEDULE
+           schedule = Schedule.find_by_id(toy.target_id)
+           if schedule.nil?
+-            deleted_ary << toy
++            deleted_arr << toy
+             next
+           end
+           Toy.copy(toy, schedule)
+@@ -166,16 +166,16 @@ def self.get_for_user(user)
+         when Toy::XTYPE_FOLDER
+           folder = Folder.find_by_id(toy.target_id)
+           if folder.nil?
+-            deleted_ary << toy
++            deleted_arr << toy
+             next
+           end
+           Toy.copy(toy, folder)
+       end
+     end
+ 
+-    deleted_ary.each do |toy|
+-      toys.delete toy
+-      Toy.destroy toy.id
++    deleted_arr.each do |toy|
++      toys.delete(toy)
++      Toy.destroy(toy.id)
+     end
+ 
+     return toys
+diff --git a/app/models/user.rb b/app/models/user.rb
+index bf4f46b..f620221 100644
+--- a/app/models/user.rb
++++ b/app/models/user.rb
+@@ -1131,7 +1131,11 @@ def check_import(mode, user_names)    #, user_emails
+       if (/^|([0-9]+|)+$/ =~ self.groups) == 0
+ 
+         self.get_groups_a.each do |group_id|
+-          group = Group.find_by_id(group_id)
++          begin
++            group = Group.find(group_id)
++          rescue => evar
++            group = nil
++          end
+           if group.nil?
+             err_msgs << I18n.t('user.import.not_valid_groups') + ': '+group_id.to_s
+             break
+diff --git a/app/views/mail_filters/_mail_filter_form.html.erb b/app/views/mail_filters/_mail_filter_form.html.erb
+index 3af47ef..184d644 100644
+--- a/app/views/mail_filters/_mail_filter_form.html.erb
++++ b/app/views/mail_filters/_mail_filter_form.html.erb
+@@ -6,7 +6,8 @@ if params[:mail_account_id].blank?
+ else
+   mail_account_id = params[:mail_account_id]
+ end
+-mail_account = MailAccount.find_by_id(mail_account_id)
++SqlHelper.validate_token([mail_account_id])
++mail_account = MailAccount.find(mail_account_id)
+ %>
+ 
+ <%= render(:partial => 'common/error', :locals => {:obj => @mail_filter}) %>

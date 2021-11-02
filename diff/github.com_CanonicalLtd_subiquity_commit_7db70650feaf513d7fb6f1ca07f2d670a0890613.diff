@@ -1,0 +1,38 @@
+From 7db70650feaf513d7fb6f1ca07f2d670a0890613 Mon Sep 17 00:00:00 2001
+From: Michael Hudson-Doyle <michael.hudson@canonical.com>
+Date: Tue, 12 May 2020 16:32:04 +1200
+Subject: [PATCH] write the dm_crypt key to a keyfile, not curtin config
+
+---
+ subiquity/models/filesystem.py | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/subiquity/models/filesystem.py b/subiquity/models/filesystem.py
+index 7f74de177..27b40d6da 100644
+--- a/subiquity/models/filesystem.py
++++ b/subiquity/models/filesystem.py
+@@ -24,6 +24,7 @@
+ import os
+ import pathlib
+ import platform
++import tempfile
+ 
+ from curtin import storage_config
+ from curtin.util import human2bytes
+@@ -1179,6 +1180,16 @@ class DM_Crypt:
+     volume = attributes.ref(backlink="_constructed_device")  # _Formattable
+     key = attr.ib(metadata={'redact': True})
+ 
++    def serialize_key(self):
++        if self.key:
++            f = tempfile.NamedTemporaryFile(
++                prefix='luks-key-', mode='w', delete=False)
++            f.write(self.key)
++            f.close()
++            return {'keyfile': f.name}
++        else:
++            return {}
++
+     dm_name = attr.ib(default=None)
+     preserve = attr.ib(default=False)
+ 

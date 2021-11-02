@@ -1,0 +1,483 @@
+From 583666c84ea2f12797a3eb71392bcb05782f5b14 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Duraffort?= <remi.duraffort@linaro.org>
+Date: Fri, 15 Jun 2018 15:57:51 +0200
+Subject: Use yaml.safe_load when parsing user data
+
+Calling yaml.load() on untrusted data is unsafe and can lead to remote code
+execution.
+
+This commit fixes remote code execution in:
+* the submit page
+* the xmlrpc api
+* the scheduler
+* lava-master and lava-slave
+
+This bug was found by running bandit (https://github.com/PyCQA/bandit).
+
+Change-Id: I80882f9baeb0e7e1c2127f602cc4b206213cb59f
+---
+ doc/v2/device-integration.rst                  |  2 +-
+ lava/dispatcher/lava-slave                     | 10 +++++-----
+ lava_dispatcher/actions/deploy/environment.py  |  4 ++--
+ lava_dispatcher/device.py                      |  4 ++--
+ lava_dispatcher/parser.py                      |  4 ++--
+ lava_results_app/dbutils.py                    |  2 +-
+ lava_results_app/tests/test_metadata.py        | 10 +++++-----
+ lava_scheduler_app/api/__init__.py             |  8 ++++----
+ lava_scheduler_app/api/devices.py              |  2 +-
+ lava_scheduler_app/dbutils.py                  |  4 ++--
+ lava_scheduler_app/models.py                   | 16 ++++++++--------
+ lava_scheduler_app/scheduler.py                |  8 ++++----
+ lava_scheduler_app/schema.py                   |  6 +++---
+ lava_server/api.py                             |  4 ++--
+ lava_server/management/commands/lava-master.py |  4 ++--
+ share/render-template.py                       |  2 +-
+ 16 files changed, 45 insertions(+), 45 deletions(-)
+
+diff --git a/doc/v2/device-integration.rst b/doc/v2/device-integration.rst
+index 03e26700a..913798649 100644
+--- a/doc/v2/device-integration.rst
++++ b/doc/v2/device-integration.rst
+@@ -615,7 +615,7 @@ files to see how this is done. e.g. for QEMU from
+         job_ctx = {'arch': 'amd64'}
+         test_template = prepare_jinja_template('staging-qemu-01', data)
+         rendered = test_template.render(**job_ctx)
+-        template_dict = yaml.load(rendered)
++        template_dict = yaml.safe_load(rendered)
+         self.assertEqual(
+             'c',
+             template_dict['actions']['boot']['methods']['qemu']['parameters']['boot_options']['boot_order']
+diff --git a/lava/dispatcher/lava-slave b/lava/dispatcher/lava-slave
+index bd991a9b5..b189b2744 100755
+--- a/lava/dispatcher/lava-slave
++++ b/lava/dispatcher/lava-slave
+@@ -85,7 +85,7 @@ def create_environ(env):
+     """
+     Generate the env variables for the job.
+     """
+-    conf = yaml.load(env) if env else None
++    conf = yaml.safe_load(env) if env else None
+     environ = dict(os.environ)
+     if conf:
+         if conf.get("purge", False):
+@@ -791,12 +791,12 @@ def handle_start(msg, jobs, sock, master, zmq_config):
+             job.send_start_ok(sock)
+     else:
+         # Pretty print configuration
+-        dispatcher_str = str(yaml.load(dispatcher_config)) if dispatcher_config else ""
+-        env_str = str(yaml.load(env)) if env else ""
+-        env_dut_str = str(yaml.load(env_dut)) if env_dut else ""
++        dispatcher_str = str(yaml.safe_load(dispatcher_config)) if dispatcher_config else ""
++        env_str = str(yaml.safe_load(env)) if env else ""
++        env_dut_str = str(yaml.safe_load(env_dut)) if env_dut else ""
+ 
+         LOG.info("[%d] Starting job", job_id)
+-        LOG.debug("[%d]         : %s", job_id, yaml.load(job_definition))
++        LOG.debug("[%d]         : %s", job_id, yaml.safe_load(job_definition))
+         LOG.debug("[%d] device  : %s", job_id, device_definition)
+         LOG.debug("[%d] dispatch: %s", job_id, dispatcher_str)
+         LOG.debug("[%d] env     : %s", job_id, env_str)
+diff --git a/lava_dispatcher/actions/deploy/environment.py b/lava_dispatcher/actions/deploy/environment.py
+index 94be9d9b7..b3dc876ab 100644
+--- a/lava_dispatcher/actions/deploy/environment.py
++++ b/lava_dispatcher/actions/deploy/environment.py
+@@ -47,7 +47,7 @@ class DeployDeviceEnvironment(Action):
+         if 'env_dut' in self.job.parameters and self.job.parameters['env_dut']:
+             # Check that the file is valid yaml
+             try:
+-                yaml.load(self.job.parameters['env_dut'])
++                yaml.safe_load(self.job.parameters['env_dut'])
+             except (TypeError, yaml.scanner.ScannerError) as exc:
+                 self.errors = exc
+                 return
+@@ -78,7 +78,7 @@ class DeployDeviceEnvironment(Action):
+ 
+     def _create_environment(self):
+         """Generate the env variables for the device."""
+-        conf = yaml.load(self.env) if self.env != '' else {}
++        conf = yaml.safe_load(self.env) if self.env != '' else {}
+         if conf.get("purge", False):
+             environ = {}
+         else:
+diff --git a/lava_dispatcher/device.py b/lava_dispatcher/device.py
+index 5ae4fcb68..797a5ffd4 100644
+--- a/lava_dispatcher/device.py
++++ b/lava_dispatcher/device.py
+@@ -105,12 +105,12 @@ class NewDevice(PipelineDevice):
+             if isinstance(target, str):
+                 with open(target) as f_in:
+                     data = f_in.read()
+-                data = yaml.load(data)
++                data = yaml.safe_load(data)
+             elif isinstance(target, dict):
+                 data = target
+             else:
+                 data = target.read()
+-                data = yaml.load(data)
++                data = yaml.safe_load(data)
+             if data is None:
+                 raise ConfigurationError("Missing device configuration")
+             self.update(data)
+diff --git a/lava_dispatcher/parser.py b/lava_dispatcher/parser.py
+index d3f11bbb9..1b79b93cb 100644
+--- a/lava_dispatcher/parser.py
++++ b/lava_dispatcher/parser.py
+@@ -118,7 +118,7 @@ class JobParser(object):
+     # pylint: disable=too-many-locals,too-many-statements
+     def parse(self, content, device, job_id, logger, dispatcher_config,
+               env_dut=None):
+-        self.loader = yaml.Loader(content)
++        self.loader = yaml.SafeLoader(content)
+         self.loader.compose_node = self.compose_node
+         self.loader.construct_mapping = self.construct_mapping
+         data = self.loader.get_single_data()
+@@ -129,7 +129,7 @@ class JobParser(object):
+         # Load the dispatcher config
+         job.parameters['dispatcher'] = {}
+         if dispatcher_config is not None:
+-            config = yaml.load(dispatcher_config)
++            config = yaml.safe_load(dispatcher_config)
+             if isinstance(config, dict):
+                 job.parameters['dispatcher'] = config
+ 
+diff --git a/lava_results_app/dbutils.py b/lava_results_app/dbutils.py
+index 435c27c6b..9913ab35c 100644
+--- a/lava_results_app/dbutils.py
++++ b/lava_results_app/dbutils.py
+@@ -365,7 +365,7 @@ def map_metadata(description, job):
+     """
+     logger = logging.getLogger('lava-master')
+     try:
+-        submission_data = yaml.load(job.definition)
++        submission_data = yaml.safe_load(job.definition)
+         description_data = yaml.load(description)
+     except yaml.YAMLError as exc:
+         logger.exception("[%s] %s", job.id, exc)
+diff --git a/lava_results_app/tests/test_metadata.py b/lava_results_app/tests/test_metadata.py
+index d5e23b260..e369dbd13 100644
+--- a/lava_results_app/tests/test_metadata.py
++++ b/lava_results_app/tests/test_metadata.py
+@@ -51,7 +51,7 @@ class TestMetaTypes(TestCaseWithFactory):
+         TestJob.objects.all().delete()
+         job = TestJob.from_yaml_and_user(
+             self.factory.make_job_yaml(), self.user)
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+         job_ctx.update({'no_kvm': True})  # override to allow unit tests on all types of systems
+         device = Device.objects.get(hostname='fakeqemu1')
+@@ -187,7 +187,7 @@ class TestMetaTypes(TestCaseWithFactory):
+     def test_repositories(self):  # pylint: disable=too-many-locals
+         job = TestJob.from_yaml_and_user(
+             self.factory.make_job_yaml(), self.user)
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+         job_ctx.update({'no_kvm': True})  # override to allow unit tests on all types of systems
+         device = Device.objects.get(hostname='fakeqemu1')
+@@ -238,7 +238,7 @@ class TestMetaTypes(TestCaseWithFactory):
+             'VARIABLE_NAME_2': "second value"
+         }
+         job = TestJob.from_yaml_and_user(yaml.dump(data), self.user)
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+         job_ctx.update({'no_kvm': True})  # override to allow unit tests on all types of systems
+         device = Device.objects.get(hostname='fakeqemu1')
+@@ -271,7 +271,7 @@ class TestMetaTypes(TestCaseWithFactory):
+         with open(multi_test_file, 'r') as test_support:
+             data = test_support.read()
+         job = TestJob.from_yaml_and_user(data, self.user)
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+         job_ctx.update({'no_kvm': True})  # override to allow unit tests on all types of systems
+         device = Device.objects.get(hostname='fakeqemu1')
+@@ -311,7 +311,7 @@ class TestMetaTypes(TestCaseWithFactory):
+         ]
+         test_block['test']['definitions'] = smoke
+         job = TestJob.from_yaml_and_user(yaml.dump(data), self.user)
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+         job_ctx.update({'no_kvm': True})  # override to allow unit tests on all types of systems
+         device = Device.objects.get(hostname='fakeqemu1')
+diff --git a/lava_scheduler_app/api/__init__.py b/lava_scheduler_app/api/__init__.py
+index c74e713b7..2c8c01a4f 100644
+--- a/lava_scheduler_app/api/__init__.py
++++ b/lava_scheduler_app/api/__init__.py
+@@ -223,7 +223,7 @@ class SchedulerAPI(ExposedAPI):
+         """
+         try:
+             # YAML can parse JSON as YAML, JSON cannot parse YAML at all
+-            yaml_data = yaml.load(yaml_string)
++            yaml_data = yaml.safe_load(yaml_string)
+         except yaml.YAMLError as exc:
+             raise xmlrpc.client.Fault(400, "Decoding job submission failed: %s." % exc)
+         try:
+@@ -1098,7 +1098,7 @@ class SchedulerAPI(ExposedAPI):
+         job_ctx = None
+         if context is not None:
+             try:
+-                job_ctx = yaml.load(context)
++                job_ctx = yaml.safe_load(context)
+             except yaml.YAMLError as exc:
+                 raise xmlrpc.client.Fault(
+                     400,
+@@ -1111,7 +1111,7 @@ class SchedulerAPI(ExposedAPI):
+         config = device.load_configuration(job_ctx=job_ctx, output_format="yaml")
+ 
+         # validate against the device schema
+-        validate_device(yaml.load(config))
++        validate_device(yaml.safe_load(config))
+ 
+         return xmlrpc.client.Binary(config.encode('UTF-8'))
+ 
+@@ -1259,7 +1259,7 @@ class SchedulerAPI(ExposedAPI):
+                 continue
+             try:
+                 # validate against the device schema
+-                validate_device(yaml.load(config))
++                validate_device(yaml.safe_load(config))
+             except SubmissionException as exc:
+                 results[key] = {'Invalid': exc}
+                 continue
+diff --git a/lava_scheduler_app/api/devices.py b/lava_scheduler_app/api/devices.py
+index fdf1e306b..bb6c6fb5d 100644
+--- a/lava_scheduler_app/api/devices.py
++++ b/lava_scheduler_app/api/devices.py
+@@ -158,7 +158,7 @@ class SchedulerDevicesAPI(ExposedV2API):
+         job_ctx = None
+         if context is not None:
+             try:
+-                job_ctx = yaml.load(context)
++                job_ctx = yaml.safe_load(context)
+             except yaml.YAMLError as exc:
+                 raise xmlrpc.client.Fault(
+                     400, "Job Context '%s' is not valid: %s" % (context, str(exc)))
+diff --git a/lava_scheduler_app/dbutils.py b/lava_scheduler_app/dbutils.py
+index b36d84413..e26c0cc15 100644
+--- a/lava_scheduler_app/dbutils.py
++++ b/lava_scheduler_app/dbutils.py
+@@ -73,7 +73,7 @@ def testjob_submission(job_definition, user, original_job=None):
+     if json_data:
+         # explicitly convert to YAML.
+         # JSON cannot have comments anyway.
+-        job_definition = yaml.dump(yaml.load(job_definition))
++        job_definition = yaml.dump(yaml.safe_load(job_definition))
+ 
+     validate_job(job_definition)
+     # returns a single job or a list (not a QuerySet) of job objects.
+@@ -160,7 +160,7 @@ def load_devicetype_template(device_type_name, raw=False):
+         data = template.render()
+         if not data:
+             return None
+-        return data if raw else yaml.load(data)
++        return data if raw else yaml.safe_load(data)
+     except (jinja2.TemplateError, yaml.error.YAMLError):
+         return None
+ 
+diff --git a/lava_scheduler_app/models.py b/lava_scheduler_app/models.py
+index 5c6928794..d3ea8cf59 100644
+--- a/lava_scheduler_app/models.py
++++ b/lava_scheduler_app/models.py
+@@ -103,7 +103,7 @@ class Tag(models.Model):
+ 
+ def validate_job(data):
+     try:
+-        yaml_data = yaml.load(data)
++        yaml_data = yaml.safe_load(data)
+     except yaml.YAMLError as exc:
+         raise SubmissionException("Loading job submission failed: %s." % exc)
+ 
+@@ -851,7 +851,7 @@ class Device(RestrictedResource):
+         if output_format == "yaml":
+             return device_template
+         else:
+-            return yaml.load(device_template)
++            return yaml.safe_load(device_template)
+ 
+     def minimise_configuration(self, data):
+         """
+@@ -1359,7 +1359,7 @@ class TestJob(RestrictedResource):
+         """
+         if not self.is_multinode or not self.definition:
+             return False
+-        job_data = yaml.load(self.definition)
++        job_data = yaml.safe_load(self.definition)
+         return 'connection' in job_data
+ 
+     tags = models.ManyToManyField(Tag, blank=True)
+@@ -1666,7 +1666,7 @@ class TestJob(RestrictedResource):
+     def essential_role(self):  # pylint: disable=too-many-return-statements
+         if not self.is_multinode:
+             return False
+-        data = yaml.load(self.definition)
++        data = yaml.safe_load(self.definition)
+         # would be nice to use reduce here but raising and catching TypeError is slower
+         # than checking 'if .. in ' - most jobs will return False.
+         if 'protocols' not in data:
+@@ -1683,7 +1683,7 @@ class TestJob(RestrictedResource):
+     def device_role(self):  # pylint: disable=too-many-return-statements
+         if not self.is_multinode:
+             return "Error"
+-        data = yaml.load(self.definition)
++        data = yaml.safe_load(self.definition)
+         if 'protocols' not in data:
+             return 'Error'
+         if 'lava-multinode' not in data['protocols']:
+@@ -1719,7 +1719,7 @@ class TestJob(RestrictedResource):
+         :return: a single TestJob object or a list
+         (explicitly, a list, not a QuerySet) of evaluated TestJob objects
+         """
+-        job_data = yaml.load(yaml_data)
++        job_data = yaml.safe_load(yaml_data)
+ 
+         # Unpack include value if present.
+         job_data = handle_include_option(job_data)
+@@ -1943,7 +1943,7 @@ class TestJob(RestrictedResource):
+         if not self.is_multinode:
+             return None
+         try:
+-            data = yaml.load(self.definition)
++            data = yaml.safe_load(self.definition)
+         except yaml.YAMLError:
+             return None
+         if 'host_role' not in data:
+@@ -2868,7 +2868,7 @@ def process_notifications(sender, **kwargs):
+         old_job = TestJob.objects.get(pk=new_job.id)
+         if new_job.state in notification_state and \
+            old_job.state != new_job.state:
+-            job_def = yaml.load(new_job.definition)
++            job_def = yaml.safe_load(new_job.definition)
+             if "notify" in job_def:
+                 if new_job.notification_criteria(job_def["notify"]["criteria"],
+                                                  old_job):
+diff --git a/lava_scheduler_app/scheduler.py b/lava_scheduler_app/scheduler.py
+index 012d1a169..3d98eae1d 100644
+--- a/lava_scheduler_app/scheduler.py
++++ b/lava_scheduler_app/scheduler.py
+@@ -143,7 +143,7 @@ def schedule_health_checks_for_device_type(logger, dt):
+ def schedule_health_check(device, definition):
+     user = User.objects.get(username="lava-health")
+     job = _create_pipeline_job(
+-        yaml.load(definition), user, [], device=device, device_type=device.device_type,
++        yaml.safe_load(definition), user, [], device=device, device_type=device.device_type,
+         orig=definition, health_check=True)
+     job.go_state_scheduled(device)
+     job.save()
+@@ -205,7 +205,7 @@ def schedule_jobs_for_device(logger, device):
+         if not job_tags.issubset(device_tags):
+             continue
+ 
+-        job_dict = yaml.load(job.definition)
++        job_dict = yaml.safe_load(job.definition)
+         if 'protocols' in job_dict and 'lava-vland' in job_dict['protocols']:
+             if not match_vlan_interface(device, job_dict):
+                 continue
+@@ -248,12 +248,12 @@ def transition_multinode_jobs(logger):
+             # build a list of all devices in this group
+             if sub_job.dynamic_connection:
+                 continue
+-            definition = yaml.load(sub_job.definition)
++            definition = yaml.safe_load(sub_job.definition)
+             devices[str(sub_job.id)] = definition['protocols']['lava-multinode']['role']
+ 
+         for sub_job in sub_jobs:
+             # apply the complete list to all jobs in this group
+-            definition = yaml.load(sub_job.definition)
++            definition = yaml.safe_load(sub_job.definition)
+             definition['protocols']['lava-multinode']['roles'] = devices
+             sub_job.definition = yaml.dump(definition)
+             # transition the job and device
+diff --git a/lava_scheduler_app/schema.py b/lava_scheduler_app/schema.py
+index 3f03f6111..63221b903 100644
+--- a/lava_scheduler_app/schema.py
++++ b/lava_scheduler_app/schema.py
+@@ -435,7 +435,7 @@ def _validate_vcs_parameters(data_objects):
+ 
+ def _download_raw_yaml(url):
+     try:
+-        return yaml.load(requests.get(url, timeout=INCLUDE_URL_TIMEOUT).content)
++        return yaml.safe_load(requests.get(url, timeout=INCLUDE_URL_TIMEOUT).content)
+     except requests.RequestException as exc:
+         raise SubmissionException(
+             "Section 'include' must contain valid URL: %s" % exc)
+@@ -473,7 +473,7 @@ def handle_include_option(data_object):
+ def validate_submission(data_object):
+     """
+     Validates a python object as a TestJob submission
+-    :param data: Python object, e.g. from yaml.load()
++    :param data: Python object, e.g. from yaml.safe_load()
+     :return: True if valid, else raises SubmissionException
+     """
+     try:
+@@ -512,7 +512,7 @@ def _validate_primary_connection_power_commands(data_object):
+ def validate_device(data_object):
+     """
+     Validates a python object as a pipeline device configuration
+-    e.g. yaml.load(`lava-server manage device-dictionary --hostname host1 --export`)
++    e.g. yaml.safe_load(`lava-server manage device-dictionary --hostname host1 --export`)
+     To validate a device_type template, a device dictionary needs to be created.
+     :param data: Python object representing a pipeline Device.
+     :return: True if valid, else raises SubmissionException
+diff --git a/lava_server/api.py b/lava_server/api.py
+index b67f1f184..4e8b9603e 100644
+--- a/lava_server/api.py
++++ b/lava_server/api.py
+@@ -167,7 +167,7 @@ class LavaSystemAPI(SystemAPI):
+         if os.path.exists(filename):
+             try:
+                 with open(filename, 'r') as output:
+-                    master = yaml.load(output)
++                    master = yaml.safe_load(output)
+             except yaml.YAMLError as exc:
+                 return master
+         if master:
+@@ -178,7 +178,7 @@ class LavaSystemAPI(SystemAPI):
+         if os.path.exists(filename):
+             try:
+                 with open(filename, 'r') as output:
+-                    log_config = yaml.load(output)
++                    log_config = yaml.safe_load(output)
+             except yaml.YAMLError as exc:
+                 return log_config
+         if log_config:
+diff --git a/lava_server/management/commands/lava-master.py b/lava_server/management/commands/lava-master.py
+index b7d799c77..716fa084c 100644
+--- a/lava_server/management/commands/lava-master.py
++++ b/lava_server/management/commands/lava-master.py
+@@ -393,7 +393,7 @@ class Command(LAVADaemonCommand):
+             self.dispatcher_alive(hostname)
+ 
+     def export_definition(self, job):  # pylint: disable=no-self-use
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_def['compatibility'] = job.pipeline_compatibility
+ 
+         # no need for the dispatcher to retain comments
+@@ -417,7 +417,7 @@ class Command(LAVADaemonCommand):
+     def start_job(self, job, options):
+         # Load job definition to get the variables for template
+         # rendering
+-        job_def = yaml.load(job.definition)
++        job_def = yaml.safe_load(job.definition)
+         job_ctx = job_def.get('context', {})
+ 
+         device = job.actual_device
+diff --git a/share/render-template.py b/share/render-template.py
+index ffad2879a..04ff21fd8 100755
+--- a/share/render-template.py
++++ b/share/render-template.py
+@@ -82,7 +82,7 @@ def main():
+     print(config)
+     print("Parsed config")
+     print("=============")
+-    print(yaml.load(config))
++    print(yaml.safe_load(config))
+ 
+ 
+ if __name__ == '__main__':
+-- 
+cgit v1.2.1
+

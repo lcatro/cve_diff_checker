@@ -1,0 +1,162 @@
+From 60e9804a61881698227b7b19c0a11d49d6930e4f Mon Sep 17 00:00:00 2001
+From: Cedric Staub <cs@squareup.com>
+Date: Wed, 31 Aug 2016 11:11:28 -0700
+Subject: [PATCH 1/2] Do not accept invalid public keys in DeriveECDHES
+ function
+
+---
+ cipher/ecdh_es.go      |  4 ++++
+ cipher/ecdh_es_test.go | 17 +++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/cipher/ecdh_es.go b/cipher/ecdh_es.go
+index c6a5a82..a78c6b6 100644
+--- a/cipher/ecdh_es.go
++++ b/cipher/ecdh_es.go
+@@ -33,6 +33,10 @@ func DeriveECDHES(alg string, apuData, apvData []byte, priv *ecdsa.PrivateKey, p
+ 	supPubInfo := make([]byte, 4)
+ 	binary.BigEndian.PutUint32(supPubInfo, uint32(size)*8)
+ 
++	if !priv.PublicKey.Curve.IsOnCurve(pub.X, pub.Y) {
++		panic("public key not on same curve as private key")
++	}
++
+ 	z, _ := priv.PublicKey.Curve.ScalarMult(pub.X, pub.Y, priv.D.Bytes())
+ 	reader := NewConcatKDF(crypto.SHA256, z.Bytes(), algID, ptyUInfo, ptyVInfo, supPubInfo, []byte{})
+ 
+diff --git a/cipher/ecdh_es_test.go b/cipher/ecdh_es_test.go
+index f92abb1..ca2c508 100644
+--- a/cipher/ecdh_es_test.go
++++ b/cipher/ecdh_es_test.go
+@@ -67,6 +67,23 @@ func TestVectorECDHES(t *testing.T) {
+ 	}
+ }
+ 
++func TestInvalidECPublicKey(t *testing.T) {
++	defer func() { recover() }()
++
++	// Invalid key
++	invalid := &ecdsa.PrivateKey{
++		PublicKey: ecdsa.PublicKey{
++			Curve: elliptic.P256(),
++			X:     fromBase64Int("MTEx"),
++			Y:     fromBase64Int("MTEx"),
++		},
++		D: fromBase64Int("0_NxaRPUMQoAJt50Gz8YiTr8gRTwyEaCumd-MToTmIo="),
++	}
++
++	DeriveECDHES("A128GCM", []byte{}, []byte{}, bobKey, &invalid.PublicKey, 16)
++	t.Fatal("should panic if public key was invalid")
++}
++
+ func BenchmarkECDHES_128(b *testing.B) {
+ 	apuData := []byte("APU")
+ 	apvData := []byte("APV")
+
+From 7f0dd807d3f3d73bb536898cb7980ddf638ce69a Mon Sep 17 00:00:00 2001
+From: Cedric Staub <cs@squareup.com>
+Date: Wed, 31 Aug 2016 11:22:30 -0700
+Subject: [PATCH 2/2] Check for invalid ECDH keys in headers, JWKs
+
+---
+ asymmetric.go      |  4 ++++
+ asymmetric_test.go | 30 ++++++++++++++++++++++++++++++
+ jwk.go             | 14 +++++++++++---
+ 3 files changed, 45 insertions(+), 3 deletions(-)
+
+diff --git a/asymmetric.go b/asymmetric.go
+index ae1d768..41eb38e 100644
+--- a/asymmetric.go
++++ b/asymmetric.go
+@@ -370,6 +370,10 @@ func (ctx ecDecrypterSigner) decryptKey(headers rawHeader, recipient *recipientI
+ 		return nil, errors.New("square/go-jose: invalid epk header")
+ 	}
+ 
++	if !ctx.privateKey.Curve.IsOnCurve(publicKey.X, publicKey.Y) {
++		return nil, errors.New("square/go-jose: invalid public key in epk header")
++	}
++
+ 	apuData := headers.Apu.bytes()
+ 	apvData := headers.Apv.bytes()
+ 
+diff --git a/asymmetric_test.go b/asymmetric_test.go
+index 1c8c8b3..b117af3 100644
+--- a/asymmetric_test.go
++++ b/asymmetric_test.go
+@@ -18,6 +18,8 @@ package jose
+ 
+ import (
+ 	"bytes"
++	"crypto/ecdsa"
++	"crypto/elliptic"
+ 	"crypto/rand"
+ 	"crypto/rsa"
+ 	"errors"
+@@ -429,3 +431,31 @@ func TestInvalidEllipticCurve(t *testing.T) {
+ 		t.Error("should not generate ES384 signature with P-521 key")
+ 	}
+ }
++
++func TestInvalidECPublicKey(t *testing.T) {
++	// Invalid key
++	invalid := &ecdsa.PrivateKey{
++		PublicKey: ecdsa.PublicKey{
++			Curve: elliptic.P256(),
++			X:     fromBase64Int("MTEx"),
++			Y:     fromBase64Int("MTEx"),
++		},
++		D: fromBase64Int("0_NxaRPUMQoAJt50Gz8YiTr8gRTwyEaCumd-MToTmIo="),
++	}
++
++	headers := rawHeader{
++		Alg: string(ECDH_ES),
++		Epk: &JsonWebKey{
++			Key: &invalid.PublicKey,
++		},
++	}
++
++	dec := ecDecrypterSigner{
++		privateKey: ecTestKey256,
++	}
++
++	_, err := dec.decryptKey(headers, nil, randomKeyGenerator{size: 16})
++	if err == nil {
++		t.Fatal("decrypter accepted JWS with invalid ECDH public key")
++	}
++}
+diff --git a/jwk.go b/jwk.go
+index 59d9a92..effd329 100644
+--- a/jwk.go
++++ b/jwk.go
+@@ -23,6 +23,7 @@ import (
+ 	"crypto/rsa"
+ 	"crypto/x509"
+ 	"encoding/base64"
++	"errors"
+ 	"fmt"
+ 	"math/big"
+ 	"reflect"
+@@ -275,13 +276,20 @@ func (key rawJsonWebKey) ecPublicKey() (*ecdsa.PublicKey, error) {
+ 	}
+ 
+ 	if key.X == nil || key.Y == nil {
+-		return nil, fmt.Errorf("square/go-jose: invalid EC key, missing x/y values")
++		return nil, errors.New("square/go-jose: invalid EC key, missing x/y values")
++	}
++
++	x := key.X.bigInt()
++	y := key.Y.bigInt()
++
++	if !curve.IsOnCurve(x, y) {
++		return nil, errors.New("square/go-jose: invalid EC key, X/Y are not on declared curve")
+ 	}
+ 
+ 	return &ecdsa.PublicKey{
+ 		Curve: curve,
+-		X:     key.X.bigInt(),
+-		Y:     key.Y.bigInt(),
++		X:     x,
++		Y:     y,
+ 	}, nil
+ }
+ 

@@ -1,0 +1,28 @@
+From faa76f39014ed3b5e2c158593b1335522e573c7f Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 4 May 2021 15:35:39 -0700
+Subject: [PATCH] Fix heap-buffer-overflow issue with
+ `tf.raw_ops.SparseFillEmptyRows`.
+
+PiperOrigin-RevId: 372009178
+Change-Id: Ia1a9e9691ecaa072f32fb39a0887b2aabd399210
+---
+ tensorflow/core/kernels/sparse_fill_empty_rows_op.cc | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/sparse_fill_empty_rows_op.cc b/tensorflow/core/kernels/sparse_fill_empty_rows_op.cc
+index a2b8b074aa1f1..c1ed592b965e2 100644
+--- a/tensorflow/core/kernels/sparse_fill_empty_rows_op.cc
++++ b/tensorflow/core/kernels/sparse_fill_empty_rows_op.cc
+@@ -228,7 +228,10 @@ void SparseFillEmptyRowsOpImpl(OpKernelContext* context,
+                               default_value_t.shape().DebugString()),
+       done);
+   // TODO(ebrevdo): add shape checks between values, indices,
+-  // dense_shape.  Also add check that dense rank > 0.
++  // Also add check that dense rank > 0.
++  OP_REQUIRES_ASYNC(context, dense_shape_t.NumElements() != 0,
++                    errors::InvalidArgument("Dense shape cannot be empty."),
++                    done);
+ 
+   using FunctorType = functor::SparseFillEmptyRows<Device, T, Tindex>;
+   OP_REQUIRES_OK_ASYNC(context,

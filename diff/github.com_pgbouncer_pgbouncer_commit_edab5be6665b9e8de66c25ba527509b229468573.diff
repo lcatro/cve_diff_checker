@@ -1,0 +1,27 @@
+From edab5be6665b9e8de66c25ba527509b229468573 Mon Sep 17 00:00:00 2001
+From: Marko Kreen <markokr@gmail.com>
+Date: Wed, 8 Apr 2015 09:22:55 +0300
+Subject: [PATCH] Check if auth_user is set.
+
+Fixes a crash if password packet appears before startup packet (#42).
+---
+ src/client.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/client.c b/src/client.c
+index 275fd1aaa..49b262445 100644
+--- a/src/client.c
++++ b/src/client.c
+@@ -39,6 +39,12 @@ static bool check_client_passwd(PgSocket *client, const char *passwd)
+ 	const char *correct;
+ 	PgUser *user = client->auth_user;
+ 
++	/* auth_user may be missing */
++	if (!user) {
++		slog_error(client, "Password packet before auth packet?");
++		return false;
++	}
++
+ 	/* disallow empty passwords */
+ 	if (!*passwd || !*user->passwd)
+ 		return false;

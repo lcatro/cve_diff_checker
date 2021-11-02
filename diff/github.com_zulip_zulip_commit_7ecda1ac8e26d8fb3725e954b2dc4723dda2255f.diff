@@ -1,0 +1,63 @@
+From 7ecda1ac8e26d8fb3725e954b2dc4723dda2255f Mon Sep 17 00:00:00 2001
+From: Tim Abbott <tabbott@zulipchat.com>
+Date: Sun, 22 Jan 2017 20:22:40 -0800
+Subject: [PATCH] streams: Fix autosubscribe security bug (CVE-2017-0881).
+
+A bug in Zulip's implementation of the "stream exists" endpoint meant
+that any user of a Zulip server could subscribe to an invite-only
+stream without needing to be invited by using the "autosubscribe"
+argument.
+
+Thanks to Rafid Aslam for discovering this issue.
+---
+ zerver/tests/test_subs.py | 23 +++++++++++++++++++++++
+ zerver/views/streams.py   |  2 +-
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/zerver/tests/test_subs.py b/zerver/tests/test_subs.py
+index 93d13971b56c..edc2df0827e4 100644
+--- a/zerver/tests/test_subs.py
++++ b/zerver/tests/test_subs.py
+@@ -1936,6 +1936,29 @@ def test_existing_subscriptions_autosubscription(self):
+         self.assertIn("exists", json)
+         self.assertTrue(json["exists"])
+ 
++    def test_existing_subscriptions_autosubscription_private_stream(self):
++        # type: () -> None
++        """Call /json/subscriptions/exist on an existing private stream with
++        autosubscribe should fail.
++        """
++        stream_name = "Saxony"
++        result = self.common_subscribe_to_streams("cordelia@zulip.com", [stream_name],
++                                                  invite_only=True)
++        stream = get_stream(stream_name, self.realm)
++
++        result = self.client_post("/json/subscriptions/exists",
++                                  {"stream": stream_name, "autosubscribe": True})
++        self.assert_json_success(result)
++        json = ujson.loads(result.content)
++        self.assertIn("exists", json)
++        self.assertTrue(json["exists"])
++        self.assertIn("subscribed", json)
++        # Importantly, we are not now subscribed
++        self.assertFalse(json["subscribed"])
++        self.assertEqual(Subscription.objects.filter(
++            recipient__type=Recipient.STREAM,
++            recipient__type_id=stream.id).count(), 1)
++
+     def get_subscription(self, user_profile, stream_name):
+         # type: (UserProfile, Text) -> Subscription
+         stream = get_stream(stream_name, self.realm)
+diff --git a/zerver/views/streams.py b/zerver/views/streams.py
+index c1df070fb580..0dada0032b89 100644
+--- a/zerver/views/streams.py
++++ b/zerver/views/streams.py
+@@ -481,7 +481,7 @@ def stream_exists_backend(request, user_profile, stream_id, autosubscribe):
+     result = {"exists": bool(stream)}
+     if stream is not None:
+         recipient = get_recipient(Recipient.STREAM, stream.id)
+-        if autosubscribe:
++        if not stream.invite_only and autosubscribe:
+             bulk_add_subscriptions([stream], [user_profile])
+         result["subscribed"] = is_active_subscriber(
+             user_profile=user_profile,

@@ -1,0 +1,27 @@
+From b69e745584a34fcfd858df33e4631e420da07b9f Mon Sep 17 00:00:00 2001
+From: Will Hunt <will@half-shot.uk>
+Date: Fri, 28 May 2021 10:32:25 +0100
+Subject: [PATCH] Check m.room.create event on room upgrade
+
+---
+ src/components/room-upgrade-handler.ts | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/components/room-upgrade-handler.ts b/src/components/room-upgrade-handler.ts
+index 2a4237b9..7f62ca71 100644
+--- a/src/components/room-upgrade-handler.ts
++++ b/src/components/room-upgrade-handler.ts
+@@ -145,6 +145,13 @@ export class RoomUpgradeHandler {
+     private async onJoinedNewRoom(oldRoomId: string, newRoomId: string) {
+         log.debug(`Joined ${newRoomId}`);
+         const intent = this.bridge.getIntent();
++        const { predecessor } = await intent.getStateEvent(newRoomId, 'm.room.create');
++        if (predecessor.room_id !== oldRoomId) {
++            log.error(
++    `Room doesn't have a matching predecessor (expected: ${oldRoomId}, got: ${predecessor.room_id}), not bridging.`
++            );
++            return false;
++        }
+         const asBot = this.bridge.getBot();
+         if (this.opts.migrateStoreEntries) {
+             const success = await this.migrateStoreEntries(oldRoomId, newRoomId);

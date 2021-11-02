@@ -1,0 +1,28 @@
+From 482da92095c4d48f8784b1f00dda4f81c28d2988 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Mon, 2 Aug 2021 15:07:31 -0700
+Subject: [PATCH] Ensure non-empty padding_value input to
+ tf.raw_ops.MatrixDiagPartV2, if a padding_value is input
+
+PiperOrigin-RevId: 388314614
+Change-Id: If0b51ad58d5d8543a6be6ce8f42ae4755c80d55f
+---
+ tensorflow/core/kernels/linalg/matrix_diag_op.cc | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/linalg/matrix_diag_op.cc b/tensorflow/core/kernels/linalg/matrix_diag_op.cc
+index b61dbe96a5d6a..1506df1712138 100644
+--- a/tensorflow/core/kernels/linalg/matrix_diag_op.cc
++++ b/tensorflow/core/kernels/linalg/matrix_diag_op.cc
+@@ -89,7 +89,10 @@ class MatrixDiagPartOp : public OpKernel {
+           upper_diag_index = diag_index.flat<int32>()(1);
+         }
+       }
+-      padding_value = context->input(2).flat<T>()(0);
++      const Tensor& padding_in = context->input(2);
++      OP_REQUIRES(context, padding_in.NumElements() == 1,
++                  errors::InvalidArgument("Padding must be scalar."));
++      padding_value = padding_in.flat<T>()(0);
+     }
+     const TensorShape& input_shape = input.shape();
+ 

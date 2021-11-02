@@ -1,0 +1,51 @@
+From 5797f013b3be450c146a4141514bda525f2f1b51 Mon Sep 17 00:00:00 2001
+From: Anders Kaseorg <anders@zulipchat.com>
+Date: Thu, 4 Apr 2019 17:31:57 -0700
+Subject: [PATCH] CVE-2019-16215: Fix DoS vulnerability in Markdown LINK_RE.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Any regex including a match-everything subpattern (.*, .*?, .+, or
+.+?) is almost automatically wrong because it fails to disambiguate
+when one subpattern should end and another should begin.  Among other
+bugs, these kind of regexes tend to be especially prone to denial of
+service vulnerabilities through catastrophic backtracking on strings
+that fail to match in a large (in this case, exponential) number of
+ways.
+
+Lacking a specification to say what characters should actually be
+allowed in these subpatterns (this syntax is too different from
+CommonMark to be able to precisely apply those rules), I’ve tried to
+make reasonable guesses and avoid changing much else.
+
+Because Zulip doesn't store messages until they have successfully been
+processed by the Markdown processor, this is not a stored DoS issue.
+
+In general, Zulip protects against the broad category of DoS issues in
+Markdown rendering via a timeout managed by another thread.  However,
+details of Python's regular expression implementation mean that this
+particular issue could prevent the timeout thread from being
+scheduled, resulting in this being a DoS issue.
+
+This was fixed in master a few months ago as a side effect of
+abe2dab88ca96786bb32dea6caab873819b8c482 (#12979).
+
+Signed-off-by: Anders Kaseorg <anders@zulipchat.com>
+---
+ zerver/lib/bugdown/__init__.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/zerver/lib/bugdown/__init__.py b/zerver/lib/bugdown/__init__.py
+index ac27c6df69e9..67e8a9fdeb86 100644
+--- a/zerver/lib/bugdown/__init__.py
++++ b/zerver/lib/bugdown/__init__.py
+@@ -1484,7 +1484,7 @@ def get_link_re() -> str:
+ 
+     # [text](url) or [text](<url>) or [text](url "title")
+     LINK_RE = NOIMG + BRK + \
+-        r'''\(\s*(<.*?>|((?:(?:\(.*?\))|[^\(\)]))*?)\s*((['"])(.*?)\12\s*)?\)'''
++        r'''\(\s*(<(?:[^<>\\]|\\.)*>|(\([^()]*\)|[^()])*?)\s*(('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\s*)?\)'''
+     return normal_compile(LINK_RE)
+ 
+ def prepare_realm_pattern(source: str) -> str:

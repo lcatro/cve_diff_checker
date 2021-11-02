@@ -1,0 +1,140 @@
+From 49c8d2a4131086716b97a1256d587f7ef13250ff Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud86@gmail.com>
+Date: Mon, 30 Nov 2020 11:59:32 +0100
+Subject: [PATCH 1/3] Cast ids into int
+
+---
+ controllers/front/CommentGrade.php          | 2 +-
+ controllers/front/ListComments.php          | 4 ++--
+ productcomments.php                         | 2 +-
+ src/Repository/ProductCommentRepository.php | 4 ++--
+ 4 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/controllers/front/CommentGrade.php b/controllers/front/CommentGrade.php
+index a821d42..2598470 100644
+--- a/controllers/front/CommentGrade.php
++++ b/controllers/front/CommentGrade.php
+@@ -29,7 +29,7 @@ class ProductCommentsCommentGradeModuleFrontController extends ModuleFrontContro
+ {
+     public function display()
+     {
+-        $idProducts = Tools::getValue('id_products');
++        $idProducts = array_unique(array_map('intval', Tools::getValue('id_products')));
+         /* @var ProductCommentRepository $productCommentRepository */
+ 
+         header('Content-Type: application/json');
+diff --git a/controllers/front/ListComments.php b/controllers/front/ListComments.php
+index f533dff..04d8b76 100644
+--- a/controllers/front/ListComments.php
++++ b/controllers/front/ListComments.php
+@@ -29,8 +29,8 @@ class ProductCommentsListCommentsModuleFrontController extends ModuleFrontContro
+ {
+     public function display()
+     {
+-        $idProduct = Tools::getValue('id_product');
+-        $page = Tools::getValue('page', 1);
++        $idProduct = (int) Tools::getValue('id_product');
++        $page = (int) Tools::getValue('page', 1);
+         $isLastNameAnynomus = Configuration::get('PRODUCT_COMMENTS_ANONYMISATION');
+         /** @var ProductCommentRepository $productCommentRepository */
+         $productCommentRepository = $this->context->controller->getContainer()->get('product_comment_repository');
+diff --git a/productcomments.php b/productcomments.php
+index dda7161..6233f2c 100644
+--- a/productcomments.php
++++ b/productcomments.php
+@@ -178,7 +178,7 @@ protected function _postProcess()
+             $comment->delete();
+         } elseif (Tools::isSubmit('submitEditCriterion')) {
+             $criterion = new ProductCommentCriterion((int) Tools::getValue('id_product_comment_criterion'));
+-            $criterion->id_product_comment_criterion_type = Tools::getValue('id_product_comment_criterion_type');
++            $criterion->id_product_comment_criterion_type = (int) Tools::getValue('id_product_comment_criterion_type');
+             $criterion->active = Tools::getValue('active');
+ 
+             $languages = Language::getLanguages();
+diff --git a/src/Repository/ProductCommentRepository.php b/src/Repository/ProductCommentRepository.php
+index 955b775..c136772 100644
+--- a/src/Repository/ProductCommentRepository.php
++++ b/src/Repository/ProductCommentRepository.php
+@@ -179,7 +179,7 @@ public function getAverageGrades(array $productIds, $validatedOnly)
+         $count = count($productIds);
+ 
+         foreach ($productIds as $index => $id) {
+-            $esqID = pSQL($id);
++            $esqID = pSQL((int) $id);
+ 
+             $sql .= ' SUM(IF(id_product = ' . $esqID . ' AND deleted = 0';
+             if ($validatedOnly) {
+@@ -247,7 +247,7 @@ public function getCommentsNumberForProducts(array $productIds, $validatedOnly)
+         $count = count($productIds);
+ 
+         foreach ($productIds as $index => $id) {
+-            $esqID = pSQL($id);
++            $esqID = pSQL((int) $id);
+ 
+             $sql .= ' SUM(IF(id_product = ' . $esqID . ' AND deleted = 0';
+             if ($validatedOnly) {
+
+From edad7db181d67332fc52db85f52c6e98a624cc1f Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud86@gmail.com>
+Date: Mon, 30 Nov 2020 12:11:29 +0100
+Subject: [PATCH 2/3] Remove useless pSQL
+
+---
+ src/Repository/ProductCommentRepository.php | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/Repository/ProductCommentRepository.php b/src/Repository/ProductCommentRepository.php
+index c136772..af95a95 100644
+--- a/src/Repository/ProductCommentRepository.php
++++ b/src/Repository/ProductCommentRepository.php
+@@ -179,7 +179,7 @@ public function getAverageGrades(array $productIds, $validatedOnly)
+         $count = count($productIds);
+ 
+         foreach ($productIds as $index => $id) {
+-            $esqID = pSQL((int) $id);
++            $esqID = (int) $id;
+ 
+             $sql .= ' SUM(IF(id_product = ' . $esqID . ' AND deleted = 0';
+             if ($validatedOnly) {
+@@ -247,7 +247,7 @@ public function getCommentsNumberForProducts(array $productIds, $validatedOnly)
+         $count = count($productIds);
+ 
+         foreach ($productIds as $index => $id) {
+-            $esqID = pSQL((int) $id);
++            $esqID = (int) $id;
+ 
+             $sql .= ' SUM(IF(id_product = ' . $esqID . ' AND deleted = 0';
+             if ($validatedOnly) {
+
+From 6d80c77e2cc0b24670f48fb52b51737fd6a29db5 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud86@gmail.com>
+Date: Mon, 30 Nov 2020 18:13:54 +0100
+Subject: [PATCH 3/3] Move array check after the is_array verification to avoid
+ warning
+
+---
+ controllers/front/CommentGrade.php | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/controllers/front/CommentGrade.php b/controllers/front/CommentGrade.php
+index 2598470..e9cb494 100644
+--- a/controllers/front/CommentGrade.php
++++ b/controllers/front/CommentGrade.php
+@@ -29,7 +29,7 @@ class ProductCommentsCommentGradeModuleFrontController extends ModuleFrontContro
+ {
+     public function display()
+     {
+-        $idProducts = array_unique(array_map('intval', Tools::getValue('id_products')));
++        $idProducts = Tools::getValue('id_products');
+         /* @var ProductCommentRepository $productCommentRepository */
+ 
+         header('Content-Type: application/json');
+@@ -38,6 +38,8 @@ public function display()
+             return $this->ajaxRender(null);
+         }
+ 
++        $idProducts = array_unique(array_map('intval', $idProducts));
++
+         $productCommentRepository = $this->context->controller->getContainer()->get('product_comment_repository');
+ 
+         $productsCommentsNb = $productCommentRepository->getCommentsNumberForProducts($idProducts, Configuration::get('PRODUCT_COMMENTS_MODERATE'));

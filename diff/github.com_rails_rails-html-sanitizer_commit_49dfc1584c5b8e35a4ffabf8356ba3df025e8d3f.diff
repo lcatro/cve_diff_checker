@@ -1,0 +1,152 @@
+From 49dfc1584c5b8e35a4ffabf8356ba3df025e8d3f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?=
+ <rafaelmfranca@gmail.com>
+Date: Mon, 10 Aug 2015 16:22:15 -0300
+Subject: [PATCH] Do not unescape already escaped HTML entities
+
+The full sanitizer was using Loofah's #text method that automatically
+escapes HTML entities. That behavior caused some problems where strings
+that were not escaped in the older sanitizer started to be escaped. To
+fix these problems we used the #text's `encode_special_chars` option as
+`false` that not just skipped the HTML entities escaping but unescaped
+already escaped entities.
+
+This introduced a security bug because an attacker can pass escaped HTML
+tags that will not be sanitized and will be returned as unescaped HTML
+tags.
+
+To fix it properly we introduced a new scrubber that will remove all
+tags and keep just the text nodes of these tags without changing how
+to escape the string.
+
+CVE-2015-7579
+---
+ lib/rails/html/sanitizer.rb | 17 ++++++++++-------
+ lib/rails/html/scrubbers.rb | 20 ++++++++++++++++++++
+ test/sanitizer_test.rb      |  7 +++++--
+ test/scrubbers_test.rb      | 16 +++++++++++++++-
+ 4 files changed, 50 insertions(+), 10 deletions(-)
+
+diff --git a/lib/rails/html/sanitizer.rb b/lib/rails/html/sanitizer.rb
+index f40bf6b..68ae6d2 100644
+--- a/lib/rails/html/sanitizer.rb
++++ b/lib/rails/html/sanitizer.rb
+@@ -13,6 +13,10 @@ def remove_xpaths(node, xpaths)
+         node.xpath(*xpaths).remove
+         node
+       end
++
++      def properly_encode(fragment, options)
++        fragment.xml? ? fragment.to_xml(options) : fragment.to_html(options)
++      end
+     end
+ 
+     # === Rails::Html::FullSanitizer
+@@ -26,9 +30,12 @@ def sanitize(html, options = {})
+         return unless html
+         return html if html.empty?
+ 
+-        Loofah.fragment(html).tap do |fragment|
+-          remove_xpaths(fragment, XPATHS_TO_REMOVE)
+-        end.text(options)
++        loofah_fragment = Loofah.fragment(html)
++
++        remove_xpaths(loofah_fragment, XPATHS_TO_REMOVE)
++        loofah_fragment.scrub!(TextOnlyScrubber.new)
++
++        properly_encode(loofah_fragment, encoding: 'UTF-8')
+       end
+     end
+ 
+@@ -140,10 +147,6 @@ def allowed_tags(options)
+       def allowed_attributes(options)
+         options[:attributes] || self.class.allowed_attributes
+       end
+-
+-      def properly_encode(fragment, options)
+-        fragment.xml? ? fragment.to_xml(options) : fragment.to_html(options)
+-      end
+     end
+   end
+ end
+diff --git a/lib/rails/html/scrubbers.rb b/lib/rails/html/scrubbers.rb
+index 2c89c04..d6f8ce4 100644
+--- a/lib/rails/html/scrubbers.rb
++++ b/lib/rails/html/scrubbers.rb
+@@ -169,5 +169,25 @@ def scrub_attribute?(name)
+         !super
+       end
+     end
++
++    # === Rails::Html::TextOnlyScrubber
++    #
++    # Rails::Html::TextOnlyScrubber allows you to permit text nodes.
++    #
++    # Unallowed elements will be stripped, i.e. element is removed but its subtree kept.
++    class TextOnlyScrubber < Loofah::Scrubber
++      def initialize
++        @direction = :bottom_up
++      end
++
++      def scrub(node)
++        if node.text?
++          CONTINUE
++        else
++          node.before node.children
++          node.remove
++        end
++      end
++    end
+   end
+ end
+diff --git a/test/sanitizer_test.rb b/test/sanitizer_test.rb
+index 58c0054..8c1ea2c 100644
+--- a/test/sanitizer_test.rb
++++ b/test/sanitizer_test.rb
+@@ -104,9 +104,12 @@ def test_strip_tags_with_frozen_string
+     assert_equal "Frozen string with no tags", full_sanitize("Frozen string with no tags".freeze)
+   end
+ 
+-  def test_full_sanitize_allows_turning_off_encoding_special_chars
++  def test_full_sanitize_respect_html_escaping_of_the_given_string
++    assert_equal 'test\r\nstring', full_sanitize('test\r\nstring')
+     assert_equal '&amp;', full_sanitize('&')
+-    assert_equal '&', full_sanitize('&', encode_special_chars: false)
++    assert_equal '&amp;', full_sanitize('&amp;')
++    assert_equal '&amp;amp;', full_sanitize('&amp;amp;')
++    assert_equal 'omg &lt;script&gt;BOM&lt;/script&gt;', full_sanitize('omg &lt;script&gt;BOM&lt;/script&gt;')
+   end
+ 
+   def test_strip_links_with_tags_in_tags
+diff --git a/test/scrubbers_test.rb b/test/scrubbers_test.rb
+index 2a2838a..4b84263 100644
+--- a/test/scrubbers_test.rb
++++ b/test/scrubbers_test.rb
+@@ -143,6 +143,20 @@ def test_targeting_tags_and_attributes_removes_only_them
+   end
+ end
+ 
++class TextOnlyScrubberTest < ScrubberTest
++  def setup
++    @scrubber = Rails::Html::TextOnlyScrubber.new
++  end
++
++  def test_removes_all_tags_and_keep_the_content
++    assert_scrubbed '<tag>hello</tag>', 'hello'
++  end
++
++  def test_skips_text_nodes
++    assert_node_skipped('some text')
++  end
++end
++
+ class ReturningStopFromScrubNodeTest < ScrubberTest
+   class ScrubStopper < Rails::Html::PermitScrubber
+     def scrub_node(node)
+@@ -157,4 +171,4 @@ def setup
+   def test_returns_stop_from_scrub_if_scrub_node_does
+     assert_scrub_stopped '<script>remove me</script>'
+   end
+-end
+\ No newline at end of file
++end

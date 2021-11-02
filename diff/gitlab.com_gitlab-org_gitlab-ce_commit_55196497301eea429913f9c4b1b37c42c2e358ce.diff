@@ -1,0 +1,125 @@
+From 55196497301eea429913f9c4b1b37c42c2e358ce Mon Sep 17 00:00:00 2001
+From: Douwe Maan <douwe@gitlab.com>
+Date: Wed, 30 Nov 2016 08:11:43 +0000
+Subject: [PATCH] Merge branch 'issue_25064' into 'security'
+
+Ensure state param has a valid value when filtering issuables.
+
+Closes https://gitlab.com/gitlab-org/gitlab-ce/issues/25064
+
+This fix makes sure we only call safe methods on issuable when filtering by state.
+
+See merge request !2038
+---
+ app/finders/issuable_finder.rb                | 13 ++++---
+ ...e-state-param-when-filtering-issuables.yml |  4 ++
+ spec/finders/issues_finder_spec.rb            | 37 ++++++++++++++++++-
+ 3 files changed, 48 insertions(+), 6 deletions(-)
+ create mode 100644 changelogs/unreleased/validate-state-param-when-filtering-issuables.yml
+
+diff --git a/app/finders/issuable_finder.rb b/app/finders/issuable_finder.rb
+index e42d5afdd89..2c9412b06eb 100644
+--- a/app/finders/issuable_finder.rb
++++ b/app/finders/issuable_finder.rb
+@@ -7,7 +7,7 @@
+ #   current_user - which user use
+ #   params:
+ #     scope: 'created-by-me' or 'assigned-to-me' or 'all'
+-#     state: 'open' or 'closed' or 'all'
++#     state: 'opened' or 'closed' or 'all'
+ #     group_id: integer
+ #     project_id: integer
+ #     milestone_title: string
+@@ -183,10 +183,13 @@ def by_scope(items)
+   end
+ 
+   def by_state(items)
+-    params[:state] ||= 'all'
+-
+-    if items.respond_to?(params[:state])
+-      items.public_send(params[:state])
++    case params[:state].to_s
++    when 'closed'
++      items.closed
++    when 'merged'
++      items.respond_to?(:merged) ? items.merged : items.closed
++    when 'opened'
++      items.opened
+     else
+       items
+     end
+diff --git a/changelogs/unreleased/validate-state-param-when-filtering-issuables.yml b/changelogs/unreleased/validate-state-param-when-filtering-issuables.yml
+new file mode 100644
+index 00000000000..3fb025806b0
+--- /dev/null
++++ b/changelogs/unreleased/validate-state-param-when-filtering-issuables.yml
+@@ -0,0 +1,4 @@
++---
++title: Validate state param when filtering issuables
++merge_request:
++author:
+diff --git a/spec/finders/issues_finder_spec.rb b/spec/finders/issues_finder_spec.rb
+index 40bccb8e50b..7f69e888f32 100644
+--- a/spec/finders/issues_finder_spec.rb
++++ b/spec/finders/issues_finder_spec.rb
+@@ -10,6 +10,7 @@
+   let(:issue1) { create(:issue, author: user, assignee: user, project: project1, milestone: milestone, title: 'gitlab') }
+   let(:issue2) { create(:issue, author: user, assignee: user, project: project2, description: 'gitlab') }
+   let(:issue3) { create(:issue, author: user2, assignee: user2, project: project2) }
++  let(:closed_issue) { create(:issue, author: user2, assignee: user2, project: project2, state: 'closed') }
+   let!(:label_link) { create(:label_link, label: label, target: issue2) }
+ 
+   before do
+@@ -25,7 +26,7 @@
+   describe '#execute' do
+     let(:search_user) { user }
+     let(:params) { {} }
+-    let(:issues) { IssuesFinder.new(search_user, params.merge(scope: scope, state: 'opened')).execute }
++    let(:issues) { IssuesFinder.new(search_user, params.reverse_merge(scope: scope, state: 'opened')).execute }
+ 
+     context 'scope: all' do
+       let(:scope) { 'all' }
+@@ -143,6 +144,40 @@
+         end
+       end
+ 
++      context 'filtering by state' do
++        context 'with opened' do
++          let(:params) { { state: 'opened' } }
++
++          it 'returns only opened issues' do
++            expect(issues).to contain_exactly(issue1, issue2, issue3)
++          end
++        end
++
++        context 'with closed' do
++          let(:params) { { state: 'closed' } }
++
++          it 'returns only closed issues' do
++            expect(issues).to contain_exactly(closed_issue)
++          end
++        end
++
++        context 'with all' do
++          let(:params) { { state: 'all' } }
++
++          it 'returns all issues' do
++            expect(issues).to contain_exactly(issue1, issue2, issue3, closed_issue)
++          end
++        end
++
++        context 'with invalid state' do
++          let(:params) { { state: 'invalid_state' } }
++
++          it 'returns all issues' do
++            expect(issues).to contain_exactly(issue1, issue2, issue3, closed_issue)
++          end
++        end
++      end
++
+       context 'when the user is unauthorized' do
+         let(:search_user) { nil }
+ 
+-- 
+GitLab
+

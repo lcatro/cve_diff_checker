@@ -1,0 +1,30 @@
+From b27f38a67573f4c989710c9bfb726dd4c1eeb929 Mon Sep 17 00:00:00 2001
+From: Patrick Uiterwijk <puiterwijk@redhat.com>
+Date: Tue, 11 Apr 2017 15:52:01 +0200
+Subject: [PATCH] Disable covert redirects and CSRF token leaking
+
+This disallows the url() function from returning any remote URLs.
+This prevents covert redirects, and also prevents us from leaking
+CSRF tokens to outside parties.
+
+Signed-off-by: Patrick Uiterwijk <puiterwijk@redhat.com>
+---
+ fedora/tg/utils.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/fedora/tg/utils.py b/fedora/tg/utils.py
+index 4f18f31..9913df7 100644
+--- a/fedora/tg/utils.py
++++ b/fedora/tg/utils.py
+@@ -81,6 +81,11 @@ def url(tgpath, tgparams=None, **kwargs):
+     '''
+     if not isinstance(tgpath, six.string_types):
+         tgpath = '/'.join(list(tgpath))
++    if not tgpath.startswith('/'):
++        # Do not allow the url() function to be used for external urls.
++        # This function is primarily used in redirect() calls, so this prevents
++        # covert redirects and thus CSRF leaking.
++        tgpath = '/'
+     if tgpath.startswith('/'):
+         webpath = (config.get('server.webpath') or '').rstrip('/')
+         if tg_util.request_available():

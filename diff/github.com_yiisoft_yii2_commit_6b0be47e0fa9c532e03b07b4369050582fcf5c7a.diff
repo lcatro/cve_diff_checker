@@ -1,0 +1,151 @@
+From 6b0be47e0fa9c532e03b07b4369050582fcf5c7a Mon Sep 17 00:00:00 2001
+From: Alexander Makarov <sam@rmcreative.ru>
+Date: Mon, 22 Jan 2018 11:41:24 +0300
+Subject: [PATCH] Fixes #14711: Fixed `yii\web\ErrorHandler` displaying
+ exception message in non-debug mode
+
+---
+ framework/CHANGELOG.md                     |  1 +
+ framework/base/ErrorHandler.php            | 42 ++++++++++++++--------
+ framework/log/Dispatcher.php               |  2 +-
+ framework/views/errorHandler/exception.php |  1 -
+ tests/framework/log/DispatcherTest.php     | 34 ++++++++++++++----
+ 5 files changed, 57 insertions(+), 23 deletions(-)
+
+diff --git a/framework/CHANGELOG.md b/framework/CHANGELOG.md
+index 5444f47e0bb..66b28e5fe7c 100644
+--- a/framework/CHANGELOG.md
++++ b/framework/CHANGELOG.md
+@@ -4,6 +4,7 @@ Yii Framework 2 Change Log
+ 2.0.14 under development
+ ------------------------
+ 
++- Bug #14711: Fixed `yii\web\ErrorHandler` displaying exception message in non-debug mode (samdark)
+ - Enh #13814: MySQL unique index names can now contain spaces (df2)
+ - Bug #15300: Fixed "Cannot read property 'style' of undefined" error at the error screen (vitorarantes)
+ - Enh #15426: Added abilitiy to create and drop database views (igravity, vladis84)
+diff --git a/framework/base/ErrorHandler.php b/framework/base/ErrorHandler.php
+index 1ec96087ed6..a62529199f9 100644
+--- a/framework/base/ErrorHandler.php
++++ b/framework/base/ErrorHandler.php
+@@ -324,22 +324,36 @@ public static function convertExceptionToError($exception)
+      */
+     public static function convertExceptionToString($exception)
+     {
+-        if ($exception instanceof Exception && ($exception instanceof UserException || !YII_DEBUG)) {
+-            $message = "{$exception->getName()}: {$exception->getMessage()}";
+-        } elseif (YII_DEBUG) {
+-            if ($exception instanceof Exception) {
+-                $message = "Exception ({$exception->getName()})";
+-            } elseif ($exception instanceof ErrorException) {
+-                $message = "{$exception->getName()}";
+-            } else {
+-                $message = 'Exception';
+-            }
+-            $message .= " '" . get_class($exception) . "' with message '{$exception->getMessage()}' \n\nin "
+-                . $exception->getFile() . ':' . $exception->getLine() . "\n\n"
+-                . "Stack trace:\n" . $exception->getTraceAsString();
++        if ($exception instanceof UserException) {
++            return "{$exception->getName()}: {$exception->getMessage()}";
++        }
++
++        if (YII_DEBUG) {
++            return static::convertExceptionToVerboseString($exception);
++        }
++
++        return 'An internal server error occurred.';
++    }
++
++    /**
++     * Converts an exception into a string that has verbose information about the exception and its trace.
++     * @param \Exception|\Error $exception the exception being converted
++     * @return string the string representation of the exception.
++     *
++     * @since 2.0.14
++     */
++    public static function convertExceptionToVerboseString($exception)
++    {
++        if ($exception instanceof Exception) {
++            $message = "Exception ({$exception->getName()})";
++        } elseif ($exception instanceof ErrorException) {
++            $message = "{$exception->getName()}";
+         } else {
+-            $message = 'Error: ' . $exception->getMessage();
++            $message = 'Exception';
+         }
++        $message .= " '" . get_class($exception) . "' with message '{$exception->getMessage()}' \n\nin "
++            . $exception->getFile() . ':' . $exception->getLine() . "\n\n"
++            . "Stack trace:\n" . $exception->getTraceAsString();
+ 
+         return $message;
+     }
+diff --git a/framework/log/Dispatcher.php b/framework/log/Dispatcher.php
+index 80ad9b590ec..7e5c72aa1ba 100644
+--- a/framework/log/Dispatcher.php
++++ b/framework/log/Dispatcher.php
+@@ -190,7 +190,7 @@ public function dispatch($messages, $final)
+                 } catch (\Exception $e) {
+                     $target->enabled = false;
+                     $targetErrors[] = [
+-                        'Unable to send log via ' . get_class($target) . ': ' . ErrorHandler::convertExceptionToString($e),
++                        'Unable to send log via ' . get_class($target) . ': ' . ErrorHandler::convertExceptionToVerboseString($e),
+                         Logger::LEVEL_WARNING,
+                         __METHOD__,
+                         microtime(true),
+diff --git a/framework/views/errorHandler/exception.php b/framework/views/errorHandler/exception.php
+index 42916d5fbaa..0b5b26e93da 100644
+--- a/framework/views/errorHandler/exception.php
++++ b/framework/views/errorHandler/exception.php
+@@ -17,7 +17,6 @@
+         if ($exception instanceof \yii\web\HttpException) {
+             echo (int) $exception->statusCode . ' ' . $handler->htmlEncode($name);
+         } else {
+-            $name = $handler->getExceptionName($exception);
+             if ($name !== null) {
+                 echo $handler->htmlEncode($name . ' – ' . get_class($exception));
+             } else {
+diff --git a/tests/framework/log/DispatcherTest.php b/tests/framework/log/DispatcherTest.php
+index b2944b637c1..ef1401896e1 100644
+--- a/tests/framework/log/DispatcherTest.php
++++ b/tests/framework/log/DispatcherTest.php
+@@ -203,13 +203,33 @@ public function testDispatchWithFakeTarget2ThrowExceptionWhenCollect()
+                 ->withConsecutive(
+                     [$this->equalTo('messages'), $this->equalTo(true)],
+                     [
+-                        [[
+-                            'Unable to send log via ' . get_class($target1) . ': Exception: some error',
+-                            Logger::LEVEL_WARNING,
+-                            'yii\log\Dispatcher::dispatch',
+-                            'time data',
+-                            [],
+-                        ]],
++                        $this->callback(function($arg) use ($target1) {
++                            if (!isset($arg[0][0], $arg[0][1], $arg[0][2], $arg[0][3])) {
++                                return false;
++                            }
++
++                            if (strpos($arg[0][0], 'Unable to send log via ' . get_class($target1) . ': Exception (Exception) \'yii\base\UserException\' with message \'some error\'') !== 0) {
++                                return false;
++                            }
++
++                            if ($arg[0][1] !== Logger::LEVEL_WARNING) {
++                                return false;
++                            }
++
++                            if ($arg[0][2] !== 'yii\log\Dispatcher::dispatch') {
++                                return false;
++                            }
++
++                            if ($arg[0][3] !== 'time data') {
++                                return false;
++                            }
++
++                            if ($arg[0][4] !== []) {
++                                return false;
++                            }
++
++                            return true;
++                        }),
+                         true,
+                     ]
+                 );

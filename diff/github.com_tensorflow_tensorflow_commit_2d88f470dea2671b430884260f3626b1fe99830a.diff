@@ -1,0 +1,28 @@
+From 2d88f470dea2671b430884260f3626b1fe99830a Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 18 Sep 2020 14:43:00 -0700
+Subject: [PATCH] [tflite] Ensure `ResolveAxis` properly handles negative
+ inputs.
+
+In Python, a list `l` of length `n` allows indexing with negative indices, `l[i]`. The only constraint is that `n + i` becomes positive. Code in `ResolveAxis` assumes the constraints and only checks it using a `DCHECK`. But the macro is a no-op in non-debug builds and that can result in reading from negative offsets (buffer underflows).
+
+PiperOrigin-RevId: 332530683
+Change-Id: I464e073fee618054ae3719a3679739007bb3f3bc
+---
+ tensorflow/lite/kernels/internal/reference/reduce.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/internal/reference/reduce.h b/tensorflow/lite/kernels/internal/reference/reduce.h
+index 7953b4347c6c2..994baa0b254b3 100644
+--- a/tensorflow/lite/kernels/internal/reference/reduce.h
++++ b/tensorflow/lite/kernels/internal/reference/reduce.h
+@@ -70,6 +70,9 @@ inline bool ResolveAxis(const int num_dims, const int* axis,
+     // eg: For num_dims=3, [0, 1, 2] is the same as [-3, -2, -1]  */
+     int current = axis[idx] < 0 ? (axis[idx] + num_dims) : axis[idx];
+     TFLITE_DCHECK(current >= 0 && current < num_dims);
++    if (current < 0 || current >= num_dims) {
++      return false;
++    }
+     bool is_dup = false;
+     for (int j = 0; j < *out_num_axis; ++j) {
+       if (out_axis[j] == current) {

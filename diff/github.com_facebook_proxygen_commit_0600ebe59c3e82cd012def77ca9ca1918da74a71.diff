@@ -1,0 +1,43 @@
+From 0600ebe59c3e82cd012def77ca9ca1918da74a71 Mon Sep 17 00:00:00 2001
+From: Kyle Nekritz <knekritz@fb.com>
+Date: Mon, 12 Nov 2018 15:36:38 -0800
+Subject: [PATCH] Check that a secondary auth manager is set before
+ dereferencing.
+
+Summary: CVE-2018-6343
+
+Reviewed By: mingtaoy
+
+Differential Revision: D12994423
+
+fbshipit-source-id: 9229ec11da8085f1fa153595e8e5353e19d06fb7
+---
+ proxygen/lib/http/session/HTTPSession.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/proxygen/lib/http/session/HTTPSession.cpp b/proxygen/lib/http/session/HTTPSession.cpp
+index 71152b24f..95b34c6e4 100644
+--- a/proxygen/lib/http/session/HTTPSession.cpp
++++ b/proxygen/lib/http/session/HTTPSession.cpp
+@@ -1349,6 +1349,10 @@ void HTTPSession::onCertificateRequest(uint16_t requestId,
+   DestructorGuard dg(this);
+   VLOG(4) << "CERTIFICATE_REQUEST on" << *this << ", requestId=" << requestId;
+ 
++  if (!secondAuthManager_) {
++    return;
++  }
++
+   std::pair<uint16_t, std::unique_ptr<folly::IOBuf>> authenticator;
+   auto fizzBase = getTransport()->getUnderlyingTransport<AsyncFizzBase>();
+   if (fizzBase) {
+@@ -1382,6 +1386,10 @@ void HTTPSession::onCertificate(uint16_t certId,
+   DestructorGuard dg(this);
+   VLOG(4) << "CERTIFICATE on" << *this << ", certId=" << certId;
+ 
++  if (!secondAuthManager_) {
++    return;
++  }
++
+   bool isValid = false;
+   auto fizzBase = getTransport()->getUnderlyingTransport<AsyncFizzBase>();
+   if (fizzBase) {

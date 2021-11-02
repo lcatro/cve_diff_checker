@@ -1,0 +1,185 @@
+From 0f818a23a876c01429196bf7623e1e94a50230f0 Mon Sep 17 00:00:00 2001
+From: Mark Story <mark@mark-story.com>
+Date: Wed, 25 Nov 2015 22:11:16 -0500
+Subject: [PATCH] Only allow GET, HEAD, OPTIONS to not have CSRF tokens.
+
+This covers cases where bad guys make up fake HTTP methods to trick CSRF
+validation.
+
+Update test cases to not muck about in $_SERVER too.
+---
+ src/Controller/Component/CsrfComponent.php    |  2 +-
+ .../Component/CsrfComponentTest.php           | 60 +++++++++++--------
+ 2 files changed, 35 insertions(+), 27 deletions(-)
+
+diff --git a/src/Controller/Component/CsrfComponent.php b/src/Controller/Component/CsrfComponent.php
+index 3e4b3f21ac9e..1824c281deb5 100644
+--- a/src/Controller/Component/CsrfComponent.php
++++ b/src/Controller/Component/CsrfComponent.php
+@@ -94,7 +94,7 @@ public function startup(Event $event)
+         if ($request->is('get') && $cookieData === null) {
+             $this->_setCookie($request, $response);
+         }
+-        if ($request->is(['patch', 'put', 'post', 'delete'])) {
++        if (!$request->is(['head', 'get', 'options'])) {
+             $this->_validateToken($request);
+             unset($request->data[$this->_config['field']]);
+         }
+diff --git a/tests/TestCase/Controller/Component/CsrfComponentTest.php b/tests/TestCase/Controller/Component/CsrfComponentTest.php
+index aa611a6eb8c6..f42aeb5e6b3a 100644
+--- a/tests/TestCase/Controller/Component/CsrfComponentTest.php
++++ b/tests/TestCase/Controller/Component/CsrfComponentTest.php
+@@ -61,10 +61,11 @@ public function tearDown()
+      */
+     public function testSettingCookie()
+     {
+-        $_SERVER['REQUEST_METHOD'] = 'GET';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+-        $controller->request = new Request(['webroot' => '/dir/']);
++        $controller->request = new Request([
++            'environment' => ['REQUEST_METHOD' => 'GET'],
++            'webroot' => '/dir/',
++        ]);
+         $controller->response = new Response();
+ 
+         $event = new Event('Controller.startup', $controller);
+@@ -87,7 +88,7 @@ public function testSettingCookie()
+     public static function httpMethodProvider()
+     {
+         return [
+-            ['PATCH'], ['PUT'], ['POST'], ['DELETE']
++            ['PATCH'], ['PUT'], ['POST'], ['DELETE'], ['PURGE'], ['INVALIDMETHOD']
+         ];
+     }
+ 
+@@ -100,11 +101,14 @@ public static function httpMethodProvider()
+      */
+     public function testValidTokenInHeader($method)
+     {
+-        $_SERVER['REQUEST_METHOD'] = $method;
+-        $_SERVER['HTTP_X_CSRF_TOKEN'] = 'testing123';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+-        $controller->request = new Request(['cookies' => ['csrfToken' => 'testing123']]);
++        $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => $method,
++                'HTTP_X_CSRF_TOKEN' => 'testing123',
++            ],
++            'cookies' => ['csrfToken' => 'testing123']
++        ]);
+         $controller->response = new Response();
+ 
+         $event = new Event('Controller.startup', $controller);
+@@ -122,11 +126,12 @@ public function testValidTokenInHeader($method)
+      */
+     public function testInvalidTokenInHeader($method)
+     {
+-        $_SERVER['REQUEST_METHOD'] = $method;
+-        $_SERVER['HTTP_X_CSRF_TOKEN'] = 'nope';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => $method,
++                'HTTP_X_CSRF_TOKEN' => 'nope',
++            ],
+             'cookies' => ['csrfToken' => 'testing123']
+         ]);
+         $controller->response = new Response();
+@@ -144,10 +149,11 @@ public function testInvalidTokenInHeader($method)
+      */
+     public function testValidTokenRequestData($method)
+     {
+-        $_SERVER['REQUEST_METHOD'] = $method;
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => $method,
++            ],
+             'post' => ['_csrfToken' => 'testing123'],
+             'cookies' => ['csrfToken' => 'testing123']
+         ]);
+@@ -168,10 +174,11 @@ public function testValidTokenRequestData($method)
+      */
+     public function testInvalidTokenRequestData($method)
+     {
+-        $_SERVER['REQUEST_METHOD'] = $method;
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => $method,
++            ],
+             'post' => ['_csrfToken' => 'nope'],
+             'cookies' => ['csrfToken' => 'testing123']
+         ]);
+@@ -189,10 +196,11 @@ public function testInvalidTokenRequestData($method)
+      */
+     public function testInvalidTokenRequestDataMissing()
+     {
+-        $_SERVER['REQUEST_METHOD'] = 'POST';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => 'POST',
++            ],
+             'post' => [],
+             'cookies' => ['csrfToken' => 'testing123']
+         ]);
+@@ -211,10 +219,11 @@ public function testInvalidTokenRequestDataMissing()
+      */
+     public function testInvalidTokenMissingCookie($method)
+     {
+-        $_SERVER['REQUEST_METHOD'] = $method;
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => [
++                'REQUEST_METHOD' => $method
++            ],
+             'post' => ['_csrfToken' => 'could-be-valid'],
+             'cookies' => []
+         ]);
+@@ -232,10 +241,9 @@ public function testInvalidTokenMissingCookie($method)
+      */
+     public function testCsrfValidationSkipsRequestAction()
+     {
+-        $_SERVER['REQUEST_METHOD'] = 'POST';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => ['REQUEST_METHOD' => 'POST'],
+             'params' => ['requested' => 1],
+             'post' => ['_csrfToken' => 'nope'],
+             'cookies' => ['csrfToken' => 'testing123']
+@@ -256,10 +264,11 @@ public function testCsrfValidationSkipsRequestAction()
+      */
+     public function testConfigurationCookieCreate()
+     {
+-        $_SERVER['REQUEST_METHOD'] = 'GET';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+-        $controller->request = new Request(['webroot' => '/dir/']);
++        $controller->request = new Request([
++            'environment' => ['REQUEST_METHOD' => 'GET'],
++            'webroot' => '/dir/'
++        ]);
+         $controller->response = new Response();
+ 
+         $component = new CsrfComponent($this->registry, [
+@@ -290,10 +299,9 @@ public function testConfigurationCookieCreate()
+      */
+     public function testConfigurationValidate()
+     {
+-        $_SERVER['REQUEST_METHOD'] = 'POST';
+-
+         $controller = $this->getMock('Cake\Controller\Controller', ['redirect']);
+         $controller->request = new Request([
++            'environment' => ['REQUEST_METHOD' => 'POST'],
+             'cookies' => ['csrfToken' => 'nope', 'token' => 'yes'],
+             'post' => ['_csrfToken' => 'no match', 'token' => 'yes'],
+         ]);

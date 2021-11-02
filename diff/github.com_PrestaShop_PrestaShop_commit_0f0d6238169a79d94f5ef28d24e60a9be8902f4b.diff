@@ -1,0 +1,102 @@
+From c3236575cab8c9c5759efa4b0d1200b9cd3dd778 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 2 Jun 2020 10:44:11 +0200
+Subject: [PATCH 1/2] Remove unwanted update in dashboard controller
+
+---
+ controllers/admin/AdminDashboardController.php | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/controllers/admin/AdminDashboardController.php b/controllers/admin/AdminDashboardController.php
+index b71475f2f247..a6a796f63266 100644
+--- a/controllers/admin/AdminDashboardController.php
++++ b/controllers/admin/AdminDashboardController.php
+@@ -522,15 +522,10 @@ public function ajaxProcessSaveDashConfig()
+             if (Validate::isLoadedObject($module_obj) && method_exists($module_obj, 'validateDashConfig')) {
+                 $return['errors'] = $module_obj->validateDashConfig($configs);
+             }
++
+             if (!count($return['errors'])) {
+                 if (Validate::isLoadedObject($module_obj) && method_exists($module_obj, 'saveDashConfig')) {
+                     $return['has_errors'] = $module_obj->saveDashConfig($configs);
+-                } elseif (is_array($configs) && count($configs)) {
+-                    foreach ($configs as $name => $value) {
+-                        if (Validate::isConfigName($name)) {
+-                            Configuration::updateValue($name, $value);
+-                        }
+-                    }
+                 }
+             } else {
+                 $return['has_errors'] = true;
+
+From 5b100ce962b400cf6b1710a4a52bea00cad56f70 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 2 Jun 2020 14:09:31 +0200
+Subject: [PATCH 2/2] Add validateDashConfig and saveDashConfig for Module
+ class
+
+---
+ classes/module/Module.php                     | 24 +++++++++++++++++++
+ .../admin/AdminDashboardController.php        | 13 ++++------
+ 2 files changed, 28 insertions(+), 9 deletions(-)
+
+diff --git a/classes/module/Module.php b/classes/module/Module.php
+index 4cbf259b369d..3611eec5565f 100644
+--- a/classes/module/Module.php
++++ b/classes/module/Module.php
+@@ -3427,6 +3427,30 @@ public function get($serviceName)
+ 
+         return false;
+     }
++
++    /**
++     * Save dashboard configuration
++     *
++     * @param array $config
++     *
++     * @return array Array of errors
++     */
++    public function validateDashConfig(array $config): array
++    {
++        return [];
++    }
++
++    /**
++     * Save dashboard configuration
++     *
++     * @param array $config
++     *
++     * @return bool Determines if the save returns an error
++     */
++    public function saveDashConfig(array $config): bool
++    {
++        return false;
++    }
+ }
+ 
+ function ps_module_version_sort($a, $b)
+diff --git a/controllers/admin/AdminDashboardController.php b/controllers/admin/AdminDashboardController.php
+index a6a796f63266..a1f135082bc5 100644
+--- a/controllers/admin/AdminDashboardController.php
++++ b/controllers/admin/AdminDashboardController.php
+@@ -519,16 +519,11 @@ public function ajaxProcessSaveDashConfig()
+         );
+ 
+         if (Validate::isModuleName($module) && $module_obj = Module::getInstanceByName($module)) {
+-            if (Validate::isLoadedObject($module_obj) && method_exists($module_obj, 'validateDashConfig')) {
+-                $return['errors'] = $module_obj->validateDashConfig($configs);
+-            }
+-
+-            if (!count($return['errors'])) {
+-                if (Validate::isLoadedObject($module_obj) && method_exists($module_obj, 'saveDashConfig')) {
+-                    $return['has_errors'] = $module_obj->saveDashConfig($configs);
+-                }
+-            } else {
++            $return['errors'] = $module_obj->validateDashConfig($configs);
++            if (count($return['errors'])) {
+                 $return['has_errors'] = true;
++            } else {
++                $return['has_errors'] = $module_obj->saveDashConfig($configs);
+             }
+         }
+ 

@@ -1,0 +1,34 @@
+From 651e150091c61fb60ad1dff2bc2166185a83d9d6 Mon Sep 17 00:00:00 2001
+From: Brendan Abbott <brendan@bloodbone.ws>
+Date: Thu, 5 Nov 2015 22:55:45 +1000
+Subject: [PATCH] Sanitize the POST for the system/preferences/
+
+---
+ symphony/content/content.systempreferences.php | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/symphony/content/content.systempreferences.php b/symphony/content/content.systempreferences.php
+index c3019b10d..a1cf73d59 100644
+--- a/symphony/content/content.systempreferences.php
++++ b/symphony/content/content.systempreferences.php
+@@ -196,7 +196,7 @@ public function action()
+         Symphony::ExtensionManager()->notifyMembers('CustomActions', '/system/preferences/');
+ 
+         if (isset($_POST['action']['save'])) {
+-            $settings = $_POST['settings'];
++            $settings = filter_var_array($_POST['settings'], FILTER_SANITIZE_STRING);
+ 
+             /**
+              * Just prior to saving the preferences and writing them to the `CONFIG`
+@@ -210,7 +210,10 @@ public function action()
+              * @param array $errors
+              *  An array of errors passed by reference
+              */
+-            Symphony::ExtensionManager()->notifyMembers('Save', '/system/preferences/', array('settings' => &$settings, 'errors' => &$this->_errors));
++            Symphony::ExtensionManager()->notifyMembers('Save', '/system/preferences/', array(
++                'settings' => &$settings,
++                'errors' => &$this->_errors
++            ));
+ 
+             if (!is_array($this->_errors) || empty($this->_errors)) {
+                 if (is_array($settings) && !empty($settings)) {

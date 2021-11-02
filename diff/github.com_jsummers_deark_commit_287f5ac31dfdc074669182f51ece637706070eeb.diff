@@ -1,0 +1,31 @@
+From 287f5ac31dfdc074669182f51ece637706070eeb Mon Sep 17 00:00:00 2001
+From: Jason Summers <jason1@pobox.com>
+Date: Fri, 12 Mar 2021 09:43:49 -0500
+Subject: [PATCH] pict: Fixed a bug with ICC profile extraction
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Could cause a NULL pointer dereference.
+
+Found by F. Çelik.
+---
+ modules/pict.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/modules/pict.c b/modules/pict.c
+index 4e4fb02f..c05b8d79 100644
+--- a/modules/pict.c
++++ b/modules/pict.c
+@@ -660,6 +660,11 @@ static void do_iccprofile_item(deark *c, lctx *d, i64 pos, i64 len)
+ 	if(selector==0 || selector==1) {
+ 		// Beginning and Continuation segments normally have profile data.
+ 		// End segments (selector==2) are not allowed to include data.
++
++		if(!d->iccprofile_file) {
++			de_warn(c, "Bad ICC profile segment");
++			return;
++		}
+ 		dbuf_copy(c->infile, pos+4, data_len, d->iccprofile_file);
+ 	}
+ }

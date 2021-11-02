@@ -1,0 +1,235 @@
+From 40cc957f52e772f45125126439ba9333cf2d2998 Mon Sep 17 00:00:00 2001
+From: Sylvain Beucler <beuc@beuc.net>
+Date: Tue, 5 Jun 2018 23:07:56 +0200
+Subject: Fix directory traversal in D-Mod extractor (CVE-2018-0496)
+
+---
+ src/InstallVerifyFrame.cpp | 22 +++++++++++--
+ src/Tar.cpp                | 81 +++++++++++++++++++++++++++++++++++-----------
+ src/Tar.hpp                |  4 ++-
+ 3 files changed, 85 insertions(+), 22 deletions(-)
+
+diff --git a/src/InstallVerifyFrame.cpp b/src/InstallVerifyFrame.cpp
+index 64964e1..494ba53 100644
+--- a/src/InstallVerifyFrame.cpp
++++ b/src/InstallVerifyFrame.cpp
+@@ -3,7 +3,7 @@
+ 
+  * Copyright (C) 2004  Andrew Reading
+  * Copyright (C) 2005, 2006  Dan Walma
+- * Copyright (C) 2008  Sylvain Beucler
++ * Copyright (C) 2008, 2018  Sylvain Beucler
+ 
+  * This file is part of GNU FreeDink
+ 
+@@ -55,7 +55,10 @@ InstallVerifyFrame::InstallVerifyFrame(const wxString& lDmodFilePath)
+     {
+       // Prepare the tar file for reading
+       Tar lTar(mTarFilePath);
+-      lTar.ReadHeaders();
++      if (lTar.ReadHeaders() == 1) {
++        this->EndModal(wxID_CANCEL);
++        return;
++      }
+      
+       // Get and display the dmod description
+       wxString lDmodDescription = lTar.getmDmodDescription();
+@@ -122,7 +125,20 @@ void InstallVerifyFrame::onInstall(wxCommandEvent &Event)
+     destdir = mConfig->mDModDir;
+ 
+   Tar lTar(mTarFilePath);
+-  lTar.ReadHeaders();
++  if (lTar.ReadHeaders() == 1) {
++    this->EndModal(wxID_CANCEL);
++    return;
++  }
++
++  if (wxDirExists(destdir + wxFileName::GetPathSeparator() + lTar.getInstalledDmodDirectory())) {
++    wxString question;
++    question.Printf(_("Directory '%s' already exists. Continue?"), lTar.getInstalledDmodDirectory());
++    int lResult = wxMessageBox(question, _("DFArc - Installing"),
++			       wxYES_NO | wxICON_WARNING, this);
++    if (lResult == wxNO)
++      return;
++  }
++
+   int lError = lTar.Extract(destdir, &lInstallProgress);
+   if (lError == 0)
+     {
+diff --git a/src/Tar.cpp b/src/Tar.cpp
+index b919ae7..8147b8a 100644
+--- a/src/Tar.cpp
++++ b/src/Tar.cpp
+@@ -3,7 +3,7 @@
+ 
+  * Copyright (C) 2004  Andrew Reading
+  * Copyright (C) 2005, 2006  Dan Walma
+- * Copyright (C) 2008, 2014  Sylvain Beucler
++ * Copyright (C) 2008, 2014, 2018  Sylvain Beucler
+ 
+  * This file is part of GNU FreeDink
+ 
+@@ -31,6 +31,7 @@
+ #include <wx/intl.h>
+ #include <wx/log.h>
+ #include <wx/filename.h>
++#include <wx/tokenzr.h>
+ 
+ #include <math.h>
+ #include <ext/stdio_filebuf.h>
+@@ -427,7 +428,15 @@ int Tar::ReadHeaders( void )
+       wxString lPath(lRecord.Name, wxConvUTF8);
+       if (mInstalledDmodDirectory.Length() == 0)
+         {
+-	  mInstalledDmodDirectory = lPath.SubString( 0, lPath.Find( '/' ) );
++	  // Security: ensure the D-Mod directory is non-empty
++	  wxString firstDir = GetFirstDir(lPath);
++	  if (firstDir.IsSameAs("", true) || firstDir.IsSameAs("..", true) || firstDir.IsSameAs("dink", true))
++            {
++	      wxLogError(_("Error: invalid D-Mod directory.  Stopping."));
++              return 1;
++            }
++          mInstalledDmodDirectory = firstDir;
++
+ 	  lDmodDizPath = mInstalledDmodDirectory + _T("dmod.diz");
+ 	  lDmodDizPath.LowerCase();
+         }
+@@ -472,10 +481,6 @@ int Tar::Extract(wxString destdir, wxProgressDialog* aProgressDialog)
+     wxString strBuf;
+     int lError = 0;
+ 
+-    // Remember current directory
+-    wxString strCwd = ::wxGetCwd();
+-
+-
+     // Open the file here so it doesn't error after changing.
+     wxFile wx_In(mFilePath, wxFile::read);
+ 
+@@ -495,8 +500,6 @@ int Tar::Extract(wxString destdir, wxProgressDialog* aProgressDialog)
+ 	wxLogFatalError(_("Error: Cannot create directory '%s'.  Cannot extract data."), destdir.c_str());
+ 	throw;
+       }
+-    // Move to the directory.
+-    ::wxSetWorkingDirectory(destdir);
+ 
+     // Put the data in the directories.
+     __gnu_cxx::stdio_filebuf<char> filebuf(wx_In.fd(), std::ios::in);
+@@ -507,10 +510,6 @@ int Tar::Extract(wxString destdir, wxProgressDialog* aProgressDialog)
+     }
+     wx_In.Close();
+ 
+-
+-    // We're done.  Move back.
+-    ::wxSetWorkingDirectory(strCwd);
+-    
+     return lError;
+ }
+ 
+@@ -527,10 +526,6 @@ int Tar::ExtractData(std::istream& aTarStreamIn, wxString destdir, wxProgressDia
+     aTarStreamIn.seekg(0, std::ios::beg);
+     lTotalBytes = lEnd - static_cast<unsigned long>(aTarStreamIn.tellg());
+ 
+-    // Move into the extract dir.
+-    wxString lPreviousWorkingDirectory(::wxGetCwd());
+-    ::wxSetWorkingDirectory(destdir);
+-
+     // Extract the files.
+     int ebufsiz = 8192;
+     char buffer[ebufsiz];
+@@ -543,7 +538,16 @@ int Tar::ExtractData(std::istream& aTarStreamIn, wxString destdir, wxProgressDia
+ 		    /* Attempt convertion from latin-1 if not valid UTF-8 */
+ 		    lCurrentFilePath = wxString(lCurrentTarRecord.Name, wxConvISO8859_1);
+ 		  }
+-		wxString lCurrentDirectory(lCurrentFilePath.substr(0, lCurrentFilePath.find_last_of('/')));
++        // Security: check if archive tries to jump out of destination directory
++        if (IsPathInsecure(lCurrentFilePath))
++        {
++            wxLogError(_("Error: Insecure filename: '%s'.  Stopping."), lCurrentFilePath);
++            lError = 1;
++            break;
++        }
++        // Security: ensure full, non-relative path, under destdir/
++        lCurrentFilePath = destdir + wxFileName::GetPathSeparator() + lCurrentFilePath;
++        wxString lCurrentDirectory = lCurrentFilePath.substr(0, lCurrentFilePath.find_last_of("/\\"));
+ 
+         // Odd bad file problem...
+ 	if (lCurrentFilePath.compare(_T("\xFF")) == 0) // "�"
+@@ -612,7 +616,6 @@ int Tar::ExtractData(std::istream& aTarStreamIn, wxString destdir, wxProgressDia
+         }
+     }
+     aProgressDialog->Update(100, _("Done."));
+-    ::wxSetWorkingDirectory(lPreviousWorkingDirectory);
+     return lError;
+ }
+ 
+@@ -687,3 +690,45 @@ int Tar::RoundTo512(int n)
+         return (n - (n % 512)) + 512;
+     }
+ }
++
++wxString Tar::GetFirstDir(wxString path) {
++    wxString firstDir = "";
++    wxString previousDir = "";
++    // tokenizer never returns empty strings + distinguish dir// and a/$
++    if (path.EndsWith("/") || path.EndsWith("\\"))
++        path += "dummy";
++    wxStringTokenizer tokenizer(path, "/\\", wxTOKEN_STRTOK);
++    while (tokenizer.HasMoreTokens()) {
++        wxString curDir = tokenizer.GetNextToken();
++        if (curDir == '.')
++	    continue;
++        if (previousDir != "") {
++	  firstDir = previousDir;
++	  break;
++	}
++        previousDir = curDir;
++    }
++    return firstDir;
++}
++
++// Security: check if archive tries to jump out of destination directory
++bool Tar::IsPathInsecure(wxString path) {
++    // Avoid leading slashes (even if we preprend destdir)
++    if (path[0] == '/' || path[0] == '\\')
++        return true;
++    // Avoid ':' since wxFileName::Mkdir silently normalizes
++    // e.g. C:\test1\C:\test2 to C:\test2
++    if (path.Contains(":"))
++        return true;
++    // Ensure all files reside in the same subdirectory
++    if (GetFirstDir(path) != mInstalledDmodDirectory)
++        return true;
++    // Ensure there's no '..' path element
++    wxStringTokenizer tokenizer(path, "/\\");
++    while (tokenizer.HasMoreTokens()) {
++        wxString token = tokenizer.GetNextToken();
++        if (token == "..")
++            return true;
++    }
++    return false;
++}
+diff --git a/src/Tar.hpp b/src/Tar.hpp
+index f612580..62d7147 100644
+--- a/src/Tar.hpp
++++ b/src/Tar.hpp
+@@ -3,7 +3,7 @@
+ 
+  * Copyright (C) 2004  Andrew Reading
+  * Copyright (C) 2005, 2006  Dan Walma
+- * Copyright (C) 2008  Sylvain Beucler
++ * Copyright (C) 2008, 2018  Sylvain Beucler
+ 
+  * This file is part of GNU FreeDink
+ 
+@@ -88,6 +88,8 @@ private:
+   bool VerifyChecksum(TarHeader *Header);
+   bool CreateReal(const wxString& aFolderName, double *compression_ratio, wxProgressDialog* aProgressDialog);
+   int ExtractData(std::istream &f_In, wxString destdir, wxProgressDialog* aProgressDialog);
++  wxString GetFirstDir(wxString path);
++  bool IsPathInsecure(wxString path);
+   
+   // True if the proper constructor was used.  The compression method
+   // will not screw up if this flag is set to true.
+-- 
+cgit v1.2.1
+

@@ -1,0 +1,38 @@
+From 126c04acbabd7ad32c2b018fe10dfac2a3bc1210 Mon Sep 17 00:00:00 2001
+From: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Date: Sun, 28 Jul 2019 19:11:24 +0200
+Subject: [PATCH] Fix heap overflow in ip_reass on big packet input
+
+When the first fragment does not fit in the preallocated buffer, q will
+already be pointing to the ext buffer, so we mustn't try to update it.
+
+Signed-off-by: Samuel Thibault <samuel.thibault@ens-lyon.org>
+---
+ src/ip_input.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/ip_input.c b/src/ip_input.c
+index 50c7657..8c75d91 100644
+--- a/src/ip_input.c
++++ b/src/ip_input.c
+@@ -326,6 +326,8 @@ insert:
+     q = fp->frag_link.next;
+     m = dtom(slirp, q);
+ 
++    int was_ext = m->m_flags & M_EXT;
++
+     q = (struct ipasfrag *)q->ipf_next;
+     while (q != (struct ipasfrag *)&fp->frag_link) {
+         struct mbuf *t = dtom(slirp, q);
+@@ -348,7 +350,7 @@ insert:
+      * the old buffer (in the mbuf), so we must point ip
+      * into the new buffer.
+      */
+-    if (m->m_flags & M_EXT) {
++    if (!was_ext && m->m_flags & M_EXT) {
+         int delta = (char *)q - m->m_dat;
+         q = (struct ipasfrag *)(m->m_ext + delta);
+     }
+-- 
+GitLab
+

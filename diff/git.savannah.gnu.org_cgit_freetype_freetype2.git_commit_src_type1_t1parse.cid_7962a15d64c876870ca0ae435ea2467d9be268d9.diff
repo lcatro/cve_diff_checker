@@ -1,0 +1,59 @@
+From 7962a15d64c876870ca0ae435ea2467d9be268d9 Mon Sep 17 00:00:00 2001
+From: Werner Lemberg <wl@gnu.org>
+Date: Mon, 14 Sep 2015 00:38:26 +0200
+Subject: [type1] Fix another potential buffer overflow (#45955).
+
+* src/type1/t1parse (T1_Get_Private_Dict): Assure that check for
+`eexec' doesn't exceed `limit'.
+---
+ src/type1/t1parse.c | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+(limited to 'src/type1/t1parse.c')
+
+diff --git a/src/type1/t1parse.c b/src/type1/t1parse.c
+index d8d4df205..0b6850260 100644
+--- a/src/type1/t1parse.c
++++ b/src/type1/t1parse.c
+@@ -334,7 +334,6 @@
+       /* first of all, look at the `eexec' keyword */
+       FT_Byte*    cur   = parser->base_dict;
+       FT_Byte*    limit = cur + parser->base_len;
+-      FT_Byte     c;
+       FT_Pointer  pos_lf;
+       FT_Bool     test_cr;
+ 
+@@ -342,9 +341,9 @@
+     Again:
+       for (;;)
+       {
+-        c = cur[0];
+-        if ( c == 'e' && cur + 9 < limit )  /* 9 = 5 letters for `eexec' + */
+-                                            /* whitespace + 4 chars        */
++        if ( cur[0] == 'e'   &&
++             cur + 9 < limit )      /* 9 = 5 letters for `eexec' + */
++                                    /* whitespace + 4 chars        */
+         {
+           if ( cur[1] == 'e' &&
+                cur[2] == 'x' &&
+@@ -374,8 +373,15 @@
+ 
+       while ( cur < limit )
+       {
+-        if ( *cur == 'e' && ft_strncmp( (char*)cur, "eexec", 5 ) == 0 )
+-          goto Found;
++        if ( cur[0] == 'e'   &&
++             cur + 5 < limit )
++        {
++          if ( cur[1] == 'e' &&
++               cur[2] == 'x' &&
++               cur[3] == 'e' &&
++               cur[4] == 'c' )
++            goto Found;
++        }
+ 
+         T1_Skip_PS_Token( parser );
+         if ( parser->root.error )
+-- 
+cgit v1.2.1
+

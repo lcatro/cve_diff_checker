@@ -1,0 +1,59 @@
+From b88393f08a558eec14964a55d3c680fe67407712 Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Mon, 5 Sep 2016 23:42:31 -0700
+Subject: [PATCH] Fix bug #72860: wddx_deserialize use-after-free
+
+---
+ ext/wddx/tests/bug72860.phpt | 27 +++++++++++++++++++++++++++
+ ext/wddx/wddx.c              |  3 ++-
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+ create mode 100644 ext/wddx/tests/bug72860.phpt
+
+diff --git a/ext/wddx/tests/bug72860.phpt b/ext/wddx/tests/bug72860.phpt
+new file mode 100644
+index 000000000000..6385457e8ee4
+--- /dev/null
++++ b/ext/wddx/tests/bug72860.phpt
+@@ -0,0 +1,27 @@
++--TEST--
++Bug #72860: wddx_deserialize use-after-free
++--SKIPIF--
++<?php
++if (!extension_loaded('wddx')) {
++    die('skip. wddx not available');
++}
++?>
++--FILE--
++<?php
++
++$xml=<<<XML
++<?xml version='1.0'?>
++<!DOCTYPE wddxPacket SYSTEM 'wddx_0100.dtd'>
++<wddxPacket version='1.0'>
++       <recordset fieldNames='F'>
++               <field name='F'>
++       </recordset>
++</wddxPacket>
++XML;
++
++var_dump(wddx_deserialize($xml));
++?>
++DONE
++--EXPECT--
++NULL
++DONE
+\ No newline at end of file
+diff --git a/ext/wddx/wddx.c b/ext/wddx/wddx.c
+index d7bd295832c7..b02d2f07ded4 100644
+--- a/ext/wddx/wddx.c
++++ b/ext/wddx/wddx.c
+@@ -230,7 +230,8 @@ static int wddx_stack_destroy(wddx_stack *stack)
+ 
+ 	if (stack->elements) {
+ 		for (i = 0; i < stack->top; i++) {
+-			if (((st_entry *)stack->elements[i])->data)	{
++			if (((st_entry *)stack->elements[i])->data
++					&& ((st_entry *)stack->elements[i])->type != ST_FIELD)	{
+ 				zval_ptr_dtor(&((st_entry *)stack->elements[i])->data);
+ 			}
+ 			if (((st_entry *)stack->elements[i])->varname) {

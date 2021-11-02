@@ -1,0 +1,149 @@
+diff --git a/time_tracker.admin.inc b/time_tracker.admin.inc
+index 7b028c73f9f0ebd80df0f09b528368bb492d6617..ea54f3a82b5fdf9e9df46f223e95ac501a1cc4ec 100644
+--- a/time_tracker.admin.inc
++++ b/time_tracker.admin.inc
+@@ -309,7 +309,7 @@ function time_tracker_activity_table_form() {
+       // The activity name.
+       $form['activities'][$activity->taid]['name'] = array(
+         '#type' => 'textfield',
+-        '#default_value' => check_plain($activity->name),
++        '#default_value' => $activity->name,
+       );
+       // The weight (this is for the tabledrag we'll add in the theme function.
+       $form['activities'][$activity->taid]['weight'] = array(
+@@ -408,8 +408,8 @@ function time_tracker_delete_activity_confirm($form, &$form_state, $taid) {
+       '#default_value' => $taid,
+     );
+     $question = t(
+-      'Are you sure you want to delete the activity: !activity_name',
+-      array('!activity_name' => _time_tracker_get_activity_name($taid))
++      'Are you sure you want to delete the activity: %activity_name',
++      array('%activity_name' => _time_tracker_get_activity_name($taid))
+     );
+     return confirm_form($form, $question, 'admin/config/time_tracker/activities');
+   }
+diff --git a/time_tracker.module b/time_tracker.module
+index 5ec3052f8cbae36955e4184c1c037fd7bd586c87..c76a85a735023aff3710dacb5237014d219f4bc4 100644
+--- a/time_tracker.module
++++ b/time_tracker.module
+@@ -1001,9 +1001,10 @@ function time_tracker_time_entry_form($form, &$form_state, $info = array(), $tim
+     else {
+       $rounding_operation = 'rounded ' . $rounding_operation;
+     }
+-    $msg = t('Time rounding is ON. Time will be !rounded to the nearest !minutes minute interval.', array(
+-      '!rounded' => $rounding_operation,
+-      '!minutes' => $rounding_interval,
++    // TODO: change this to full string translations.
++    $msg = t('Time rounding is ON. Time will be @rounded to the nearest @minutes minute interval.', array(
++      '@rounded' => $rounding_operation,
++      '@minutes' => $rounding_interval,
+     ));
+     // Add it to the time_tracker fieldset.
+     $form['time_tracker']['#description'] = $msg;
+@@ -1141,7 +1142,9 @@ function time_tracker_time_entry_form($form, &$form_state, $info = array(), $tim
+       if (isset($time_tracker_data->duration) && !($time_tracker_data->end) && !($time_tracker_data->start)) {
+         $form['time_tracker']['duration_msg'] = array(
+           '#prefix' => '<div class="description"><em>',
+-          '#value' => t("A duration value exists for this time entry, but no Start and End time. <br/> Saving this entry with a Start and End time will overwrite the duration<br/> Logged Duration: <b>!duration</b>", array('!duration' => _time_tracker_format_hours_to_hours_and_minutes($time_tracker_data->duration))),
++          '#value' => t("A duration value exists for this time entry, but no Start and End time. <br/> Saving this entry with a Start and End time will overwrite the duration<br/> Logged Duration: <b>@duration</b>", array(
++            '@duration' => _time_tracker_format_hours_to_hours_and_minutes($time_tracker_data->duration)
++          )),
+           '#suffix' => '</em></div>',
+           '#weight' => 4,
+         );
+diff --git a/time_tracker.theme.inc b/time_tracker.theme.inc
+index d224ccd8b2f3b2411f920884107feb0cc4f9debe..a10a0e1657a4943e4b4b561882a62e313bd93892 100644
+--- a/time_tracker.theme.inc
++++ b/time_tracker.theme.inc
+@@ -140,7 +140,7 @@ function theme_time_tracker_time_entry_table($variables) {
+             'class' => 'time_entry_username',
+           ),
+           array( //Cell2
+-            'data' => _time_tracker_get_activity_name($time_entry->activity),
++            'data' => filter_xss_admin(_time_tracker_get_activity_name($time_entry->activity)),
+             'class' => 'time_entry_activity',
+           ),
+           array( //Cell3
+@@ -167,7 +167,7 @@ function theme_time_tracker_time_entry_table($variables) {
+       );
+       // The note field is not optional
+       $row['data'][] = array( //Cell5
+-        'data' => $time_entry->note,
++        'data' => filter_xss($time_entry->note),
+         'class' => 'time_entry_note',
+       );
+       if (variable_get('enable_billable_field', 0)) {
+@@ -258,10 +258,7 @@ function theme_time_tracker_comment($variables) {
+     $rows = array();
+     $time = '';
+ 
+-    $activity = _time_tracker_get_activity_name($time_entry->activity);
+-    if ($activity) {
+-      $activity = '(' . $activity . ') ';
+-    }
++    $activity = filter_xss_admin(_time_tracker_get_activity_name($time_entry->activity));
+ 
+     // If there is a time start and end, it's a time entry that was logged as an interval
+     if ($time_entry->start && $time_entry->end) {
+@@ -301,7 +298,7 @@ function theme_time_tracker_comment($variables) {
+         );
+       }
+       $row['data'][] = array(
+-        'data' => _time_tracker_get_activity_name($time_entry->activity),
++        'data' => $activity,
+         'class' => 'time_entry_activity',
+       );
+       $row['data'][] = array(
+@@ -338,7 +335,7 @@ function theme_time_tracker_comment($variables) {
+       if (variable_get('enable_deductions_field', 0)) {
+         $time_string['total_details'] = '(' . _time_tracker_format_hours_to_hours_and_minutes($time_entry->duration) . ' - ' . _time_tracker_format_hours_to_hours_and_minutes($time_entry->deductions) . ')';
+       }
+-      $time_string['activity'] = $activity;
++      $time_string['activity'] = $activity ? '(' . $activity . ') ' : $activity;
+       $time_string['on'] = t('on');
+       $time_string['time'] = format_date($time_entry->timestamp, 'custom', variable_get('timestamp_date_format', 'F d, Y'));
+       if (variable_get('enable_billable_field', 0)) {
+diff --git a/timer/time_tracker_timer.module b/timer/time_tracker_timer.module
+index 01e8612f64cdf0afc3e10fc0081a40d176055090..a6706480b0fc53b198a3d4b268c866a88b194b83 100644
+--- a/timer/time_tracker_timer.module
++++ b/timer/time_tracker_timer.module
+@@ -772,7 +772,9 @@ function theme_time_tracker_timer($variables) {
+               'class' => 'stopped_timer_time timer_time timer_mine',
+             ),
+             array(
+-              'data' => t('Your time has been entered below.  <a href="!hours_field_link">Please complete the form</a>', array('!hours_field_link' => base_path() . $hours_field_link)),
++              'data' => t('Your time has been entered below.  <a href="!url">Please complete the form</a>', array(
++                '!url' => check_url(base_path() . $hours_field_link),
++              )),
+               'class' => 'stopped_timer_msg timer_msg timer_mine',
+             ),
+           ),
+diff --git a/views/time_tracker.views.inc b/views/time_tracker.views.inc
+index 0b6b91e3adf457e8bda0b8afae678d8319978801..cd260de2f33329748ddffd7348130e5f9a3e9c6e 100644
+--- a/views/time_tracker.views.inc
++++ b/views/time_tracker.views.inc
+@@ -23,19 +23,19 @@ function time_tracker_views_data() {
+       $tracking = time_tracker_is_tracking_time($key, $bkey);
+       if ($tracking) {
+         $data['time_tracker_entry'][$type['entity keys']['id']] = array(
+-          'title' => t($type['label']),
+-          'help' => t('Relate an entry to its !label entity.', array('!label' => t($type['label']))),
++          'title' => $type['label'],
++          'help' => t('Relate an entry to its %label entity.', array('%label' => $type['label'])),
+           'relationship' => array(
+             'handler' => 'time_tracker_views_handler_relationship',
+             'base' => $type['base table'],
+             'base field' => $type['entity keys']['id'],
+-            'label' => t($type['label'] . ' ID'),
++            'label' => t('%label ID', array('%label' => $type['label'])),
+           ),
+         );
+         $data[$key]['time_tracker_entry'] = array(
+           'title' => t('Time Tracker Entry'),
+-          'help' => t('Relate an entity (@bundle_label) to its Time Tracker entries.', array(
+-            '@bundle_label' => $bundle['label'],
++          'help' => t('Relate an entity (%bundle_label) to its Time Tracker entries.', array(
++            '%bundle_label' => $bundle['label'],
+           )),
+           'relationship' => array(
+             'handler' => 'time_tracker_views_handler_relationship',

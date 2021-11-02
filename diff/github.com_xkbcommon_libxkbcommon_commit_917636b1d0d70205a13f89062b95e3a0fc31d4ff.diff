@@ -1,0 +1,58 @@
+From 917636b1d0d70205a13f89062b95e3a0fc31d4ff Mon Sep 17 00:00:00 2001
+From: Ran Benita <ran234@gmail.com>
+Date: Sun, 11 Mar 2018 17:07:06 +0200
+Subject: [PATCH] xkbcomp: fix crash when parsing an xkb_geometry section
+
+xkb_geometry sections are ignored; previously the had done so by
+returning NULL for the section's XkbFile, however some sections of the
+code do not expect this. Instead, create an XkbFile for it, it will
+never be processes and discarded later.
+
+Caught with the afl fuzzer.
+
+Signed-off-by: Ran Benita <ran234@gmail.com>
+---
+ src/xkbcomp/keymap.c | 9 +++++++--
+ src/xkbcomp/parser.y | 9 +--------
+ 2 files changed, 8 insertions(+), 10 deletions(-)
+
+diff --git a/src/xkbcomp/keymap.c b/src/xkbcomp/keymap.c
+index 45098c24..e95e50c3 100644
+--- a/src/xkbcomp/keymap.c
++++ b/src/xkbcomp/keymap.c
+@@ -241,8 +241,13 @@ CompileKeymap(XkbFile *file, struct xkb_keymap *keymap, enum merge_mode merge)
+          file = (XkbFile *) file->common.next) {
+         if (file->file_type < FIRST_KEYMAP_FILE_TYPE ||
+             file->file_type > LAST_KEYMAP_FILE_TYPE) {
+-            log_err(ctx, "Cannot define %s in a keymap file\n",
+-                    xkb_file_type_to_string(file->file_type));
++            if (file->file_type == FILE_TYPE_GEOMETRY) {
++                log_vrb(ctx, 1,
++                        "Geometry sections are not supported; ignoring\n");
++            } else {
++                log_err(ctx, "Cannot define %s in a keymap file\n",
++                        xkb_file_type_to_string(file->file_type));
++            }
+             continue;
+         }
+ 
+diff --git a/src/xkbcomp/parser.y b/src/xkbcomp/parser.y
+index d15d24b3..b555bc25 100644
+--- a/src/xkbcomp/parser.y
++++ b/src/xkbcomp/parser.y
+@@ -273,14 +273,7 @@ XkbMapConfig    :       OptFlags FileType OptMapName OBRACE
+                             DeclList
+                         CBRACE SEMI
+                         {
+-                            if ($2 == FILE_TYPE_GEOMETRY) {
+-                                free($3);
+-                                FreeStmt($5);
+-                                $$ = NULL;
+-                            }
+-                            else {
+-                                $$ = XkbFileCreate($2, $3, $5, $1);
+-                            }
++                            $$ = XkbFileCreate($2, $3, $5, $1);
+                         }
+                 ;
+ 

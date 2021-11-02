@@ -1,0 +1,83 @@
+From 3c8a2b0e91d8d8947e89384dacf6b54673083e71 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sun, 6 Aug 2017 18:45:09 +0100
+Subject: [PATCH] CVE-2017-13048/RSVP: fix decoding of Fast Reroute objects
+
+In rsvp_obj_print() the case block for Class-Num 205 (FAST_REROUTE) from
+RFC 4090 Section 4.1 could over-read accessing the buffer contents before
+making the bounds check. Rearrange those steps the correct way around.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-rsvp.c                      |   3 ++-
+ tests/TESTLIST                    |   1 +
+ tests/rsvp_fast_reroute-oobr.out  |   6 ++++++
+ tests/rsvp_fast_reroute-oobr.pcap | Bin 0 -> 114 bytes
+ 4 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 tests/rsvp_fast_reroute-oobr.out
+ create mode 100644 tests/rsvp_fast_reroute-oobr.pcap
+
+diff --git a/print-rsvp.c b/print-rsvp.c
+index 1eccb4875..bc599796a 100644
+--- a/print-rsvp.c
++++ b/print-rsvp.c
+@@ -1472,12 +1472,12 @@ rsvp_obj_print(netdissect_options *ndo,
+         case RSVP_OBJ_FASTREROUTE:
+             /* the differences between c-type 1 and 7 are minor */
+             obj_ptr.rsvp_obj_frr = (const struct rsvp_obj_frr_t *)obj_tptr;
+-            bw.i = EXTRACT_32BITS(obj_ptr.rsvp_obj_frr->bandwidth);
+ 
+             switch(rsvp_obj_ctype) {
+             case RSVP_CTYPE_1: /* new style */
+                 if (obj_tlen < sizeof(struct rsvp_obj_frr_t))
+                     return-1;
++                bw.i = EXTRACT_32BITS(obj_ptr.rsvp_obj_frr->bandwidth);
+                 ND_PRINT((ndo, "%s  Setup Priority: %u, Holding Priority: %u, Hop-limit: %u, Bandwidth: %.10g Mbps",
+                        ident,
+                        (int)obj_ptr.rsvp_obj_frr->setup_prio,
+@@ -1496,6 +1496,7 @@ rsvp_obj_print(netdissect_options *ndo,
+             case RSVP_CTYPE_TUNNEL_IPV4: /* old style */
+                 if (obj_tlen < 16)
+                     return-1;
++                bw.i = EXTRACT_32BITS(obj_ptr.rsvp_obj_frr->bandwidth);
+                 ND_PRINT((ndo, "%s  Setup Priority: %u, Holding Priority: %u, Hop-limit: %u, Bandwidth: %.10g Mbps",
+                        ident,
+                        (int)obj_ptr.rsvp_obj_frr->setup_prio,
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 08cb0d9ac..d80395177 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -565,6 +565,7 @@ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+ vqp-oobr		vqp-oobr.pcap			vqp-oobr.out		-v -c1
+ bgp_pmsi_tunnel-oobr	bgp_pmsi_tunnel-oobr.pcap	bgp_pmsi_tunnel-oobr.out -v -c1
+ bgp_mvpn_6_and_7	bgp_mvpn_6_and_7.pcap		bgp_mvpn_6_and_7.out	-v -c1
++rsvp_fast_reroute-oobr	rsvp_fast_reroute-oobr.pcap	rsvp_fast_reroute-oobr.out -v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/rsvp_fast_reroute-oobr.out b/tests/rsvp_fast_reroute-oobr.out
+new file mode 100644
+index 000000000..0ca2a684b
+--- /dev/null
++++ b/tests/rsvp_fast_reroute-oobr.out
+@@ -0,0 +1,6 @@
++IP (tos 0x0, ttl 224, id 17920, offset 0, flags [none], proto RSVP (46), length 42024, bad cksum 3700 (->fc41)!)
++    0.203.243.128 > 0.26.0.0: 
++	RSVPv1 Path Message (1), Flags: [Refresh reduction capable], length: 41218, ttl: 227, checksum: 0x00f4
++	  Fast Re-Route Object (205) Flags: [ignore and forward if unknown], Class-Type: Unknown (0), length: 4
++	  Fast Re-Route Object (205) Flags: [ignore and forward if unknown], Class-Type: Unknown (0), length: 4
++		 [|rsvp]
+diff --git a/tests/rsvp_fast_reroute-oobr.pcap b/tests/rsvp_fast_reroute-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc1d72e252c74c75114ccee032fb12e4a4de67c7
+GIT binary patch
+literal 114
+zcmca|c+)~A1{MYwFa|OhftdNl8!j;cCI&MgTSJPGvwnRF!?gSZ=MOBHJ(q*Qm0^j7
+s8&Kwfo;d@<>CX)eQVa~zj0|5MgAF^&z`z2;3=9np3=RMPGc%zu0rc@4+5i9m
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,42 @@
+From 6ffc7f9032c55eaa1c37cf5e070809b7211c7e9a Mon Sep 17 00:00:00 2001
+From: Mark Unwin <marku@opmantek.com>
+Date: Fri, 24 Apr 2020 09:59:41 +1000
+Subject: [PATCH] Validate correct character for subnet and exclude_ip
+ attributes when running a discovery.
+
+---
+ .../application/helpers/discoveries_helper.php     | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/code_igniter/application/helpers/discoveries_helper.php b/code_igniter/application/helpers/discoveries_helper.php
+index 2a64f8da9..2ad851114 100644
+--- a/code_igniter/application/helpers/discoveries_helper.php
++++ b/code_igniter/application/helpers/discoveries_helper.php
+@@ -272,6 +272,13 @@ function discover_subnet($queue_item = null)
+ 		$data = array($discovery_id);
+ 		$CI->db->query($sql, $data);
+ 
++		if ( ! preg_match('/^[\d,\.,\/,\-]*$/', $discovery->attributes->other->subnet)) {
++			$log->message = 'Invalid subnet value supplied of ' . htmlentities($discovery->attributes->other->subnet);
++			$log->severity = 5;
++			discovery_log($log);
++			return;
++		}
++
+ 		if ( ! empty($CI->config->config['discovery_ip_exclude'])) {
+ 			// Account for users adding multiple spaces which would be converted to multiple comma's.
+ 			$exclude_ip = preg_replace('!\s+!', ' ', $CI->config->config['discovery_ip_exclude']);
+@@ -283,6 +290,13 @@ function discover_subnet($queue_item = null)
+ 				$discovery->attributes->other->nmap->exclude_ip = $exclude_ip;
+ 			}
+ 		}
++		// Ensure we only have valid characters of digit, dot, slash and comma in attribute
++		if ( ! preg_match('/^[\d,\.,\/,\-,\,]*$/', $discovery->attributes->other->nmap->exclude_ip)) {
++			$discovery->attributes->other->nmap->exclude_ip = '';
++			$log->message = 'Invalid characters supplied in exclude_ip, setting to blank.';
++			$log->severity = 5;
++			discovery_log($log);
++		}
+ 
+ 		$all_ip_list = all_ip_list($discovery);
+ 

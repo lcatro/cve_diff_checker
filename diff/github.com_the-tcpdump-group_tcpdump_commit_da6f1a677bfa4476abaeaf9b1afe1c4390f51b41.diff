@@ -1,0 +1,83 @@
+From da6f1a677bfa4476abaeaf9b1afe1c4390f51b41 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Thu, 23 Mar 2017 14:11:30 -0700
+Subject: [PATCH] CVE-2017-13034/PGM: Add a bounds check.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+
+Move a return to make the code a bit cleaner (i.e., make it more obvious
+that if we don't have enough of the PGM header, we just print the source
+and destination IP addresses, mark it as incomplete PGM, and don't try
+to look at the PGM header).
+---
+ print-pgm.c                    |   4 ++--
+ tests/TESTLIST                 |   1 +
+ tests/pgm_group_addr_asan.out  |   2 ++
+ tests/pgm_group_addr_asan.pcap | Bin 0 -> 111 bytes
+ 4 files changed, 5 insertions(+), 2 deletions(-)
+ create mode 100644 tests/pgm_group_addr_asan.out
+ create mode 100644 tests/pgm_group_addr_asan.pcap
+
+diff --git a/print-pgm.c b/print-pgm.c
+index c22b188b7..8340f2c3e 100644
+--- a/print-pgm.c
++++ b/print-pgm.c
+@@ -169,13 +169,12 @@ pgm_print(netdissect_options *ndo,
+ 			ND_PRINT((ndo, "%s > %s: [|pgm]",
+ 				ip6addr_string(ndo, &ip6->ip6_src),
+ 				ip6addr_string(ndo, &ip6->ip6_dst)));
+-			return;
+ 		} else {
+ 			ND_PRINT((ndo, "%s > %s: [|pgm]",
+ 				ipaddr_string(ndo, &ip->ip_src),
+ 				ipaddr_string(ndo, &ip->ip_dst)));
+-			return;
+ 		}
++		return;
+ 	}
+ 
+ 	sport = EXTRACT_16BITS(&pgm->pgm_sport);
+@@ -362,6 +361,7 @@ pgm_print(netdissect_options *ndo,
+ 	     * and stopping if we don't have enough.
+ 	     */
+ 	    bp += (2 * sizeof(uint16_t));
++	    ND_TCHECK_16BITS(bp);
+ 	    switch (EXTRACT_16BITS(bp)) {
+ 	    case AFNUM_INET:
+ 		ND_TCHECK2(*bp, sizeof(struct in_addr));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 433a8fab9..1c94dcca1 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -522,6 +522,7 @@ dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
+ pgm_opts_asan		pgm_opts_asan.pcap		pgm_opts_asan.out	-v
+ pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
+ pgm_opts_asan_3		pgm_opts_asan_3.pcap		pgm_opts_asan_3.out	-v
++pgm_group_addr_asan	pgm_group_addr_asan.pcap	pgm_group_addr_asan.out	-v
+ vtp_asan		vtp_asan.pcap			vtp_asan.out	-v
+ vtp_asan-2		vtp_asan-2.pcap			vtp_asan-2.out	-v
+ vtp_asan-3		vtp_asan-3.pcap			vtp_asan-3.out	-v
+diff --git a/tests/pgm_group_addr_asan.out b/tests/pgm_group_addr_asan.out
+new file mode 100644
+index 000000000..a09d9b2ac
+--- /dev/null
++++ b/tests/pgm_group_addr_asan.out
+@@ -0,0 +1,2 @@
++IP (tos 0x41,ECT(1), id 40256, offset 0, flags [none], proto PGM (113), length 768, options (unknown 89 [bad length 232]), bad cksum 5959 (->5afd)!)
++    89.121.89.107 > 89.89.89.89: 89.121.89.107.32322 > 89.89.89.89.500: PGM, length 24818 0x00ff7f010347 [|pgm]
+diff --git a/tests/pgm_group_addr_asan.pcap b/tests/pgm_group_addr_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c11567198dc5d378c4e29c579956f68ecb222c1
+GIT binary patch
+literal 111
+zcmca|c+)~A1{MZ}pZ|pzfWRGy8G)Etl7UN%g$c~}W?)icVBqzf7I**Pfd#YYa4@(#
+zGBeC|04ghtjEt;|%m$K?kuRKAUuAmou+E9`3&)f9y$t{B8JXP^J~1=^)iE;6W%RIS
+GPyzrO?H>>T
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,27 @@
+From 02f909dc24b1f05cfbba75077c7707b905e63cd2 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Fri, 26 Jul 2019 00:35:32 +0200
+Subject: [PATCH] avcodec/vqavideo: Set video size
+
+Fixes: out of array access
+Fixes: 15919/clusterfuzz-testcase-minimized-ffmpeg_AV_CODEC_ID_VQA_fuzzer-5657368257363968
+
+Found-by: continuous fuzzing process https://github.com/google/oss-fuzz/tree/master/projects/ffmpeg
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavcodec/vqavideo.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libavcodec/vqavideo.c b/libavcodec/vqavideo.c
+index 0e70be1000a1..b9743abda95d 100644
+--- a/libavcodec/vqavideo.c
++++ b/libavcodec/vqavideo.c
+@@ -147,7 +147,7 @@ static av_cold int vqa_decode_init(AVCodecContext *avctx)
+     }
+     s->width = AV_RL16(&s->avctx->extradata[6]);
+     s->height = AV_RL16(&s->avctx->extradata[8]);
+-    if ((ret = av_image_check_size(s->width, s->height, 0, avctx)) < 0) {
++    if ((ret = ff_set_dimensions(avctx, s->width, s->height)) < 0) {
+         s->width= s->height= 0;
+         return ret;
+     }

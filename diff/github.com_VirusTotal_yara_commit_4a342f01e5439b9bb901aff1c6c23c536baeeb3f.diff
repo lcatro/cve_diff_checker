@@ -1,0 +1,70 @@
+From 4a342f01e5439b9bb901aff1c6c23c536baeeb3f Mon Sep 17 00:00:00 2001
+From: Victor Manuel Alvarez
+ <vmalvarez@vmalvarez-macbookpro.roam.corp.google.com>
+Date: Wed, 5 Jul 2017 10:01:03 +0200
+Subject: [PATCH] Fix heap overflow (reported by Jurriaan Bremer)
+
+When setting a new array item with yr_object_array_set_item() the array size is doubled if the index for the new item is larger than the already allocated ones. No further checks were made to ensure that the index fits into the array after doubling its capacity. If the array capacity was for example 64, and a new object is assigned to an index larger than 128 the overflow occurs. As yr_object_array_set_item() is usually invoked with indexes that increase monotonically by one, this bug never triggered before. But the new "dotnet" module has the potential to allow the exploitation of this bug by scanning a specially crafted .NET binary.
+---
+ libyara/modules/tests.c | 1 +
+ libyara/object.c        | 9 ++++++++-
+ tests/test-rules.c      | 7 +++++++
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/libyara/modules/tests.c b/libyara/modules/tests.c
+index a15263832..4eacc3654 100644
+--- a/libyara/modules/tests.c
++++ b/libyara/modules/tests.c
+@@ -176,6 +176,7 @@ int module_load(
+   set_integer(0, module_object, "integer_array[%i]", 0);
+   set_integer(1, module_object, "integer_array[%i]", 1);
+   set_integer(2, module_object, "integer_array[%i]", 2);
++  set_integer(256, module_object, "integer_array[%i]", 256);
+ 
+   set_string("foo", module_object, "string_array[%i]", 0);
+   set_string("bar", module_object, "string_array[%i]", 1);
+diff --git a/libyara/object.c b/libyara/object.c
+index b130278e1..1572a131b 100644
+--- a/libyara/object.c
++++ b/libyara/object.c
+@@ -725,7 +725,10 @@ int yr_object_array_set_item(
+ 
+   if (array->items == NULL)
+   {
+-    count = yr_max(64, (index + 1) * 2);
++    count = 64;
++
++    while (count <= index)
++      count *= 2;
+ 
+     array->items = (YR_ARRAY_ITEMS*) yr_malloc(
+         sizeof(YR_ARRAY_ITEMS) + count * sizeof(YR_OBJECT*));
+@@ -740,6 +743,10 @@ int yr_object_array_set_item(
+   else if (index >= array->items->count)
+   {
+     count = array->items->count * 2;
++
++    while (count <= index)
++      count *= 2;
++
+     array->items = (YR_ARRAY_ITEMS*) yr_realloc(
+         array->items,
+         sizeof(YR_ARRAY_ITEMS) + count * sizeof(YR_OBJECT*));
+diff --git a/tests/test-rules.c b/tests/test-rules.c
+index f03a7b921..1897499da 100644
+--- a/tests/test-rules.c
++++ b/tests/test-rules.c
+@@ -1395,6 +1395,13 @@ static void test_modules()
+       }",
+       NULL);
+ 
++  assert_true_rule(
++      "import \"tests\" \
++       rule test { \
++        condition: tests.integer_array[256] == 256 \
++      }",
++      NULL);
++
+   assert_true_rule(
+       "import \"tests\" \
+        rule test { \

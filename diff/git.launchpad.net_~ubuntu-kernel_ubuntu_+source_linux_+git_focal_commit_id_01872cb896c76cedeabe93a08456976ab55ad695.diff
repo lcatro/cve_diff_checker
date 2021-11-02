@@ -1,0 +1,38 @@
+From 01872cb896c76cedeabe93a08456976ab55ad695 Mon Sep 17 00:00:00 2001
+From: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Date: Thu, 27 Aug 2020 23:47:47 -0300
+Subject: UBUNTU: SAUCE: dccp: avoid double free of ccid on child socket
+
+When a dccp socket is cloned, the pointers to dccps_hc_rx_ccid and
+dccps_hc_tx_ccid are copied. When CCID features are activated on the child
+socket, the CCID objects are freed, leaving the parent socket with dangling
+pointers.
+
+During cloning, set dccps_hc_rx_ccid and dccps_hc_tx_ccid to NULL so the
+parent objects are not freed.
+
+Reported-by: Hadar Manor
+CVE-2020-16119
+Signed-off-by: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Juerg Haefliger <juerg.haefliger@canonical.com>
+---
+ net/dccp/minisocks.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/dccp/minisocks.c b/net/dccp/minisocks.c
+index 25187528..def85e5 100644
+--- a/net/dccp/minisocks.c
++++ b/net/dccp/minisocks.c
+@@ -93,6 +93,8 @@ struct sock *dccp_create_openreq_child(const struct sock *sk,
+ 
+ 		newdp->dccps_role	    = DCCP_ROLE_SERVER;
+ 		newdp->dccps_hc_rx_ackvec   = NULL;
++		newdp->dccps_hc_rx_ccid = NULL;
++		newdp->dccps_hc_tx_ccid = NULL;
+ 		newdp->dccps_service_list   = NULL;
+ 		newdp->dccps_service	    = dreq->dreq_service;
+ 		newdp->dccps_timestamp_echo = dreq->dreq_timestamp_echo;
+-- 
+cgit v1.1
+

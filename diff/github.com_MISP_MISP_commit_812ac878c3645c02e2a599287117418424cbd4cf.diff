@@ -1,0 +1,55 @@
+From 812ac878c3645c02e2a599287117418424cbd4cf Mon Sep 17 00:00:00 2001
+From: Iglocska <andras.iklody@gmail.com>
+Date: Wed, 1 Jul 2015 08:42:21 +0200
+Subject: [PATCH] Fix to XSS in the template creation process
+
+---
+ app/View/Templates/add.ctp      | 2 +-
+ app/View/Templates/edit.ctp     | 2 +-
+ app/webroot/js/ajaxification.js | 6 ++++++
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/app/View/Templates/add.ctp b/app/View/Templates/add.ctp
+index 453f059326..37a9d827e4 100644
+--- a/app/View/Templates/add.ctp
++++ b/app/View/Templates/add.ctp
+@@ -56,7 +56,7 @@ var selectedTags = [];
+ var allTags = [
+ 	<?php 
+ 		foreach ($tagInfo as $tag) {
+-			echo "{'id' : '" . $tag['Tags']['id'] . "', 'name' : '" . $tag['Tags']['name'] . "', 'colour' : '" . $tag['Tags']['colour'] . "'},";
++			echo "{'id' : '" . h($tag['Tags']['id']) . "', 'name' : '" . h($tag['Tags']['name']) . "', 'colour' : '" . h($tag['Tags']['colour']) . "'},";
+ 		}
+ 	?>
+ ];
+diff --git a/app/View/Templates/edit.ctp b/app/View/Templates/edit.ctp
+index 365782d647..dfb6519ac5 100644
+--- a/app/View/Templates/edit.ctp
++++ b/app/View/Templates/edit.ctp
+@@ -63,7 +63,7 @@ var selectedTags = [
+ var allTags = [
+ 	<?php 
+ 		foreach ($tagInfo as $tag) {
+-			echo "{'id' : '" . $tag['Tags']['id'] . "', 'name' : '" . $tag['Tags']['name'] . "', 'colour' : '" . $tag['Tags']['colour'] . "'},";
++			echo "{'id' : '" . h($tag['Tags']['id']) . "', 'name' : '" . h($tag['Tags']['name']) . "', 'colour' : '" . h($tag['Tags']['colour']) . "'},";
+ 		}
+ 	?>
+ ];
+diff --git a/app/webroot/js/ajaxification.js b/app/webroot/js/ajaxification.js
+index 0ce6dd3643..aebfac694c 100644
+--- a/app/webroot/js/ajaxification.js
++++ b/app/webroot/js/ajaxification.js
+@@ -904,7 +904,13 @@ function templateFileHiddenAdd(files, element_id, batch) {
+ 	}
+ }
+ 
++function htmlEncode(value){
++	return $('<div/>').text(value).html();
++}
++
+ function templateAddFileBubble(element_id, iframe, filename, tmp_name, batch) {
++	filename = htmlEncode(filename);
++	tmp_name = htmlEncode(tmp_name);
+ 	if (batch == 'no') {
+ 		if (iframe == true) {
+ 			$('#filenames_' + element_id, window.parent.document).html('<div id ="' + tmp_name + '_container" class ="template_file_box_container"><span class="tagFirstHalf template_file_box">' + filename + '</span><span onClick="templateDeleteFileBubble(\'' + filename + '\', \'' + tmp_name + '\', \'' + element_id + '\', \'normal\', \'no\');" class="tagSecondHalf useCursorPointer">x</span></div>');

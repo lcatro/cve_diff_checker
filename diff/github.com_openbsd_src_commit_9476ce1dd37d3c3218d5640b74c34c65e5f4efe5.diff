@@ -1,0 +1,186 @@
+From 9476ce1dd37d3c3218d5640b74c34c65e5f4efe5 Mon Sep 17 00:00:00 2001
+From: djm <djm@openbsd.org>
+Date: Wed, 30 Nov 2016 03:07:37 +0000
+Subject: [PATCH] add a whitelist of paths from which ssh-agent will load (via
+ ssh-pkcs11-helper) a PKCS#11 module; ok markus@
+
+---
+ usr.bin/ssh/ssh-agent.1 | 17 ++++++++++++++--
+ usr.bin/ssh/ssh-agent.c | 43 +++++++++++++++++++++++++++++++++--------
+ 2 files changed, 50 insertions(+), 10 deletions(-)
+
+diff --git a/usr.bin/ssh/ssh-agent.1 b/usr.bin/ssh/ssh-agent.1
+index c4b50bbdfe74..372adbe7c7f5 100644
+--- a/usr.bin/ssh/ssh-agent.1
++++ b/usr.bin/ssh/ssh-agent.1
+@@ -1,4 +1,4 @@
+-.\" $OpenBSD: ssh-agent.1,v 1.62 2015/11/15 23:54:15 jmc Exp $
++.\" $OpenBSD: ssh-agent.1,v 1.63 2016/11/30 03:07:37 djm Exp $
+ .\"
+ .\" Author: Tatu Ylonen <ylo@cs.hut.fi>
+ .\" Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+@@ -34,7 +34,7 @@
+ .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ .\"
+-.Dd $Mdocdate: November 15 2015 $
++.Dd $Mdocdate: November 30 2016 $
+ .Dt SSH-AGENT 1
+ .Os
+ .Sh NAME
+@@ -47,6 +47,7 @@
+ .Op Fl a Ar bind_address
+ .Op Fl E Ar fingerprint_hash
+ .Op Fl t Ar life
++.Op Fl P Ar pkcs11_whitelist
+ .Op Ar command Op Ar arg ...
+ .Nm ssh-agent
+ .Op Fl c | s
+@@ -121,6 +122,18 @@ The default is
+ Kill the current agent (given by the
+ .Ev SSH_AGENT_PID
+ environment variable).
++.It Fl P
++Specify a pattern-list of acceptable paths for PKCS#11 shared libraries
++that may be added using the
++.Fl s
++option to
++.Xr ssh-add 1 .
++The default is to allow loading PKCS#11 libraries from
++.Dq /usr/lib/*,/usr/local/lib/* .
++PKCS#11 libraries that do not match the whitelist will be refused.
++See PATTERNS in
++.Xr ssh_config 5
++for a description of pattern-list syntax.
+ .It Fl s
+ Generate Bourne shell commands on
+ .Dv stdout .
+diff --git a/usr.bin/ssh/ssh-agent.c b/usr.bin/ssh/ssh-agent.c
+index 957ff5a9d605..4a91f36d3ffa 100644
+--- a/usr.bin/ssh/ssh-agent.c
++++ b/usr.bin/ssh/ssh-agent.c
+@@ -1,4 +1,4 @@
+-/* $OpenBSD: ssh-agent.c,v 1.214 2016/09/12 01:22:38 deraadt Exp $ */
++/* $OpenBSD: ssh-agent.c,v 1.215 2016/11/30 03:07:37 djm Exp $ */
+ /*
+  * Author: Tatu Ylonen <ylo@cs.hut.fi>
+  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+@@ -69,11 +69,16 @@
+ #include "misc.h"
+ #include "digest.h"
+ #include "ssherr.h"
++#include "match.h"
+ 
+ #ifdef ENABLE_PKCS11
+ #include "ssh-pkcs11.h"
+ #endif
+ 
++#ifndef DEFAULT_PKCS11_WHITELIST
++# define DEFAULT_PKCS11_WHITELIST "/usr/lib/*,/usr/local/lib/*"
++#endif
++
+ typedef enum {
+ 	AUTH_UNUSED,
+ 	AUTH_SOCKET,
+@@ -121,6 +126,9 @@ pid_t cleanup_pid = 0;
+ char socket_name[PATH_MAX];
+ char socket_dir[PATH_MAX];
+ 
++/* PKCS#11 path whitelist */
++static char *pkcs11_whitelist;
++
+ /* locking */
+ #define LOCK_SIZE	32
+ #define LOCK_SALT_SIZE	16
+@@ -724,7 +732,7 @@ no_identities(SocketEntry *e, u_int type)
+ static void
+ process_add_smartcard_key(SocketEntry *e)
+ {
+-	char *provider = NULL, *pin;
++	char *provider = NULL, *pin, canonical_provider[PATH_MAX];
+ 	int r, i, version, count = 0, success = 0, confirm = 0;
+ 	u_int seconds;
+ 	time_t death = 0;
+@@ -756,10 +764,21 @@ process_add_smartcard_key(SocketEntry *e)
+ 			goto send;
+ 		}
+ 	}
++	if (realpath(provider, canonical_provider) == NULL) {
++		verbose("failed PKCS#11 add of \"%.100s\": realpath: %s",
++		    provider, strerror(errno));
++		goto send;
++	}
++	if (match_pattern_list(canonical_provider, pkcs11_whitelist, 0) != 1) {
++		verbose("refusing PKCS#11 add of \"%.100s\": "
++		    "provider not whitelisted", canonical_provider);
++		goto send;
++	}
++	debug("%s: add %.100s", __func__, canonical_provider);
+ 	if (lifetime && !death)
+ 		death = monotime() + lifetime;
+ 
+-	count = pkcs11_add_provider(provider, pin, &keys);
++	count = pkcs11_add_provider(canonical_provider, pin, &keys);
+ 	for (i = 0; i < count; i++) {
+ 		k = keys[i];
+ 		version = k->type == KEY_RSA1 ? 1 : 2;
+@@ -767,8 +786,8 @@ process_add_smartcard_key(SocketEntry *e)
+ 		if (lookup_identity(k, version) == NULL) {
+ 			id = xcalloc(1, sizeof(Identity));
+ 			id->key = k;
+-			id->provider = xstrdup(provider);
+-			id->comment = xstrdup(provider); /* XXX */
++			id->provider = xstrdup(canonical_provider);
++			id->comment = xstrdup(canonical_provider); /* XXX */
+ 			id->death = death;
+ 			id->confirm = confirm;
+ 			TAILQ_INSERT_TAIL(&tab->idlist, id, next);
+@@ -1157,7 +1176,7 @@ usage(void)
+ {
+ 	fprintf(stderr,
+ 	    "usage: ssh-agent [-c | -s] [-Dd] [-a bind_address] [-E fingerprint_hash]\n"
+-	    "                 [-t life] [command [arg ...]]\n"
++	    "                 [-P pkcs11_whitelist] [-t life] [command [arg ...]]\n"
+ 	    "       ssh-agent [-c | -s] -k\n");
+ 	exit(1);
+ }
+@@ -1191,7 +1210,7 @@ main(int ac, char **av)
+ 	OpenSSL_add_all_algorithms();
+ #endif
+ 
+-	while ((ch = getopt(ac, av, "cDdksE:a:t:")) != -1) {
++	while ((ch = getopt(ac, av, "cDdksE:a:P:t:")) != -1) {
+ 		switch (ch) {
+ 		case 'E':
+ 			fingerprint_hash = ssh_digest_alg_by_name(optarg);
+@@ -1206,6 +1225,11 @@ main(int ac, char **av)
+ 		case 'k':
+ 			k_flag++;
+ 			break;
++		case 'P':
++			if (pkcs11_whitelist != NULL)
++				fatal("-P option already specified");
++			pkcs11_whitelist = xstrdup(optarg);
++			break;
+ 		case 's':
+ 			if (c_flag)
+ 				usage();
+@@ -1240,6 +1264,9 @@ main(int ac, char **av)
+ 	if (ac > 0 && (c_flag || k_flag || s_flag || d_flag || D_flag))
+ 		usage();
+ 
++	if (pkcs11_whitelist == NULL)
++		pkcs11_whitelist = xstrdup(DEFAULT_PKCS11_WHITELIST);
++
+ 	if (ac == 0 && !c_flag && !s_flag) {
+ 		shell = getenv("SHELL");
+ 		if (shell != NULL && (len = strlen(shell)) > 2 &&
+@@ -1385,7 +1412,7 @@ main(int ac, char **av)
+ 	signal(SIGTERM, cleanup_handler);
+ 	nalloc = 0;
+ 
+-	if (pledge("stdio cpath unix id proc exec", NULL) == -1)
++	if (pledge("stdio rpath cpath unix id proc exec", NULL) == -1)
+ 		fatal("%s: pledge: %s", __progname, strerror(errno));
+ 
+ 	while (1) {

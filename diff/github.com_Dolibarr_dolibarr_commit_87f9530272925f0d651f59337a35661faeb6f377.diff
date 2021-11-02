@@ -1,0 +1,31 @@
+From 87f9530272925f0d651f59337a35661faeb6f377 Mon Sep 17 00:00:00 2001
+From: Laurent Destailleur <eldy@destailleur.fr>
+Date: Mon, 5 Jul 2021 17:29:10 +0200
+Subject: [PATCH] Fix report by Ahsan Aziz (can reset the password of another
+ user that did not request password reset).
+
+---
+ htdocs/user/passwordforgotten.php | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/htdocs/user/passwordforgotten.php b/htdocs/user/passwordforgotten.php
+index cb149f1e481e..63f33b5f8ec7 100644
+--- a/htdocs/user/passwordforgotten.php
++++ b/htdocs/user/passwordforgotten.php
+@@ -87,14 +87,14 @@
+ 	// Validate new password
+ 	if ($action == 'validatenewpassword' && $username && $passworduidhash) {
+ 		$edituser = new User($db);
+-		$result = $edituser->fetch('', $_GET["username"]);
++		$result = $edituser->fetch('', $username);
+ 		if ($result < 0) {
+ 			$message = '<div class="error">'.dol_escape_htmltag($langs->trans("ErrorLoginDoesNotExists", $username)).'</div>';
+ 		} else {
+ 			global $dolibarr_main_instance_unique_id;
+ 
+ 			//print $edituser->pass_temp.'-'.$edituser->id.'-'.$dolibarr_main_instance_unique_id.' '.$passworduidhash;
+-			if (dol_verifyHash($edituser->pass_temp.'-'.$edituser->id.'-'.$dolibarr_main_instance_unique_id, $passworduidhash)) {
++			if ($edituser->pass_temp && dol_verifyHash($edituser->pass_temp.'-'.$edituser->id.'-'.$dolibarr_main_instance_unique_id, $passworduidhash)) {
+ 				// Clear session
+ 				unset($_SESSION['dol_login']);
+ 				$_SESSION['dol_loginmesg'] = $langs->trans('NewPasswordValidated'); // Save message for the session page

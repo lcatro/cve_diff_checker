@@ -1,0 +1,1230 @@
+From 9c30c8d0ca0cc0548d631cdc7d8990176dd065a0 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 15:32:20 -0400
+Subject: [PATCH 01/13] try to ensure we always have some kind of object
+
+---
+ lib/rack/session/abstract/id.rb | 11 +++++++++--
+ lib/rack/session/cookie.rb      |  4 ++--
+ 2 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index c9f9f4586..d8db868fb 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -13,6 +13,10 @@ module Rack
+ 
+   module Session
+ 
++    class NullSessionId
++      def empty?; true; end
++    end
++
+     module Abstract
+       # SessionHash is responsible to lazily load the session from store.
+ 
+@@ -41,8 +45,11 @@ def initialize(store, req)
+         end
+ 
+         def id
+-          return @id if @loaded or instance_variable_defined?(:@id)
+-          @id = @store.send(:extract_session_id, @req)
++          if @loaded or instance_variable_defined?(:@id)
++          else
++            @id = @store.send(:extract_session_id, @req)
++          end
++          @id || NullSessionId.new
+         end
+ 
+         def options
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index 3c067d7bf..e63fa2ad5 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -127,11 +127,11 @@ def initialize(app, options = {})
+       def find_session(req, sid)
+         data = unpacked_cookie_data(req)
+         data = persistent_session_id!(data)
+-        [data["session_id"], data]
++        [data["session_id"] || raise, data]
+       end
+ 
+       def extract_session_id(request)
+-        unpacked_cookie_data(request)["session_id"]
++        unpacked_cookie_data(request)["session_id"] || NullSessionId.new
+       end
+ 
+       def unpacked_cookie_data(request)
+
+From a4f30d25b20b12dc8444637eca95000ca4c70d7e Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 15:43:58 -0400
+Subject: [PATCH 02/13] remove more nils
+
+---
+ lib/rack/session/abstract/id.rb | 11 ++++++-----
+ lib/rack/session/cookie.rb      |  6 +++++-
+ lib/rack/session/pool.rb        |  6 +++++-
+ 3 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index d8db868fb..89d3ce52c 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -15,6 +15,7 @@ module Session
+ 
+     class NullSessionId
+       def empty?; true; end
++      def nil?; true; end
+     end
+ 
+     module Abstract
+@@ -49,7 +50,7 @@ def id
+           else
+             @id = @store.send(:extract_session_id, @req)
+           end
+-          @id || NullSessionId.new
++          @id || raise
+         end
+ 
+         def options
+@@ -95,7 +96,7 @@ def clear
+ 
+         def destroy
+           clear
+-          @id = @store.send(:delete_session, @req, id, options)
++          @id = @store.send(:delete_session, @req, id, options) || raise
+         end
+ 
+         def to_hash
+@@ -287,7 +288,7 @@ def prepare_session(req)
+         def load_session(req)
+           sid = current_session_id(req)
+           sid, session = find_session(req, sid)
+-          [sid, session || {}]
++          [sid || NullSessionId.new, session || {}]
+         end
+ 
+         # Extract session id from request object.
+@@ -295,7 +296,7 @@ def load_session(req)
+         def extract_session_id(request)
+           sid = request.cookies[@key]
+           sid ||= request.params[@key] unless @cookie_only
+-          sid
++          sid || NullSessionId.new
+         end
+ 
+         # Returns the current session id from the SessionHash.
+@@ -351,7 +352,7 @@ def commit_session(req, res)
+ 
+           if options[:drop] || options[:renew]
+             session_id = delete_session(req, session.id || generate_sid, options)
+-            return unless session_id
++            return if session_id.nil?
+           end
+ 
+           return unless commit_session?(req, session, options)
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index e63fa2ad5..3476fd833 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -171,7 +171,11 @@ def write_session(req, session_id, session, options)
+ 
+       def delete_session(req, session_id, options)
+         # Nothing to do here, data is in the client
+-        generate_sid unless options[:drop]
++        if options[:drop]
++          NullSessionId.new
++        else
++          generate_sid
++        end
+       end
+ 
+       def digest_match?(data, digest)
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index 2e1f867ff..ea2c24f6a 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -63,7 +63,11 @@ def write_session(req, session_id, new_session, options)
+       def delete_session(req, session_id, options)
+         with_lock(req) do
+           @pool.delete(session_id)
+-          generate_sid unless options[:drop]
++          if options[:drop]
++            NullSessionId.new
++          else
++            generate_sid
++          end
+         end
+       end
+ 
+
+From cc1d162d28396b6a71f266e6a40ffc19a258792b Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 16:20:32 -0400
+Subject: [PATCH 03/13] use session id objects
+
+---
+ lib/rack/session/abstract/id.rb  | 28 ++++++++++++++++++++++++----
+ lib/rack/session/cookie.rb       | 11 ++++++++++-
+ lib/rack/session/memcache.rb     | 10 +++++-----
+ lib/rack/session/pool.rb         |  8 ++++----
+ test/spec_session_abstract_id.rb |  2 +-
+ 5 files changed, 44 insertions(+), 15 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 89d3ce52c..48b0de495 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -18,6 +18,20 @@ def empty?; true; end
+       def nil?; true; end
+     end
+ 
++    class SessionId
++      attr_reader :public_id
++
++      def initialize(public_id)
++        @public_id = public_id
++      end
++
++      alias :cookie_value :public_id
++
++      def empty?; false; end
++      def to_s; raise; end
++      def inspect; public_id.inspect; end
++    end
++
+     module Abstract
+       # SessionHash is responsible to lazily load the session from store.
+ 
+@@ -64,7 +78,11 @@ def each(&block)
+ 
+         def [](key)
+           load_for_read!
+-          @data[key.to_s]
++          if key == "session_id"
++            id.public_id
++          else
++            @data[key.to_s]
++          end
+         end
+ 
+         def fetch(key, default = Unspecified, &block)
+@@ -262,11 +280,13 @@ def initialize_sid
+         # Monkey patch this to use custom methods for session id generation.
+ 
+         def generate_sid(secure = @sid_secure)
+-          if secure
++          public_id = if secure
+             secure.hex(@sid_length)
+           else
+             "%0#{@sid_length}x" % Kernel.rand(2**@sidbits - 1)
+           end
++
++          SessionId.new(public_id)
+         rescue NotImplementedError
+           generate_sid(false)
+         end
+@@ -296,7 +316,7 @@ def load_session(req)
+         def extract_session_id(request)
+           sid = request.cookies[@key]
+           sid ||= request.params[@key] unless @cookie_only
+-          sid || NullSessionId.new
++          (sid && SessionId.new(sid)) || NullSessionId.new
+         end
+ 
+         # Returns the current session id from the SessionHash.
+@@ -367,7 +387,7 @@ def commit_session(req, res)
+             req.get_header(RACK_ERRORS).puts("Deferring cookie for #{session_id}") if $VERBOSE
+           else
+             cookie = Hash.new
+-            cookie[:value] = data
++            cookie[:value] = data.cookie_value
+             cookie[:expires] = Time.now + options[:expire_after] if options[:expire_after]
+             cookie[:expires] = Time.now + options[:max_age] if options[:max_age]
+             set_cookie(req, res, cookie.merge!(options))
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index 3476fd833..c8bf1f19f 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -153,6 +153,15 @@ def persistent_session_id!(data, sid = nil)
+         data
+       end
+ 
++      class SessionId < DelegateClass(Session::SessionId)
++        attr_reader :cookie_value
++
++        def initialize(session_id, cookie_value)
++          super(session_id)
++          @cookie_value = cookie_value
++        end
++      end
++
+       def write_session(req, session_id, session, options)
+         session = session.merge("session_id" => session_id)
+         session_data = coder.encode(session)
+@@ -165,7 +174,7 @@ def write_session(req, session_id, session, options)
+           req.get_header(RACK_ERRORS).puts("Warning! Rack::Session::Cookie data size exceeds 4K.")
+           nil
+         else
+-          session_data
++          SessionId.new(session_id, session_data)
+         end
+       end
+ 
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index dd587633a..1ef734f00 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -47,15 +47,15 @@ def initialize(app, options = {})
+       def generate_sid
+         loop do
+           sid = super
+-          break sid unless @pool.get(sid, true)
++          break sid unless @pool.get(sid.public_id, true)
+         end
+       end
+ 
+       def get_session(env, sid)
+         with_lock(env) do
+-          unless sid and session = @pool.get(sid)
++          unless !sid.nil? and session = @pool.get(sid.public_id)
+             sid, session = generate_sid, {}
+-            unless /^STORED/.match?(@pool.add(sid, session))
++            unless /^STORED/.match?(@pool.add(sid.public_id, session))
+               raise "Session collision on '#{sid.inspect}'"
+             end
+           end
+@@ -68,14 +68,14 @@ def set_session(env, session_id, new_session, options)
+         expiry = expiry.nil? ? 0 : expiry + 1
+ 
+         with_lock(env) do
+-          @pool.set session_id, new_session, expiry
++          @pool.set session_id.public_id, new_session, expiry
+           session_id
+         end
+       end
+ 
+       def destroy_session(env, session_id, options)
+         with_lock(env) do
+-          @pool.delete(session_id)
++          @pool.delete(session_id.public_id)
+           generate_sid unless options[:drop]
+         end
+       end
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index ea2c24f6a..51def20a2 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -45,9 +45,9 @@ def generate_sid
+ 
+       def find_session(req, sid)
+         with_lock(req) do
+-          unless sid and session = @pool[sid]
++          unless !sid.nil? and session = @pool[sid.public_id]
+             sid, session = generate_sid, {}
+-            @pool.store sid, session
++            @pool.store sid.public_id, session
+           end
+           [sid, session]
+         end
+@@ -55,14 +55,14 @@ def find_session(req, sid)
+ 
+       def write_session(req, session_id, new_session, options)
+         with_lock(req) do
+-          @pool.store session_id, new_session
++          @pool.store session_id.public_id, new_session
+           session_id
+         end
+       end
+ 
+       def delete_session(req, session_id, options)
+         with_lock(req) do
+-          @pool.delete(session_id)
++          @pool.delete(session_id.public_id)
+           if options[:drop]
+             NullSessionId.new
+           else
+diff --git a/test/spec_session_abstract_id.rb b/test/spec_session_abstract_id.rb
+index 00140c163..e41e63ce1 100644
+--- a/test/spec_session_abstract_id.rb
++++ b/test/spec_session_abstract_id.rb
+@@ -27,7 +27,7 @@ def hex(*args)
+       end
+     end
+     id = Rack::Session::Abstract::ID.new nil, secure_random: secure_random.new
+-    id.send(:generate_sid).must_equal 'fake_hex'
++    id.send(:generate_sid).public_id.must_equal 'fake_hex'
+   end
+ 
+ end
+
+From 7a4cf249ac8ab2a709bba03e4d16da0059eab4b8 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 16:31:06 -0400
+Subject: [PATCH 04/13] store hashed id, send public id
+
+---
+ lib/rack/session/abstract/id.rb | 10 ++++++++++
+ lib/rack/session/memcache.rb    | 10 +++++-----
+ lib/rack/session/pool.rb        |  8 ++++----
+ test/spec_session_memcache.rb   |  6 +++---
+ 4 files changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 48b0de495..ed77c4aa9 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -25,11 +25,21 @@ def initialize(public_id)
+         @public_id = public_id
+       end
+ 
++      def private_id
++        hash_sid public_id
++      end
++
+       alias :cookie_value :public_id
+ 
+       def empty?; false; end
+       def to_s; raise; end
+       def inspect; public_id.inspect; end
++
++      private
++
++      def hash_sid(sid)
++        Digest::SHA256.hexdigest(sid)
++      end
+     end
+ 
+     module Abstract
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index 1ef734f00..67876b342 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -47,15 +47,15 @@ def initialize(app, options = {})
+       def generate_sid
+         loop do
+           sid = super
+-          break sid unless @pool.get(sid.public_id, true)
++          break sid unless @pool.get(sid.private_id, true)
+         end
+       end
+ 
+       def get_session(env, sid)
+         with_lock(env) do
+-          unless !sid.nil? and session = @pool.get(sid.public_id)
++          unless !sid.nil? and session = @pool.get(sid.private_id)
+             sid, session = generate_sid, {}
+-            unless /^STORED/.match?(@pool.add(sid.public_id, session))
++            unless /^STORED/.match?(@pool.add(sid.private_id, session))
+               raise "Session collision on '#{sid.inspect}'"
+             end
+           end
+@@ -68,14 +68,14 @@ def set_session(env, session_id, new_session, options)
+         expiry = expiry.nil? ? 0 : expiry + 1
+ 
+         with_lock(env) do
+-          @pool.set session_id.public_id, new_session, expiry
++          @pool.set session_id.private_id, new_session, expiry
+           session_id
+         end
+       end
+ 
+       def destroy_session(env, session_id, options)
+         with_lock(env) do
+-          @pool.delete(session_id.public_id)
++          @pool.delete(session_id.private_id)
+           generate_sid unless options[:drop]
+         end
+       end
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index 51def20a2..e2841879f 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -45,9 +45,9 @@ def generate_sid
+ 
+       def find_session(req, sid)
+         with_lock(req) do
+-          unless !sid.nil? and session = @pool[sid.public_id]
++          unless !sid.nil? and session = @pool[sid.private_id]
+             sid, session = generate_sid, {}
+-            @pool.store sid.public_id, session
++            @pool.store sid.private_id, session
+           end
+           [sid, session]
+         end
+@@ -55,14 +55,14 @@ def find_session(req, sid)
+ 
+       def write_session(req, session_id, new_session, options)
+         with_lock(req) do
+-          @pool.store session_id.public_id, new_session
++          @pool.store session_id.private_id, new_session
+           session_id
+         end
+       end
+ 
+       def delete_session(req, session_id, options)
+         with_lock(req) do
+-          @pool.delete(session_id.public_id)
++          @pool.delete(session_id.private_id)
+           if options[:drop]
+             NullSessionId.new
+           else
+diff --git a/test/spec_session_memcache.rb b/test/spec_session_memcache.rb
+index da90b3407..5f82d80da 100644
+--- a/test/spec_session_memcache.rb
++++ b/test/spec_session_memcache.rb
+@@ -228,11 +228,11 @@
+       req = Rack::MockRequest.new(pool)
+ 
+       res0 = req.get("/")
+-      session_id = (cookie = res0["Set-Cookie"])[session_match, 1]
+-      ses0 = pool.pool.get(session_id, true)
++      session_id = Rack::Session::SessionId.new (cookie = res0["Set-Cookie"])[session_match, 1]
++      ses0 = pool.pool.get(session_id.private_id, true)
+ 
+       req.get("/", "HTTP_COOKIE" => cookie)
+-      ses1 = pool.pool.get(session_id, true)
++      ses1 = pool.pool.get(session_id.private_id, true)
+ 
+       ses1.wont_equal ses0
+     end
+
+From 7a55a3f617241eebaa1e2939d8ad22ff6c755594 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 16:38:01 -0400
+Subject: [PATCH 05/13] remove || raise and get closer to master
+
+---
+ lib/rack/session/abstract/id.rb | 9 +++------
+ lib/rack/session/cookie.rb      | 2 +-
+ 2 files changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index ed77c4aa9..4a149c518 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -70,11 +70,8 @@ def initialize(store, req)
+         end
+ 
+         def id
+-          if @loaded or instance_variable_defined?(:@id)
+-          else
+-            @id = @store.send(:extract_session_id, @req)
+-          end
+-          @id || raise
++          return @id if @loaded or instance_variable_defined?(:@id)
++          @id = @store.send(:extract_session_id, @req)
+         end
+ 
+         def options
+@@ -124,7 +121,7 @@ def clear
+ 
+         def destroy
+           clear
+-          @id = @store.send(:delete_session, @req, id, options) || raise
++          @id = @store.send(:delete_session, @req, id, options)
+         end
+ 
+         def to_hash
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index c8bf1f19f..b27f11d2d 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -127,7 +127,7 @@ def initialize(app, options = {})
+       def find_session(req, sid)
+         data = unpacked_cookie_data(req)
+         data = persistent_session_id!(data)
+-        [data["session_id"] || raise, data]
++        [data["session_id"], data]
+       end
+ 
+       def extract_session_id(request)
+
+From b530254fd0c2eb1f9e0a51952218805848c1aa86 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 16:45:04 -0400
+Subject: [PATCH 06/13] remove NullSession
+
+---
+ lib/rack/session/abstract/id.rb | 9 ++-------
+ lib/rack/session/cookie.rb      | 8 ++------
+ lib/rack/session/pool.rb        | 6 +-----
+ 3 files changed, 5 insertions(+), 18 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 4a149c518..c873d7bc6 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -13,11 +13,6 @@ module Rack
+ 
+   module Session
+ 
+-    class NullSessionId
+-      def empty?; true; end
+-      def nil?; true; end
+-    end
+-
+     class SessionId
+       attr_reader :public_id
+ 
+@@ -315,7 +310,7 @@ def prepare_session(req)
+         def load_session(req)
+           sid = current_session_id(req)
+           sid, session = find_session(req, sid)
+-          [sid || NullSessionId.new, session || {}]
++          [sid, session || {}]
+         end
+ 
+         # Extract session id from request object.
+@@ -323,7 +318,7 @@ def load_session(req)
+         def extract_session_id(request)
+           sid = request.cookies[@key]
+           sid ||= request.params[@key] unless @cookie_only
+-          (sid && SessionId.new(sid)) || NullSessionId.new
++          sid && SessionId.new(sid)
+         end
+ 
+         # Returns the current session id from the SessionHash.
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index b27f11d2d..476f9fb15 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -131,7 +131,7 @@ def find_session(req, sid)
+       end
+ 
+       def extract_session_id(request)
+-        unpacked_cookie_data(request)["session_id"] || NullSessionId.new
++        unpacked_cookie_data(request)["session_id"]
+       end
+ 
+       def unpacked_cookie_data(request)
+@@ -180,11 +180,7 @@ def write_session(req, session_id, session, options)
+ 
+       def delete_session(req, session_id, options)
+         # Nothing to do here, data is in the client
+-        if options[:drop]
+-          NullSessionId.new
+-        else
+-          generate_sid
+-        end
++        generate_sid unless options[:drop]
+       end
+ 
+       def digest_match?(data, digest)
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index e2841879f..8c9ef85a9 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -63,11 +63,7 @@ def write_session(req, session_id, new_session, options)
+       def delete_session(req, session_id, options)
+         with_lock(req) do
+           @pool.delete(session_id.private_id)
+-          if options[:drop]
+-            NullSessionId.new
+-          else
+-            generate_sid
+-          end
++          generate_sid unless options[:drop]
+         end
+       end
+ 
+
+From 91088625d33162c0e4ce3622f7663890864a97f7 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 16:48:41 -0400
+Subject: [PATCH 07/13] revert conditionals to master
+
+---
+ lib/rack/session/abstract/id.rb | 2 +-
+ lib/rack/session/memcache.rb    | 2 +-
+ lib/rack/session/pool.rb        | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index c873d7bc6..0a2859371 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -374,7 +374,7 @@ def commit_session(req, res)
+ 
+           if options[:drop] || options[:renew]
+             session_id = delete_session(req, session.id || generate_sid, options)
+-            return if session_id.nil?
++            return unless session_id
+           end
+ 
+           return unless commit_session?(req, session, options)
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index 67876b342..c56508249 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -53,7 +53,7 @@ def generate_sid
+ 
+       def get_session(env, sid)
+         with_lock(env) do
+-          unless !sid.nil? and session = @pool.get(sid.private_id)
++          unless sid and session = @pool.get(sid.private_id)
+             sid, session = generate_sid, {}
+             unless /^STORED/.match?(@pool.add(sid.private_id, session))
+               raise "Session collision on '#{sid.inspect}'"
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index 8c9ef85a9..94a8c99cb 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -45,7 +45,7 @@ def generate_sid
+ 
+       def find_session(req, sid)
+         with_lock(req) do
+-          unless !sid.nil? and session = @pool[sid.private_id]
++          unless sid and session = @pool[sid.private_id]
+             sid, session = generate_sid, {}
+             @pool.store sid.private_id, session
+           end
+
+From e8af79dd7025a281039c7caf5c59c13e59bf31bd Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Tue, 13 Aug 2019 17:16:23 -0400
+Subject: [PATCH 08/13] Add the private id
+
+---
+ lib/rack/session/pool.rb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index 94a8c99cb..4685cf1e5 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -39,7 +39,7 @@ def initialize(app, options = {})
+       def generate_sid
+         loop do
+           sid = super
+-          break sid unless @pool.key? sid
++          break sid unless @pool.key? sid.private_id
+         end
+       end
+ 
+
+From 3d74b7a903094a91f60e50b422fb5678d2756817 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?= <rafael@franca.dev>
+Date: Wed, 9 Oct 2019 17:50:45 -0400
+Subject: [PATCH 09/13] Fallback to the legacy id when the new id is not found
+
+This will avoid all session to be invalidated.
+---
+ lib/rack/session/memcache.rb  |  7 ++++++-
+ test/spec_session_memcache.rb | 18 ++++++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index c56508249..7a226df6d 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -53,7 +53,7 @@ def generate_sid
+ 
+       def get_session(env, sid)
+         with_lock(env) do
+-          unless sid and session = @pool.get(sid.private_id)
++          unless sid and session = get_session_with_fallback(sid)
+             sid, session = generate_sid, {}
+             unless /^STORED/.match?(@pool.add(sid.private_id, session))
+               raise "Session collision on '#{sid.inspect}'"
+@@ -93,6 +93,11 @@ def with_lock(env)
+         @mutex.unlock if @mutex.locked?
+       end
+ 
++      private
++
++      def get_session_with_fallback(sid)
++        @pool.get(sid.private_id) || @pool.get(sid.public_id)
++      end
+     end
+   end
+ end
+diff --git a/test/spec_session_memcache.rb b/test/spec_session_memcache.rb
+index 5f82d80da..3e946940e 100644
+--- a/test/spec_session_memcache.rb
++++ b/test/spec_session_memcache.rb
+@@ -237,6 +237,24 @@
+       ses1.wont_equal ses0
+     end
+ 
++    it "can read the session with the legacy id" do
++      pool = Rack::Session::Memcache.new(incrementor)
++      req = Rack::MockRequest.new(pool)
++
++      res0 = req.get("/")
++      cookie = res0["Set-Cookie"]
++      session_id = Rack::Session::SessionId.new cookie[session_match, 1]
++      ses0 = pool.pool.get(session_id.private_id, true)
++      pool.pool.set(session_id.public_id, ses0, 0, true)
++      pool.pool.delete(session_id.private_id)
++
++
++      res1 = req.get("/", "HTTP_COOKIE" => cookie)
++      res1["Set-Cookie"].must_be_nil
++      res1.body.must_equal '{"counter"=>2}'
++      pool.pool.get(session_id.private_id, true).wont_be_nil
++    end
++
+     # anyone know how to do this better?
+     it "cleanly merges sessions when multithreaded" do
+       skip unless $DEBUG
+
+From 668c9a5c6055eead356b0daf25dc7d7774b76da6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?= <rafael@franca.dev>
+Date: Wed, 9 Oct 2019 18:06:23 -0400
+Subject: [PATCH 10/13] Also drop the session with the public id when
+ destroying sessions
+
+---
+ lib/rack/session/memcache.rb  |  1 +
+ test/spec_session_memcache.rb | 21 +++++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index 7a226df6d..47ea8dc8f 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -75,6 +75,7 @@ def set_session(env, session_id, new_session, options)
+ 
+       def destroy_session(env, session_id, options)
+         with_lock(env) do
++          @pool.delete(session_id.public_id)
+           @pool.delete(session_id.private_id)
+           generate_sid unless options[:drop]
+         end
+diff --git a/test/spec_session_memcache.rb b/test/spec_session_memcache.rb
+index 3e946940e..0c4e65a3b 100644
+--- a/test/spec_session_memcache.rb
++++ b/test/spec_session_memcache.rb
+@@ -255,6 +255,27 @@
+       pool.pool.get(session_id.private_id, true).wont_be_nil
+     end
+ 
++    it "drops the session in the legacy id as well" do
++      pool = Rack::Session::Memcache.new(incrementor)
++      req = Rack::MockRequest.new(pool)
++      drop = Rack::Utils::Context.new(pool, drop_session)
++      dreq = Rack::MockRequest.new(drop)
++
++      res0 = req.get("/")
++      cookie = res0["Set-Cookie"]
++      session_id = Rack::Session::SessionId.new cookie[session_match, 1]
++      ses0 = pool.pool.get(session_id.private_id, true)
++      pool.pool.set(session_id.public_id, ses0, 0, true)
++      pool.pool.delete(session_id.private_id)
++
++
++      res2 = dreq.get("/", "HTTP_COOKIE" => cookie)
++      res2["Set-Cookie"].must_be_nil
++      res2.body.must_equal '{"counter"=>2}'
++      pool.pool.get(session_id.private_id, true).must_be_nil
++      pool.pool.get(session_id.public_id, true).must_be_nil
++    end
++
+     # anyone know how to do this better?
+     it "cleanly merges sessions when multithreaded" do
+       skip unless $DEBUG
+
+From b26b73f564e023331032027e340af8d53b32aa1d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?= <rafael@franca.dev>
+Date: Wed, 9 Oct 2019 19:14:08 -0400
+Subject: [PATCH 11/13] Fallback to the public id when reading the session in
+ the pool adapter
+
+---
+ lib/rack/session/abstract/id.rb |  1 +
+ lib/rack/session/pool.rb        |  9 ++++++-
+ test/spec_session_pool.rb       | 43 ++++++++++++++++++++++++++++++---
+ 3 files changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 0a2859371..544d399c3 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -8,6 +8,7 @@
+ require 'rack/request'
+ require 'rack/response'
+ require 'securerandom'
++require 'digest/sha2'
+ 
+ module Rack
+ 
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index 4685cf1e5..c031117d2 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -45,7 +45,7 @@ def generate_sid
+ 
+       def find_session(req, sid)
+         with_lock(req) do
+-          unless sid and session = @pool[sid.private_id]
++          unless sid and session = get_session_with_fallback(sid)
+             sid, session = generate_sid, {}
+             @pool.store sid.private_id, session
+           end
+@@ -62,6 +62,7 @@ def write_session(req, session_id, new_session, options)
+ 
+       def delete_session(req, session_id, options)
+         with_lock(req) do
++          @pool.delete(session_id.public_id)
+           @pool.delete(session_id.private_id)
+           generate_sid unless options[:drop]
+         end
+@@ -73,6 +74,12 @@ def with_lock(req)
+       ensure
+         @mutex.unlock if @mutex.locked?
+       end
++
++      private
++
++      def get_session_with_fallback(sid)
++        @pool[sid.private_id] || @pool[sid.public_id]
++      end
+     end
+   end
+ end
+diff --git a/test/spec_session_pool.rb b/test/spec_session_pool.rb
+index 6eecce36c..59becb87c 100644
+--- a/test/spec_session_pool.rb
++++ b/test/spec_session_pool.rb
+@@ -8,7 +8,7 @@
+ 
+ describe Rack::Session::Pool do
+   session_key = Rack::Session::Pool::DEFAULT_OPTIONS[:key]
+-  session_match = /#{session_key}=[0-9a-fA-F]+;/
++  session_match = /#{session_key}=([0-9a-fA-F]+);/
+ 
+   incrementor = lambda do |env|
+     env["rack.session"]["counter"] ||= 0
+@@ -16,7 +16,7 @@
+     Rack::Response.new(env["rack.session"].inspect).to_a
+   end
+ 
+-  session_id = Rack::Lint.new(lambda do |env|
++  get_session_id = Rack::Lint.new(lambda do |env|
+     Rack::Response.new(env["rack.session"].inspect).to_a
+   end)
+ 
+@@ -145,6 +145,43 @@
+     pool.pool.size.must_equal 1
+   end
+ 
++  it "can read the session with the legacy id" do
++    pool = Rack::Session::Pool.new(incrementor)
++    req = Rack::MockRequest.new(pool)
++
++    res0 = req.get("/")
++    cookie = res0["Set-Cookie"]
++    session_id = Rack::Session::SessionId.new cookie[session_match, 1]
++    ses0 = pool.pool[session_id.private_id]
++    pool.pool[session_id.public_id] = ses0
++    pool.pool.delete(session_id.private_id)
++
++    res1 = req.get("/", "HTTP_COOKIE" => cookie)
++    res1["Set-Cookie"].must_be_nil
++    res1.body.must_equal '{"counter"=>2}'
++    pool.pool[session_id.private_id].wont_be_nil
++  end
++
++  it "drops the session in the legacy id as well" do
++    pool = Rack::Session::Pool.new(incrementor)
++    req = Rack::MockRequest.new(pool)
++    drop = Rack::Utils::Context.new(pool, drop_session)
++    dreq = Rack::MockRequest.new(drop)
++
++    res0 = req.get("/")
++    cookie = res0["Set-Cookie"]
++    session_id = Rack::Session::SessionId.new cookie[session_match, 1]
++    ses0 = pool.pool[session_id.private_id]
++    pool.pool[session_id.public_id] = ses0
++    pool.pool.delete(session_id.private_id)
++
++    res2 = dreq.get("/", "HTTP_COOKIE" => cookie)
++    res2["Set-Cookie"].must_be_nil
++    res2.body.must_equal '{"counter"=>2}'
++    pool.pool[session_id.private_id].must_be_nil
++    pool.pool[session_id.public_id].must_be_nil
++  end
++
+   # anyone know how to do this better?
+   it "should merge sessions when multithreaded" do
+     unless $DEBUG
+@@ -193,7 +230,7 @@
+   end
+ 
+   it "does not return a cookie if cookie was not written (only read)" do
+-    app = Rack::Session::Pool.new(session_id)
++    app = Rack::Session::Pool.new(get_session_id)
+     res = Rack::MockRequest.new(app).get("/")
+     res["Set-Cookie"].must_be_nil
+   end
+
+From 542c078764d91255b5ca5f5a4147824f1004a982 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?= <rafael@franca.dev>
+Date: Wed, 16 Oct 2019 14:07:36 -0400
+Subject: [PATCH 12/13] Add a version prefix to the private id to make easier
+ to migrate old values
+
+---
+ lib/rack/session/abstract/id.rb | 4 +++-
+ test/spec_session_memcache.rb   | 2 --
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 544d399c3..189847355 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -15,6 +15,8 @@ module Rack
+   module Session
+ 
+     class SessionId
++      ID_VERSION = 2
++
+       attr_reader :public_id
+ 
+       def initialize(public_id)
+@@ -22,7 +24,7 @@ def initialize(public_id)
+       end
+ 
+       def private_id
+-        hash_sid public_id
++        "#{ID_VERSION}::#{hash_sid(public_id)}"
+       end
+ 
+       alias :cookie_value :public_id
+diff --git a/test/spec_session_memcache.rb b/test/spec_session_memcache.rb
+index 0c4e65a3b..2a0e7ee0f 100644
+--- a/test/spec_session_memcache.rb
++++ b/test/spec_session_memcache.rb
+@@ -248,7 +248,6 @@
+       pool.pool.set(session_id.public_id, ses0, 0, true)
+       pool.pool.delete(session_id.private_id)
+ 
+-
+       res1 = req.get("/", "HTTP_COOKIE" => cookie)
+       res1["Set-Cookie"].must_be_nil
+       res1.body.must_equal '{"counter"=>2}'
+@@ -268,7 +267,6 @@
+       pool.pool.set(session_id.public_id, ses0, 0, true)
+       pool.pool.delete(session_id.private_id)
+ 
+-
+       res2 = dreq.get("/", "HTTP_COOKIE" => cookie)
+       res2["Set-Cookie"].must_be_nil
+       res2.body.must_equal '{"counter"=>2}'
+
+From ef6d23d36a1480980971a8ad81ed0b7621ab8101 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rafael=20Mendon=C3=A7a=20Fran=C3=A7a?= <rafael@franca.dev>
+Date: Mon, 21 Oct 2019 16:39:00 -0400
+Subject: [PATCH 13/13] Introduce a new base class to avoid breaking when
+ upgrading
+
+Third-party session store would still need to be chaged to be more
+secure but only upgrading rack will not break any application.
+---
+ lib/rack/session/abstract/id.rb  | 52 ++++++++++++++++++++++++++------
+ lib/rack/session/cookie.rb       |  2 +-
+ lib/rack/session/memcache.rb     | 18 +++++------
+ lib/rack/session/pool.rb         |  2 +-
+ test/spec_session_abstract_id.rb |  2 +-
+ 5 files changed, 54 insertions(+), 22 deletions(-)
+
+diff --git a/lib/rack/session/abstract/id.rb b/lib/rack/session/abstract/id.rb
+index 189847355..95adbd7b0 100644
+--- a/lib/rack/session/abstract/id.rb
++++ b/lib/rack/session/abstract/id.rb
+@@ -83,11 +83,7 @@ def each(&block)
+ 
+         def [](key)
+           load_for_read!
+-          if key == "session_id"
+-            id.public_id
+-          else
+-            @data[key.to_s]
+-          end
++          @data[key.to_s]
+         end
+ 
+         def fetch(key, default = Unspecified, &block)
+@@ -285,13 +281,11 @@ def initialize_sid
+         # Monkey patch this to use custom methods for session id generation.
+ 
+         def generate_sid(secure = @sid_secure)
+-          public_id = if secure
++          if secure
+             secure.hex(@sid_length)
+           else
+             "%0#{@sid_length}x" % Kernel.rand(2**@sidbits - 1)
+           end
+-
+-          SessionId.new(public_id)
+         rescue NotImplementedError
+           generate_sid(false)
+         end
+@@ -321,7 +315,7 @@ def load_session(req)
+         def extract_session_id(request)
+           sid = request.cookies[@key]
+           sid ||= request.params[@key] unless @cookie_only
+-          sid && SessionId.new(sid)
++          sid
+         end
+ 
+         # Returns the current session id from the SessionHash.
+@@ -392,7 +386,7 @@ def commit_session(req, res)
+             req.get_header(RACK_ERRORS).puts("Deferring cookie for #{session_id}") if $VERBOSE
+           else
+             cookie = Hash.new
+-            cookie[:value] = data.cookie_value
++            cookie[:value] = cookie_value(data)
+             cookie[:expires] = Time.now + options[:expire_after] if options[:expire_after]
+             cookie[:expires] = Time.now + options[:max_age] if options[:max_age]
+             set_cookie(req, res, cookie.merge!(options))
+@@ -400,6 +394,10 @@ def commit_session(req, res)
+         end
+         public :commit_session
+ 
++        def cookie_value(data)
++          data
++        end
++
+         # Sets the cookie back to the client with session id. We skip the cookie
+         # setting if the value didn't change (sid is the same) or expires was given.
+ 
+@@ -441,6 +439,40 @@ def delete_session(req, sid, options)
+         end
+       end
+ 
++      class PersistedSecure < Persisted
++        class SecureSessionHash < SessionHash
++          def [](key)
++            if key == "session_id"
++              load_for_read!
++              id.public_id
++            else
++              super
++            end
++          end
++        end
++
++        def generate_sid(*)
++          public_id = super
++
++          SessionId.new(public_id)
++        end
++
++        def extract_session_id(*)
++          public_id = super
++          public_id && SessionId.new(public_id)
++        end
++
++        private
++
++        def session_class
++          SecureSessionHash
++        end
++
++        def cookie_value(data)
++          data.cookie_value
++        end
++      end
++
+       class ID < Persisted
+         def self.inherited(klass)
+           k = klass.ancestors.find { |kl| kl.respond_to?(:superclass) && kl.superclass == ID }
+diff --git a/lib/rack/session/cookie.rb b/lib/rack/session/cookie.rb
+index 476f9fb15..27c6afc10 100644
+--- a/lib/rack/session/cookie.rb
++++ b/lib/rack/session/cookie.rb
+@@ -47,7 +47,7 @@ module Session
+     #   })
+     #
+ 
+-    class Cookie < Abstract::Persisted
++    class Cookie < Abstract::PersistedSecure
+       # Encode session cookies as Base64
+       class Base64
+         def encode(str)
+diff --git a/lib/rack/session/memcache.rb b/lib/rack/session/memcache.rb
+index 47ea8dc8f..f6d8d6493 100644
+--- a/lib/rack/session/memcache.rb
++++ b/lib/rack/session/memcache.rb
+@@ -22,7 +22,7 @@ module Session
+     # Note that memcache does drop data before it may be listed to expire. For
+     # a full description of behaviour, please see memcache's documentation.
+ 
+-    class Memcache < Abstract::ID
++    class Memcache < Abstract::PersistedSecure
+       using ::Rack::RegexpExtensions
+ 
+       attr_reader :mutex, :pool
+@@ -51,8 +51,8 @@ def generate_sid
+         end
+       end
+ 
+-      def get_session(env, sid)
+-        with_lock(env) do
++      def find_session(req, sid)
++        with_lock(req) do
+           unless sid and session = get_session_with_fallback(sid)
+             sid, session = generate_sid, {}
+             unless /^STORED/.match?(@pool.add(sid.private_id, session))
+@@ -63,26 +63,26 @@ def get_session(env, sid)
+         end
+       end
+ 
+-      def set_session(env, session_id, new_session, options)
++      def write_session(req, session_id, new_session, options)
+         expiry = options[:expire_after]
+         expiry = expiry.nil? ? 0 : expiry + 1
+ 
+-        with_lock(env) do
++        with_lock(req) do
+           @pool.set session_id.private_id, new_session, expiry
+           session_id
+         end
+       end
+ 
+-      def destroy_session(env, session_id, options)
+-        with_lock(env) do
++      def delete_session(req, session_id, options)
++        with_lock(req) do
+           @pool.delete(session_id.public_id)
+           @pool.delete(session_id.private_id)
+           generate_sid unless options[:drop]
+         end
+       end
+ 
+-      def with_lock(env)
+-        @mutex.lock if env[RACK_MULTITHREAD]
++      def with_lock(req)
++        @mutex.lock if req.multithread?
+         yield
+       rescue MemCache::MemCacheError, Errno::ECONNREFUSED
+         if $VERBOSE
+diff --git a/lib/rack/session/pool.rb b/lib/rack/session/pool.rb
+index c031117d2..f5b626504 100644
+--- a/lib/rack/session/pool.rb
++++ b/lib/rack/session/pool.rb
+@@ -26,7 +26,7 @@ module Session
+     #   )
+     #   Rack::Handler::WEBrick.run sessioned
+ 
+-    class Pool < Abstract::Persisted
++    class Pool < Abstract::PersistedSecure
+       attr_reader :mutex, :pool
+       DEFAULT_OPTIONS = Abstract::ID::DEFAULT_OPTIONS.merge drop: false
+ 
+diff --git a/test/spec_session_abstract_id.rb b/test/spec_session_abstract_id.rb
+index e41e63ce1..00140c163 100644
+--- a/test/spec_session_abstract_id.rb
++++ b/test/spec_session_abstract_id.rb
+@@ -27,7 +27,7 @@ def hex(*args)
+       end
+     end
+     id = Rack::Session::Abstract::ID.new nil, secure_random: secure_random.new
+-    id.send(:generate_sid).public_id.must_equal 'fake_hex'
++    id.send(:generate_sid).must_equal 'fake_hex'
+   end
+ 
+ end

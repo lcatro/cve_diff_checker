@@ -1,0 +1,361 @@
+From 7e2e523a1c4e9ac7b9cc4fd551831f7639ed5ff9 Mon Sep 17 00:00:00 2001
+From: David Hu <david.hu@arm.com>
+Date: Wed, 21 Apr 2021 16:52:07 +0800
+Subject: Crypto: Remove unnecessary multi-part operation clean-up
+
+Remove unnecessary clean up steps from other multi-part operation
+function. Otherwise, the PSA multi-part operation object content can be
+cleaned before the underlying crypto library frees resouces specified
+in the content, which may cause memory leakage.
+
+The multi-part operation structure will be eventually cleaned in
+psa_xxx_abort() when an error occurs during multi-part operations.
+
+Change-Id: I9cd0fa3881e5c7c27b60883d04c186a3ea58bc9c
+Signed-off-by: David Hu <david.hu@arm.com>
+---
+ secure_fw/partitions/crypto/crypto_cipher.c | 60 ++++++++++-------------------
+ secure_fw/partitions/crypto/crypto_hash.c   | 35 +++--------------
+ secure_fw/partitions/crypto/crypto_mac.c    | 49 ++++++++++-------------
+ 3 files changed, 46 insertions(+), 98 deletions(-)
+
+diff --git a/secure_fw/partitions/crypto/crypto_cipher.c b/secure_fw/partitions/crypto/crypto_cipher.c
+index 03849dfd97..5a318efd83 100644
+--- a/secure_fw/partitions/crypto/crypto_cipher.c
++++ b/secure_fw/partitions/crypto/crypto_cipher.c
+@@ -57,14 +57,7 @@ psa_status_t tfm_crypto_cipher_generate_iv(psa_invec in_vec[],
+ 
+     *handle_out = handle;
+ 
+-    status = psa_cipher_generate_iv(operation, iv, iv_size, &out_vec[1].len);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+-    }
+-
+-    return status;
++    return psa_cipher_generate_iv(operation, iv, iv_size, &out_vec[1].len);
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+@@ -102,14 +95,7 @@ psa_status_t tfm_crypto_cipher_set_iv(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = psa_cipher_set_iv(operation, iv, iv_length);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+-    }
+-
+-    return status;
++    return psa_cipher_set_iv(operation, iv, iv_length);
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+@@ -153,17 +139,20 @@ psa_status_t tfm_crypto_cipher_encrypt_setup(psa_invec in_vec[],
+ 
+     status = tfm_crypto_encode_id_and_owner(key_id, &encoded_key);
+     if (status != PSA_SUCCESS) {
+-        return status;
++        goto exit;
+     }
+ 
+     status = psa_cipher_encrypt_setup(operation, encoded_key, alg);
+     if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
++        goto exit;
+     }
+ 
+     return status;
++
++exit:
++    /* Release the operation context, ignore if the operation fails. */
++    (void)tfm_crypto_operation_release(handle_out);
++    return status;
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+@@ -207,17 +196,20 @@ psa_status_t tfm_crypto_cipher_decrypt_setup(psa_invec in_vec[],
+     *handle_out = handle;
+     status = tfm_crypto_encode_id_and_owner(key_id, &encoded_key);
+     if (status != PSA_SUCCESS) {
+-        return status;
++        goto exit;
+     }
+ 
+     status = psa_cipher_decrypt_setup(operation, encoded_key, alg);
+     if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
++        goto exit;
+     }
+ 
+     return status;
++
++exit:
++    /* Release the operation context, ignore if the operation fails. */
++    (void)tfm_crypto_operation_release(handle_out);
++    return status;
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+@@ -261,15 +253,8 @@ psa_status_t tfm_crypto_cipher_update(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = psa_cipher_update(operation, input, input_length,
+-                               output, output_size, &out_vec[1].len);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+-    }
+-
+-    return status;
++    return psa_cipher_update(operation, input, input_length,
++                             output, output_size, &out_vec[1].len);
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+@@ -311,14 +296,11 @@ psa_status_t tfm_crypto_cipher_finish(psa_invec in_vec[],
+     }
+ 
+     status = psa_cipher_finish(operation, output, output_size, &out_vec[1].len);
+-    if (status != PSA_SUCCESS) {
++    if (status == PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+     return status;
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+@@ -364,9 +346,7 @@ psa_status_t tfm_crypto_cipher_abort(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+-    return status;
++    return tfm_crypto_operation_release(handle_out);
+ #endif /* TFM_CRYPTO_CIPHER_MODULE_DISABLED */
+ }
+ 
+diff --git a/secure_fw/partitions/crypto/crypto_hash.c b/secure_fw/partitions/crypto/crypto_hash.c
+index 4d3480148f..6c2d27aa70 100644
+--- a/secure_fw/partitions/crypto/crypto_hash.c
++++ b/secure_fw/partitions/crypto/crypto_hash.c
+@@ -59,10 +59,9 @@ psa_status_t tfm_crypto_hash_setup(psa_invec in_vec[],
+     if (status != PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    return PSA_SUCCESS;
++    return status;
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+ 
+@@ -100,14 +99,7 @@ psa_status_t tfm_crypto_hash_update(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = psa_hash_update(operation, input, input_length);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+-    }
+-
+-    return PSA_SUCCESS;
++    return psa_hash_update(operation, input, input_length);
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+ 
+@@ -149,14 +141,11 @@ psa_status_t tfm_crypto_hash_finish(psa_invec in_vec[],
+     }
+ 
+     status = psa_hash_finish(operation, hash, hash_size, &out_vec[1].len);
+-    if (status != PSA_SUCCESS) {
++    if (status == PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+     return status;
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+@@ -196,14 +185,11 @@ psa_status_t tfm_crypto_hash_verify(psa_invec in_vec[],
+     }
+ 
+     status = psa_hash_verify(operation, hash, hash_length);
+-    if (status != PSA_SUCCESS) {
++    if (status == PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+     return status;
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+@@ -248,9 +234,7 @@ psa_status_t tfm_crypto_hash_abort(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+-    return status;
++    return tfm_crypto_operation_release(handle_out);
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+ 
+@@ -292,14 +276,7 @@ psa_status_t tfm_crypto_hash_clone(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = psa_hash_clone(source_operation, target_operation);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the target operation context, ignore if it fails. */
+-        (void)tfm_crypto_operation_release(target_handle);
+-        return status;
+-    }
+-
+-    return status;
++    return psa_hash_clone(source_operation, target_operation);
+ #endif /* TFM_CRYPTO_HASH_MODULE_DISABLED */
+ }
+ 
+diff --git a/secure_fw/partitions/crypto/crypto_mac.c b/secure_fw/partitions/crypto/crypto_mac.c
+index e2f27c55b7..e0f3a6f02e 100644
+--- a/secure_fw/partitions/crypto/crypto_mac.c
++++ b/secure_fw/partitions/crypto/crypto_mac.c
+@@ -64,17 +64,20 @@ psa_status_t tfm_crypto_mac_sign_setup(psa_invec in_vec[],
+ 
+     status = tfm_crypto_encode_id_and_owner(key_id, &encoded_key);
+     if (status != PSA_SUCCESS) {
+-        return status;
++        goto exit;
+     }
+ 
+     status = psa_mac_sign_setup(operation, encoded_key, alg);
+     if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
++        goto exit;
+     }
+ 
+-    return PSA_SUCCESS;
++    return status;
++
++exit:
++    /* Release the operation context, ignore if the operation fails. */
++    (void)tfm_crypto_operation_release(handle_out);
++    return status;
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+ 
+@@ -122,17 +125,20 @@ psa_status_t tfm_crypto_mac_verify_setup(psa_invec in_vec[],
+ 
+     status = tfm_crypto_encode_id_and_owner(key_id, &encoded_key);
+     if (status != PSA_SUCCESS) {
+-        return status;
++        goto exit;
+     }
+ 
+     status = psa_mac_verify_setup(operation, encoded_key, alg);
+     if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
++        goto exit;
+     }
+ 
+-    return PSA_SUCCESS;
++    return status;
++
++exit:
++    /* Release the operation context, ignore if the operation fails. */
++    (void)tfm_crypto_operation_release(handle_out);
++    return status;
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+ 
+@@ -170,14 +176,7 @@ psa_status_t tfm_crypto_mac_update(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = psa_mac_update(operation, input, input_length);
+-    if (status != PSA_SUCCESS) {
+-        /* Release the operation context, ignore if the operation fails. */
+-        (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+-    }
+-
+-    return PSA_SUCCESS;
++    return psa_mac_update(operation, input, input_length);
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+ 
+@@ -219,14 +218,11 @@ psa_status_t tfm_crypto_mac_sign_finish(psa_invec in_vec[],
+     }
+ 
+     status = psa_mac_sign_finish(operation, mac, mac_size, &out_vec[1].len);
+-    if (status != PSA_SUCCESS) {
++    if (status == PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+     return status;
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+@@ -266,14 +262,11 @@ psa_status_t tfm_crypto_mac_verify_finish(psa_invec in_vec[],
+     }
+ 
+     status = psa_mac_verify_finish(operation, mac, mac_length);
+-    if (status != PSA_SUCCESS) {
++    if (status == PSA_SUCCESS) {
+         /* Release the operation context, ignore if the operation fails. */
+         (void)tfm_crypto_operation_release(handle_out);
+-        return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+     return status;
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+@@ -319,9 +312,7 @@ psa_status_t tfm_crypto_mac_abort(psa_invec in_vec[],
+         return status;
+     }
+ 
+-    status = tfm_crypto_operation_release(handle_out);
+-
+-    return status;
++    return tfm_crypto_operation_release(handle_out);
+ #endif /* TFM_CRYPTO_MAC_MODULE_DISABLED */
+ }
+ 
+-- 
+cgit v1.2.3
+

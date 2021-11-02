@@ -1,0 +1,101 @@
+From 8249a26d69f72b9cda584c14cc3f12769985e481 Mon Sep 17 00:00:00 2001
+From: Jay Berkenbilt <ejb@ql.org>
+Date: Sat, 12 Aug 2017 07:35:04 -0400
+Subject: [PATCH] Fix infinite loop in QPDFWriter (fixes #143)
+
+---
+ libqpdf/QPDFWriter.cc         |   9 +++++++++
+ qpdf/qpdf.testcov             |   1 +
+ qpdf/qtest/qpdf.test          |   1 +
+ qpdf/qtest/qpdf/issue-143.out |  19 +++++++++++++++++++
+ qpdf/qtest/qpdf/issue-143.pdf | Bin 0 -> 707 bytes
+ 5 files changed, 30 insertions(+)
+ create mode 100644 qpdf/qtest/qpdf/issue-143.out
+ create mode 100644 qpdf/qtest/qpdf/issue-143.pdf
+
+diff --git a/libqpdf/QPDFWriter.cc b/libqpdf/QPDFWriter.cc
+index de4fa349..345613ad 100644
+--- a/libqpdf/QPDFWriter.cc
++++ b/libqpdf/QPDFWriter.cc
+@@ -1054,6 +1054,9 @@ QPDFWriter::enqueueObject(QPDFObjectHandle object)
+ 		// here.  Instead, enqueue the object stream.  Object
+ 		// streams always have generation 0.
+ 		int stream_id = this->object_to_object_stream[og];
++                // Detect loops by storing invalid object ID 0, which
++                // will get overwritten later.
++                obj_renumber[og] = 0;
+ 		enqueueObject(this->pdf.getObjectByID(stream_id, 0));
+ 	    }
+ 	    else
+@@ -1079,6 +1082,12 @@ QPDFWriter::enqueueObject(QPDFObjectHandle object)
+ 		}
+ 	    }
+ 	}
++        else if (obj_renumber[og] == 0)
++        {
++            // This can happen if a specially constructed file
++            // indicates that an object stream is inside itself.
++            QTC::TC("qpdf", "QPDFWriter ignore self-referential object stream");
++        }
+     }
+     else if (object.isArray())
+     {
+diff --git a/qpdf/qpdf.testcov b/qpdf/qpdf.testcov
+index 0038aa34..f5b628b9 100644
+--- a/qpdf/qpdf.testcov
++++ b/qpdf/qpdf.testcov
+@@ -294,3 +294,4 @@ QPDF ignore first extra space in xref entry 0
+ QPDF ignore second extra space in xref entry 0
+ QPDF ignore length error xref entry 0
+ QPDF_encryption pad short parameter 0
++QPDFWriter ignore self-referential object stream 0
+diff --git a/qpdf/qtest/qpdf.test b/qpdf/qtest/qpdf.test
+index 06f298e0..1aaeb8d4 100644
+--- a/qpdf/qtest/qpdf.test
++++ b/qpdf/qtest/qpdf.test
+@@ -220,6 +220,7 @@ my @bug_tests = (
+     ["106", "zlib data error", 3],
+     ["141a", "/W entry size 0", 2],
+     ["141b", "/W entry size 0", 2],
++    ["143", "self-referential ostream", 3],
+     );
+ $n_tests += scalar(@bug_tests);
+ foreach my $d (@bug_tests)
+diff --git a/qpdf/qtest/qpdf/issue-143.out b/qpdf/qtest/qpdf/issue-143.out
+new file mode 100644
+index 00000000..2bf1e40d
+--- /dev/null
++++ b/qpdf/qtest/qpdf/issue-143.out
+@@ -0,0 +1,19 @@
++WARNING: issue-143.pdf: can't find PDF header
++WARNING: issue-143.pdf (xref stream: object 3 0, file position 654): stream keyword not followed by proper line terminator
++WARNING: issue-143.pdf (xref stream: object 3 0, file position 607): stream dictionary lacks /Length key
++WARNING: issue-143.pdf (xref stream: object 3 0, file position 654): attempting to recover stream length
++WARNING: issue-143.pdf (xref stream: object 3 0, file position 654): recovered stream length: 36
++WARNING: issue-143.pdf (xref stream: object 3 0, file position 694): expected endobj
++WARNING: issue-143.pdf: file is damaged
++WARNING: issue-143.pdf (object 1 0, file position 48): expected n n obj
++WARNING: issue-143.pdf: Attempting to reconstruct cross-reference table
++WARNING: issue-143.pdf (file position 24): expected dictionary key but found non-name object; inserting key /QPDFFake1
++WARNING: issue-143.pdf (file position 24): expected dictionary key but found non-name object; inserting key /QPDFFake2
++WARNING: issue-143.pdf (file position 24): expected dictionary key but found non-name object; inserting key /QPDFFake3
++WARNING: issue-143.pdf (file position 24): expected dictionary key but found non-name object; inserting key /QPDFFake4
++WARNING: issue-143.pdf (object 1 0, file position 21): stream dictionary lacks /Length key
++WARNING: issue-143.pdf (object 1 0, file position 84): attempting to recover stream length
++WARNING: issue-143.pdf (object 1 0, file position 84): recovered stream length: 606
++WARNING: issue-143.pdf (object 1 0, file position 694): expected endobj
++WARNING: object stream 1 (file position 33): expected dictionary key but found non-name object; inserting key /QPDFFake1
++qpdf: operation succeeded with warnings; resulting file may have some problems
+diff --git a/qpdf/qtest/qpdf/issue-143.pdf b/qpdf/qtest/qpdf/issue-143.pdf
+new file mode 100644
+index 0000000000000000000000000000000000000000..b45460361c1c239175b2e55aabd939830513e2e6
+GIT binary patch
+literal 707
+zcmeHF!3x4K4DIGEUy(m(x}hMH9z7~-f`WM1u!9X|rRzccdee>JzCjEmc`t2J+CHL%
+zfkHx8cc3*_<?;2fC=Yd4h8~#jaUIjH^+Uj1F<zQ6Fa&R_xRrpAvKS`#ja(Rq&z(7+
+zSb#Az|L5O$f%vbiB&|mk$#Y>FS+;MBTY0)D%uror;ap(E0x)Khj^N8Df<!73O2vv&
+V=CdbpjosdFEVRmpr?(Akh(3^ajfwyO
+
+literal 0
+HcmV?d00001
+

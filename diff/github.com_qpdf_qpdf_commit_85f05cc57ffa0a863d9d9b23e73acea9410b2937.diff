@@ -1,0 +1,96 @@
+From 85f05cc57ffa0a863d9d9b23e73acea9410b2937 Mon Sep 17 00:00:00 2001
+From: Jay Berkenbilt <ejb@ql.org>
+Date: Fri, 25 Aug 2017 19:58:31 -0400
+Subject: [PATCH] Detect xref pointer infinite loop (fixes #149)
+
+---
+ ChangeLog                     |   5 +++++
+ libqpdf/QPDF.cc               |   6 ++++++
+ qpdf/qtest/qpdf.test          |   1 +
+ qpdf/qtest/qpdf/issue-149.out |   2 ++
+ qpdf/qtest/qpdf/issue-149.pdf | Bin 0 -> 1685 bytes
+ 5 files changed, 14 insertions(+)
+ create mode 100644 qpdf/qtest/qpdf/issue-149.out
+ create mode 100644 qpdf/qtest/qpdf/issue-149.pdf
+
+diff --git a/ChangeLog b/ChangeLog
+index 510c6145..bd0acc2b 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,8 @@
++2017-08-25  Jay Berkenbilt  <ejb@ql.org>
++
++	* Detect infinite loop while finding additional xref tables. Fixes
++	#149.
++
+ 2017-08-22  Jay Berkenbilt  <ejb@ql.org>
+ 
+ 	* 7.0.b1: release
+diff --git a/libqpdf/QPDF.cc b/libqpdf/QPDF.cc
+index 27efdd55..86e798ee 100644
+--- a/libqpdf/QPDF.cc
++++ b/libqpdf/QPDF.cc
+@@ -491,8 +491,10 @@ void
+ QPDF::read_xref(qpdf_offset_t xref_offset)
+ {
+     std::map<int, int> free_table;
++    std::set<qpdf_offset_t> visited;
+     while (xref_offset)
+     {
++        visited.insert(xref_offset);
+         char buf[7];
+         memset(buf, 0, sizeof(buf));
+ 	this->m->file->seek(xref_offset, SEEK_SET);
+@@ -520,6 +522,10 @@ QPDF::read_xref(qpdf_offset_t xref_offset)
+ 	{
+ 	    xref_offset = read_xrefStream(xref_offset);
+ 	}
++        if (visited.count(xref_offset) != 0)
++        {
++            xref_offset = 0;
++        }
+     }
+ 
+     if (! this->m->trailer.isInitialized())
+diff --git a/qpdf/qtest/qpdf.test b/qpdf/qtest/qpdf.test
+index 232e421e..9ecf0005 100644
+--- a/qpdf/qtest/qpdf.test
++++ b/qpdf/qtest/qpdf.test
+@@ -221,6 +221,7 @@ my @bug_tests = (
+     ["141a", "/W entry size 0", 2],
+     ["141b", "/W entry size 0", 2],
+     ["143", "self-referential ostream", 3],
++    ["149", "xref prev pointer loop", 3],
+     );
+ $n_tests += scalar(@bug_tests);
+ foreach my $d (@bug_tests)
+diff --git a/qpdf/qtest/qpdf/issue-149.out b/qpdf/qtest/qpdf/issue-149.out
+new file mode 100644
+index 00000000..5c473389
+--- /dev/null
++++ b/qpdf/qtest/qpdf/issue-149.out
+@@ -0,0 +1,2 @@
++WARNING: issue-149.pdf: reported number of objects (11) inconsistent with actual number of objects (7)
++qpdf: operation succeeded with warnings; resulting file may have some problems
+diff --git a/qpdf/qtest/qpdf/issue-149.pdf b/qpdf/qtest/qpdf/issue-149.pdf
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a2f8a88c28c0db20eeae6f7d3556cd1eae675ac
+GIT binary patch
+literal 1685
+zcmcgry^`865bpgH+ju4^f-PfXbKxksz+@)590Tr{6v7tZ8)Mzbf+OjY>e@U_`s7XS
+zNwShHpBcD<CR=!{PrIxA`96F4Ve*c2Ld*X9<N4{=pWn|<KP?;f+4c%bCP6-4hdq$x
+zwFh{*!mETAdnP12W^$v>9cPsta#pP6ri1}(Sf2BaJV+SU{}1U3-lN-^6$imqFQ`Sp
+z1-`tu00sj9C;s-pz`3E4=6sEyGUsk5^Q>Sc^w4=`&?#Lb<kiq{Xt5$ynJfjJq}1Lf
+z^i!6Wu;{ALuLir}yFvoNV=I+%Ih)EvO{riQW~$KT-m)~KBYuE|i{U{(=y*84$S0ks
+z-+Hc)7+Hd^sxawhtmHe9U|)kljbZ;&!IL?Te&OJza7OGPO&+|Ra4Z0a=S&C$Dw%3P
+z4-P;2x7Cn(t<}(Hy))?cv}Y*=qg#v}#SpnbTo>Y0=k+6qSMX-V`CEwZVH~Sr*Y0NQ
+z>g`tQYLlus)7*TwlzP4DN)1|>^M!74<CEq*q9xNUIUiZRXEIBuaUB;4PqShT&Mi%5
+zd`k<1phv4oMU#_C42ev#YTxd0q#~!~LTI^-K`#ip0U%r%@vu>4P#DN_qZ24X>KuFd
+zePqco6r6g69x9^tvZSC{&IHz|#WBymGpwy1+*GhVkbv|IFykBvtQb%=RZ1$P?kEiV
+zwmrU^Sg2L|azl}l(}7+jQeuiSZ1K*eJS$QRHEefY5$T!gR4Ox=Mx<30ns%3pv=#av
+zM0(WFg(6*2@w!Mg9SHa}b%`5P)Flm@3Gpiiwjht7q|jQBU&}y2XL(8*MQfrW1<g8Y
+Oo;H+t;i+bG#ngWXbeLcO
+
+literal 0
+HcmV?d00001
+

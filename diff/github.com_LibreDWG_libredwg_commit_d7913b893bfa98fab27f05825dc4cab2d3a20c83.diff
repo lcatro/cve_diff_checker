@@ -1,0 +1,24 @@
+From d7913b893bfa98fab27f05825dc4cab2d3a20c83 Mon Sep 17 00:00:00 2001
+From: Reini Urban <rurban@cpan.org>
+Date: Tue, 31 Dec 2019 08:52:11 +0100
+Subject: [PATCH] encode: fix empty FIELD_2DD_VECTOR
+
+Fixes GH #178 null_pointer1 case
+---
+ src/encode.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/encode.c b/src/encode.c
+index 5e0013371..a4d514dcc 100644
+--- a/src/encode.c
++++ b/src/encode.c
+@@ -281,7 +281,8 @@ static bool env_var_checked_p;
+ 
+ #define FIELD_2DD_VECTOR(nam, size, dxf)                                      \
+   OVERFLOW_CHECK (nam, _obj->size)                                            \
+-  FIELD_2RD (nam[0], dxf);                                                    \
++  if (_obj->size)                                                             \
++    FIELD_2RD (nam[0], dxf);                                                  \
+   for (vcount = 1; vcount < (BITCODE_BL)_obj->size; vcount++)                 \
+     {                                                                         \
+       FIELD_2DD (nam[vcount], FIELD_VALUE (nam[vcount - 1].x),                \

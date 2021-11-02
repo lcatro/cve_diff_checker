@@ -1,0 +1,28 @@
+From 4f2a95f877d406a054f9f2253475fe58c76aa03d Mon Sep 17 00:00:00 2001
+From: memleak <memleak@1f8fe7d8-47f0-464c-8d0a-336f4953ab05>
+Date: Mon, 20 Apr 2015 07:54:08 +0000
+Subject: [PATCH] AssetController: directory traversal vulnerability issue
+
+git-svn-id: http://www.pimcore.org/svn/pimcore/private/core/trunk@6458 1f8fe7d8-47f0-464c-8d0a-336f4953ab05
+---
+ pimcore/modules/admin/controllers/AssetController.php | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/pimcore/modules/admin/controllers/AssetController.php b/pimcore/modules/admin/controllers/AssetController.php
+index fec5d5ba766..e897b8d3fb8 100644
+--- a/pimcore/modules/admin/controllers/AssetController.php
++++ b/pimcore/modules/admin/controllers/AssetController.php
+@@ -210,6 +210,13 @@ protected function addAsset()
+             $parent = Asset::getById($this->getParam("parentId"));
+             $newPath = $parent->getFullPath() . "/" . trim($this->getParam("dir"), "/ ");
+ 
++            // check if the path is outside of the asset directory
++            $newRealPath = PIMCORE_ASSET_DIRECTORY . $newPath;
++            $newRealPath= realpath($newRealPath);
++            if (strpos($newRealPath, PIMCORE_ASSET_DIRECTORY) !== 0) {
++                throw new Exception("not allowed");
++            }
++
+             $maxRetries = 5;
+             for ($retries=0; $retries<$maxRetries; $retries++) {
+                 try {

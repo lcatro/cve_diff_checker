@@ -1,0 +1,31 @@
+From 1b0f0d0988e6df4e32e9f4bf8780846ea95d4485 Mon Sep 17 00:00:00 2001
+From: JerikoOne <jeriko.one@gmx.us>
+Date: Sat, 7 Jul 2018 14:03:46 -0500
+Subject: [PATCH] Don't overflow stack buffer in msg_parse_fetch
+
+---
+ imap/message.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/imap/message.c b/imap/message.c
+index 8adc916452..62bace9a75 100644
+--- a/imap/message.c
++++ b/imap/message.c
+@@ -330,7 +330,7 @@ static int msg_parse_fetch(struct ImapHeader *h, char *s)
+       }
+       s++;
+       ptmp = tmp;
+-      while (*s && *s != '\"')
++      while (*s && (*s != '\"') && (ptmp != (tmp + sizeof(tmp) - 1)))
+         *ptmp++ = *s++;
+       if (*s != '\"')
+         return -1;
+@@ -343,7 +343,7 @@ static int msg_parse_fetch(struct ImapHeader *h, char *s)
+       s += 11;
+       SKIPWS(s);
+       ptmp = tmp;
+-      while (isdigit((unsigned char) *s))
++      while (isdigit((unsigned char) *s) && (ptmp != (tmp + sizeof(tmp) - 1)))
+         *ptmp++ = *s++;
+       *ptmp = '\0';
+       if (mutt_str_atol(tmp, &h->content_length) < 0)

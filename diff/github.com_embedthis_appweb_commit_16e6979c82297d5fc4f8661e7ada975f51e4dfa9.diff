@@ -1,0 +1,36 @@
+From 16e6979c82297d5fc4f8661e7ada975f51e4dfa9 Mon Sep 17 00:00:00 2001
+From: Michael O'Brien <mob@emobrien.com>
+Date: Tue, 6 Feb 2018 12:36:36 +1100
+Subject: [PATCH] FIX: null deref with invalid IPv6 socket addresses.
+
+---
+ src/mpr/mprLib.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/mpr/mprLib.c b/src/mpr/mprLib.c
+index 26c01349e..8f11569e7 100644
+--- a/src/mpr/mprLib.c
++++ b/src/mpr/mprLib.c
+@@ -23298,8 +23298,9 @@ PUBLIC int mprParseSocketAddress(cchar *address, char **pip, int *pport, int *ps
+ 
+                 /* Set ipAddr to ipv6 address without brackets */
+                 ip = sclone(ip + 1);
+-                cp = strchr(ip, ']');
+-                *cp = '\0';
++                if ((cp = strchr(ip, ']')) != 0) {
++                    *cp = '\0';
++                }
+ 
+             } else {
+                 /* Handles [a:b:c:d:e:f:g:h:i] case (no port)- should not occur */
+@@ -27668,8 +27669,8 @@ static void validateTime(struct tm *tp, struct tm *defaults)
+     }
+     if (tp->tm_yday < 0) {
+         if (tp->tm_mon <= 11) {
+-        tp->tm_yday = (leapYear(tp->tm_year + 1900) ?
+-            leapMonthStart[tp->tm_mon] : normalMonthStart[tp->tm_mon]) + tp->tm_mday - 1;
++            tp->tm_yday = (leapYear(tp->tm_year + 1900) ?
++                leapMonthStart[tp->tm_mon] : normalMonthStart[tp->tm_mon]) + tp->tm_mday - 1;
+         } else {
+             tp->tm_yday = defaults->tm_yday;
+         }

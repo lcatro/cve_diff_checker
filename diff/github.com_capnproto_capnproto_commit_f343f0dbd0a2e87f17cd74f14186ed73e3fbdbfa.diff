@@ -1,0 +1,42 @@
+From f343f0dbd0a2e87f17cd74f14186ed73e3fbdbfa Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@sandstorm.io>
+Date: Wed, 25 Feb 2015 13:50:43 -0800
+Subject: [PATCH] SECURITY: Integer overflow in pointer validation.
+
+Details: https://github.com/sandstorm-io/capnproto/tree/master/security-advisories/2014-03-02-0-c++-integer-overflow.md
+---
+ c++/src/capnp/layout.c++ | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/c++/src/capnp/layout.c++ b/c++/src/capnp/layout.c++
+index 325ca403d..a43dbcd6b 100644
+--- a/c++/src/capnp/layout.c++
++++ b/c++/src/capnp/layout.c++
+@@ -685,7 +685,8 @@ struct WireHelpers {
+               return result;
+             }
+ 
+-            KJ_REQUIRE(elementTag->structRef.wordSize() / ELEMENTS * count <= wordCount,
++            KJ_REQUIRE(elementTag->structRef.wordSize() / ELEMENTS *
++                       ElementCount64(count) <= wordCount,
+                        "Struct list pointer's elements overran size.") {
+               return result;
+             }
+@@ -1663,7 +1664,7 @@ struct WireHelpers {
+           ElementCount elementCount = tag->inlineCompositeListElementCount();
+           auto wordsPerElement = tag->structRef.wordSize() / ELEMENTS;
+ 
+-          KJ_REQUIRE(wordsPerElement * elementCount <= wordCount,
++          KJ_REQUIRE(wordsPerElement * ElementCount64(elementCount) <= wordCount,
+                      "INLINE_COMPOSITE list's elements overrun its word count.") {
+             goto useDefault;
+           }
+@@ -1919,7 +1920,7 @@ struct WireHelpers {
+       size = tag->inlineCompositeListElementCount();
+       wordsPerElement = tag->structRef.wordSize() / ELEMENTS;
+ 
+-      KJ_REQUIRE(size * wordsPerElement <= wordCount,
++      KJ_REQUIRE(ElementCount64(size) * wordsPerElement <= wordCount,
+                  "INLINE_COMPOSITE list's elements overrun its word count.") {
+         goto useDefault;
+       }

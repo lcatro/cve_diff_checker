@@ -1,0 +1,203 @@
+From 6e34c2b5e5e849302af7ccd00509929c3809c658 Mon Sep 17 00:00:00 2001
+From: Daniel Wallace <danielwallace@gtmanfred.com>
+Date: Mon, 10 Apr 2017 10:30:20 -0600
+Subject: [PATCH] stat file when placing it on server instead of caching
+
+remove chmod of files in the fileserver
+add stat_file to cp module
+use cp.stat_file to get file mode in file module
+add a note about keep not working with ssh
+---
+ salt/fileclient.py   | 75 +-------------------------------------------
+ salt/modules/cp.py   | 22 +++++++++++++
+ salt/modules/file.py | 11 +++++--
+ salt/states/file.py  |  7 +++++
+ 4 files changed, 39 insertions(+), 76 deletions(-)
+
+diff --git a/salt/fileclient.py b/salt/fileclient.py
+index 9b131220790e..51a035b51aaa 100644
+--- a/salt/fileclient.py
++++ b/salt/fileclient.py
+@@ -787,22 +787,6 @@ def get_file(self,
+         if not fnd_path:
+             return ''
+ 
+-        try:
+-            fnd_mode = fnd.get('stat', [])[0]
+-        except (IndexError, TypeError):
+-            fnd_mode = None
+-
+-        if not salt.utils.is_windows():
+-            if fnd_mode is not None:
+-                try:
+-                    if os.stat(dest).st_mode != fnd_mode:
+-                        try:
+-                            os.chmod(dest, fnd_mode)
+-                        except OSError as exc:
+-                            log.warning('Failed to chmod %s: %s', dest, exc)
+-                except Exception:
+-                    pass
+-
+         return fnd_path
+ 
+     def file_list(self, saltenv='base', prefix=''):
+@@ -1054,47 +1038,7 @@ def get_file(self,
+                 mode_local = None
+ 
+             if hash_local == hash_server:
+-                if not salt.utils.is_windows():
+-                    if mode_server is None:
+-                        log.debug('No file mode available for \'%s\'', path)
+-                    elif mode_local is None:
+-                        log.debug(
+-                            'No file mode available for \'%s\'',
+-                            dest2check
+-                        )
+-                    else:
+-                        if mode_server == mode_local:
+-                            log.info(
+-                                'Fetching file from saltenv \'%s\', '
+-                                '** skipped ** latest already in cache '
+-                                '\'%s\', mode up-to-date', saltenv, path
+-                            )
+-                        else:
+-                            try:
+-                                os.chmod(dest2check, mode_server)
+-                                log.info(
+-                                    'Fetching file from saltenv \'%s\', '
+-                                    '** updated ** latest already in cache, '
+-                                    '\'%s\', mode updated from %s to %s',
+-                                    saltenv,
+-                                    path,
+-                                    salt.utils.st_mode_to_octal(mode_local),
+-                                    salt.utils.st_mode_to_octal(mode_server)
+-                                )
+-                            except OSError as exc:
+-                                log.warning(
+-                                    'Failed to chmod %s: %s', dest2check, exc
+-                                )
+-                    # We may not have been able to check/set the mode, but we
+-                    # don't want to re-download the file because of a failure
+-                    # in mode checking. Return the cached path.
+-                    return dest2check
+-                else:
+-                    log.info(
+-                        'Fetching file from saltenv \'%s\', ** skipped ** '
+-                        'latest already in cache \'%s\'', saltenv, path
+-                    )
+-                    return dest2check
++                return dest2check
+ 
+         log.debug(
+             'Fetching file from saltenv \'%s\', ** attempting ** \'%s\'',
+@@ -1211,23 +1155,6 @@ def get_file(self,
+                 saltenv, path
+             )
+ 
+-        if not salt.utils.is_windows():
+-            if mode_server is not None:
+-                try:
+-                    if os.stat(dest).st_mode != mode_server:
+-                        try:
+-                            os.chmod(dest, mode_server)
+-                            log.info(
+-                                'Fetching file from saltenv \'%s\', '
+-                                '** done ** \'%s\', mode set to %s',
+-                                saltenv,
+-                                path,
+-                                salt.utils.st_mode_to_octal(mode_server)
+-                            )
+-                        except OSError:
+-                            log.warning('Failed to chmod %s: %s', dest, exc)
+-                except OSError:
+-                    pass
+         return dest
+ 
+     def file_list(self, saltenv='base', prefix=''):
+diff --git a/salt/modules/cp.py b/salt/modules/cp.py
+index 87982f34bfda..7a3bd3344dfe 100644
+--- a/salt/modules/cp.py
++++ b/salt/modules/cp.py
+@@ -631,6 +631,28 @@ def hash_file(path, saltenv='base'):
+     return _client().hash_file(path, saltenv)
+ 
+ 
++def stat_file(path, saltenv='base', octal=True):
++    '''
++    Return the permissions of a file, to get the permissions of a file on the
++    salt master file server prepend the path with salt://<file on server>
++    otherwise, prepend the file with / for a local file.
++
++    CLI Example:
++
++    .. code-block:: bash
++
++        salt '*' cp.stat_file salt://path/to/file
++    '''
++    path, senv = salt.utils.url.split_env(path)
++    if senv:
++        saltenv = senv
++
++    stat = _client().hash_and_stat_file(path, saltenv)[1]
++    if stat is None:
++        return stat
++    return salt.utils.st_mode_to_octal(stat[0]) if octal is True else stat[0]
++
++
+ def push(path, keep_symlinks=False, upload_path=None, remove_source=False):
+     '''
+     WARNING Files pushed to the master will have global read permissions..
+diff --git a/salt/modules/file.py b/salt/modules/file.py
+index 2cebc485805a..b35a11d05411 100644
+--- a/salt/modules/file.py
++++ b/salt/modules/file.py
+@@ -4349,7 +4349,7 @@ def check_managed_changes(
+             if _urlparse(source).scheme in ('salt', 'file') \
+                     or source.startswith('/'):
+                 try:
+-                    mode = salt.utils.st_mode_to_octal(os.stat(sfn).st_mode)
++                    mode = __salt__['cp.stat_file'](source, saltenv=saltenv, octal=True)
+                 except Exception as exc:
+                     log.warning('Unable to stat %s: %s', sfn, exc)
+     changes = check_file_meta(name, sfn, source, source_sum, user,
+@@ -4607,6 +4607,13 @@ def manage_file(name,
+         a local file on the minion), the mode of the destination file will be
+         set to the mode of the source file.
+ 
++        .. note:: keep_mode does not work with salt-ssh.
++
++            As a consequence of how the files are transfered to the minion, and
++            the inability to connect back to the master with salt-ssh, salt is
++            unable to stat the file as it exists on the fileserver and thus
++            cannot mirror the mode on the salt-ssh minion
++
+     CLI Example:
+ 
+     .. code-block:: bash
+@@ -4641,7 +4648,7 @@ def manage_file(name,
+             if _urlparse(source).scheme in ('salt', 'file') \
+                     or source.startswith('/'):
+                 try:
+-                    mode = salt.utils.st_mode_to_octal(os.stat(sfn).st_mode)
++                    mode = __salt__['cp.stat_file'](source, saltenv=saltenv, octal=True)
+                 except Exception as exc:
+                     log.warning('Unable to stat %s: %s', sfn, exc)
+ 
+diff --git a/salt/states/file.py b/salt/states/file.py
+index cc842d024bf2..cc73bf32dd41 100644
+--- a/salt/states/file.py
++++ b/salt/states/file.py
+@@ -1336,6 +1336,13 @@ def managed(name,
+             the ``contents`` options, setting the ``mode`` to ``keep`` is also
+             incompatible with the ``contents`` options.
+ 
++        .. note:: keep does not work with salt-ssh.
++
++            As a consequence of how the files are transfered to the minion, and
++            the inability to connect back to the master with salt-ssh, salt is
++            unable to stat the file as it exists on the fileserver and thus
++            cannot mirror the mode on the salt-ssh minion
++
+     template
+         If this setting is applied, the named templating engine will be used to
+         render the downloaded file. The following templates are supported:

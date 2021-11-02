@@ -1,0 +1,208 @@
+From 6f786c123196eb622625a920d54048629a7caa74 Mon Sep 17 00:00:00 2001
+From: Michael O'Brien <mob@emobrien.com>
+Date: Thu, 8 Jun 2017 13:43:42 -0700
+Subject: [PATCH] DEV: add CGI prefixes
+
+---
+ doc/partials/menu.html.exp    |  2 +-
+ doc/partials/sidebar.html.exp |  2 +-
+ main.me                       | 20 ++++++++++++--------
+ src/cgi.c                     | 15 +++++++++++----
+ src/goahead.h                 | 14 ++++++++++++--
+ src/runtime.c                 | 14 +++++++++++++-
+ 6 files changed, 50 insertions(+), 17 deletions(-)
+
+diff --git a/doc/partials/menu.html.exp b/doc/partials/menu.html.exp
+index ec826fa0..6cd8d378 100644
+--- a/doc/partials/menu.html.exp
++++ b/doc/partials/menu.html.exp
+@@ -5,5 +5,5 @@
+                         <a class="item" href="http://goo.gl/9bL9rM">GoAhead News</a>
+                         <a class="item" href="https://github.com/embedthis/goahead">Repository</a>
+                         <a class="item" href="https://embedthis.com/blog/">Blog</a>
+-                        <a class="item" href="https://twitter.com/mobstream">Twitter</a>
++                        <a class="item" href="https://twitter.com/embedthat">Twitter</a>
+                     </span>
+diff --git a/doc/partials/sidebar.html.exp b/doc/partials/sidebar.html.exp
+index 7195a036..41243bc0 100644
+--- a/doc/partials/sidebar.html.exp
++++ b/doc/partials/sidebar.html.exp
+@@ -81,7 +81,7 @@
+                 <div class="menu">
+                     <a class="item" href="https://embedthis.com/">Embedthis Web Site</a>
+                     <a class="item" href="https://embedthis.com/blog/">Embedthis Blog</a>
+-                    <a class="item" href="http://twitter.com/mobstream">Twitter</a>
++                    <a class="item" href="http://twitter.com/embedthat">Twitter</a>
+                 </div>
+             </div>
+         </div>
+diff --git a/main.me b/main.me
+index d70418a2..b603eb07 100644
+--- a/main.me
++++ b/main.me
+@@ -2,7 +2,7 @@
+     main.me -- Main MakeMe file for GoAhead
+ 
+     This file contains the rules for targets to build and default settings for configuration.
+-    The MakeMe utility (https://embedthis.com/me) may be used to build GoAhead instead of make. 
++    The MakeMe utility (https://embedthis.com/me) may be used to build GoAhead instead of make.
+     MakeMe provides for configured builds and generates projects files.
+ 
+     Alternatively, build using the 'make' utility in which case this file is not used.
+@@ -53,7 +53,7 @@ Me.load({
+             accessLog: false,
+ 
+             /*
+-                User authentication 
++                User authentication
+              */
+             auth: true,
+ 
+@@ -76,6 +76,11 @@ Me.load({
+              */
+             cgi: true,
+ 
++            /*
++                Prefix for CGI environment variables
++             */
++            cgiPrefix: "CGI_"
++
+             /*
+                 Build with support for digest authentication
+              */
+@@ -235,9 +240,9 @@ Me.load({
+     },
+ 
+     customize: [
+-        /* 
++        /*
+             The optional custom.me file is loaded after main.me is fully processed. It can
+-            thus override any setting. Feel free to create and customize. 
++            thus override any setting. Feel free to create and customize.
+          */
+         'custom.me',
+     ],
+@@ -261,7 +266,7 @@ Me.load({
+                 prebuild: `
+                     if (me.settings.compiler.hasPam && me.settings.goahead.pam) {
+                         me.target.libraries.push('pam')
+-                    }                                                                                      
++                    }
+                 `
+             },
+         },
+@@ -275,10 +280,10 @@ Me.load({
+                 prebuild: `
+                     if (me.settings.compiler.hasPam) {
+                         me.target.libraries.push('pam')
+-                    }                                                                                      
++                    }
+                     cp(['${BIN}/self.key', '${BIN}/self.crt'], 'src')
+                     cp(['${BIN}/self.key', '${BIN}/self.crt'], 'test')
+-                `,  
++                `,
+             },
+         },
+ 
+@@ -353,4 +358,3 @@ Me.load({
+         }
+     },
+ })
+-
+diff --git a/src/cgi.c b/src/cgi.c
+index 899ec97b..18d9b45b 100644
+--- a/src/cgi.c
++++ b/src/cgi.c
+@@ -160,10 +160,17 @@ PUBLIC bool cgiHandler(Webs *wp)
+     envpsize = 64;
+     envp = walloc(envpsize * sizeof(char*));
+     for (n = 0, s = hashFirst(wp->vars); s != NULL; s = hashNext(wp->vars, s)) {
+-        if (s->content.valid && s->content.type == string &&
+-            strcmp(s->name.value.string, "REMOTE_HOST") != 0 &&
+-            strcmp(s->name.value.string, "HTTP_AUTHORIZATION") != 0) {
+-            envp[n++] = sfmt("%s=%s", s->name.value.string, s->content.value.string);
++        if (s->content.valid && s->content.type == string) {
++            if (smatch(s->name.value.string, "REMOTE_HOST") ||
++                smatch(s->name.value.string, "HTTP_AUTHORIZATION") ||
++                smatch(s->name.value.string, "IFS") ||
++                smatch(s->name.value.string, "CDPATH") ||
++                smatch(s->name.value.string, "PATH") ||
++                sstarts(s->name.value.string, "LD_")) {
++                continue;
++            }
++            envp[n++] = sfmt("%s%s=%s", ME_GOAHEAD_CGI_PREFIX,
++                s->name.value.string, s->content.value.string);
+             trace(5, "Env[%d] %s", n, envp[n-1]);
+             if (n >= envpsize) {
+                 envpsize *= 2;
+diff --git a/src/goahead.h b/src/goahead.h
+index ea5f8270..f58b8d10 100644
+--- a/src/goahead.h
++++ b/src/goahead.h
+@@ -1391,7 +1391,7 @@ PUBLIC WebsSocket *socketPtr(int sid);
+         help prevent buffer overflows and other potential security traps.
+     @defgroup WebsRuntime WebsRuntime
+     @see fmt wallocHandle wallocObject wfreeHandle hextoi itosbuf scaselesscmp scaselessmatch
+-        sclone scmp scopy sfmt sfmtv slen slower smatch sncaselesscmp sncmp sncopy stok strim supper
++        sclone scmp scopy sfmt sfmtv slen slower smatch sstarts sncaselesscmp sncmp sncopy stok strim supper
+     @stability Stable
+  */
+ 
+@@ -1575,7 +1575,7 @@ PUBLIC char *sfmtv(char *format, va_list args);
+     @ingroup WebsRuntime
+     @stability Stable
+  */
+-PUBLIC ssize slen(char *str);
++PUBLIC ssize slen(cchar *str);
+ 
+ /**
+     Convert a string to lower case.
+@@ -1667,6 +1667,16 @@ PUBLIC bool snumber(cchar *s);
+  */
+ PUBLIC char *ssplit(char *str, cchar *delim, char **last);
+ 
++/**
++    Test if the string starts with a given pattern.
++    @param str String to examine
++    @param prefix Pattern to search for
++    @return Returns TRUE if the pattern was found. Otherwise returns zero.
++    @ingroup MprString
++    @stability Stable
++ */
++PUBLIC bool sstarts(cchar *str, cchar *prefix);
++
+ /**
+     Tokenize a string
+     @description Split a string into tokens.
+diff --git a/src/runtime.c b/src/runtime.c
+index 59e0949b..95848095 100644
+--- a/src/runtime.c
++++ b/src/runtime.c
+@@ -2495,6 +2495,18 @@ PUBLIC bool smatch(char *s1, char *s2)
+ }
+ 
+ 
++PUBLIC bool sstarts(cchar *str, cchar *prefix)
++{
++    if (str == 0 || prefix == 0) {
++        return 0;
++    }
++    if (strncmp(str, prefix, slen(prefix)) == 0) {
++        return 1;
++    }
++    return 0;
++}
++
++
+ PUBLIC int scmp(char *s1, char *s2)
+ {
+     if (s1 == s2) {
+@@ -2508,7 +2520,7 @@ PUBLIC int scmp(char *s1, char *s2)
+ }
+ 
+ 
+-PUBLIC ssize slen(char *s)
++PUBLIC ssize slen(cchar *s)
+ {
+     return s ? strlen(s) : 0;
+ }

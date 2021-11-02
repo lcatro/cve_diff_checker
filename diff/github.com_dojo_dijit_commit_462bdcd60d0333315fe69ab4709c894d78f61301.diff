@@ -1,0 +1,141 @@
+From 462bdcd60d0333315fe69ab4709c894d78f61301 Mon Sep 17 00:00:00 2001
+From: Mangala Sadhu Sangeet Singh Khalsa <mssskhalsa@gmail.com>
+Date: Sat, 13 Jun 2020 05:02:38 -0700
+Subject: [PATCH] Merge pull request from GHSA-cxjc-r2fp-7mq6
+
+* Add config option `allowUnsafeHtml`: default is `false` which results in
+  `<` being replaced with `&lt;`
+* Add config option `linkFilter`: can be a function or array of filter pairs
+  to control exactly what filtering is applied
+
+This update should minimally affect production applications:
+
+* The behavior of existing links with HTML content will be unchanged
+* Existing links that are edited and saved will be filtered (this is only if
+  the link is edited, other content within the editor can be edited without
+  affecting the link)
+* Newly created links will be filtered by default
+* For production code to continue working as-is with new data the application
+  code will have to be updated to specify `true` for the `LinkDialog` plugin's
+  `allowUnsafeHtml` option
+(cherry picked from commit 7d9d4927a26a246719e153c1fad557b9a956eb60)
+---
+ _editor/plugins/LinkDialog.js     | 39 ++++++++++++++++++++++++++++---
+ tests/editor/test_LinkDialog.html | 20 ++++++++++++++++
+ 2 files changed, 56 insertions(+), 3 deletions(-)
+
+diff --git a/_editor/plugins/LinkDialog.js b/_editor/plugins/LinkDialog.js
+index c3f7e016a..9068c2d60 100644
+--- a/_editor/plugins/LinkDialog.js
++++ b/_editor/plugins/LinkDialog.js
+@@ -1,5 +1,6 @@
+ define([
+ 	"require",
++	"dojo/_base/array",
+ 	"dojo/_base/declare", // declare
+ 	"dojo/dom-attr", // domAttr.get
+ 	"dojo/keys", // keys.ENTER
+@@ -11,7 +12,7 @@ define([
+ 	"../_Plugin",
+ 	"../../form/DropDownButton",
+ 	"../range"
+-], function(require, declare, domAttr, keys, lang, on, has, query, string,
++], function(require, array, declare, domAttr, keys, lang, on, has, query, string,
+ 	_Plugin, DropDownButton, rangeapi){
+ 
+ 	// module:
+@@ -26,6 +27,21 @@ define([
+ 		//
+ 		//		- createLink
+ 
++		// allowUnsafeHtml: boolean
++		//		If false (default), the link description will be filtered to prevent HTML content.
++		//		If true no filtering is done, allowing for HTML content within the link element.
++		//		The filter can be specified with the 'linkFilter' option.
++		allowUnsafeHtml: false,
++
++		// linkFilter: function or array of replacement pairs
++		//		If 'allowUnsafeHtml' is false then this filter will be applied to the link Description value.
++		//		function: the function will be invoked with the string value of the Description field and its
++		//			return value will be used
++		//		array: each array item should be an array of two values to pass to String#replace
++		linkFilter: [
++			[/</g, "&lt;"]
++		],
++
+ 		// Override _Plugin.buttonClass.   This plugin is controlled by a DropDownButton
+ 		// (which triggers a TooltipDialog).
+ 		buttonClass: DropDownButton,
+@@ -252,6 +268,16 @@ define([
+ 			if(args && args.urlInput){
+ 				args.urlInput = args.urlInput.replace(/"/g, "&quot;");
+ 			}
++			if(!this.allowUnsafeHtml && args && args.textInput){
++				if(typeof this.linkFilter === 'function'){
++					args.textInput = this.linkFilter(args.textInput);
++				}
++				else{
++					array.forEach(this.linkFilter, function (currentFilter) {
++						args.textInput = args.textInput.replace(currentFilter[0], currentFilter[1]);
++					});
++				}
++			}
+ 			return args;
+ 		},
+ 
+@@ -629,8 +655,15 @@ define([
+ 	});
+ 
+ 	// Register these plugins
+-	_Plugin.registry["createLink"] = function(){
+-		return new LinkDialog({command: "createLink"});
++	_Plugin.registry["createLink"] = function(args){
++		var pluginOptions = {
++			command: "createLink",
++			allowUnsafeHtml: ("allowUnsafeHtml" in args) ? args.allowUnsafeHtml : false
++		};
++		if("linkFilter" in args){
++			pluginOptions.linkFilter = args.linkFilter;
++		}
++		return new LinkDialog(pluginOptions);
+ 	};
+ 	_Plugin.registry["insertImage"] = function(){
+ 		return new ImgLinkDialog({command: "insertImage"});
+diff --git a/tests/editor/test_LinkDialog.html b/tests/editor/test_LinkDialog.html
+index 1681b6e9c..3d692a058 100644
+--- a/tests/editor/test_LinkDialog.html
++++ b/tests/editor/test_LinkDialog.html
+@@ -7,6 +7,10 @@
+ 	<script type="text/javascript" src="../boilerplate.js"></script>
+ 
+ 	<script type="text/javascript">
++		function filterLink () {
++			return 'Filtered Value';
++		}
++
+ 		require([
+ 			"dojo/parser",
+ 			"dijit/Editor",
+@@ -36,6 +40,22 @@
+ 		</div>
+ 	</div>
+ 
++	<p>Editor with <code>allowUnsafeHtml</code> set to <code>true</code></p>
++	<div style="border: 1px dotted black;">
++		<div id="editorUnsafe" data-dojo-type="dijit/Editor" data-dojo-props='"aria-label":"editor",extraPlugins:[{name: "createLink", allowUnsafeHtml: true}, "insertImage", "viewSource"]'>
++			<p>This editor will allow unrestricted HTML in the Description field of links</p>
++			<br>
++		</div>
++	</div>
++
++	<p>Editor with custom <code>linkFilter</code> function</p>
++	<div style="border: 1px dotted black;">
++		<div id="editorLinkFilter" data-dojo-type="dijit/Editor" data-dojo-props='"aria-label":"editor",extraPlugins:[{name: "createLink", linkFilter: filterLink}, "insertImage", "viewSource"]'>
++			<p>Links created in this editor will always have a description of "Filtered Value", which is the value returned by the custom <code>linkFilter</code> function.</p>
++			<br>
++		</div>
++	</div>
++
+ 	<p>RTL Editor:</p>
+ 	<div style="border: 1px dotted black;">
+ 		<div id="reditor" data-dojo-type="dijit/Editor" dir="rtl" data-dojo-props='"aria-label":"reditor",extraPlugins:["createLink", "insertImage"]'>

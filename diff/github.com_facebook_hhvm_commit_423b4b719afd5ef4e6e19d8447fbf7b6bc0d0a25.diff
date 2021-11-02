@@ -1,0 +1,37 @@
+From 423b4b719afd5ef4e6e19d8447fbf7b6bc0d0a25 Mon Sep 17 00:00:00 2001
+From: Brett Simmers <bsimmers@fb.com>
+Date: Mon, 18 Jul 2016 20:44:23 -0700
+Subject: [PATCH] CVE-2016-1000109: Ignore Proxy HTTP header from fastcgi
+ requests
+
+Summary:
+The default PHP behavior is to transform a Proxy header from requests
+into the HTTP_PROXY environment variable in the PHP environment running the
+request. Some scripts may use this env var to decide which HTTP proxy to
+connect to, and we don't want requests to have that kind of control over
+scripts' behavior.
+
+Reviewed By: alexmalyshev, Orvid
+
+Differential Revision: D3579221
+
+fbshipit-source-id: 18a405fd73aee65283aea99ff995f8082b3fc3b5
+---
+ hphp/runtime/server/fastcgi/fastcgi-transport.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hphp/runtime/server/fastcgi/fastcgi-transport.cpp b/hphp/runtime/server/fastcgi/fastcgi-transport.cpp
+index 5b69d9190cb4..756e12e59e10 100644
+--- a/hphp/runtime/server/fastcgi/fastcgi-transport.cpp
++++ b/hphp/runtime/server/fastcgi/fastcgi-transport.cpp
+@@ -212,6 +212,10 @@ void FastCGITransport::onHeader(std::unique_ptr<folly::IOBuf> key_chain,
+   Cursor keyCur(key_chain.get());
+   auto key = keyCur.readFixedString(key_chain->computeChainDataLength());
+ 
++  // Don't allow requests to inject an HTTP_PROXY environment variable by
++  // sending a Proxy header.
++  if (strcasecmp(key.c_str(), "HTTP_PROXY") == 0) return;
++
+   Cursor valCur(value_chain.get());
+   auto value = valCur.readFixedString(value_chain->computeChainDataLength());
+ 

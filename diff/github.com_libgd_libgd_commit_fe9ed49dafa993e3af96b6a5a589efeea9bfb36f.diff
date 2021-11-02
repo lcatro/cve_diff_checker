@@ -1,0 +1,128 @@
+From fe9ed49dafa993e3af96b6a5a589efeea9bfb36f Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Tue, 16 Aug 2016 18:23:36 +0200
+Subject: [PATCH] Fix DOS vulnerability in gdImageCreateFromGd2Ctx()
+
+We must not pretend that there are image data if there are none. Instead
+we fail reading the image file gracefully.
+---
+ src/gd_gd2.c                     |  14 ++++++--------
+ tests/gd2/.gitignore             |   1 +
+ tests/gd2/CMakeLists.txt         |   1 +
+ tests/gd2/Makemodule.am          |   7 +++++--
+ tests/gd2/too_few_image_data.c   |  22 ++++++++++++++++++++++
+ tests/gd2/too_few_image_data.gd2 | Bin 0 -> 1050 bytes
+ 6 files changed, 35 insertions(+), 10 deletions(-)
+ create mode 100644 tests/gd2/too_few_image_data.c
+ create mode 100644 tests/gd2/too_few_image_data.gd2
+
+diff --git a/src/gd_gd2.c b/src/gd_gd2.c
+index 3c7168260..d07828c78 100644
+--- a/src/gd_gd2.c
++++ b/src/gd_gd2.c
+@@ -503,18 +503,16 @@ BGD_DECLARE(gdImagePtr) gdImageCreateFromGd2Ctx (gdIOCtxPtr in)
+ 
+ 						if (im->trueColor) {
+ 							if (!gdGetInt (&im->tpixels[y][x], in)) {
+-								/*printf("EOF while reading\n"); */
+-								/*gdImageDestroy(im); */
+-								/*return 0; */
+-								im->tpixels[y][x] = 0;
++								gd_error("gd2: EOF while reading\n");
++								gdImageDestroy(im);
++								return NULL;
+ 							}
+ 						} else {
+ 							int ch;
+ 							if (!gdGetByte (&ch, in)) {
+-								/*printf("EOF while reading\n"); */
+-								/*gdImageDestroy(im); */
+-								/*return 0; */
+-								ch = 0;
++								gd_error("gd2: EOF while reading\n");
++								gdImageDestroy(im);
++								return NULL;
+ 							}
+ 							im->pixels[y][x] = ch;
+ 						}
+diff --git a/tests/gd2/.gitignore b/tests/gd2/.gitignore
+index 136a2d50f..39d8bf4eb 100644
+--- a/tests/gd2/.gitignore
++++ b/tests/gd2/.gitignore
+@@ -6,3 +6,4 @@
+ /gd2_read
+ /gd2_read_corrupt
+ /php_bug_72339
++/too_few_image_data
+diff --git a/tests/gd2/CMakeLists.txt b/tests/gd2/CMakeLists.txt
+index 8fcc90652..5a61d113a 100644
+--- a/tests/gd2/CMakeLists.txt
++++ b/tests/gd2/CMakeLists.txt
+@@ -7,6 +7,7 @@ LIST(APPEND TESTS_FILES
+ 	php_bug_72339
+ 	gd2_read
+ 	gd2_read_corrupt
++	too_few_image_data
+ )
+ 
+ ADD_GD_TESTS()
+diff --git a/tests/gd2/Makemodule.am b/tests/gd2/Makemodule.am
+index d69aee024..c1fbf440a 100644
+--- a/tests/gd2/Makemodule.am
++++ b/tests/gd2/Makemodule.am
+@@ -3,7 +3,8 @@ libgd_test_programs += \
+ 	gd2/bug00309 \
+ 	gd2/gd2_empty_file \
+ 	gd2/php_bug_72339 \
+-	gd2/gd2_read_corrupt
++	gd2/gd2_read_corrupt \
++	gd2/too_few_image_data
+ 
+ if HAVE_LIBZ
+ libgd_test_programs += \
+@@ -23,4 +24,6 @@ EXTRA_DIST += \
+ 	gd2/conv_test_exp.png \
+ 	gd2/empty.gd2 \
+ 	gd2/invalid_header.gd2 \
+-	gd2/invalid_neg_size.gd2
++	gd2/invalid_neg_size.gd2 \
++	gd2/php_bug_72339_exp.gd2 \
++	gd2/too_few_image_data.gd2
+diff --git a/tests/gd2/too_few_image_data.c b/tests/gd2/too_few_image_data.c
+new file mode 100644
+index 000000000..3153a0800
+--- /dev/null
++++ b/tests/gd2/too_few_image_data.c
+@@ -0,0 +1,22 @@
++/*
++too_few_image_data.gd2 claims to have a size of 12336x48 pixels, but doesn't
++provide as much image data. We test that gdImageCreateFromGd2Ctx() returns NULL
++in this case.
++*/
++
++#include "gd.h"
++#include "gdtest.h"
++
++int main()
++{
++    gdImagePtr im;
++    FILE *fp;
++
++    fp = gdTestFileOpen2("gd2", "too_few_image_data.gd2");
++    gdTestAssert(fp != NULL);
++    im = gdImageCreateFromGd2(fp);
++    gdTestAssert(im == NULL);
++    fclose(fp);
++
++    return gdNumFailures();
++}
+diff --git a/tests/gd2/too_few_image_data.gd2 b/tests/gd2/too_few_image_data.gd2
+new file mode 100644
+index 0000000000000000000000000000000000000000..1c797d1acfae114be5505962f9f3201f01bca420
+GIT binary patch
+literal 1050
+kcmYdKF=Aj~GB98;U@~A}1kqrw!6+CFfzc2c!6Cp30J@*U8UO$Q
+
+literal 0
+HcmV?d00001
+

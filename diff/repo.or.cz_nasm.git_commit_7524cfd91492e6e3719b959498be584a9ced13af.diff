@@ -1,0 +1,32 @@
+From 7524cfd91492e6e3719b959498be584a9ced13af Mon Sep 17 00:00:00 2001
+From: Cyrill Gorcunov <gorcunov@gmail.com>
+Date: Sun, 22 Oct 2017 19:01:16 +0300
+Subject: [PATCH] preproc: Fix sigsegv in find_cc
+
+For specially formed code we can have skip_white_
+to end up with nil pointer which should be taken
+into account.
+
+https://bugzilla.nasm.us/show_bug.cgi?id=3392435
+
+Signed-off-by: Cyrill Gorcunov <gorcunov@gmail.com>
+---
+ asm/preproc.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/asm/preproc.c b/asm/preproc.c
+index cd4a9494..43b62aa7 100644
+--- a/asm/preproc.c
++++ b/asm/preproc.c
+@@ -3714,6 +3714,8 @@ static int find_cc(Token * t)
+         return -1;              /* Probably a %+ without a space */
+ 
+     skip_white_(t);
++    if (!t)
++        return -1;
+     if (t->type != TOK_ID)
+         return -1;
+     tt = t->next;
+-- 
+2.11.4.GIT
+

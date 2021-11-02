@@ -1,0 +1,51 @@
+From 814f31d8eceda8401eb812fc2e94ed143fdad0ab Mon Sep 17 00:00:00 2001
+From: sezero <sezero@users.sourceforge.net>
+Date: Fri, 4 Aug 2017 10:15:00 +0300
+Subject: [PATCH] wildmidi_lib.c (WildMidi_Open, WildMidi_OpenBuffer): refuse
+ to proceed if less then 18 bytes of input
+
+Fixes bug #178.
+---
+ README.md          | 2 ++
+ src/wildmidi_lib.c | 8 ++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/README.md b/README.md
+index bc0ea32..8268474 100644
+--- a/README.md
++++ b/README.md
+@@ -38,6 +38,8 @@ CHANGELOG
+ 0.4.2
+ * Fixed CVE-2017-11661, CVE-2017-11662, CVE-2017-11663, CVE-2017-11664
+   (Bug #175).
++* Fixed WildMidi_Open() might read beyond buffer with too short inputs
++  (Bug #178).
+ * GUS patch processing changes to meet users expectations (Bug #132).
+ * Worked around a build failure with newer FreeBSD versions failing to
+   retrieve the ONLCR constant (Bug #171).
+diff --git a/src/wildmidi_lib.c b/src/wildmidi_lib.c
+index 15c1bb1..3842e90 100644
+--- a/src/wildmidi_lib.c
++++ b/src/wildmidi_lib.c
+@@ -1655,6 +1655,10 @@ WM_SYMBOL midi *WildMidi_Open(const char *midifile) {
+     if ((mididata = (uint8_t *) _WM_BufferFile(midifile, &midisize)) == NULL) {
+         return (NULL);
+     }
++    if (midisize < 18) {
++        _WM_GLOBAL_ERROR(__FUNCTION__, __LINE__, WM_ERR_CORUPT, "(too short)", 0);
++        return (NULL);
++    }
+     if (memcmp(mididata,"HMIMIDIP", 8) == 0) {
+         ret = (void *) _WM_ParseNewHmp(mididata, midisize);
+     } else if (memcmp(mididata, "HMI-MIDISONG061595", 18) == 0) {
+@@ -1696,6 +1700,10 @@ WM_SYMBOL midi *WildMidi_OpenBuffer(uint8_t *midibuffer, uint32_t size) {
+         _WM_GLOBAL_ERROR(__FUNCTION__, __LINE__, WM_ERR_LONGFIL, NULL, 0);
+         return (NULL);
+     }
++    if (size < 18) {
++        _WM_GLOBAL_ERROR(__FUNCTION__, __LINE__, WM_ERR_CORUPT, "(too short)", 0);
++        return (NULL);
++    }
+     if (memcmp(midibuffer,"HMIMIDIP", 8) == 0) {
+         ret = (void *) _WM_ParseNewHmp(midibuffer, size);
+     } else if (memcmp(midibuffer, "HMI-MIDISONG061595", 18) == 0) {

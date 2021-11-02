@@ -1,0 +1,206 @@
+From dd88504804e186029f845a166dc5c31695e2cca2 Mon Sep 17 00:00:00 2001
+From: Shuo A Liu <shuo.a.liu@intel.com>
+Date: Mon, 10 May 2021 13:31:25 +0800
+Subject: [PATCH] dm: Reset virtio device before release
+
+With virtio polling mode enabled, a timer is running in the virtio
+backend service. And the timer will also be triggered if its frondend
+driver didn't do the device reset in shutdown. A freed virtio device
+will be accessed in the polling timer handler.
+
+Do the virtio reset() callback specifically to clear the polling timer
+before the free.
+
+Tracked-On: #6147
+Signed-off-by: Shuo A Liu <shuo.a.liu@intel.com>
+Signed-off-by: Yonghua Huang <yonghua.huang@intel.com>
+---
+ devicemodel/hw/pci/virtio/virtio_audio.c        | 1 +
+ devicemodel/hw/pci/virtio/virtio_block.c        | 1 +
+ devicemodel/hw/pci/virtio/virtio_console.c      | 1 +
+ devicemodel/hw/pci/virtio/virtio_coreu.c        | 1 +
+ devicemodel/hw/pci/virtio/virtio_gpio.c         | 1 +
+ devicemodel/hw/pci/virtio/virtio_hdcp.c         | 1 +
+ devicemodel/hw/pci/virtio/virtio_hyper_dmabuf.c | 4 +++-
+ devicemodel/hw/pci/virtio/virtio_i2c.c          | 1 +
+ devicemodel/hw/pci/virtio/virtio_input.c        | 2 ++
+ devicemodel/hw/pci/virtio/virtio_ipu.c          | 1 +
+ devicemodel/hw/pci/virtio/virtio_mei.c          | 1 +
+ devicemodel/hw/pci/virtio/virtio_net.c          | 1 +
+ devicemodel/hw/pci/virtio/virtio_rnd.c          | 1 +
+ devicemodel/hw/pci/virtio/virtio_rpmb.c         | 1 +
+ 14 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/devicemodel/hw/pci/virtio/virtio_audio.c b/devicemodel/hw/pci/virtio/virtio_audio.c
+index 0cf88db05b..3dc1d30749 100644
+--- a/devicemodel/hw/pci/virtio/virtio_audio.c
++++ b/devicemodel/hw/pci/virtio/virtio_audio.c
+@@ -376,6 +376,7 @@ virtio_audio_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 		close(virt_audio->vbs_k.audio_fd);
+ 		virt_audio->vbs_k.audio_fd = -1;
+ 	}
++	virtio_audio_reset(virt_audio);
+ 	pthread_mutex_destroy(&virt_audio->mtx);
+ 	DPRINTF(("%s: free struct virtio_audio!\n", __func__));
+ 	free((struct virtio_audio *)dev->arg);
+diff --git a/devicemodel/hw/pci/virtio/virtio_block.c b/devicemodel/hw/pci/virtio/virtio_block.c
+index 38586d9bb5..9032960e1d 100644
+--- a/devicemodel/hw/pci/virtio/virtio_block.c
++++ b/devicemodel/hw/pci/virtio/virtio_block.c
+@@ -587,6 +587,7 @@ virtio_blk_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 				WPRINTF(("vrito_blk: Failed to flush before close\n"));
+ 			blockif_close(bctxt);
+ 		}
++		virtio_reset_dev(&blk->base);
+ 		free(blk);
+ 	}
+ }
+diff --git a/devicemodel/hw/pci/virtio/virtio_console.c b/devicemodel/hw/pci/virtio/virtio_console.c
+index fe12be1c83..3eda8badc6 100644
+--- a/devicemodel/hw/pci/virtio/virtio_console.c
++++ b/devicemodel/hw/pci/virtio/virtio_console.c
+@@ -1009,6 +1009,7 @@ static void
+ virtio_console_destroy(struct virtio_console *console)
+ {
+ 	if (console) {
++		virtio_console_reset(console);
+ 		if (console->config)
+ 			free(console->config);
+ 		free(console);
+diff --git a/devicemodel/hw/pci/virtio/virtio_coreu.c b/devicemodel/hw/pci/virtio/virtio_coreu.c
+index 653fd8fd9b..e7f67c1fa7 100644
+--- a/devicemodel/hw/pci/virtio/virtio_coreu.c
++++ b/devicemodel/hw/pci/virtio/virtio_coreu.c
+@@ -358,6 +358,7 @@ virtio_coreu_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 	pthread_cond_destroy(&vcoreu->rx_cond);
+ 	pthread_join(vcoreu->rx_tid, NULL);
+ 
++	virtio_coreu_reset(vcoreu);
+ 	free(vcoreu);
+ }
+ 
+diff --git a/devicemodel/hw/pci/virtio/virtio_gpio.c b/devicemodel/hw/pci/virtio/virtio_gpio.c
+index f157698965..a1502155c3 100644
+--- a/devicemodel/hw/pci/virtio/virtio_gpio.c
++++ b/devicemodel/hw/pci/virtio/virtio_gpio.c
+@@ -1433,6 +1433,7 @@ virtio_gpio_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 		gpio_irq_deinit(gpio);
+ 		for (i = 0; i < gpio->nchip; i++)
+ 			native_gpio_close_chip(&gpio->chips[i]);
++		virtio_gpio_reset(gpio);
+ 		free(gpio);
+ 		dev->arg = NULL;
+ 	}
+diff --git a/devicemodel/hw/pci/virtio/virtio_hdcp.c b/devicemodel/hw/pci/virtio/virtio_hdcp.c
+index 4786c5a268..97b122ff48 100644
+--- a/devicemodel/hw/pci/virtio/virtio_hdcp.c
++++ b/devicemodel/hw/pci/virtio/virtio_hdcp.c
+@@ -480,6 +480,7 @@ virtio_hdcp_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 
+ 	if (vhdcp) {
+ 		DPRINTF(("free struct virtio_hdcp\n"));
++		virtio_hdcp_reset(vhdcp);
+ 		free(vhdcp);
+ 	}
+ }
+diff --git a/devicemodel/hw/pci/virtio/virtio_hyper_dmabuf.c b/devicemodel/hw/pci/virtio/virtio_hyper_dmabuf.c
+index c2d3a68d58..3d7edcf543 100644
+--- a/devicemodel/hw/pci/virtio/virtio_hyper_dmabuf.c
++++ b/devicemodel/hw/pci/virtio/virtio_hyper_dmabuf.c
+@@ -348,8 +348,10 @@ virtio_hyper_dmabuf_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 		vbs_k_hyper_dmabuf_fd = -1;
+ 	}
+ 
+-	if (dev->arg)
++	if (dev->arg) {
++		virtio_hyper_dmabuf_reset(dev->arg);
+ 		free((struct virtio_hyper_dmabuf *)dev->arg);
++	}
+ }
+ 
+ struct pci_vdev_ops pci_ops_virtio_hyper_dmabuf = {
+diff --git a/devicemodel/hw/pci/virtio/virtio_i2c.c b/devicemodel/hw/pci/virtio/virtio_i2c.c
+index 459948f9ed..55cf64d699 100644
+--- a/devicemodel/hw/pci/virtio/virtio_i2c.c
++++ b/devicemodel/hw/pci/virtio/virtio_i2c.c
+@@ -826,6 +826,7 @@ virtio_i2c_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 		native_adapter_remove(vi2c);
+ 		pthread_mutex_destroy(&vi2c->req_mtx);
+ 		pthread_mutex_destroy(&vi2c->mtx);
++		virtio_i2c_reset(vi2c);
+ 		free(vi2c);
+ 		dev->arg = NULL;
+ 	}
+diff --git a/devicemodel/hw/pci/virtio/virtio_input.c b/devicemodel/hw/pci/virtio/virtio_input.c
+index 856597d8fc..181150d003 100644
+--- a/devicemodel/hw/pci/virtio/virtio_input.c
++++ b/devicemodel/hw/pci/virtio/virtio_input.c
+@@ -585,6 +585,8 @@ virtio_input_teardown(void *param)
+ 			free(vi->evdev);
+ 		if (vi->serial)
+ 			free(vi->serial);
++
++		virtio_input_reset(vi);
+ 		free(vi);
+ 		vi = NULL;
+ 	}
+diff --git a/devicemodel/hw/pci/virtio/virtio_ipu.c b/devicemodel/hw/pci/virtio/virtio_ipu.c
+index 9443a89e0d..c01a035681 100644
+--- a/devicemodel/hw/pci/virtio/virtio_ipu.c
++++ b/devicemodel/hw/pci/virtio/virtio_ipu.c
+@@ -377,6 +377,7 @@ virtio_ipu_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 			close(ipu->vbs_k.ipu_fd);
+ 		ipu->vbs_k.ipu_fd = -1;
+ 	}
++	virtio_ipu_reset(ipu);
+ 	pthread_mutex_destroy(&ipu->mtx);
+ 	free(ipu);
+ }
+diff --git a/devicemodel/hw/pci/virtio/virtio_mei.c b/devicemodel/hw/pci/virtio/virtio_mei.c
+index 8efa93f2f1..d50c5a2786 100644
+--- a/devicemodel/hw/pci/virtio/virtio_mei.c
++++ b/devicemodel/hw/pci/virtio/virtio_mei.c
+@@ -971,6 +971,7 @@ vmei_reset_teardown(void *param)
+ 	vmei->reset_mevp = NULL;
+ 
+ 	pthread_mutex_destroy(&vmei->mutex);
++	virtio_reset_dev(&vmei->base);
+ 	free(vmei->config);
+ 	free(vmei);
+ }
+diff --git a/devicemodel/hw/pci/virtio/virtio_net.c b/devicemodel/hw/pci/virtio/virtio_net.c
+index 8a0afb95e6..3e35a1b68f 100644
+--- a/devicemodel/hw/pci/virtio/virtio_net.c
++++ b/devicemodel/hw/pci/virtio/virtio_net.c
+@@ -1067,6 +1067,7 @@ virtio_net_teardown(void *param)
+ 	} else
+ 		pr_err("net->tapfd is -1!\n");
+ 
++	virtio_reset_dev(&net->base);
+ 	free(net);
+ }
+ 
+diff --git a/devicemodel/hw/pci/virtio/virtio_rnd.c b/devicemodel/hw/pci/virtio/virtio_rnd.c
+index 462afa3978..247142320e 100644
+--- a/devicemodel/hw/pci/virtio/virtio_rnd.c
++++ b/devicemodel/hw/pci/virtio/virtio_rnd.c
+@@ -510,6 +510,7 @@ virtio_rnd_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ 		close(rnd->fd);
+ 		rnd->fd = -1;
+ 	}
++	virtio_rnd_reset(rnd);
+ 	DPRINTF(("%s: free struct virtio_rnd!\n", __func__));
+ 	free(rnd);
+ }
+diff --git a/devicemodel/hw/pci/virtio/virtio_rpmb.c b/devicemodel/hw/pci/virtio/virtio_rpmb.c
+index 8574e3f7dc..216a2dbb61 100644
+--- a/devicemodel/hw/pci/virtio/virtio_rpmb.c
++++ b/devicemodel/hw/pci/virtio/virtio_rpmb.c
+@@ -794,6 +794,7 @@ virtio_rpmb_deinit(struct vmctx *ctx, struct pci_vdev *dev, char *opts)
+ {
+ 	if (dev->arg) {
+ 		DPRINTF(("virtio_rpmb_be_deinit: free struct virtio_rpmb!\n"));
++		virtio_rpmb_reset(dev->arg);
+ 		free((struct virtio_rpmb *)dev->arg);
+ 	}
+ }

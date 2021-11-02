@@ -1,0 +1,32 @@
+From c1e1fc899ad5f8c725dcbb6470069890b5060bc7 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 4 Dec 2020 17:06:23 -0800
+Subject: [PATCH] Mark `MemmappedTensorAllocator` as returning opaque handle.
+
+This allocator is used for `ImmutableConstantOp` and it returns a handle to the contents of a memory mapped file which is supposed to represent a tensor.
+
+For tensors of complex types (resources, variables and strings), allocators which are not marked as returning opaque handles will call placement new to initialize each element. This means writing to the buffer. However, in our case, the buffer is immutable and already contains the tensor data. Hence, writing to it is both destructive and causes a crash.
+
+PiperOrigin-RevId: 345786451
+Change-Id: I46369c50fa60b3431709ffe068a728d3061f49c4
+---
+ tensorflow/core/kernels/immutable_constant_op.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tensorflow/core/kernels/immutable_constant_op.cc b/tensorflow/core/kernels/immutable_constant_op.cc
+index 0dd08c694eb6c..1cfbdb8277891 100644
+--- a/tensorflow/core/kernels/immutable_constant_op.cc
++++ b/tensorflow/core/kernels/immutable_constant_op.cc
+@@ -62,6 +62,12 @@ class MemmappedTensorAllocator : public Allocator {
+ 
+   void set_delete_on_deallocate() { delete_on_deallocate_ = true; }
+ 
++  // Make sure tensors or complex types (strings, variants, resources) don't get
++  // their constructor called via a placement new since that would require
++  // writing to immutable data.
++  // See also: tensorflow/core/framework/typed_allocator.h
++  bool AllocatesOpaqueHandle() const override { return true; }
++
+  private:
+   std::unique_ptr<ReadOnlyMemoryRegion> memory_region_;
+   // If there is an error during allocation we keep it in this status.

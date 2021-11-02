@@ -1,0 +1,880 @@
+From 89155f2506b9cee822e15ce60ccae390a1419d5e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?St=C3=A9phane=20Brunner?= <stephane.brunner@camptocamp.com>
+Date: Thu, 2 Jul 2020 16:42:18 +0200
+Subject: [PATCH] Remove JSONP support
+
+See: https://github.com/mapfish/mapfish-print/security/code-scanning/5?query=ref%3Arefs%2Fheads%2Fmaster
+---
+ BREAKING-CHANGES.md                           |   4 +
+ .../print/servlet/MapPrinterServlet.java      |  91 ++--------
+ .../MapPrinterServletSecurityTest.java        |   2 +-
+ .../print/servlet/MapPrinterServletTest.java  | 159 ++++--------------
+ .../org/mapfish/print/AbstractApiTest.java    |   6 -
+ .../java/org/mapfish/print/PrintApiTest.java  |  84 +--------
+ 6 files changed, 54 insertions(+), 292 deletions(-)
+
+diff --git a/BREAKING-CHANGES.md b/BREAKING-CHANGES.md
+index 67a6b6cfb..b3eabc00f 100644
+--- a/BREAKING-CHANGES.md
++++ b/BREAKING-CHANGES.md
+@@ -1,5 +1,9 @@
+ # Known breaking changes
+ 
++## Version 3.24
++
++- Removing JsonP support.
++
+ ## Version 3.13
+ 
+ - If throwErrorOnExtraParameters is set to true and the JSON contains extra attributes,
+diff --git a/core/src/main/java/org/mapfish/print/servlet/MapPrinterServlet.java b/core/src/main/java/org/mapfish/print/servlet/MapPrinterServlet.java
+index 93a33e74a..5d4d76bfb 100644
+--- a/core/src/main/java/org/mapfish/print/servlet/MapPrinterServlet.java
++++ b/core/src/main/java/org/mapfish/print/servlet/MapPrinterServlet.java
+@@ -121,7 +121,7 @@
+     /**
+      * If the job is done (value is true) or not (value is false).
+      *
+-     * Part of the {@link #getStatus(String, String, javax.servlet.http.HttpServletRequest,
++     * Part of the {@link #getStatus(String, javax.servlet.http.HttpServletRequest,
+      * javax.servlet.http.HttpServletResponse)} response.
+      */
+     public static final String JSON_DONE = "done";
+@@ -134,7 +134,7 @@
+      * <li>cancelled</li>
+      * <li>error</li>
+      * </ul>
+-     * Part of the {@link #getStatus(String, String, javax.servlet.http.HttpServletRequest,
++     * Part of the {@link #getStatus(String, javax.servlet.http.HttpServletRequest,
+      * javax.servlet.http.HttpServletResponse)} response
+      */
+     public static final String JSON_STATUS = "status";
+@@ -142,14 +142,14 @@
+      * The elapsed time in ms from the point the job started. If the job is finished, this is the duration it
+      * took to process the job.
+      *
+-     * Part of the {@link #getStatus(String, String, javax.servlet.http.HttpServletRequest,
++     * Part of the {@link #getStatus(String, javax.servlet.http.HttpServletRequest,
+      * javax.servlet.http.HttpServletResponse)} response.
+      */
+     public static final String JSON_ELAPSED_TIME = "elapsedTime";
+     /**
+      * A rough estimate for the time in ms the job still has to wait in the queue until it starts processing.
+      *
+-     * Part of the {@link #getStatus(String, String, javax.servlet.http.HttpServletRequest,
++     * Part of the {@link #getStatus(String, javax.servlet.http.HttpServletRequest,
+      * javax.servlet.http.HttpServletResponse)} response.
+      */
+     public static final String JSON_WAITING_TIME = "waitingTime";
+@@ -271,7 +271,8 @@ private static PJsonObject parseJson(
+     private static String maybeAddRequestId(final String ref, final HttpServletRequest request) {
+         final Optional<String> headerName =
+                 REQUEST_ID_HEADERS.stream().filter(h -> request.getHeader(h) != null).findFirst();
+-        return headerName.map(s -> ref + "@" + request.getHeader(s).replaceAll("[^a-zA-Z0-9._:-]", "_")
++        return headerName.map(
++            s -> ref + "@" + request.getHeader(s).replaceAll("[^a-zA-Z0-9._:-]", "_")
+         ).orElse(ref);
+     }
+ 
+@@ -284,7 +285,6 @@ private static String maybeAddRequestId(final String ref, final HttpServletReque
+      *
+      * @param appId the app ID
+      * @param referenceId the job reference
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param statusRequest the request object
+      * @param statusResponse the response object
+      */
+@@ -292,10 +292,9 @@ private static String maybeAddRequestId(final String ref, final HttpServletReque
+     public final void getStatusSpecificAppId(
+             @SuppressWarnings("unused") @PathVariable final String appId,
+             @PathVariable final String referenceId,
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest statusRequest,
+             final HttpServletResponse statusResponse) {
+-        getStatus(referenceId, jsonpCallback, statusRequest, statusResponse);
++        getStatus(referenceId, statusRequest, statusResponse);
+     }
+ 
+     /**
+@@ -306,14 +305,12 @@ public final void getStatusSpecificAppId(
+      * </code></pre>
+      *
+      * @param referenceId the job reference
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param statusRequest the request object
+      * @param statusResponse the response object
+      */
+     @RequestMapping(value = STATUS_URL + "/{referenceId:\\S+}.json", method = RequestMethod.GET)
+     public final void getStatus(
+             @PathVariable final String referenceId,
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest statusRequest,
+             final HttpServletResponse statusResponse) {
+         MDC.put(Processor.MDC_JOB_ID_KEY, referenceId);
+@@ -321,10 +318,8 @@ public final void getStatus(
+         try {
+             PrintJobStatus status = this.jobManager.getStatus(referenceId);
+ 
+-            setContentType(statusResponse, jsonpCallback);
++            setContentType(statusResponse);
+             try (PrintWriter writer = statusResponse.getWriter()) {
+-
+-                appendJsonpCallback(jsonpCallback, writer);
+                 JSONWriter json = new JSONWriter(writer);
+                 json.object();
+                 {
+@@ -339,7 +334,6 @@ public final void getStatus(
+                     addDownloadLinkToJson(statusRequest, referenceId, json);
+                 }
+                 json.endObject();
+-                appendJsonpCallbackEnd(jsonpCallback, writer);
+             }
+         } catch (JSONException | IOException e) {
+             throw ExceptionUtils.getRuntimeException(e);
+@@ -638,22 +632,18 @@ public final void createReportAndGetNoAppId(
+     /**
+      * To get (in JSON) the information about the available formats and CO.
+      *
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param listAppsResponse the response object
+      */
+     @RequestMapping(value = LIST_APPS_URL, method = RequestMethod.GET)
+     public final void listAppIds(
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletResponse listAppsResponse) throws ServletException,
+             IOException {
+         MDC.remove(Processor.MDC_JOB_ID_KEY);
+         setCache(listAppsResponse);
+         Set<String> appIds = this.printerFactory.getAppIds();
+ 
+-        setContentType(listAppsResponse, jsonpCallback);
++        setContentType(listAppsResponse);
+         try (PrintWriter writer = listAppsResponse.getWriter()) {
+-            appendJsonpCallback(jsonpCallback, writer);
+-
+             JSONWriter json = new JSONWriter(writer);
+             try {
+                 json.array();
+@@ -664,8 +654,6 @@ public final void listAppIds(
+             } catch (JSONException e) {
+                 throw new ServletException(e);
+             }
+-
+-            appendJsonpCallbackEnd(jsonpCallback, writer);
+         }
+     }
+ 
+@@ -673,18 +661,16 @@ public final void listAppIds(
+      * To get (in JSON) the information about the available formats and CO.
+      *
+      * @param pretty if true then pretty print the capabilities
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param request the request
+      * @param capabilitiesResponse the response object
+      */
+     @RequestMapping(value = CAPABILITIES_URL, method = RequestMethod.GET)
+     public final void getCapabilities(
+             @RequestParam(value = "pretty", defaultValue = "false") final boolean pretty,
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest request,
+             final HttpServletResponse capabilitiesResponse) throws ServletException,
+             IOException {
+-        getCapabilities(DEFAULT_CONFIGURATION_FILE_KEY, pretty, jsonpCallback, request, capabilitiesResponse);
++        getCapabilities(DEFAULT_CONFIGURATION_FILE_KEY, pretty, request, capabilitiesResponse);
+     }
+ 
+     /**
+@@ -693,7 +679,6 @@ public final void getCapabilities(
+      * @param appId the name of the "app" or in other words, a mapping to the configuration file for
+      *         this request.
+      * @param pretty if true then pretty print the capabilities
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param request the request
+      * @param capabilitiesResponse the response object
+      */
+@@ -701,7 +686,6 @@ public final void getCapabilities(
+     public final void getCapabilities(
+             @PathVariable final String appId,
+             @RequestParam(value = "pretty", defaultValue = "false") final boolean pretty,
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest request,
+             final HttpServletResponse capabilitiesResponse) throws ServletException,
+             IOException {
+@@ -719,16 +703,12 @@ public final void getCapabilities(
+             return;
+         }
+ 
+-        setContentType(capabilitiesResponse, jsonpCallback);
++        setContentType(capabilitiesResponse);
+ 
+         final ByteArrayOutputStream prettyPrintBuffer = new ByteArrayOutputStream();
+ 
+         try (Writer writer = pretty ? new OutputStreamWriter(prettyPrintBuffer, Constants.DEFAULT_CHARSET) :
+                 capabilitiesResponse.getWriter()) {
+-            if (!pretty && !StringUtils.isEmpty(jsonpCallback)) {
+-                writer.append(jsonpCallback).append("(");
+-            }
+-
+             JSONWriter json = new JSONWriter(writer);
+             try {
+                 json.object();
+@@ -749,53 +729,38 @@ public final void getCapabilities(
+             } catch (JSONException e) {
+                 throw new ServletException(e);
+             }
+-
+-            if (!pretty && !StringUtils.isEmpty(jsonpCallback)) {
+-                writer.append(");");
+-            }
+         }
+ 
+         if (pretty) {
+             final JSONObject jsonObject =
+                     new JSONObject(new String(prettyPrintBuffer.toByteArray(), Constants.DEFAULT_CHARSET));
+-
+-            if (!StringUtils.isEmpty(jsonpCallback)) {
+-                capabilitiesResponse.getOutputStream().print(jsonpCallback + "(");
+-            }
+             capabilitiesResponse.getOutputStream().print(jsonObject.toString(JSON_INDENT_FACTOR));
+-            if (!StringUtils.isEmpty(jsonpCallback)) {
+-                capabilitiesResponse.getOutputStream().print(");");
+-            }
+         }
+     }
+ 
+     /**
+      * Get a sample request for the app.  An empty response may be returned if there is not example request.
+      *
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param request the request object
+      * @param getExampleResponse the response object
+      */
+     @RequestMapping(value = EXAMPLE_REQUEST_URL, method = RequestMethod.GET)
+     public final void getExampleRequest(
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest request,
+             final HttpServletResponse getExampleResponse) throws IOException {
+-        getExampleRequest(DEFAULT_CONFIGURATION_FILE_KEY, jsonpCallback, request, getExampleResponse);
++        getExampleRequest(DEFAULT_CONFIGURATION_FILE_KEY, request, getExampleResponse);
+     }
+ 
+     /**
+      * Get a sample request for the app.  An empty response may be returned if there is not example request.
+      *
+      * @param appId the id of the app to get the request for.
+-     * @param jsonpCallback if given the result is returned with a function call wrapped around it
+      * @param request the request object
+      * @param getExampleResponse the response object
+      */
+     @RequestMapping(value = "{appId}" + EXAMPLE_REQUEST_URL, method = RequestMethod.GET)
+     public final void getExampleRequest(
+             @PathVariable final String appId,
+-            @RequestParam(value = "jsonp", defaultValue = "") final String jsonpCallback,
+             final HttpServletRequest request,
+             final HttpServletResponse getExampleResponse) throws
+             IOException {
+@@ -827,7 +792,7 @@ public final void getExampleRequest(
+                         jsonObject.remove(JSON_APP);
+                         requestData = jsonObject.toString(JSON_INDENT_FACTOR);
+ 
+-                        setContentType(getExampleResponse, jsonpCallback);
++                        setContentType(getExampleResponse);
+                     } catch (JSONException e) {
+                         // ignore, return raw text
+                     }
+@@ -864,9 +829,7 @@ public final void getExampleRequest(
+             }
+ 
+             try (PrintWriter writer = getExampleResponse.getWriter()) {
+-                appendJsonpCallback(jsonpCallback, writer);
+                 writer.append(result);
+-                appendJsonpCallbackEnd(jsonpCallback, writer);
+             }
+         } catch (NoSuchAppException e) {
+             error(getExampleResponse, "No print app identified by: " + appId, HttpStatus.NOT_FOUND);
+@@ -1076,31 +1039,7 @@ private boolean checkReferer(
+ 
+     }
+ 
+-    private void setContentType(
+-            final HttpServletResponse statusResponse,
+-            final String jsonpCallback) {
+-        if (StringUtils.isEmpty(jsonpCallback)) {
+-            statusResponse.setContentType("application/json; charset=utf-8");
+-        } else {
+-            statusResponse.setContentType("application/javascript; charset=utf-8");
+-        }
+-    }
+-
+-    private void appendJsonpCallback(
+-            final String jsonpCallback,
+-            final PrintWriter writer) {
+-        if (!StringUtils.isEmpty(jsonpCallback)) {
+-            writer.append(jsonpCallback);
+-            writer.append("(");
+-        }
++    private void setContentType(final HttpServletResponse statusResponse) {
++        statusResponse.setContentType("application/json; charset=utf-8");
+     }
+-
+-    private void appendJsonpCallbackEnd(
+-            final String jsonpCallback,
+-            final PrintWriter writer) {
+-        if (!StringUtils.isEmpty(jsonpCallback)) {
+-            writer.append(");");
+-        }
+-    }
+-
+ }
+diff --git a/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletSecurityTest.java b/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletSecurityTest.java
+index 84fa1cfc3..13a2102da 100644
+--- a/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletSecurityTest.java
++++ b/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletSecurityTest.java
+@@ -110,7 +110,7 @@ public void testCreateReportAndGet_RequestAllowed_OtherGetDenied() throws Except
+         while (!done) {
+             MockHttpServletRequest servletStatusRequest = new MockHttpServletRequest("GET", statusURL);
+             MockHttpServletResponse servletStatusResponse = new MockHttpServletResponse();
+-            servlet.getStatus(ref, null, servletStatusRequest, servletStatusResponse);
++            servlet.getStatus(ref, servletStatusRequest, servletStatusResponse);
+ 
+             String contentAsString = servletStatusResponse.getContentAsString();
+ 
+diff --git a/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletTest.java b/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletTest.java
+index 132923819..1e3169e6f 100644
+--- a/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletTest.java
++++ b/core/src/test/java/org/mapfish/print/servlet/MapPrinterServletTest.java
+@@ -84,7 +84,7 @@ public void testExampleRequest() throws Exception {
+ 
+         final HttpServletRequest request = new MockHttpServletRequest();
+         final MockHttpServletResponse getExampleResponseImplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest("", request, getExampleResponseImplicit);
++        this.servlet.getExampleRequest(request, getExampleResponseImplicit);
+         assertEquals(HttpStatus.OK.value(), getExampleResponseImplicit.getStatus());
+         final PJsonObject createResponseJson =
+                 parseJSONObjectFromString(getExampleResponseImplicit.getContentAsString());
+@@ -95,7 +95,7 @@ public void testExampleRequest() throws Exception {
+         assertTrue(obj.length() > 0);
+ 
+         final MockHttpServletResponse getExampleResponseExplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest(DEFAULT_CONFIGURATION_FILE_KEY, "", request,
++        this.servlet.getExampleRequest(DEFAULT_CONFIGURATION_FILE_KEY, request,
+                                        getExampleResponseExplicit);
+         assertEquals(HttpStatus.OK.value(), getExampleResponseExplicit.getStatus());
+         final PJsonObject createResponseJson2 =
+@@ -103,33 +103,10 @@ public void testExampleRequest() throws Exception {
+         assertTrue(createResponseJson2.size() > 0);
+ 
+         final MockHttpServletResponse getExampleResponseNotFound = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest("DoesNotExist", "", request, getExampleResponseNotFound);
++        this.servlet.getExampleRequest("DoesNotExist", request, getExampleResponseNotFound);
+         assertEquals(HttpStatus.NOT_FOUND.value(), getExampleResponseNotFound.getStatus());
+     }
+ 
+-    @Test
+-    public void testExampleRequest_Jsonp() throws Exception {
+-        setUpConfigFiles();
+-
+-        final HttpServletRequest request = new MockHttpServletRequest();
+-        final MockHttpServletResponse getExampleResponseImplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest("exampleRequest", request, getExampleResponseImplicit);
+-        assertEquals(HttpStatus.OK.value(), getExampleResponseImplicit.getStatus());
+-
+-        final String contentAsString = getExampleResponseImplicit.getContentAsString();
+-        assertTrue(contentAsString.startsWith("exampleRequest("));
+-        assertTrue(contentAsString.endsWith(");"));
+-
+-        final MockHttpServletResponse getExampleResponseExplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest(DEFAULT_CONFIGURATION_FILE_KEY, "", request,
+-                                       getExampleResponseExplicit);
+-        assertEquals(HttpStatus.OK.value(), getExampleResponseExplicit.getStatus());
+-
+-        final String contentAsString2 = getExampleResponseImplicit.getContentAsString();
+-        assertTrue(contentAsString2.startsWith("exampleRequest("));
+-        assertTrue(contentAsString2.endsWith(");"));
+-    }
+-
+     @Test
+     public void testExampleRequest_refererOK() throws Exception {
+         setUpConfigFiles();
+@@ -137,7 +114,7 @@ public void testExampleRequest_refererOK() throws Exception {
+         final MockHttpServletRequest request = new MockHttpServletRequest();
+         request.addHeader("referer", "http://www.example.com/toto");
+         final MockHttpServletResponse getExampleResponseImplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest("referer", "", request, getExampleResponseImplicit);
++        this.servlet.getExampleRequest("referer", request, getExampleResponseImplicit);
+         assertEquals(HttpStatus.OK.value(), getExampleResponseImplicit.getStatus());
+     }
+ 
+@@ -148,7 +125,7 @@ public void testExampleRequest_refererNOK() throws Exception {
+         final MockHttpServletRequest request = new MockHttpServletRequest();
+         request.addHeader("referer", "http://www.google.com/");
+         final MockHttpServletResponse getExampleResponseImplicit = new MockHttpServletResponse();
+-        this.servlet.getExampleRequest("referer", "", request, getExampleResponseImplicit);
++        this.servlet.getExampleRequest("referer", request, getExampleResponseImplicit);
+         assertEquals(HttpStatus.FORBIDDEN.value(), getExampleResponseImplicit.getStatus());
+     }
+ 
+@@ -163,7 +140,7 @@ public void testCreateReport_Success_NoAppId() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, false);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -178,7 +155,7 @@ public void testCreateReport_Success_EncodedSpec() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, false);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -193,7 +170,7 @@ public void testCreateReport_Success_FormPostEncodedSpec() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, false);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -208,7 +185,7 @@ public void testCreateReport_Success_explicitAppId() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, false);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -222,7 +199,7 @@ public void testCreateReport_FormPosting() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, true);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -241,7 +218,7 @@ public void testCreateReport_2Requests_Success_NoAppId() throws Exception {
+             } catch (Exception e) {
+                 throw new AssertionError(e);
+             }
+-        }, false);
++        });
+     }
+ 
+     @Test(timeout = 60000)
+@@ -283,7 +260,7 @@ public MockClientHttpRequest handleRequest(URI uri, HttpMethod httpMethod) {
+                     } catch (Exception e) {
+                         throw new AssertionError(e);
+                     }
+-                }, false);
++                });
+ 
+         assertEquals(2, request.getHeaders().size());
+         assertArrayEquals(new Object[]{"CookieValue", "CookieValue2"},
+@@ -384,7 +361,7 @@ public void testListFonts() {
+     }
+ 
+     private String doCreateAndPollAndGetReport(
+-            Function<MockHttpServletRequest, MockHttpServletResponse> createReport, boolean checkJsonp)
++            Function<MockHttpServletRequest, MockHttpServletResponse> createReport)
+             throws URISyntaxException, IOException, InterruptedException, ServletException {
+         setUpConfigFiles();
+ 
+@@ -419,15 +396,9 @@ private String doCreateAndPollAndGetReport(
+             MockHttpServletRequest servletStatusRequest = new MockHttpServletRequest("GET", statusURL);
+             addHeaders(servletStatusRequest);
+             MockHttpServletResponse servletStatusResponse = new MockHttpServletResponse();
+-            final String jsonp = (checkJsonp) ? "getStatus" : "";
+-            servlet.getStatus(ref, jsonp, servletStatusRequest, servletStatusResponse);
++            servlet.getStatus(ref, servletStatusRequest, servletStatusResponse);
+ 
+             String contentAsString = servletStatusResponse.getContentAsString();
+-            if (checkJsonp) {
+-                assertTrue(contentAsString.startsWith("getStatus("));
+-                assertTrue(contentAsString.endsWith(");"));
+-                contentAsString = contentAsString.replace("getStatus(", "").replace(");", "");
+-            }
+ 
+             final PJsonObject statusJson = parseJSONObjectFromString(contentAsString);
+             assertTrue(statusJson.toString(), statusJson.has(MapPrinterServlet.JSON_DONE));
+@@ -453,7 +424,6 @@ private String doCreateAndPollAndGetReport(
+         assertCorrectResponse(servletGetReportResponse);
+ 
+         return ref;
+-
+     }
+ 
+     private void addHeaders(MockHttpServletRequest servletStatusRequest) {
+@@ -511,7 +481,7 @@ public void testCreateReport_FailureInvalidUrl() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -559,7 +529,7 @@ public void testCancel() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -593,7 +563,7 @@ public void testCancel_Sleep() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -617,7 +587,7 @@ public void testCancel_FinishedJob() throws Exception {
+                     } catch (Exception e) {
+                         throw new AssertionError(e);
+                     }
+-                }, false);
++                });
+ 
+         // ... then cancel
+         MockHttpServletResponse servletCancelResponse = new MockHttpServletResponse();
+@@ -626,7 +596,7 @@ public void testCancel_FinishedJob() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -666,7 +636,7 @@ public void testCancelSpecificAppId() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -726,7 +696,7 @@ public void testCreateReport_AbandonedTimeout() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", statusRequest, statusResponse);
++        servlet.getStatus(ref, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("true", statusJson.getString(MapPrinterServlet.JSON_DONE));
+@@ -762,7 +732,7 @@ public void testCreateReport_NotAbandonedTimeout() throws Exception {
+ 
+             final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+             final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-            servlet.getStatus(ref, "", statusRequest, statusResponse);
++            servlet.getStatus(ref, statusRequest, statusResponse);
+             final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+             assertNotEquals("cancelled", statusJson.getString(MapPrinterServlet.JSON_STATUS));
+         }
+@@ -938,11 +908,10 @@ public void testGetStatus_InvalidRef() throws Exception {
+         setUpConfigFiles();
+ 
+         String ref = "invalid-ref";
+-        MockHttpServletRequest servletStatusRequest = new MockHttpServletRequest("GET",
+-                                                                                 "/print/status/" + ref +
+-                                                                                         ".json");
++        MockHttpServletRequest servletStatusRequest = new MockHttpServletRequest(
++            "GET", "/print/status/" + ref + ".json");
+         MockHttpServletResponse servletStatusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref, "", servletStatusRequest, servletStatusResponse);
++        servlet.getStatus(ref, servletStatusRequest, servletStatusResponse);
+ 
+         assertEquals(HttpStatus.NOT_FOUND.value(), servletStatusResponse.getStatus());
+     }
+@@ -964,7 +933,7 @@ public void testGetCapabilities_NotPretty() throws Exception {
+         setUpConfigFiles();
+         final MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+         final HttpServletRequest request = new MockHttpServletRequest();
+-        this.servlet.getCapabilities(false, "", request, servletResponse);
++        this.servlet.getCapabilities(false, request, servletResponse);
+         assertEquals(HttpStatus.OK.value(), servletResponse.getStatus());
+ 
+         final String contentAsString = servletResponse.getContentAsString();
+@@ -1001,7 +970,7 @@ public void testGetCapabilities_Pretty() throws Exception {
+         setUpConfigFiles();
+         final HttpServletRequest request = new MockHttpServletRequest();
+         final MockHttpServletResponse servletResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities(true, "", request, servletResponse);
++        this.servlet.getCapabilities(true, request, servletResponse);
+         assertEquals(HttpStatus.OK.value(), servletResponse.getStatus());
+ 
+         final String contentAsString = servletResponse.getContentAsString();
+@@ -1035,7 +1004,7 @@ public void testGetCapabilitiesWithAppId_NotPretty() throws Exception {
+ 
+         final HttpServletRequest request = new MockHttpServletRequest();
+         final MockHttpServletResponse defaultGetInfoResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities("default", false, "", request, defaultGetInfoResponse);
++        this.servlet.getCapabilities("default", false, request, defaultGetInfoResponse);
+         assertEquals(HttpStatus.OK.value(), defaultGetInfoResponse.getStatus());
+ 
+         final String contentAsString = defaultGetInfoResponse.getContentAsString();
+@@ -1046,7 +1015,7 @@ public void testGetCapabilitiesWithAppId_NotPretty() throws Exception {
+         assertEquals("A4 Landscape", a4LandscapeLayout.getString("name"));
+ 
+         final MockHttpServletResponse app2GetInfoResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities("app2", false, "", request, app2GetInfoResponse);
++        this.servlet.getCapabilities("app2", false, request, app2GetInfoResponse);
+         assertEquals(HttpStatus.OK.value(), app2GetInfoResponse.getStatus());
+ 
+         final PJsonObject app2GetInfoJson = parseJSONObjectFromString(
+@@ -1056,54 +1025,10 @@ public void testGetCapabilitiesWithAppId_NotPretty() throws Exception {
+         assertEquals("main", mainLayout.getString("name"));
+ 
+         final MockHttpServletResponse noSuchGetInfoResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities("NoSuch", false, "", request, noSuchGetInfoResponse);
++        this.servlet.getCapabilities("NoSuch", false, request, noSuchGetInfoResponse);
+         assertEquals(HttpStatus.NOT_FOUND.value(), noSuchGetInfoResponse.getStatus());
+     }
+ 
+-    @Test
+-    public void testGetCapabilitiesWithAppId_NotPrettyAndJsonp() throws Exception {
+-        final HashMap<String, String> configFiles = new HashMap<>();
+-        configFiles.put("default", getFile(MapPrinterServletTest.class,
+-                                           "config.yaml").getAbsolutePath());
+-        configFiles.put("app2", getFile(CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.class,
+-                                        CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.BASE_DIR +
+-                                                "config.yaml").
+-                getAbsolutePath());
+-        printerFactory.setConfigurationFiles(configFiles);
+-
+-        final HttpServletRequest request = new MockHttpServletRequest();
+-        final MockHttpServletResponse defaultGetInfoResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities("default", false, "printConfig",
+-                                     request, defaultGetInfoResponse);
+-        assertEquals(HttpStatus.OK.value(), defaultGetInfoResponse.getStatus());
+-
+-        final String contentAsString = defaultGetInfoResponse.getContentAsString();
+-        assertTrue(contentAsString.startsWith("printConfig("));
+-        assertTrue(contentAsString.endsWith(");"));
+-    }
+-
+-    @Test
+-    public void testGetCapabilitiesWithAppId_PrettyAndJsonp() throws Exception {
+-        final HashMap<String, String> configFiles = new HashMap<>();
+-        configFiles.put("default", getFile(MapPrinterServletTest.class,
+-                                           "config.yaml").getAbsolutePath());
+-        configFiles.put("app2", getFile(CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.class,
+-                                        CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.BASE_DIR +
+-                                                "config.yaml").
+-                getAbsolutePath());
+-        printerFactory.setConfigurationFiles(configFiles);
+-
+-        final HttpServletRequest request = new MockHttpServletRequest();
+-        final MockHttpServletResponse defaultGetInfoResponse = new MockHttpServletResponse();
+-        this.servlet.getCapabilities("default", true, "printConfig",
+-                                     request, defaultGetInfoResponse);
+-        assertEquals(HttpStatus.OK.value(), defaultGetInfoResponse.getStatus());
+-
+-        final String contentAsString = defaultGetInfoResponse.getContentAsString();
+-        assertTrue(contentAsString.startsWith("printConfig("));
+-        assertTrue(contentAsString.endsWith(");"));
+-    }
+-
+     @Test
+     public void testListAppIds() throws Exception {
+         final HashMap<String, String> configFiles = new HashMap<>();
+@@ -1116,7 +1041,7 @@ public void testListAppIds() throws Exception {
+         printerFactory.setConfigurationFiles(configFiles);
+ 
+         final MockHttpServletResponse listAppIdsResponse = new MockHttpServletResponse();
+-        this.servlet.listAppIds("", listAppIdsResponse);
++        this.servlet.listAppIds(listAppIdsResponse);
+         assertEquals(HttpStatus.OK.value(), listAppIdsResponse.getStatus());
+ 
+         final String contentAsString = listAppIdsResponse.getContentAsString();
+@@ -1128,26 +1053,6 @@ public void testListAppIds() throws Exception {
+         assertTrue(expected.contains(appIdsJson.getString(1)));
+     }
+ 
+-    @Test
+-    public void testListAppIds_Jsonp() throws Exception {
+-        final HashMap<String, String> configFiles = new HashMap<>();
+-        configFiles.put("default", getFile(MapPrinterServletTest.class,
+-                                           "config.yaml").getAbsolutePath());
+-        configFiles.put("app2", getFile(CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.class,
+-                                        CreateMapProcessorFlexibleScaleBBoxGeoJsonTest.BASE_DIR +
+-                                                "config.yaml").
+-                getAbsolutePath());
+-        printerFactory.setConfigurationFiles(configFiles);
+-
+-        final MockHttpServletResponse listAppIdsResponse = new MockHttpServletResponse();
+-        this.servlet.listAppIds("listAppIds", listAppIdsResponse);
+-        assertEquals(HttpStatus.OK.value(), listAppIdsResponse.getStatus());
+-
+-        final String contentAsString = listAppIdsResponse.getContentAsString();
+-        assertTrue(contentAsString.startsWith("listAppIds("));
+-        assertTrue(contentAsString.endsWith(");"));
+-    }
+-
+     @Test(timeout = 60000)
+     @DirtiesContext
+     public void testCreateReport_ExceedsMaxNumberOfWaitingJobs() throws Exception {
+@@ -1205,7 +1110,7 @@ public void testGetStatus_WaitingRunning() throws Exception {
+ 
+         final MockHttpServletRequest statusRequest = new MockHttpServletRequest();
+         final MockHttpServletResponse statusResponse = new MockHttpServletResponse();
+-        servlet.getStatus(ref2, "", statusRequest, statusResponse);
++        servlet.getStatus(ref2, statusRequest, statusResponse);
+ 
+         final PJsonObject statusJson = parseJSONObjectFromString(statusResponse.getContentAsString());
+         assertEquals("false", statusJson.getString(MapPrinterServlet.JSON_DONE));
+diff --git a/examples/src/test/java/org/mapfish/print/AbstractApiTest.java b/examples/src/test/java/org/mapfish/print/AbstractApiTest.java
+index 0f448a32b..6f353bbb5 100644
+--- a/examples/src/test/java/org/mapfish/print/AbstractApiTest.java
++++ b/examples/src/test/java/org/mapfish/print/AbstractApiTest.java
+@@ -52,10 +52,4 @@ protected MediaType getJsonMediaType() {
+         params.put("charset", "utf-8");
+         return new MediaType("application", "json", params);
+     }
+-
+-    protected MediaType getJavaScriptMediaType() {
+-        Map<String, String> params = new HashMap<>();
+-        params.put("charset", "utf-8");
+-        return new MediaType("application", "javascript", params);
+-    }
+ }
+diff --git a/examples/src/test/java/org/mapfish/print/PrintApiTest.java b/examples/src/test/java/org/mapfish/print/PrintApiTest.java
+index 8c14d5fd5..813999f21 100644
+--- a/examples/src/test/java/org/mapfish/print/PrintApiTest.java
++++ b/examples/src/test/java/org/mapfish/print/PrintApiTest.java
+@@ -49,23 +49,6 @@ public void testListApps() throws Exception {
+         }
+     }
+ 
+-    @Test
+-    public void testListAppsJsonp() throws Exception {
+-        ClientHttpRequest request =
+-                getPrintRequest(MapPrinterServlet.LIST_APPS_URL + "?jsonp=listApps", HttpMethod.GET);
+-        try (ClientHttpResponse response = request.execute()) {
+-            assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
+-
+-            String responseAsText = getBodyAsText(response);
+-            assertTrue(responseAsText.startsWith("listApps("));
+-
+-            responseAsText = responseAsText.replace("listApps(", "").replace(");", "");
+-            final JSONArray appIdsJson = new JSONArray(responseAsText);
+-            assertTrue(appIdsJson.length() > 0);
+-        }
+-    }
+-
+     @Test
+     public void testGetCapabilities_NoApp() throws Exception {
+         ClientHttpRequest request = getPrintRequest(MapPrinterServlet.CAPABILITIES_URL, HttpMethod.GET);
+@@ -107,31 +90,6 @@ public void testGetCapabilitiesPretty_NoApp() throws Exception {
+         }
+     }
+ 
+-    @Test
+-    public void testGetCapabilitiesJsonp_NoApp() throws Exception {
+-        ClientHttpRequest request =
+-                getPrintRequest(MapPrinterServlet.CAPABILITIES_URL + "?jsonp=printCapabilities",
+-                                HttpMethod.GET);
+-        try (ClientHttpResponse response = request.execute()) {
+-            assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
+-            assertTrue(getBodyAsText(response).startsWith("printCapabilities("));
+-        }
+-    }
+-
+-    @Test
+-    public void testGetCapabilitiesJsonpPretty_NoApp() throws Exception {
+-        ClientHttpRequest request = getPrintRequest(
+-                MapPrinterServlet.CAPABILITIES_URL + "?pretty=true&jsonp=printCapabilities", HttpMethod.GET);
+-        try (ClientHttpResponse response = request.execute()) {
+-            assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
+-            String responseAsText = getBodyAsText(response);
+-            assertTrue(responseAsText.startsWith("printCapabilities("));
+-            assertTrue(responseAsText.contains("\n"));
+-        }
+-    }
+-
+     @Test
+     public void testExampleRequest_NoApp() throws Exception {
+         ClientHttpRequest request = getPrintRequest(MapPrinterServlet.EXAMPLE_REQUEST_URL, HttpMethod.GET);
+@@ -142,23 +100,6 @@ public void testExampleRequest_NoApp() throws Exception {
+         }
+     }
+ 
+-    @Test
+-    public void testExampleRequestJsonp_NoApp() throws Exception {
+-        ClientHttpRequest request =
+-                getPrintRequest(MapPrinterServlet.EXAMPLE_REQUEST_URL + "?jsonp=exampleRequest",
+-                                HttpMethod.GET);
+-        try (ClientHttpResponse response = request.execute()) {
+-            assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
+-
+-            String responseAsText = getBodyAsText(response);
+-            assertTrue(responseAsText.startsWith("exampleRequest("));
+-
+-            responseAsText = responseAsText.replace("exampleRequest(", "").replace(");", "");
+-            checkExampleRequest(responseAsText);
+-        }
+-    }
+-
+     @Test
+     public void testExampleRequest_App() throws Exception {
+         ClientHttpRequest request =
+@@ -170,23 +111,6 @@ public void testExampleRequest_App() throws Exception {
+         }
+     }
+ 
+-    @Test
+-    public void testExampleRequestJsonp_App() throws Exception {
+-        ClientHttpRequest request =
+-                getPrintRequest("geoext" + MapPrinterServlet.EXAMPLE_REQUEST_URL + "?jsonp=exampleRequest",
+-                                HttpMethod.GET);
+-        try (ClientHttpResponse response = request.execute()) {
+-            assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
+-
+-            String responseAsText = getBodyAsText(response);
+-            assertTrue(responseAsText.startsWith("exampleRequest("));
+-
+-            responseAsText = responseAsText.replace("exampleRequest(", "").replace(");", "");
+-            checkExampleRequest(responseAsText);
+-        }
+-    }
+-
+     private void checkExampleRequest(String responseAsText) throws JSONException {
+         JSONObject samplesRequest = new JSONObject(responseAsText);
+         final Iterator keys = samplesRequest.keys();
+@@ -308,17 +232,13 @@ private void testCreateReport(String requestPath, String printSpec) throws Excep
+             }
+         }
+ 
+-        // check status with JSONP
+-        request = getPrintRequest(MapPrinterServlet.STATUS_URL + "/" + ref + ".json?jsonp=getStatus",
++        request = getPrintRequest(MapPrinterServlet.STATUS_URL + "/" + ref + ".json",
+                                   HttpMethod.GET);
+         try (ClientHttpResponse response = request.execute()) {
+             assertEquals(HttpStatus.OK, response.getStatusCode());
+-            assertEquals(getJavaScriptMediaType(), response.getHeaders().getContentType());
++            assertEquals(getJsonMediaType(), response.getHeaders().getContentType());
+ 
+             String responseAsText = getBodyAsText(response);
+-            assertTrue(responseAsText.startsWith("getStatus("));
+-
+-            responseAsText = responseAsText.replace("getStatus(", "").replace(");", "");
+             JSONObject statusResult = new JSONObject(responseAsText);
+ 
+             assertTrue(statusResult.has(MapPrinterServlet.JSON_DONE));

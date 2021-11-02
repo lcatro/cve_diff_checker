@@ -1,0 +1,84 @@
+From 4970ad24ce49ec76a0ee67bca7594f918ced2f5f Mon Sep 17 00:00:00 2001
+From: Andreas Gohr <andi@splitbrain.org>
+Date: Tue, 24 Feb 2015 19:45:03 +0100
+Subject: [PATCH] check permissions in ACL plugin's RPC API component. #1056
+
+Security Fix
+
+Severity: Medium
+Type:     Remote Priviledge Escalation
+Remote:   yes
+
+Vulnerability Details:
+
+This fixes a security hole in the ACL plugins remote API component. The
+plugin failed to check for superuser permissions before executing ACL
+addition or deletion. This means everybody with permissions to call the
+XMLRPC API also had permissions to set up their own ACL rules and thus
+circumventing any existing rules.
+
+Risk Assessment:
+
+The XMLRPC API in DokuWiki is marked experimental and off by default. It
+also implements an additional safeguard by giving access to a configured
+circle of users and groups only. So only a minor number of DokuWiki
+installations will be affected at all.
+For affected installations the risk is high if users with access to the
+API are not to be trusted.
+Thus the overall severity of medium.
+
+Resolution:
+
+Installations applying this commit are safe. A hotfix is about to be
+released. Meanwhile users are advised to disable the XMLRPC API in the
+config manager.
+---
+ lib/plugins/acl/remote.php | 31 +++++++++++++++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/lib/plugins/acl/remote.php b/lib/plugins/acl/remote.php
+index 6d5201cf61..9433b77015 100644
+--- a/lib/plugins/acl/remote.php
++++ b/lib/plugins/acl/remote.php
+@@ -17,12 +17,39 @@ function _getMethods() {
+         );
+     }
+ 
+-    function addAcl($scope, $user, $level){
++    /**
++     * Add a new entry to ACL config
++     *
++     * @param string $scope
++     * @param string $user
++     * @param int    $level see also inc/auth.php
++     * @throws RemoteAccessDeniedException
++     * @return bool
++     */
++    public function addAcl($scope, $user, $level){
++        if(!auth_isadmin()) {
++            throw new RemoteAccessDeniedException('You are not allowed to access ACLs, superuser permission is required', 114);
++        }
++
++        /** @var admin_plugin_acl $apa */
+         $apa = plugin_load('admin', 'acl');
+         return $apa->_acl_add($scope, $user, $level);
+     }
+ 
+-    function delAcl($scope, $user){
++    /**
++     * Remove an entry from ACL config
++     *
++     * @param string $scope
++     * @param string $user
++     * @throws RemoteAccessDeniedException
++     * @return bool
++     */
++    public function delAcl($scope, $user){
++        if(!auth_isadmin()) {
++            throw new RemoteAccessDeniedException('You are not allowed to access ACLs, superuser permission is required', 114);
++        }
++
++        /** @var admin_plugin_acl $apa */
+         $apa = plugin_load('admin', 'acl');
+         return $apa->_acl_del($scope, $user);
+     }

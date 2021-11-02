@@ -1,0 +1,192 @@
+From 2b62d1dda41590db29368ec7ba5f4faf3464765a Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 3 Feb 2017 20:02:45 -0800
+Subject: [PATCH] CVE-2017-12895/ICMP: Check the availability of data before
+ checksumming it.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add tests using the capture files supplied by the reporter(s).
+---
+ print-icmp.c                 |  17 ++++++++++-------
+ tests/TESTLIST               |   4 ++++
+ tests/icmp-cksum-oobr-1.out  |   5 +++++
+ tests/icmp-cksum-oobr-1.pcap | Bin 0 -> 244 bytes
+ tests/icmp-cksum-oobr-2.out  |  11 +++++++++++
+ tests/icmp-cksum-oobr-2.pcap | Bin 0 -> 284 bytes
+ tests/icmp-cksum-oobr-3.out  |   5 +++++
+ tests/icmp-cksum-oobr-3.pcap | Bin 0 -> 456 bytes
+ tests/icmp-cksum-oobr-4.out  |   7 +++++++
+ tests/icmp-cksum-oobr-4.pcap | Bin 0 -> 288 bytes
+ 10 files changed, 42 insertions(+), 7 deletions(-)
+ create mode 100644 tests/icmp-cksum-oobr-1.out
+ create mode 100644 tests/icmp-cksum-oobr-1.pcap
+ create mode 100644 tests/icmp-cksum-oobr-2.out
+ create mode 100644 tests/icmp-cksum-oobr-2.pcap
+ create mode 100644 tests/icmp-cksum-oobr-3.out
+ create mode 100644 tests/icmp-cksum-oobr-3.pcap
+ create mode 100644 tests/icmp-cksum-oobr-4.out
+ create mode 100644 tests/icmp-cksum-oobr-4.pcap
+
+diff --git a/print-icmp.c b/print-icmp.c
+index 10772213e..ec7525357 100644
+--- a/print-icmp.c
++++ b/print-icmp.c
+@@ -598,7 +598,8 @@ icmp_print(netdissect_options *ndo, const u_char *bp, u_int plen, const u_char *
+              * to check if an extension header is present. This is expedient,
+              * however not all implementations set the length field proper.
+              */
+-            if (!ext_dp->icmp_length) {
++            if (!ext_dp->icmp_length &&
++                ND_TTEST2(ext_dp->icmp_ext_version_res, plen - ICMP_EXTD_MINLEN)) {
+                 vec[0].ptr = (const uint8_t *)(const void *)&ext_dp->icmp_ext_version_res;
+                 vec[0].len = plen - ICMP_EXTD_MINLEN;
+                 if (in_cksum(vec, 1)) {
+@@ -619,12 +620,14 @@ icmp_print(netdissect_options *ndo, const u_char *bp, u_int plen, const u_char *
+             }
+ 
+             hlen = plen - ICMP_EXTD_MINLEN;
+-            vec[0].ptr = (const uint8_t *)(const void *)&ext_dp->icmp_ext_version_res;
+-            vec[0].len = hlen;
+-            ND_PRINT((ndo, ", checksum 0x%04x (%scorrect), length %u",
+-                   EXTRACT_16BITS(ext_dp->icmp_ext_checksum),
+-                   in_cksum(vec, 1) ? "in" : "",
+-                   hlen));
++            if (ND_TTEST2(ext_dp->icmp_ext_version_res, hlen)) {
++                vec[0].ptr = (const uint8_t *)(const void *)&ext_dp->icmp_ext_version_res;
++                vec[0].len = hlen;
++                ND_PRINT((ndo, ", checksum 0x%04x (%scorrect), length %u",
++                       EXTRACT_16BITS(ext_dp->icmp_ext_checksum),
++                       in_cksum(vec, 1) ? "in" : "",
++                       hlen));
++            }
+ 
+             hlen -= 4; /* subtract common header size */
+             obj_tptr = (const uint8_t *)ext_dp->icmp_ext_data;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index f7e168c6b..c44e2b75f 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -452,6 +452,10 @@ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+ # bad packets from Otto Airamo and Antti Levomäki
+ nbns-valgrind		nbns-valgrind.pcap		nbns-valgrind.out	-vvv -e
+ arp-oobr		arp-oobr.pcap			arp-oobr.out	-vvv -e
++icmp-cksum-oobr-1	icmp-cksum-oobr-1.pcap		icmp-cksum-oobr-1.out	-vvv -e
++icmp-cksum-oobr-2	icmp-cksum-oobr-2.pcap		icmp-cksum-oobr-2.out	-vvv -e
++icmp-cksum-oobr-3	icmp-cksum-oobr-3.pcap		icmp-cksum-oobr-3.out	-vvv -e
++icmp-cksum-oobr-4	icmp-cksum-oobr-4.pcap		icmp-cksum-oobr-4.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/icmp-cksum-oobr-1.out b/tests/icmp-cksum-oobr-1.out
+new file mode 100644
+index 000000000..2efafee67
+--- /dev/null
++++ b/tests/icmp-cksum-oobr-1.out
+@@ -0,0 +1,5 @@
++Out 00:16:3e:27:78:a2 ethertype IPv4 (0x0800), length 204: truncated-ip - 13723 bytes missing! (tos 0x72,ECT(0), ttl 64, id 9472, offset 0, flags [none], proto ICMP (1), length 13911, bad cksum 67ea (->8c0c)!)
++    62.220.31.247 > 62.225.245.115: ICMP 62.220.31.247 udp port 1027 unreachable, length 13891
++	(tos 0xa0, ttl 114, id 30054, offset 0, flags [none], proto UDP (17), length 13728, bad cksum 3f1f (->a1f)!)
++    62.225.245.115.9109 > 62.220.31.247.1027: [bad udp cksum 0xdfe7 -> 0xdb95!] UDP, length 132
++	MPLS extension v0 packet not supported
+diff --git a/tests/icmp-cksum-oobr-1.pcap b/tests/icmp-cksum-oobr-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b79f72b1f96dfcd99005cd8cb1e9b61096548cd7
+GIT binary patch
+literal 244
+zcmca|c+)~A1{MYw*ul-fPzdB)FVu5;@Ro<+43G`NKqZU}Yz$&{>J^I^7&sVQi_F4R
+zfx-@q>96eW$bYwc__dgsdBP!(Qr88h3rf=%7>We#<w4>gdF81r%nUvEpEsUh;YqHz
+z<?5zac%}IN|NoYzZMPX1Se+P{D|ggO2;Ku~X9V&W0BJMkGrJD}X{p9j3}8Ksg@$Iv
+zmZpZrrk0kvCT12X2FZy=4i=_*hUOM}hI(ekY^=ea0Rh24Jq(Sf8Q4Jf2o$Fl7iZ?@
+PDHLavmZapD=K<vaqmD)d
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/icmp-cksum-oobr-2.out b/tests/icmp-cksum-oobr-2.out
+new file mode 100644
+index 000000000..71d6b886d
+--- /dev/null
++++ b/tests/icmp-cksum-oobr-2.out
+@@ -0,0 +1,11 @@
++IP (0x0021), length 244: truncated-ip - 32768 bytes missing! (tos 0x0, ttl 254, id 59168, offset 0, flags [DF], proto ICMP (1), length 33008, bad cksum 7ade (->fabd)!)
++    10.4.0.34 > 12.4.4.4: ICMP time exceeded in-transit, length 32988
++	(tos 0x0, ttl 1, id 42321, offset 0, flags [none], proto UDP (17), length 40)
++    12.4.4.4.42315 > 12.1.1.1.33440: [bad udp cksum 0x1000 -> 0xbad0!] UDP, length 12
++	MPLS extension v2
++	  Extended Payload Object (2), Class-Type: 14, length 80
++	    0x0000:  0000 000f 0001 0000 0a0a 0a0a 3f54 6869
++	    0x0010:  732d 6973 2d74 6865 2d6e 616d 652d 6f66
++	    0x0020:  2d74 6865 2d49 6e74 6572 6661 6365 2d74
++	    0x0030:  6861 742d 7765 2d61 7265 2d6c 6f6f 6b69
++	    0x0040:  6e67 2d66 6f72 2d5b 3a2d 295d[|icmp]
+diff --git a/tests/icmp-cksum-oobr-2.pcap b/tests/icmp-cksum-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..32db8ac902088c42829ff66a79719e0b96779733
+GIT binary patch
+literal 284
+zcmca|c+)~A1{MYoU<BentPBjCK-#nFtiwWnR)#M?HVFS`W>9oxX!!74!GYl)W7Rz_
+z76v6A78Vw6hBN<x(hRN)3>r%Vfo2GP&jN|_FfuYO^=?|gAR+*gMgee<1{7fghY7(X
+zh6OTDf#Jv#h5#l$Ad?^D5iTIG56Q?Z)&-)Hj8xsc#N1Tf{4_AzGp{7IC@nEL70630
+e(JfEaO)N^)&B@Qt&df{KP0KIRjkeO&j0FIXS})N6
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/icmp-cksum-oobr-3.out b/tests/icmp-cksum-oobr-3.out
+new file mode 100644
+index 000000000..4a16fdd83
+--- /dev/null
++++ b/tests/icmp-cksum-oobr-3.out
+@@ -0,0 +1,5 @@
++00:00:00:00:00:00 > 00:00:00:00:00:00, ethertype IPv4 (0x0800), length 337: truncated-ip - 4096 bytes missing! (tos 0x0, ttl 64, id 30662, offset 0, flags [DF], proto ICMP (1), length 4419, bad cksum cdf9 (->bdf9)!)
++    97.242.24.11 > 97.242.24.11: ICMP 97.242.24.11 udp port 162 unreachable, length 4399
++	(tos 0x0, ttl 128, id 30661, offset 0, flags [DF], proto UDP (17), length 295)
++    97.242.24.11.60377 > 97.242.24.11.162: [udp sum ok]  { SNMPv1 C="trap" { Trap(251)  .1.3.6.1.4.1.3830.1.1.2.2.1 97.242.24.11 enterpriseSpecific s=52 61498489 .1.3.6.1.4.1.3830.1.1.2.1.1.1=3 .1.3.6.1.4.1.3830.1.1.2.1.1.2=2 .1.3.6.1.4.1.3830.1.1.2.1.1.3="%SMSA-E-POLLERR, Polling the SMSC was not successful." .1.3.6.1.4.1.3830.1.1.2.1.1.4="OPCOM" .1.3.6.1.4.1.3830.1.1.2.1.1.5="28-OCT-2010 20:42:14.67" .1.3.6.1.4.1.3830.1.1.2.1.1.6="SMRL51" } } 
++	MPLS extension v0 packet not supported
+diff --git a/tests/icmp-cksum-oobr-3.pcap b/tests/icmp-cksum-oobr-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..a92d933f6b287ccfa97da55ee8c4539bd13a964a
+GIT binary patch
+literal 456
+zcmd<$<>fMAU|{gI(UxKa(*L1=g@KpBH6^noIk7;&NY6me2q*^vAhjTM3Q$^rkAZ;`
+zD8dHhgMb1MgV-e?ML@7_G7G~|uBan{Kt2c~0}cjP20`cYV-5@sjAwr)ev;q@VP@t}
+z(jZl?42<gKM;#a%1pC-va<6YPEMgS)n`F?$$j-#bz`{~elvuE&@i!ZfHX9=g<J>Yv
+zMkXdk2NsZeCPp?UMiXZi=2a<`22Bjtfmn!*7om<3sFsl#Qxs?b6HwF*RV_1%scNuq
+zu%oW4Zh*g!k84nnjzU0wPEKZCx<W}tssd2XS)n|!SRpUJM4`AeIXShsIIT2C4``AY
+zs!1#?to{Mc{=PsN4OAIc7I7mBU4Q2gT_XcS0|g@kD-$CtLlZqSbD&yrRJCj@Y{9-k
+MKBk7ikOGA@0IOnFLjV8(
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/icmp-cksum-oobr-4.out b/tests/icmp-cksum-oobr-4.out
+new file mode 100644
+index 000000000..2b1208222
+--- /dev/null
++++ b/tests/icmp-cksum-oobr-4.out
+@@ -0,0 +1,7 @@
++IP (0x0021), length 172: truncated-ip - 8192 bytes missing! (tos 0xc0, ttl 251, id 5047, offset 0, flags [none], proto ICMP (1), length 8360, bad cksum 7edb (->5edb)!)
++    10.0.12.2 > 10.0.12.1: ICMP time exceeded in-transit, length 8340
++	(tos 0x0, ttl 1, id 2574, offset 0, flags [none], proto UDP (17), length 28)
++    10.0.12.1.49215 > 10.255.255.4.33435: [udp sum ok] UDP, length 0
++	MPLS extension v2
++	  MPLS Stack Entry Object (1), Class-Type: 1, length 8
++	    label 16, exp 0, [S], ttl 1[|icmp]
+diff --git a/tests/icmp-cksum-oobr-4.pcap b/tests/icmp-cksum-oobr-4.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..58f472832382e52506350b14f193870303aa665c
+GIT binary patch
+literal 288
+zcmd<$<>fMAU|{gI(UxKa(*L1=g@KpBH6^noIk7;&NY6me2q*^vAhjTM3P8*W#2^MI
+zP=pP{1_A{j2C>foF$k2tVPPm+(xJTu$Ohs6%nXXI2NYHaZ)afm%~*Gvi-Cs;h#9#V
+zMCCy0T^Sf;xcGo}2=?y>iF5t`&vL-NX*L7LoPQvB@_+)-+7uY>eqrEXWMp7uWCZyE
+E06r`vF8}}l
+
+literal 0
+HcmV?d00001
+

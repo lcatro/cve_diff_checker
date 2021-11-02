@@ -1,0 +1,181 @@
+From f9b8fadd85308ded4639335683c21c97dcfffe1a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cenk=20G=C3=BCndo=C4=9Fan?= <mail+dev@gundogan.net>
+Date: Thu, 4 Feb 2021 16:17:58 +0100
+Subject: [PATCH 1/5] uri_parser: check boundaries if host is empty, but
+ userinfo exists
+
+---
+ sys/uri_parser/uri_parser.c | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/sys/uri_parser/uri_parser.c b/sys/uri_parser/uri_parser.c
+index 294c6d92cbec..a300cd4d5115 100644
+--- a/sys/uri_parser/uri_parser.c
++++ b/sys/uri_parser/uri_parser.c
+@@ -75,9 +75,16 @@ void _consume_userinfo(uri_parser_result_t *result, char *uri,
+     if (userinfo_end) {
+         result->userinfo = uri;
+         result->userinfo_len = userinfo_end - uri;
+-        /* shift host part beyond userinfo and '@' */
+-        result->host += result->userinfo_len + 1;
+-        result->host_len -= result->userinfo_len + 1;
++
++        /* shift host part beyond userinfo and '@', but only if possible */
++        unsigned offset = result->userinfo_len + 1;
++        if ((result->host + offset) > authority_end) {
++            result->host_len = 0;
++            return;
++        }
++
++        result->host_len -= offset;
++        result->host += offset;
+     }
+ }
+ 
+@@ -125,6 +132,11 @@ static char *_consume_authority(uri_parser_result_t *result, char *uri,
+     /* consume userinfo, if available */
+     _consume_userinfo(result, uri, authority_end);
+ 
++    /* host is empty */
++    if (result->host_len == 0) {
++        return authority_end;
++    }
++
+     char *ipv6_end = NULL;
+     /* validate IPv6 form */
+     if (result->host[0] == '[') {
+
+From 1040cf98623701501d3cab54718c8e85463ba643 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cenk=20G=C3=BCndo=C4=9Fan?= <mail+dev@gundogan.net>
+Date: Thu, 4 Feb 2021 16:18:41 +0100
+Subject: [PATCH 2/5] uri_parser: allow empty host part even if userinfo and
+ port exist
+
+---
+ sys/uri_parser/uri_parser.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/sys/uri_parser/uri_parser.c b/sys/uri_parser/uri_parser.c
+index a300cd4d5115..1a3fb79f0201 100644
+--- a/sys/uri_parser/uri_parser.c
++++ b/sys/uri_parser/uri_parser.c
+@@ -171,12 +171,6 @@ static char *_consume_authority(uri_parser_result_t *result, char *uri,
+         return NULL;
+     }
+ 
+-    /* do not allow empty host if userinfo or port are set */
+-    if ((result->host_len == 0) &&
+-        (result->userinfo || result->port)) {
+-        return NULL;
+-    }
+-
+     /* this includes the '/' */
+     return authority_end;
+ }
+
+From 6f13325a52b6eef4e991d84b2462a7f97113c09b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cenk=20G=C3=BCndo=C4=9Fan?= <mail+dev@gundogan.net>
+Date: Thu, 4 Feb 2021 16:19:29 +0100
+Subject: [PATCH 3/5] uri_parser: do not parse path if end-of-uri
+
+---
+ sys/uri_parser/uri_parser.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/sys/uri_parser/uri_parser.c b/sys/uri_parser/uri_parser.c
+index 1a3fb79f0201..89101a7da888 100644
+--- a/sys/uri_parser/uri_parser.c
++++ b/sys/uri_parser/uri_parser.c
+@@ -231,8 +231,12 @@ static int _parse_absolute(uri_parser_result_t *result, char *uri,
+         }
+     }
+ 
+-    /* parsing the path, starting with '/' */
+-    return _parse_relative(result, uri, uri_end);
++    /* is there more to parse after authority? */
++    if (uri < uri_end) {
++        /* parsing the path, starting with '/' */
++        return _parse_relative(result, uri, uri_end);
++    }
++    return 0;
+ }
+ 
+ bool uri_parser_is_absolute(const char *uri, size_t uri_len)
+
+From e399ef5d761aa02fa3505f03ca604e9b06056b2f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cenk=20G=C3=BCndo=C4=9Fan?= <mail+dev@gundogan.net>
+Date: Fri, 5 Feb 2021 13:32:33 +0100
+Subject: [PATCH 4/5] uri_parser: terminate, if nothing to consume after scheme
+
+---
+ sys/uri_parser/uri_parser.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/sys/uri_parser/uri_parser.c b/sys/uri_parser/uri_parser.c
+index 89101a7da888..34d96698d318 100644
+--- a/sys/uri_parser/uri_parser.c
++++ b/sys/uri_parser/uri_parser.c
+@@ -224,6 +224,11 @@ static int _parse_absolute(uri_parser_result_t *result, char *uri,
+         return -1;
+     }
+ 
++    if (uri >= uri_end) {
++        /* nothing more to consume */
++        return 0;
++    }
++
+     if (has_authority) {
+         uri = _consume_authority(result, uri, uri_end);
+         if (uri == NULL) {
+
+From 6ef29d9b532dbb6666072ad52684123d5087a14b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cenk=20G=C3=BCndo=C4=9Fan?= <mail+dev@gundogan.net>
+Date: Thu, 4 Feb 2021 16:20:01 +0100
+Subject: [PATCH 5/5] tests: uri_parser: new test to check empty host
+
+---
+ .../tests-uri_parser/tests-uri_parser.c       | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/tests/unittests/tests-uri_parser/tests-uri_parser.c b/tests/unittests/tests-uri_parser/tests-uri_parser.c
+index 73772aba10f6..af108e0c771e 100644
+--- a/tests/unittests/tests-uri_parser/tests-uri_parser.c
++++ b/tests/unittests/tests-uri_parser/tests-uri_parser.c
+@@ -216,15 +216,15 @@ static const validate_t validate_uris[] = {
+         0),
+     VEC("coap://R@////////////////7///v=1",
+         true,
++        "coap",
++        "R",
+         "",
+         "",
+         "",
+         "",
++        "////////////////7///v=1",
+         "",
+-        "",
+-        "",
+-        "",
+-        -1),
++        0),
+     VEC("coa[:////[2001:db5ow:5own/Ov=1",
+         false,
+         "",
+@@ -412,6 +412,17 @@ static const validate_t validate_uris[] = {
+         "",
+         "",
+         0),
++    VEC("A://@",
++        true,
++        "A",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        "",
++        0),
+ };
+ 
+ static char _failure_msg[VEC_MSG_LEN];

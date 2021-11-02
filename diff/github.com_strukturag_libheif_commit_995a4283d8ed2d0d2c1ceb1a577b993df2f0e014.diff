@@ -1,0 +1,44 @@
+From 995a4283d8ed2d0d2c1ceb1a577b993df2f0e014 Mon Sep 17 00:00:00 2001
+From: Joachim Bauch <bauch@struktur.de>
+Date: Mon, 15 Apr 2019 09:07:27 +0200
+Subject: [PATCH] Detect non-existing referenced alpha images (fixes #123)
+
+---
+ fuzzing/corpus/uaf_heif_context.h_117_1.heic | Bin 0 -> 584 bytes
+ libheif/heif_context.cc                      |   5 +++++
+ 2 files changed, 5 insertions(+)
+ create mode 100644 fuzzing/corpus/uaf_heif_context.h_117_1.heic
+
+diff --git a/fuzzing/corpus/uaf_heif_context.h_117_1.heic b/fuzzing/corpus/uaf_heif_context.h_117_1.heic
+new file mode 100644
+index 0000000000000000000000000000000000000000..c8826b452eb09e8d746f99380844117529ec8532
+GIT binary patch
+literal 584
+zcmZWn%}WA76n`_@2Sk`egxSG_1rHHq6v3V(jXvlccx%~RbzoNqTXj37bjp*5Iu;g0
+zboMW(zaTp0txK0c@Muujn=wD4$IknH@AqS803eWZPq@QUQ9#L9%;@<v<XEmQawy@9
+zY3F+`0B45V_xskznd^u^X`xzYcFqt{A_i3X5FXtGg2oS|@g#eC8Pa&c>=d2@#<D52
+z*or5Ffh8O<ohcg8-R;Bp(w?KIEz$B@?n=1-<si#jy<Gr4z2Mo1NJ_Yg>@%L{Xd{dp
+zIb3ApaGa1Mu~drJhOh5V2Vh32BjZ4fOp|U`G$_N*YpXX{3~doPI$EjIa(N~6{;4|G
+z&0Fl5OpwRgWn~tZ&#_}J*#nGYNS{%8L;M<snD~poFp7^I63V-((wHEyJRmSAN&NZb
+z>w_8&zWK#~P^4BCWG0YIsd<ht5&SE0fmg_9HHTYiEn^i8ZEZEWp<#)cntTq6j63}|
+bfEP(CRB0(^bPP-!HFXy*l6Ten9rg4F<b`_1
+
+literal 0
+HcmV?d00001
+
+diff --git a/libheif/heif_context.cc b/libheif/heif_context.cc
+index fac3bd9c..4fe9ba09 100644
+--- a/libheif/heif_context.cc
++++ b/libheif/heif_context.cc
+@@ -576,6 +576,11 @@ Error HeifContext::interpret_heif_file()
+             image->set_is_alpha_channel_of(refs[0]);
+ 
+             auto master_iter = m_all_images.find(refs[0]);
++            if (master_iter == m_all_images.end()) {
++              return Error(heif_error_Invalid_input,
++                           heif_suberror_Nonexisting_item_referenced,
++                           "Non-existing alpha image referenced");
++            }
+             if (image.get() == master_iter->second.get()) {
+               return Error(heif_error_Invalid_input,
+                            heif_suberror_Nonexisting_item_referenced,

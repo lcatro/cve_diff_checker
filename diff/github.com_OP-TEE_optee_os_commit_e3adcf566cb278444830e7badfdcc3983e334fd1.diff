@@ -1,0 +1,54 @@
+From e3adcf566cb278444830e7badfdcc3983e334fd1 Mon Sep 17 00:00:00 2001
+From: Jens Wiklander <jens.wiklander@linaro.org>
+Date: Fri, 12 Oct 2018 11:16:22 +0200
+Subject: [PATCH] core: ensure that supplied range matches MOBJ
+
+In set_rmem_param() if the MOBJ is found by the cookie it's verified to
+represent non-secure shared memory. Prior to this patch the supplied
+sub-range to be used of the MOBJ was not checked here and relied on
+later checks further down the chain. Those checks seems to be enough
+for user TAs, but not for pseudo TAs where the size isn't checked.
+
+This patch adds a check for offset and size to see that they remain
+inside the memory covered by the MOBJ.
+
+Fixes: OP-TEE-2018-0004: "Unchecked parameters are passed through from
+REE".
+
+Signed-off-by: Jens Wiklander <jens.wiklander@linaro.org>
+Tested-by: Joakim Bech <joakim.bech@linaro.org> (QEMU v7, v8)
+Reviewed-by: Joakim Bech <joakim.bech@linaro.org>
+Reported-by: Riscure <inforequest@riscure.com>
+Reported-by: Alyssa Milburn <a.a.milburn@vu.nl>
+Acked-by: Etienne Carriere <etienne.carriere@linaro.org>
+---
+ core/arch/arm/tee/entry_std.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/core/arch/arm/tee/entry_std.c b/core/arch/arm/tee/entry_std.c
+index 960833b614e..29269819331 100644
+--- a/core/arch/arm/tee/entry_std.c
++++ b/core/arch/arm/tee/entry_std.c
+@@ -101,6 +101,7 @@ static TEE_Result set_tmem_param(const struct optee_msg_param_tmem *tmem,
+ static TEE_Result set_rmem_param(const struct optee_msg_param_rmem *rmem,
+ 				 struct param_mem *mem)
+ {
++	size_t req_size = 0;
+ 	uint64_t shm_ref = READ_ONCE(rmem->shm_ref);
+ 
+ 	mem->mobj = mobj_reg_shm_get_by_cookie(shm_ref);
+@@ -110,6 +111,14 @@ static TEE_Result set_rmem_param(const struct optee_msg_param_rmem *rmem,
+ 	mem->offs = READ_ONCE(rmem->offs);
+ 	mem->size = READ_ONCE(rmem->size);
+ 
++	/*
++	 * Check that the supplied offset and size is covered by the
++	 * previously verified MOBJ.
++	 */
++	if (ADD_OVERFLOW(mem->offs, mem->size, &req_size) ||
++	    mem->mobj->size < req_size)
++		return TEE_ERROR_SECURITY;
++
+ 	return TEE_SUCCESS;
+ }
+ 

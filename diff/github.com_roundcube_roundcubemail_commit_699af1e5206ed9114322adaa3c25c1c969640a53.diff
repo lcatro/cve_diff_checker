@@ -1,0 +1,276 @@
+From 699af1e5206ed9114322adaa3c25c1c969640a53 Mon Sep 17 00:00:00 2001
+From: Thomas Bruederli <thomas@roundcube.net>
+Date: Sat, 16 Jan 2016 17:48:22 +0100
+Subject: [PATCH] Protect download urls against CSRF using unique request
+ tokens (#1490642) Send X-Frame-Options headers with every HTTP response
+
+Conflicts:
+	plugins/enigma/enigma.js
+	plugins/enigma/lib/enigma_ui.php
+	program/lib/Roundcube/rcube_message.php
+---
+ .../lib/Roundcube/rcube_sieve_engine.php      |  2 ++
+ plugins/managesieve/managesieve.js            |  2 +-
+ plugins/zipdownload/zipdownload.js            |  2 +-
+ plugins/zipdownload/zipdownload.php           |  6 ++++-
+ program/include/rcmail.php                    |  2 ++
+ program/include/rcmail_output_html.php        |  6 ++---
+ program/js/app.js                             | 24 ++++++++++++-------
+ program/lib/Roundcube/rcube_message.php       |  9 +++----
+ program/lib/Roundcube/rcube_output.php        |  5 ++++
+ program/steps/addressbook/export.inc          |  2 ++
+ program/steps/mail/get.inc                    |  4 ++++
+ program/steps/mail/viewsource.inc             |  4 ++++
+ 12 files changed, 50 insertions(+), 18 deletions(-)
+
+diff --git a/plugins/managesieve/lib/Roundcube/rcube_sieve_engine.php b/plugins/managesieve/lib/Roundcube/rcube_sieve_engine.php
+index 362c529e5b..cdeac98f65 100644
+--- a/plugins/managesieve/lib/Roundcube/rcube_sieve_engine.php
++++ b/plugins/managesieve/lib/Roundcube/rcube_sieve_engine.php
+@@ -397,6 +397,8 @@ function actions()
+                 }
+             }
+             else if ($action == 'setget') {
++                $this->rc->request_security_check(rcube_utils::INPUT_GET);
++
+                 $script_name = rcube_utils::get_input_value('_set', rcube_utils::INPUT_GPC, true);
+                 $script      = $this->sieve->get_script($script_name);
+ 
+diff --git a/plugins/managesieve/managesieve.js b/plugins/managesieve/managesieve.js
+index 1098b5b9e7..30cfb67ed3 100644
+--- a/plugins/managesieve/managesieve.js
++++ b/plugins/managesieve/managesieve.js
+@@ -181,7 +181,7 @@ rcube_webmail.prototype.managesieve_setget = function()
+   var id = this.filtersets_list.get_single_selection(),
+     script = this.env.filtersets[id];
+ 
+-  location.href = this.env.comm_path+'&_action=plugin.managesieve-action&_act=setget&_set='+urlencode(script);
++  this.goto_url('plugin.managesieve-action', {_act: 'setget', _set: script}, false, true);
+ };
+ 
+ // Set activate/deactivate request
+diff --git a/plugins/zipdownload/zipdownload.js b/plugins/zipdownload/zipdownload.js
+index f9495084c4..182af6390c 100644
+--- a/plugins/zipdownload/zipdownload.js
++++ b/plugins/zipdownload/zipdownload.js
+@@ -54,7 +54,7 @@ function rcmail_zipdownload(mode)
+     // default .eml download of single message
+     if (mode == 'eml') {
+         var uid = rcmail.get_single_uid();
+-        rcmail.goto_url('viewsource', rcmail.params_from_uid(uid, {_save: 1}));
++        rcmail.goto_url('viewsource', rcmail.params_from_uid(uid, {_save: 1}), false, true);
+         return;
+     }
+ 
+diff --git a/plugins/zipdownload/zipdownload.php b/plugins/zipdownload/zipdownload.php
+index 983db12272..35d3964a60 100644
+--- a/plugins/zipdownload/zipdownload.php
++++ b/plugins/zipdownload/zipdownload.php
+@@ -63,7 +63,7 @@ public function attachment_ziplink($p)
+                 '_action' => 'plugin.zipdownload.attachments',
+                 '_mbox'   => $rcmail->output->env['mailbox'],
+                 '_uid'    => $rcmail->output->env['uid'],
+-            ));
++            ), false, false, true);
+ 
+             $link = html::a(array('href' => $href, 'class' => 'button zipdownload'),
+                 rcube::Q($this->gettext('downloadall'))
+@@ -120,6 +120,10 @@ public function download_menu()
+     public function download_attachments()
+     {
+         $rcmail    = rcmail::get_instance();
++
++        // require CSRF protected request
++        $rcmail->request_security_check(rcube_utils::INPUT_GET);
++
+         $imap      = $rcmail->get_storage();
+         $temp_dir  = $rcmail->config->get('temp_dir');
+         $tmpfname  = tempnam($temp_dir, 'zipdownload');
+diff --git a/program/include/rcmail.php b/program/include/rcmail.php
+index 95ad67a377..53aeb90d7d 100644
+--- a/program/include/rcmail.php
++++ b/program/include/rcmail.php
+@@ -813,6 +813,8 @@ public function url($p, $absolute = false, $full = false, $secure = false)
+             // this need to be full url to make redirects work
+             $absolute = true;
+         }
++        else if ($secure && ($token = $this->get_request_token()))
++            $url .= $delm . '_token=' . urlencode($token);
+ 
+         if ($absolute || $full) {
+             // add base path to this Roundcube installation
+diff --git a/program/include/rcmail_output_html.php b/program/include/rcmail_output_html.php
+index 2374f87cbb..2f591316ab 100644
+--- a/program/include/rcmail_output_html.php
++++ b/program/include/rcmail_output_html.php
+@@ -514,10 +514,10 @@ public function write($template = '')
+         // write all javascript commands
+         $this->add_script($commands, 'head_top');
+ 
+-        // send clickjacking protection headers
++        // allow (legal) iframe content to be loaded
+         $iframe = $this->framed || $this->env['framed'];
+-        if (!headers_sent() && ($xframe = $this->app->config->get('x_frame_options', 'sameorigin'))) {
+-            header('X-Frame-Options: ' . ($iframe && $xframe == 'deny' ? 'sameorigin' : $xframe));
++        if (!headers_sent() && $iframe && $this->app->config->get('x_frame_options', 'sameorigin') === 'deny') {
++            header('X-Frame-Options: sameorigin', true);
+         }
+ 
+         // call super method
+diff --git a/program/js/app.js b/program/js/app.js
+index c147c5ddcd..b5be135b62 100644
+--- a/program/js/app.js
++++ b/program/js/app.js
+@@ -999,7 +999,7 @@ function rcube_webmail()
+             break;
+         }
+ 
+-        this.goto_url('get', qstring+'&_download=1', false);
++        this.goto_url('get', qstring+'&_download=1', false, true);
+         break;
+ 
+       case 'select-all':
+@@ -1205,10 +1205,10 @@ function rcube_webmail()
+ 
+       case 'download':
+         if (this.env.action == 'get') {
+-          location.href = location.href.replace(/_frame=/, '_download=');
++          location.href = this.secure_url(location.href.replace(/_frame=/, '_download='));
+         }
+         else if (uid = this.get_single_uid()) {
+-          this.goto_url('viewsource', this.params_from_uid(uid, {_save: 1}));
++          this.goto_url('viewsource', this.params_from_uid(uid, {_save: 1}), false, true);
+         }
+         break;
+ 
+@@ -1296,13 +1296,13 @@ function rcube_webmail()
+ 
+       case 'export':
+         if (this.contact_list.rowcount > 0) {
+-          this.goto_url('export', { _source: this.env.source, _gid: this.env.group, _search: this.env.search_request });
++          this.goto_url('export', { _source: this.env.source, _gid: this.env.group, _search: this.env.search_request }, false, true);
+         }
+         break;
+ 
+       case 'export-selected':
+         if (this.contact_list.rowcount > 0) {
+-          this.goto_url('export', { _source: this.env.source, _gid: this.env.group, _cid: this.contact_list.get_selection().join(',') });
++          this.goto_url('export', { _source: this.env.source, _gid: this.env.group, _cid: this.contact_list.get_selection().join(',') }, false, true);
+         }
+         break;
+ 
+@@ -1417,7 +1417,7 @@ function rcube_webmail()
+     if (task == 'mail')
+       url += '&_mbox=INBOX';
+     else if (task == 'logout' && !this.env.server_error) {
+-      url += '&_token=' + this.env.request_token;
++      url = this.secure_url(url);
+       this.clear_compose_data();
+     }
+ 
+@@ -1466,6 +1466,12 @@ function rcube_webmail()
+     return url + '?' + name + '=' + value;
+   };
+ 
++  // append CSRF protection token to the given url
++  this.secure_url = function(url)
++  {
++    return this.add_url(url, '_token', this.env.request_token);
++  },
++
+   this.is_framed = function()
+   {
+     return this.env.framed && parent.rcmail && parent.rcmail != this && typeof parent.rcmail.command == 'function';
+@@ -7282,9 +7288,11 @@ function rcube_webmail()
+     }
+   };
+ 
+-  this.goto_url = function(action, query, lock)
++  this.goto_url = function(action, query, lock, secure)
+   {
+-    this.redirect(this.url(action, query), lock);
++    var url = this.url(action, query)
++    if (secure) url = this.secure_url(url);
++    this.redirect(url, lock);
+   };
+ 
+   this.location_href = function(url, target, frame)
+diff --git a/program/lib/Roundcube/rcube_message.php b/program/lib/Roundcube/rcube_message.php
+index b9008af066..4550b76f3f 100644
+--- a/program/lib/Roundcube/rcube_message.php
++++ b/program/lib/Roundcube/rcube_message.php
+@@ -105,10 +105,11 @@ function __construct($uid, $folder = null)
+         $this->opt = array(
+             'safe' => $this->is_safe,
+             'prefer_html' => $this->app->config->get('prefer_html'),
+-            'get_url' => $this->app->url(array(
+-                'action' => 'get',
+-                'mbox'   => $this->storage->get_folder(),
+-                'uid'    => $uid))
++            'get_url'     => $this->app->url(array(
++                    'action' => 'get',
++                    'mbox'   => $this->storage->get_folder(),
++                    'uid'    => $uid),
++                false, false, true)
+         );
+ 
+         if (!empty($this->headers->structure)) {
+diff --git a/program/lib/Roundcube/rcube_output.php b/program/lib/Roundcube/rcube_output.php
+index 55a38b2401..586aba3f7a 100644
+--- a/program/lib/Roundcube/rcube_output.php
++++ b/program/lib/Roundcube/rcube_output.php
+@@ -190,6 +190,11 @@ public function common_headers()
+ 
+         // Request browser to disable DNS prefetching (CVE-2010-0464)
+         header("X-DNS-Prefetch-Control: off");
++
++        // send CSRF and clickjacking protection headers
++        if ($xframe = $this->app->config->get('x_frame_options', 'sameorigin')) {
++            header('X-Frame-Options: ' . $xframe);
++        }
+     }
+ 
+     /**
+diff --git a/program/steps/addressbook/export.inc b/program/steps/addressbook/export.inc
+index e2b6d88974..417832c892 100644
+--- a/program/steps/addressbook/export.inc
++++ b/program/steps/addressbook/export.inc
+@@ -21,6 +21,8 @@
+  +-----------------------------------------------------------------------+
+ */
+ 
++$RCMAIL->request_security_check(rcube_utils::INPUT_GET);
++
+ // Use search result
+ if (!empty($_REQUEST['_search']) && isset($_SESSION['search'][$_REQUEST['_search']])) {
+     $sort_col = $RCMAIL->config->get('addressbook_sort_col', 'name');
+diff --git a/program/steps/mail/get.inc b/program/steps/mail/get.inc
+index a79b968a81..e4fd55f1eb 100644
+--- a/program/steps/mail/get.inc
++++ b/program/steps/mail/get.inc
+@@ -131,6 +131,10 @@ else if (strlen($part_id)) {
+             exit;
+         }
+ 
++        // require CSRF protected url for downloads
++        if ($plugin['download'])
++            $RCMAIL->request_security_check(rcube_utils::INPUT_GET);
++
+         // overwrite modified vars from plugin
+         $mimetype   = $plugin['mimetype'];
+         $extensions = rcube_mime::get_mime_extensions($mimetype);
+diff --git a/program/steps/mail/viewsource.inc b/program/steps/mail/viewsource.inc
+index f988f679a5..284b333942 100644
+--- a/program/steps/mail/viewsource.inc
++++ b/program/steps/mail/viewsource.inc
+@@ -19,6 +19,10 @@
+  +-----------------------------------------------------------------------+
+ */
+ 
++if (!empty($_GET['_save'])) {
++    $RCMAIL->request_security_check(rcube_utils::INPUT_GET);
++}
++
+ ob_end_clean();
+ 
+ // similar code as in program/steps/mail/get.inc

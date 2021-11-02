@@ -1,0 +1,43 @@
+From ba27c91351878bc297ec4baba0bd488a2f3b568d Mon Sep 17 00:00:00 2001
+From: Michael Schroeder <mls@suse.de>
+Date: Fri, 17 Mar 2017 10:57:58 +0100
+Subject: [PATCH] [backend] only allow plain files in cpio_sender
+
+No devices, sockets, directories, symlinks please...
+---
+ src/backend/BSHTTP.pm | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/src/backend/BSHTTP.pm b/src/backend/BSHTTP.pm
+index d91de76b0a0..928b88a9922 100644
+--- a/src/backend/BSHTTP.pm
++++ b/src/backend/BSHTTP.pm
+@@ -448,13 +448,24 @@ sub cpio_sender {
+       my $filename = $file->{'filename'};
+       if (ref($filename)) {
+ 	*F = $filename;
+-      } elsif (!open(F, '<', $filename)) {
+-	$errors->{'data'} .= "$file->{'name'}: $filename: $!\n";
+-	next;
++      } else {
++	@s = lstat($filename);
++	if (!@s) {
++	  $errors->{'data'} .= "$file->{'name'}: $filename: $!\n";
++	  next;
++	}
++	if (-l _ || ! -f _) {
++	  $errors->{'data'} .= "$file->{'name'}: $filename: not a plain file\n";
++	  next;
++	}
++	if (!open(F, '<', $filename)) {
++	  $errors->{'data'} .= "$file->{'name'}: $filename: $!\n";
++	  next;
++	}
+       }
+       @s = stat(F);
+       if (!@s) {
+-	$errors->{'data'} .= "$file->{'name'}: stat: $!\n";
++	$errors->{'data'} .= "$file->{'name'}: fstat: $!\n";
+ 	close F unless ref $filename;
+ 	next;
+       }

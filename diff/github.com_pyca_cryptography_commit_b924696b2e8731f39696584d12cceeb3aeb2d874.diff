@@ -1,0 +1,45 @@
+From b924696b2e8731f39696584d12cceeb3aeb2d874 Mon Sep 17 00:00:00 2001
+From: Alex Gaynor <alex.gaynor@gmail.com>
+Date: Sat, 5 Nov 2016 22:08:21 -0400
+Subject: [PATCH] Fixes #3211 -- fixed hkdf's output with short length (#3215)
+
+---
+ src/cryptography/hazmat/primitives/kdf/hkdf.py |  2 +-
+ tests/hazmat/primitives/test_hkdf.py           | 11 +++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/cryptography/hazmat/primitives/kdf/hkdf.py b/src/cryptography/hazmat/primitives/kdf/hkdf.py
+index f738bbdc72e..82ed9b1c85e 100644
+--- a/src/cryptography/hazmat/primitives/kdf/hkdf.py
++++ b/src/cryptography/hazmat/primitives/kdf/hkdf.py
+@@ -91,7 +91,7 @@ def _expand(self, key_material):
+         output = [b""]
+         counter = 1
+ 
+-        while (self._algorithm.digest_size // 8) * len(output) < self._length:
++        while self._algorithm.digest_size * (len(output) - 1) < self._length:
+             h = hmac.HMAC(key_material, self._algorithm, backend=self._backend)
+             h.update(output[-1])
+             h.update(self._info)
+diff --git a/tests/hazmat/primitives/test_hkdf.py b/tests/hazmat/primitives/test_hkdf.py
+index e33529c9d59..a05fd752ff5 100644
+--- a/tests/hazmat/primitives/test_hkdf.py
++++ b/tests/hazmat/primitives/test_hkdf.py
+@@ -142,6 +142,17 @@ def test_unicode_typeerror(self, backend):
+ 
+             hkdf.verify(b"foo", u"bar")
+ 
++    def test_derive_short_output(self, backend):
++        hkdf = HKDF(
++            hashes.SHA256(),
++            4,
++            salt=None,
++            info=None,
++            backend=backend
++        )
++
++        assert hkdf.derive(b"\x01" * 16) == b"gJ\xfb{"
++
+ 
+ @pytest.mark.requires_backend_interface(interface=HMACBackend)
+ class TestHKDFExpand(object):

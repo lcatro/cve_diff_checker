@@ -1,0 +1,57 @@
+From 27195157aa2a6b1fabfb882c36a8a6eb9201f029 Mon Sep 17 00:00:00 2001
+From: Eric Norris <erictnorris@gmail.com>
+Date: Wed, 9 Jun 2021 23:51:47 -0400
+Subject: [PATCH] fix: throw TypeError if 'html' is non-string argument
+
+---
+ package.json           | 2 +-
+ src/striptags.js       | 4 ++++
+ test/striptags-test.js | 9 +++++++++
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/package.json b/package.json
+index c3d5910..5c0e2ef 100644
+--- a/package.json
++++ b/package.json
+@@ -10,7 +10,7 @@
+   "main": "src/striptags.js",
+   "homepage": "https://github.com/ericnorris/striptags",
+   "bugs": "https://github.com/ericnorris/striptags/issues",
+-  "version": "3.1.1",
++  "version": "3.2.0",
+   "devDependencies": {
+     "istanbul": "^0.4.5",
+     "mocha": "^3.2.0"
+diff --git a/src/striptags.js b/src/striptags.js
+index 9d39698..d9b58a2 100644
+--- a/src/striptags.js
++++ b/src/striptags.js
+@@ -56,6 +56,10 @@
+     }
+ 
+     function striptags_internal(html, context) {
++        if (typeof html != "string") {
++            throw new TypeError("'html' parameter must be a string");
++        }
++
+         let allowable_tags  = context.allowable_tags;
+         let tag_replacement = context.tag_replacement;
+ 
+diff --git a/test/striptags-test.js b/test/striptags-test.js
+index ebe8bce..36ae474 100644
+--- a/test/striptags-test.js
++++ b/test/striptags-test.js
+@@ -157,4 +157,13 @@ describe('striptags', function() {
+             assert.equal(part_three, '< amet');
+         });
+     });
++
++    it('GHSL-2021-074', function() {
++        assert.throws(
++            function() {
++                striptags(["type-confusion"]);
++            },
++            TypeError,
++        );
++    });
+ });

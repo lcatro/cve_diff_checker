@@ -1,0 +1,92 @@
+From f60729f3903d17917dc351f3ac87794de379b0cc Mon Sep 17 00:00:00 2001
+From: Oleg Gaidarenko <markelog@gmail.com>
+Date: Thu, 10 Sep 2015 13:40:00 +0300
+Subject: [PATCH] Ajax: Mitigate possible XSS vulnerability
+
+Proposed by @jaubourg
+
+Cherry-picked from b078a62013782c7424a4a61a240c23c4c0b42614
+Fixes gh-2432
+Closes gh-2588
+---
+ src/ajax/script.js |  7 +++++++
+ test/unit/ajax.js  | 48 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+
+diff --git a/src/ajax/script.js b/src/ajax/script.js
+index 4c810f0a09..d941774327 100644
+--- a/src/ajax/script.js
++++ b/src/ajax/script.js
+@@ -4,6 +4,13 @@ define( [
+ 	"../ajax"
+ ], function( jQuery, document ) {
+ 
++// Prevent auto-execution of scripts when no explicit dataType was provided (See gh-2432)
++jQuery.ajaxPrefilter( function( s ) {
++    if ( s.crossDomain ) {
++        s.contents.script = false;
++    }
++} );
++
+ // Install script dataType
+ jQuery.ajaxSetup( {
+ 	accepts: {
+diff --git a/test/unit/ajax.js b/test/unit/ajax.js
+index 4d9b1bc49c..6c78618f42 100644
+--- a/test/unit/ajax.js
++++ b/test/unit/ajax.js
+@@ -85,6 +85,54 @@ QUnit.module( "ajax", {
+ 		};
+ 	} );
+ 
++	ajaxTest( "jQuery.ajax() - do not execute js (crossOrigin)", 2, function( assert ) {
++		return {
++			create: function( options ) {
++				options.crossDomain = true;
++				return jQuery.ajax( url( "data/script.php?header=ecma" ), options );
++			},
++			success: function() {
++				assert.ok( true, "success" );
++			},
++			complete: function() {
++				assert.ok( true, "complete" );
++			}
++		};
++	} );
++
++	ajaxTest( "jQuery.ajax() - execute js for crossOrigin when dataType option is provided", 3,
++		function( assert ) {
++			return {
++				create: function( options ) {
++					options.crossDomain = true;
++					options.dataType = "script";
++					return jQuery.ajax( url( "data/script.php?header=ecma" ), options );
++				},
++				success: function() {
++					assert.ok( true, "success" );
++				},
++				complete: function() {
++					assert.ok( true, "complete" );
++				}
++			};
++		}
++	);
++
++	ajaxTest( "jQuery.ajax() - do not execute js (crossOrigin)", 2, function( assert ) {
++		return {
++			create: function( options ) {
++				options.crossDomain = true;
++				return jQuery.ajax( url( "data/script.php" ), options );
++			},
++			success: function() {
++				assert.ok( true, "success" );
++			},
++			complete: function() {
++				assert.ok( true, "complete" );
++			}
++		};
++	} );
++
+ 	ajaxTest( "jQuery.ajax() - success callbacks (late binding)", 8, function( assert ) {
+ 		return {
+ 			setup: addGlobalEvents( "ajaxStart ajaxStop ajaxSend ajaxComplete ajaxSuccess", assert ),

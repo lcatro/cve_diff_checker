@@ -1,0 +1,24 @@
+From 98b727637e32d1d4824101d8947e2dbd573d4fc8 Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@users.sourceforge.net>
+Date: Sun, 7 Jul 2019 17:54:21 +0200
+Subject: [PATCH] be stricter in PAT processing - cf #1269
+
+---
+ src/media_tools/mpegts.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/media_tools/mpegts.c b/src/media_tools/mpegts.c
+index 30c6747eeb..bbcd8a14fe 100644
+--- a/src/media_tools/mpegts.c
++++ b/src/media_tools/mpegts.c
+@@ -1667,7 +1667,9 @@ static void gf_m2ts_process_pat(GF_M2TS_Demuxer *ts, GF_M2TS_SECTION_ES *ses, GF
+ 			if (!ts->nit) {
+ 				ts->nit = gf_m2ts_section_filter_new(gf_m2ts_process_nit, 0);
+ 			}
+-		} else {
++		} else if (!pid) {
++			GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("Broken PAT found reserved PID 0, ignoring\n", pid));
++		} else if (! ts->ess[pid]) {
+ 			GF_SAFEALLOC(prog, GF_M2TS_Program);
+ 			if (!prog) {
+ 				GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("Fail to allocate program for pid %d\n", pid));

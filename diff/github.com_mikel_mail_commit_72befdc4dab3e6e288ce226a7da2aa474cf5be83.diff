@@ -1,0 +1,139 @@
+From 72befdc4dab3e6e288ce226a7da2aa474cf5be83 Mon Sep 17 00:00:00 2001
+From: Conrad Irwin <conrad.irwin@gmail.com>
+Date: Fri, 1 Feb 2013 22:08:54 -0800
+Subject: [PATCH] Also unfold and split lazily
+
+This has little effect on the specs, but on my header reading example it
+makes about a 10x performance difference, finally bringing it within one
+order of magnitude of the "fast hacky solution" at
+https://gist.github.com/5901bbd810c08ed3d0b1
+---
+ lib/mail/field.rb         | 22 +++++++++++++++++++---
+ lib/mail/header.rb        | 19 +------------------
+ lib/mail/patterns.rb      |  4 +++-
+ spec/mail/message_spec.rb |  2 +-
+ 4 files changed, 24 insertions(+), 23 deletions(-)
+
+diff --git a/lib/mail/field.rb b/lib/mail/field.rb
+index 0fced8f2e..c5a55a363 100644
+--- a/lib/mail/field.rb
++++ b/lib/mail/field.rb
+@@ -115,7 +115,8 @@ def initialize(name, value = nil, charset = 'utf-8')
+       case
+       when name =~ /:/                  # Field.new("field-name: field data")
+         @charset = value.blank? ? charset : value
+-        @name, @value = split(name)
++        @name = name[FIELD_PREFIX]
++        @raw_value = name
+       when name !~ /:/ && value.blank?  # Field.new("field-name")
+         @name = name
+         @value = nil
+@@ -125,7 +126,7 @@ def initialize(name, value = nil, charset = 'utf-8')
+         @value = value
+         @charset = charset
+       end
+-      return self
++      @name = FIELD_NAME_MAP[@name.to_s.downcase] || @name
+     end
+ 
+     def field=(value)
+@@ -133,11 +134,12 @@ def field=(value)
+     end
+ 
+     def field
++      _, @value = split(@raw_value) if @raw_value && !@value
+       @field ||= create_field(@name, @value, @charset)
+     end
+ 
+     def name
+-      FIELD_NAME_MAP[@name.to_s.downcase] || @name
++      @name
+     end
+ 
+     def value
+@@ -198,7 +200,21 @@ def split(raw_field)
+       STDERR.puts "WARNING: Could not parse (and so ignoring) '#{raw_field}'"
+     end
+ 
++    # 2.2.3. Long Header Fields
++    #
++    #  The process of moving from this folded multiple-line representation
++    #  of a header field to its single line representation is called
++    #  "unfolding". Unfolding is accomplished by simply removing any CRLF
++    #  that is immediately followed by WSP.  Each header field should be
++    #  treated in its unfolded form for further syntactic and semantic
++    #  evaluation.
++    def unfold(string)
++      string.gsub(/[\r\n \t]+/m, ' ')
++    end
++
+     def create_field(name, value, charset)
++      value = unfold(value) if value.is_a?(String) || value.is_a?(Mail::Multibyte::Chars)
++
+       begin
+         new_field(name, value, charset)
+       rescue Mail::Field::ParseError => e
+diff --git a/lib/mail/header.rb b/lib/mail/header.rb
+index 6d5d80fb5..3f6f5b15f 100644
+--- a/lib/mail/header.rb
++++ b/lib/mail/header.rb
+@@ -244,27 +244,10 @@ def raw_source=(val)
+       @raw_source = val
+     end
+     
+-    # 2.2.3. Long Header Fields
+-    # 
+-    #  The process of moving from this folded multiple-line representation
+-    #  of a header field to its single line representation is called
+-    #  "unfolding". Unfolding is accomplished by simply removing any CRLF
+-    #  that is immediately followed by WSP.  Each header field should be
+-    #  treated in its unfolded form for further syntactic and semantic
+-    #  evaluation.
+-    def unfold(string)
+-      string.gsub(/#{CRLF}#{WSP}+/, ' ').gsub(/#{WSP}+/, ' ')
+-    end
+-    
+-    # Returns the header with all the folds removed
+-    def unfolded_header
+-      @unfolded_header ||= unfold(raw_source)
+-    end
+-    
+     # Splits an unfolded and line break cleaned header into individual field
+     # strings.
+     def split_header
+-      self.fields = unfolded_header.split(CRLF)
++      self.fields = raw_source.split(HEADER_SPLIT)
+     end
+     
+     def select_field_for(name)
+diff --git a/lib/mail/patterns.rb b/lib/mail/patterns.rb
+index 582fe1ae2..77fcfc7b1 100644
+--- a/lib/mail/patterns.rb
++++ b/lib/mail/patterns.rb
+@@ -20,10 +20,12 @@ module Patterns
+     FWS           = /#{CRLF}#{WSP}*/
+     TEXT          = /[#{text}]/ # + obs-text
+     FIELD_NAME    = /[#{field_name}]+/
+-    FIELD_BODY    = /.+/
++    FIELD_PREFIX  = /\A(#{FIELD_NAME})/
++    FIELD_BODY    = /.+/m
+     FIELD_LINE    = /^[#{field_name}]+:\s*.+$/
+     FIELD_SPLIT   = /^(#{FIELD_NAME})\s*:\s*(#{FIELD_BODY})?$/
+     HEADER_LINE   = /^([#{field_name}]+:\s*.+)$/
++    HEADER_SPLIT  = /#{CRLF}(?!#{WSP})/
+ 
+     QP_UNSAFE     = /[^#{qp_safe}]/
+     QP_SAFE       = /[#{qp_safe}]/
+diff --git a/spec/mail/message_spec.rb b/spec/mail/message_spec.rb
+index 68a3d96f5..26849dca3 100644
+--- a/spec/mail/message_spec.rb
++++ b/spec/mail/message_spec.rb
+@@ -109,7 +109,7 @@ def basic_email
+ 
+     it "should raise a warning (and keep parsing) on having an incorrectly formatted header" do
+       STDERR.should_receive(:puts).with("WARNING: Could not parse (and so ignoring) 'quite Delivered-To: xxx@xxx.xxx'")
+-      Mail.read(fixture('emails', 'plain_emails', 'raw_email_incorrect_header.eml'))
++      Mail.read(fixture('emails', 'plain_emails', 'raw_email_incorrect_header.eml')).to_s
+     end
+ 
+     it "should read in an email message and basically parse it" do

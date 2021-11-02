@@ -1,0 +1,41 @@
+From d990df909d7839640143344e79356754384dcdd0 Mon Sep 17 00:00:00 2001
+From: Slava Karpenko <slavikus@gmail.com>
+Date: Wed, 11 Nov 2020 21:13:12 +0100
+Subject: [PATCH] consensus/ethash: use 64bit indexes for the DAG generation
+ (#21793)
+
+* Bit boundary fix for the DAG generation routine
+
+* Fix unnecessary conversion warnings
+
+Co-authored-by: Sergey Pavlov <spavlov@gmail.com>
+---
+ consensus/ethash/algorithm.go | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/consensus/ethash/algorithm.go b/consensus/ethash/algorithm.go
+index e79c702dc8c7..47d7e51b5959 100644
+--- a/consensus/ethash/algorithm.go
++++ b/consensus/ethash/algorithm.go
+@@ -304,16 +304,16 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
+ 			keccak512 := makeHasher(sha3.NewLegacyKeccak512())
+ 
+ 			// Calculate the data segment this thread should generate
+-			batch := uint32((size + hashBytes*uint64(threads) - 1) / (hashBytes * uint64(threads)))
+-			first := uint32(id) * batch
++			batch := (size + hashBytes*uint64(threads) - 1) / (hashBytes * uint64(threads))
++			first := uint64(id) * batch
+ 			limit := first + batch
+-			if limit > uint32(size/hashBytes) {
+-				limit = uint32(size / hashBytes)
++			if limit > size/hashBytes {
++				limit = size / hashBytes
+ 			}
+ 			// Calculate the dataset segment
+ 			percent := size / hashBytes / 100
+ 			for index := first; index < limit; index++ {
+-				item := generateDatasetItem(cache, index, keccak512)
++				item := generateDatasetItem(cache, uint32(index), keccak512)
+ 				if swapped {
+ 					swap(item)
+ 				}

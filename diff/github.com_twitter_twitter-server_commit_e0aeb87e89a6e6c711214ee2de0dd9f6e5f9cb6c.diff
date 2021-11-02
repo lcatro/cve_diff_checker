@@ -1,0 +1,59 @@
+From e0aeb87e89a6e6c711214ee2de0dd9f6e5f9cb6c Mon Sep 17 00:00:00 2001
+From: Moses Nakamura <mnakamura@twitter.com>
+Date: Tue, 10 Nov 2020 16:14:44 +0000
+Subject: [PATCH] twitter-server: Plug XSS vulnerability in /histograms
+ endpoint
+
+Problem
+
+Right now we allow script injection in /histograms by telling people about the
+query that they just ran.
+
+Solution
+
+Stop telling people about the query they ran.
+
+JIRA Issues: OSS-5328
+
+Differential Revision: https://phabricator.twitter.biz/D574844
+---
+ CHANGELOG.rst                                                 | 3 +++
+ .../com/twitter/server/handler/HistogramQueryHandler.scala    | 4 ++--
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.rst b/CHANGELOG.rst
+index df6b53c..6ed485a 100644
+--- a/CHANGELOG.rst
++++ b/CHANGELOG.rst
+@@ -7,6 +7,9 @@ Note that ``PHAB_ID=#`` and ``RB_ID=#`` correspond to associated messages in com
+ Unreleased
+ ----------
+ 
++* Escape user-provided string from the returned text.  This removes a potential vector for an XSS
++  attack. ``PHAB_ID=D574844``
++
+ 20.10.0
+ -------
+ 
+diff --git a/server/src/main/scala/com/twitter/server/handler/HistogramQueryHandler.scala b/server/src/main/scala/com/twitter/server/handler/HistogramQueryHandler.scala
+index bf87e6e..951c255 100644
+--- a/server/src/main/scala/com/twitter/server/handler/HistogramQueryHandler.scala
++++ b/server/src/main/scala/com/twitter/server/handler/HistogramQueryHandler.scala
+@@ -198,7 +198,7 @@ private[server] class HistogramQueryHandler(details: WithHistogramDetails)
+       content = {
+         val text = histograms.get(query) match {
+           case Some(h) => transform(h.counts)
+-          case None => s"Key: $query is not a valid histogram."
++          case None => s"Key: ${escapeHtml(query)} is not a valid histogram."
+         }
+         Buf.Utf8(text)
+       }
+@@ -280,7 +280,7 @@ private[server] class HistogramQueryHandler(details: WithHistogramDetails)
+         if (histograms.contains(query))
+           render
+         else
+-          s"Key: $query is not a valid histogram."
++          s"Key: ${escapeHtml(query)} is not a valid histogram."
+       }
+     )
+ 

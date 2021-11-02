@@ -1,0 +1,41 @@
+From 05beb69ba60acce09f73ed491bb76f332849c3a0 Mon Sep 17 00:00:00 2001
+From: Steve Lhomme <slhomme@matroska.org>
+Date: Mon, 27 Nov 2017 09:48:32 +0100
+Subject: [PATCH] Check the max size to read before actually reading
+
+The size check waas also missing from the length parsing
+---
+ src/EbmlElement.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/EbmlElement.cpp b/src/EbmlElement.cpp
+index 143f439..ae4441e 100644
+--- a/src/EbmlElement.cpp
++++ b/src/EbmlElement.cpp
+@@ -404,12 +404,14 @@ EbmlElement * EbmlElement::FindNextElement(IOCallback & DataStream, const EbmlSe
+         memmove(&PossibleIdNSize[0],&PossibleIdNSize[1], --ReadIndex);
+       }
+ 
++      if (MaxDataSize <= ReadSize)
++        break;
+       if (DataStream.read(&PossibleIdNSize[ReadIndex++], 1) == 0) {
+         return NULL; // no more data ?
+       }
+       ReadSize++;
+ 
+-    } while (!bFound && MaxDataSize > ReadSize);
++    } while (!bFound);
+ 
+     if (!bFound)
+       // we reached the maximum we could read without a proper ID
+@@ -432,6 +434,10 @@ EbmlElement * EbmlElement::FindNextElement(IOCallback & DataStream, const EbmlSe
+         bFound = false;
+         break;
+       }
++      if (MaxDataSize <= ReadSize) {
++        bFound = false;
++        break;
++      }
+       if( DataStream.read( &PossibleIdNSize[SizeIdx++], 1 ) == 0 ) {
+         return NULL; // no more data ?
+       }

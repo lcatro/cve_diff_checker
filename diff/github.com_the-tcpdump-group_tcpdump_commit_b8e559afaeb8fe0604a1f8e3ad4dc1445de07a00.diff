@@ -1,0 +1,65 @@
+From b8e559afaeb8fe0604a1f8e3ad4dc1445de07a00 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Wed, 22 Mar 2017 16:08:25 +0100
+Subject: [PATCH] CVE-2017-13023/IPv6 mobility: Add a bounds check before
+ fetching data
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't cause 'tcpdump: pcap_loop: truncated dump file'
+---
+ print-mobility.c             |   1 +
+ tests/TESTLIST               |   1 +
+ tests/mobility_opt_asan.out  |   2 ++
+ tests/mobility_opt_asan.pcap | Bin 0 -> 256 bytes
+ 4 files changed, 4 insertions(+)
+ create mode 100644 tests/mobility_opt_asan.out
+ create mode 100644 tests/mobility_opt_asan.pcap
+
+diff --git a/print-mobility.c b/print-mobility.c
+index 16d3f7c29..64497b36e 100644
+--- a/print-mobility.c
++++ b/print-mobility.c
+@@ -150,6 +150,7 @@ mobility_opt_print(netdissect_options *ndo,
+ 				goto trunc;
+ 			}
+ 			/* units of 4 secs */
++			ND_TCHECK_16BITS(&bp[i+2]);
+ 			ND_PRINT((ndo, "(refresh: %u)",
+ 				EXTRACT_16BITS(&bp[i+2]) << 2));
+ 			break;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 657196ba2..3e215960d 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -524,6 +524,7 @@ pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
+ vtp_asan		vtp_asan.pcap			vtp_asan.out	-v
+ icmp6_mobileprefix_asan	icmp6_mobileprefix_asan.pcap	icmp6_mobileprefix_asan.out	-v
+ ip_printroute_asan	ip_printroute_asan.pcap		ip_printroute_asan.out	-v
++mobility_opt_asan	mobility_opt_asan.pcap		mobility_opt_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/mobility_opt_asan.out b/tests/mobility_opt_asan.out
+new file mode 100644
+index 000000000..91493c2dd
+--- /dev/null
++++ b/tests/mobility_opt_asan.out
+@@ -0,0 +1,2 @@
++IP6 (class 0x50, flowlabel 0x00004, hlim 0, next-header Mobile IP (old) (62) payload length: 7168) d400:7fa1:0:400::6238:2949 > 9675:86dd:7300:2c:1c7f:ffff:ffc3:b2a1: mobility: BU seq#=116 A lifetime=15872(pad1)[|MOBILITY]
++IP6 (class 0x50, flowlabel 0x00004, hlim 0, next-header Mobile IP (old) (62) payload length: 7168) d4c3:b2a1:200:400::6238:2949 > 9675:86dd:73f0:2c:1c7f:ffff:ebc3:b291: mobility: BU seq#=116 A lifetime=15360[|MOBILITY]
+diff --git a/tests/mobility_opt_asan.pcap b/tests/mobility_opt_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..d28de32c80863d6d6a0ca491f9cd86d5cf8e4ea8
+GIT binary patch
+literal 256
+zcmca|c+)~A1{Q{GDZvjN92u0{7#J8Bf%xru1}-sXCWaIsyP<)B;Xs4(0*3oZ7Pg+#
+zO55(HGBB{nFxW9%VW?jSWCGPNFeF)Mg5`=C7<6Rn|Ns9FGFh0F0jRm8A)LQ~0b~sb
+zoB^8u3ye~D*ciUWD8&N>!FH~5j$-ERK-ig#)lR63K}Nyt`~b1@_2EqunfO^5CP3_D
+RU_t_n@3@h8U?u~D006EFKhyvK
+
+literal 0
+HcmV?d00001
+

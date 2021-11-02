@@ -1,0 +1,130 @@
+From 80ceb1c375fdb1b4ffba16528c99089e804ce61f Mon Sep 17 00:00:00 2001
+From: odinn1986 <levan@sleep-coding.com>
+Date: Wed, 2 May 2018 22:46:01 +0300
+Subject: [PATCH] fix: prevent extracting archived files outside of target path
+
+This PR is meant to fix an arbitrary file write vulnerability, that can be
+achieved using a specially crafted zip archive, that holds path traversal
+filenames. When the filename gets concatenated to the target extraction
+directory, the final path ends up outside of the target folder.
+
+A sample malicious zip file named Zip.Evil.zip was used,
+and when running the code below, resulted in the creation of C:/Temp/evil.txt
+outside of the intended target directory.
+
+There are various possible ways to avoid this issue, some include checking
+for .. (dot dot) characters in the filename, but the best solution in our
+opinion is to check if the final target filename, starts with the target
+folder (after both are resolved to their absolute path).
+
+Stay secure,
+Snyk Team
+---
+ .../Archives/IArchiveEntryExtensions.cs       |  21 ++++++++++++--
+ .../SharpCompress.Test/Zip/ZipArchiveTests.cs |  27 ++++++++++++++++++
+ tests/TestArchives/Archives/Zip.Evil.zip      | Bin 0 -> 547 bytes
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+ create mode 100644 tests/TestArchives/Archives/Zip.Evil.zip
+
+diff --git a/src/SharpCompress/Archives/IArchiveEntryExtensions.cs b/src/SharpCompress/Archives/IArchiveEntryExtensions.cs
+index f4f8cb6b..d66669b9 100644
+--- a/src/SharpCompress/Archives/IArchiveEntryExtensions.cs
++++ b/src/SharpCompress/Archives/IArchiveEntryExtensions.cs
+@@ -48,6 +48,7 @@ public static void WriteTo(this IArchiveEntry archiveEntry, Stream streamToWrite
+         {
+             string destinationFileName;
+             string file = Path.GetFileName(entry.Key);
++            string fullDestinationDirectoryPath = Path.GetFullPath(destinationDirectory);
+ 
+             options = options ?? new ExtractionOptions()
+                                  {
+@@ -58,19 +59,35 @@ public static void WriteTo(this IArchiveEntry archiveEntry, Stream streamToWrite
+             if (options.ExtractFullPath)
+             {
+                 string folder = Path.GetDirectoryName(entry.Key);
+-                string destdir = Path.Combine(destinationDirectory, folder);
++                string destdir = Path.GetFullPath(
++                                    Path.Combine(fullDestinationDirectoryPath, folder)
++                                 );
++
+                 if (!Directory.Exists(destdir))
+                 {
++                    if (!destdir.StartsWith(fullDestinationDirectoryPath))
++                    {
++                        throw new ExtractionException("Entry is trying to create a directory outside of the destination directory.");
++                    }
++
+                     Directory.CreateDirectory(destdir);
+                 }
+                 destinationFileName = Path.Combine(destdir, file);
+             }
+             else
+             {
+-                destinationFileName = Path.Combine(destinationDirectory, file);
++                destinationFileName = Path.Combine(fullDestinationDirectoryPath, file);
+             }
++
+             if (!entry.IsDirectory)
+             {
++                destinationFileName = Path.GetFullPath(destinationFileName);
++
++                if (!destinationFileName.StartsWith(fullDestinationDirectoryPath))
++                {
++                    throw new ExtractionException("Entry is trying to write a file outside of the destination directory.");
++                }
++
+                 entry.WriteToFile(destinationFileName, options);
+             }
+         }
+diff --git a/tests/SharpCompress.Test/Zip/ZipArchiveTests.cs b/tests/SharpCompress.Test/Zip/ZipArchiveTests.cs
+index a613abad..c776dcf9 100644
+--- a/tests/SharpCompress.Test/Zip/ZipArchiveTests.cs
++++ b/tests/SharpCompress.Test/Zip/ZipArchiveTests.cs
+@@ -433,7 +433,34 @@ public void Zip_Deflate_PKWear_Multipy_Entry_Access()
+                     }
+                 }
+             }
++        }
++
++        [Fact]
++        public void Zip_Evil_Throws_Exception()
++        {
++            Exception expectedExcetpion = null;
++            string zipFile = Path.Combine(TEST_ARCHIVES_PATH, "Zip.Evil.zip");
++
++            try
++            { 
++                using (var archive = ZipArchive.Open(zipFile))
++                {
++                    foreach (var entry in archive.Entries.Where(entry => !entry.IsDirectory))
++                    {
++                        entry.WriteToDirectory(SCRATCH_FILES_PATH, new ExtractionOptions()
++                        {
++                            ExtractFullPath = true,
++                            Overwrite = true
++                        });
++                    }
++                }
++            }
++            catch (Exception ex)
++            {
++                expectedExcetpion = ex;
++            }
+ 
++            Assert.NotEqual(expectedExcetpion, null);
+         }
+ 
+         class NonSeekableMemoryStream : MemoryStream
+diff --git a/tests/TestArchives/Archives/Zip.Evil.zip b/tests/TestArchives/Archives/Zip.Evil.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..3474c88bec74e6381fb9e1e598f98076c64f2d68
+GIT binary patch
+literal 547
+zcmWIWW@h1H0D=Au{XYEp{-1?`Y!K#PkYPyA&ri`SsVE5z;bdU8U359BLG@ZxX$3a}
+zBg;2N1_l-ppt_Qb%wh!~N>l);R>;pw<q7~A3X)=Am<lvB!LiyB!~@}0AlB2184whb
+znp+T)T9%mu@)6wCc?uvQsIwWF<d|`Vh6K>*3=BYDGc0KYu@GUy3JDvua0&2cWD;S<
+n9Sk5dKwwE@D3BbG5CK|>5-0)QtZX1BF##bX(5E~g-!cFIhBtZG
+
+literal 0
+HcmV?d00001
+

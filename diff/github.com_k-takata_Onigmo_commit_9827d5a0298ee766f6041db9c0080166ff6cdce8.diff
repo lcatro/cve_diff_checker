@@ -1,0 +1,43 @@
+From 00cc7e28a3ed54b3b512ef3b58ea737a57acf1f9 Mon Sep 17 00:00:00 2001
+From: "K.Takata" <kentkt@csc.jp>
+Date: Mon, 29 Jul 2019 20:15:26 +0900
+Subject: [PATCH] Fix SEGV in onig_error_code_to_str() (Fix #132)
+
+When onig_new(ONIG_SYNTAX_PERL) fails with ONIGERR_INVALID_GROUP_NAME,
+onig_error_code_to_str() crashes.
+onig_scan_env_set_error_string() should have been used when returning
+ONIGERR_INVALID_GROUP_NAME.
+---
+ regparse.c | 6 +++++-
+ testpy.py  | 1 +
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/regparse.c b/regparse.c
+index b54a9891..12dc8cc4 100644
+--- a/regparse.c
++++ b/regparse.c
+@@ -3910,7 +3910,11 @@ fetch_token(OnigToken* tok, UChar** src, UChar* end, ScanEnv* env)
+ 
+ 	  if (c == 'R' || c == '0') {
+ 	    PINC;   /* skip 'R' / '0' */
+-	    if (!PPEEK_IS(')')) return ONIGERR_INVALID_GROUP_NAME;
++	    if (!PPEEK_IS(')')) {
++	      r = ONIGERR_INVALID_GROUP_NAME;
++	      onig_scan_env_set_error_string(env, r, p - 1, p + 1);
++	      return r;
++	    }
+ 	    PINC;   /* skip ')' */
+ 	    name_end = name = p;
+ 	    gnum = 0;
+diff --git a/testpy.py b/testpy.py
+index 831efb4d..b14446ba 100755
+--- a/testpy.py
++++ b/testpy.py
+@@ -1320,6 +1320,7 @@ def main():
+     n("\\M#", "", err=onigmo.ONIGERR_META_CODE_SYNTAX)
+     n("\\C", "", err=onigmo.ONIGERR_END_PATTERN_AT_CONTROL)
+     n("\\C#", "", err=onigmo.ONIGERR_CONTROL_CODE_SYNTAX)
++    n("(?0d", "", syn=onigmo.ONIG_SYNTAX_PERL, err=onigmo.ONIGERR_INVALID_GROUP_NAME) # Issue #132
+ 
+     # ONIG_OPTION_FIND_LONGEST option
+     x2("foo|foobar", "foobar", 0, 3)

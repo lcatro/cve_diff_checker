@@ -1,0 +1,50 @@
+From dfa095cadf7e8309155be51982d8720daf32e31c Mon Sep 17 00:00:00 2001
+From: Colin Hutchinson <hutchic@users.noreply.github.com>
+Date: Fri, 20 Mar 2020 10:57:33 -0400
+Subject: [PATCH] chore(admin) restrict the admin port to 127 (#350)
+
+* fix(admin) bind admin port to 127 only
+
+* tests need to adjust the compose file for swarm vs docker-compose
+---
+ compose/docker-compose.yml | 4 ++--
+ tests.sh                   | 3 ++-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/compose/docker-compose.yml b/compose/docker-compose.yml
+index a46bf08e..de946b82 100644
+--- a/compose/docker-compose.yml
++++ b/compose/docker-compose.yml
+@@ -71,9 +71,9 @@ services:
+       - kong-net
+     ports:
+       - "8000:8000/tcp"
+-      - "8001:8001/tcp"
++      - "127.0.0.1:8001:8001/tcp"
+       - "8443:8443/tcp"
+-      - "8444:8444/tcp"
++      - "127.0.0.1:8444:8444/tcp"
+     healthcheck:
+       test: ["CMD", "kong", "health"]
+       interval: 10s
+diff --git a/tests.sh b/tests.sh
+index 015169a3..f99363c8 100755
+--- a/tests.sh
++++ b/tests.sh
+@@ -29,7 +29,7 @@ done
+ 
+ sleep 20
+ curl -I localhost:8001 | grep 'Server: openresty'
+-
++sed -i -e 's/127.0.0.1://g' docker-compose.yml
+ KONG_DOCKER_TAG=${KONG_DOCKER_TAG} docker stack deploy -c docker-compose.yml kong
+ sleep 20
+ until docker ps | grep ${KONG_DOCKER_TAG}:latest | grep -q healthy; do
+@@ -45,6 +45,7 @@ docker stack rm kong
+ sleep 20
+ docker swarm leave --force
+ docker volume prune -f
++git checkout -- docker-compose.yml
+ popd
+ 
+ # Validate Kong is running as the Kong user

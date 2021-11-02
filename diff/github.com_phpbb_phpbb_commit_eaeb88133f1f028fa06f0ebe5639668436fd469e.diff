@@ -1,0 +1,157 @@
+From 4b9434bf1ba4c015da11309602cfccf1a9c2493c Mon Sep 17 00:00:00 2001
+From: Marc Alexander <admin@m-a-styles.de>
+Date: Wed, 21 Jan 2015 00:16:42 +0100
+Subject: [PATCH 1/2] [ticket/13531] Explicitly disallow trailing paths (e.g.
+ PATH_INFO).
+
+PHPBB3-13531
+---
+ phpBB/includes/startup.php            | 34 +++++++++++++++++
+ tests/security/trailing_path_test.php | 55 +++++++++++++++++++++++++++
+ 2 files changed, 89 insertions(+)
+ create mode 100644 tests/security/trailing_path_test.php
+
+diff --git a/phpBB/includes/startup.php b/phpBB/includes/startup.php
+index 2f3b1c5324c8..d9dab2a356f9 100644
+--- a/phpBB/includes/startup.php
++++ b/phpBB/includes/startup.php
+@@ -95,6 +95,40 @@ function deregister_globals()
+ 	unset($input);
+ }
+ 
++/**
++ * Check if requested page uses a trailing path
++ *
++ * @param string $phpEx PHP extension
++ *
++ * @return bool True if trailing path is used, false if not
++ */
++function phpbb_has_trailing_path($phpEx)
++{
++	// Check if path_info is being used
++	if (!empty($_SERVER['PATH_INFO']) || !empty($_SERVER['ORIG_PATH_INFO']))
++	{
++		return true;
++	}
++
++	// Match any trailing path appended to a php script in the REQUEST_URI.
++	// It is assumed that only actual PHP scripts use names like foo.php. Due
++	// to this, any phpBB board inside a directory that has the php extension
++	// appended to its name will stop working, i.e. if the board is at
++	// example.com/phpBB/test.php/ or example.com/test.php/
++	if (preg_match('#^[^?]+\.' . preg_quote($phpEx, '#') . '/#', $_SERVER['REQUEST_URI']))
++	{
++		return true;
++	}
++
++	return false;
++}
++
++// Check if trailing path is used
++if (phpbb_has_trailing_path($phpEx))
++{
++	exit('Trailing paths and path_info is not supported by phpBB 3.0');
++}
++
+ // Register globals and magic quotes have been dropped in PHP 5.4
+ if (version_compare(PHP_VERSION, '5.4.0-dev', '>='))
+ {
+diff --git a/tests/security/trailing_path_test.php b/tests/security/trailing_path_test.php
+new file mode 100644
+index 000000000000..72ec6b88169f
+--- /dev/null
++++ b/tests/security/trailing_path_test.php
+@@ -0,0 +1,55 @@
++<?php
++/**
++ *
++ * @package testing
++ * @copyright (c) 2011 phpBB Group
++ * @license http://opensource.org/licenses/gpl-2.0.php GNU General Public License v2
++ *
++ */
++
++require_once dirname(__FILE__) . '/../../phpBB/includes/startup.php';
++
++class phpbb_security_trailing_path_test extends phpbb_test_case
++{
++	public function data_has_trailing_path()
++	{
++		return array(
++			array(false, '', '', ''),
++			array(true, '/', '', ''),
++			array(true, '/foo', '', ''),
++			array(true, '', '/foo', ''),
++			array(true, '/foo', '/foo', ''),
++			array(false, '', '', '/'),
++			array(false, '', '', '/?/x.php/'),
++			array(false, '', '', '/index.php'),
++			array(false, '', '', '/dir.phpisfunny/foo.php'),
++			array(true, '', '', '/index.php/foo.php'),
++			array(false, '', '', '/phpBB/viewtopic.php?f=3&amp;t=5'),
++			array(false, '', '', '/phpBB/viewtopic.php?f=3&amp;t=5/'),
++			array(false, '', '', '/phpBB/viewtopic.php?f=3&amp;t=5/foo'),
++			array(true, '/foo', '/foo', '/phpBB/viewtopic.php?f=3&amp;t=5/foo'),
++			array(false, '', '', '/projects/php.bb/phpBB/viewtopic.php?f=3&amp;t=5/'),
++			array(false, '', '', '/projects/php.bb/phpBB/viewtopic.php?f=3&amp;t=5'),
++			array(false, '', '', '/projects/php.bb/phpBB/viewtopic.php?f=3&amp;t=5/foo.php/'),
++			array(false, '', '', '/projects/php.bb/phpBB/index.php'),
++			array(true, '', '', '/projects/php.bb/phpBB/index.php/'),
++			array(true, '', '', '/phpBB/index.php/?foo/a'),
++			array(true, '', '', '/projects/php.bb/phpBB/index.php/?a=5'),
++			array(false, '', '', '/projects/php.bb/phpBB/index.php?/a=5'),
++		);
++	}
++
++	/**
++	 * @dataProvider data_has_trailing_path
++	 */
++	public function test_has_trailing_path($expected, $path_info, $orig_path_info, $request_uri)
++	{
++		global $phpEx;
++
++		$_SERVER['PATH_INFO'] = $path_info;
++		$_SERVER['ORIG_PATH_INFO'] = $orig_path_info;
++		$_SERVER['REQUEST_URI'] = $request_uri;
++
++		$this->assertSame($expected, phpbb_has_trailing_path($phpEx));
++	}
++}
+
+From e34b92882a51dc89da88464b8c751a9d93a03124 Mon Sep 17 00:00:00 2001
+From: Andreas Fischer <bantu@phpbb.com>
+Date: Wed, 21 Jan 2015 00:51:36 +0100
+Subject: [PATCH 2/2] [ticket/13531] Send 404 Not Found.
+
+PHPBB3-13531
+---
+ phpBB/includes/startup.php | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/phpBB/includes/startup.php b/phpBB/includes/startup.php
+index d9dab2a356f9..92639fc5bddf 100644
+--- a/phpBB/includes/startup.php
++++ b/phpBB/includes/startup.php
+@@ -126,7 +126,21 @@ function phpbb_has_trailing_path($phpEx)
+ // Check if trailing path is used
+ if (phpbb_has_trailing_path($phpEx))
+ {
+-	exit('Trailing paths and path_info is not supported by phpBB 3.0');
++	if (substr(strtolower(@php_sapi_name()), 0, 3) === 'cgi')
++	{
++		$prefix = 'Status:';
++	}
++	else if (!empty($_SERVER['SERVER_PROTOCOL']))
++	{
++		$prefix = $_SERVER['SERVER_PROTOCOL'];
++	}
++	else
++	{
++		$prefix = 'HTTP/1.0';
++	}
++	header("$prefix 404 Not Found", true, 404);
++	echo 'Trailing paths and PATH_INFO is not supported by phpBB 3.0';
++	exit;
+ }
+ 
+ // Register globals and magic quotes have been dropped in PHP 5.4

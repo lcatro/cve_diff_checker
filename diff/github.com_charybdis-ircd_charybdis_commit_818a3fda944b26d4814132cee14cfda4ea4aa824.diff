@@ -1,0 +1,30 @@
+From 818a3fda944b26d4814132cee14cfda4ea4aa824 Mon Sep 17 00:00:00 2001
+From: Aaron Jones <aaronmdjones@gmail.com>
+Date: Sat, 3 Sep 2016 17:28:41 +0000
+Subject: [PATCH] SASL: Disallow beginning : and space anywhere in AUTHENTICATE
+ parameter
+
+This is a FIX FOR A SECURITY VULNERABILITY. All Charybdis users must
+apply this fix if you support SASL on your servers, or unload m_sasl.so
+in the meantime.
+---
+ modules/m_sasl.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/modules/m_sasl.c b/modules/m_sasl.c
+index 38c7baeb3..93c5a0412 100644
+--- a/modules/m_sasl.c
++++ b/modules/m_sasl.c
+@@ -91,6 +91,12 @@ m_authenticate(struct Client *client_p, struct Client *source_p,
+ 		return 0;
+ 	}
+ 
++	if (*parv[1] == ':' || strchr(parv[1], ' '))
++	{
++		exit_client(client_p, client_p, client_p, "Malformed AUTHENTICATE");
++		return 0;
++	}
++
+ 	saslserv_p = find_named_client(ConfigFileEntry.sasl_service);
+ 	if (saslserv_p == NULL || !IsService(saslserv_p))
+ 	{

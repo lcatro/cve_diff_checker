@@ -1,0 +1,65 @@
+From 11e8957deaf0c76fdfbac62d99c8b6c61cfdddf9 Mon Sep 17 00:00:00 2001
+From: Calum Lind <calumlind+deluge@gmail.com>
+Date: Wed, 1 Mar 2017 13:22:15 +0000
+Subject: [WebUI] Only accept application/json content-type requests
+
+ - Protects against CSRF (Cross-site request forgery)
+---
+ deluge/tests/test_json_api.py | 11 +++++++++++
+ deluge/ui/web/json_api.py     |  4 ++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/deluge/tests/test_json_api.py b/deluge/tests/test_json_api.py
+index 4f24263..7a26df7 100644
+--- a/deluge/tests/test_json_api.py
++++ b/deluge/tests/test_json_api.py
+@@ -94,6 +94,7 @@ class JSONTestCase(JSONBase):
+         request.write = write
+         request.write_was_called = False
+         request._disconnected = False
++        request.getHeader.return_value = 'application/json'
+         self.assertEquals(json.render(request), server.NOT_DONE_YET)
+         self.assertTrue(request.write_was_called)
+ 
+@@ -115,6 +116,15 @@ class JSONTestCase(JSONBase):
+         request.json = json_lib.dumps({'method': 'some.method', 'id': 0})
+         self.assertRaises(JSONException, json._handle_request, request)
+ 
++    def test_on_json_request_invalid_content_type(self):
++        """Test for exception with content type not application/json"""
++        json = JSON()
++        request = MagicMock()
++        request.getHeader.return_value = 'text/plain'
++        json_data = {'method': 'some.method', 'id': 0, 'params': []}
++        request.json = json_lib.dumps(json_data)
++        self.assertRaises(JSONException, json._on_json_request, request)
++
+ 
+ class JSONCustomUserTestCase(JSONBase):
+ 
+@@ -252,6 +262,7 @@ class JSONRequestFailedTestCase(JSONBase, WebServerMockBase):
+         request.write = write
+         request.write_was_called = False
+         request._disconnected = False
++        request.getHeader.return_value = 'application/json'
+         json_data = {'method': 'testclass.test', 'id': 0, 'params': []}
+         request.json = json_lib.dumps(json_data)
+         d = json._on_json_request(request)
+diff --git a/deluge/ui/web/json_api.py b/deluge/ui/web/json_api.py
+index 0e66408..f91aee2 100644
+--- a/deluge/ui/web/json_api.py
++++ b/deluge/ui/web/json_api.py
+@@ -187,6 +187,10 @@ class JSON(resource.Resource, component.Component):
+         Handler to take the json data as a string and pass it on to the
+         _handle_request method for further processing.
+         """
++        if request.getHeader('content-type') != 'application/json':
++            message = 'Invalid JSON request content-type: %s' % request.getHeader('content-type')
++            raise JSONException(message)
++
+         log.debug('json-request: %s', request.json)
+         response = {'result': None, 'error': None, 'id': None}
+         response['id'], d, response['error'] = self._handle_request(request)
+-- 
+cgit v1.1
+

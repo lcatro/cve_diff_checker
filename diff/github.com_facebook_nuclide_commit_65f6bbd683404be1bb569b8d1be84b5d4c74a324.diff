@@ -1,0 +1,38 @@
+From 65f6bbd683404be1bb569b8d1be84b5d4c74a324 Mon Sep 17 00:00:00 2001
+From: Eric Bluestein <ericblue@fb.com>
+Date: Fri, 16 Mar 2018 16:02:55 -0700
+Subject: [PATCH] Ignore invalid hostnames in hhvm-attach deep link
+
+Summary: Provide nicer handling and an error message when following a deep link requesting HHVM debugger attach that has a malformed host name.
+
+Reviewed By: hansonw
+
+Differential Revision: D7308417
+
+fbshipit-source-id: 60bae4013444008980dda9cda8dec5f8ae20944f
+---
+ pkg/nuclide-hhvm/lib/main.js | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/pkg/nuclide-hhvm/lib/main.js b/pkg/nuclide-hhvm/lib/main.js
+index d286489c59..d503a37b9d 100644
+--- a/pkg/nuclide-hhvm/lib/main.js
++++ b/pkg/nuclide-hhvm/lib/main.js
+@@ -113,6 +113,17 @@ class Activation {
+     }
+ 
+     const host = nuclideUri.getHostname(pathString);
++
++    // Allow only valid hostname characters, per RFC 952:
++    // https://tools.ietf.org/html/rfc952
++    const invalidMatch = host.match(/[^A-Za-z0-9\-._]+/);
++    if (invalidMatch != null) {
++      atom.notifications.addError(
++        'The specified host name contained invalid characters.',
++      );
++      return;
++    }
++
+     const cwd = nuclideUri.createRemoteUri(host, hackRootString);
+     const notification = atom.notifications.addInfo(
+       startDebugger

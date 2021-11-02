@@ -1,0 +1,43 @@
+From 05b1eceb39d241e26ee3b4e41df7ca04edfdba89 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Mon, 26 Sep 2016 15:25:55 +0200
+Subject: [PATCH] Fix h1 report 128181
+
+Special Element Injection
+-------------------------
+
+Joel Noguera has reported via HackerOne that usernames weren't properly
+sanitised when creating users on a Revive Adserver instance. Especially,
+control characters were not filtered, allowing apparently identical
+usernames to co-exist in the system, due to the fact that such characters
+are normally ignored when an HTML page is displayed in a browser.
+The issue could have therefore been exploited for user spoofing, although
+elevated privileges are required to create users within Revive Adserver.
+
+CWE: CWE-75
+CVSSv2: 2.1 (AV:N/AC:H/Au:S/C:N/I:P/A:N)
+
+CVSSv3 Vector: CVSS:3.0/AV:N/AC:H/PR:H/UI:R/S:U/C:L/I:L/A:N/E:U/RL:O/RC:C
+CVSSv3 Base Score: 3.1
+CVSSv3 Temporal Score: 2.7
+---
+ lib/OA/Admin/UI/UserAccess.php | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/lib/OA/Admin/UI/UserAccess.php b/lib/OA/Admin/UI/UserAccess.php
+index fcc31515bc..951f1a9549 100644
+--- a/lib/OA/Admin/UI/UserAccess.php
++++ b/lib/OA/Admin/UI/UserAccess.php
+@@ -81,7 +81,11 @@ function setNavigationFooterCallback($callback)
+     function process()
+     {
+         if (!empty($this->request['submit'])) {
+-            $this->aErrors = $this->oPlugin->validateUsersData($this->request);
++            if (preg_match('#[\x00-\x1F\x7F]#', $this->request['login'])) {
++                $this->aErrors = array($GLOBALS['strInvalidUsername']);
++            } else {
++                $this->aErrors = $this->oPlugin->validateUsersData($this->request);
++            }
+             if (empty($this->aErrors)) {
+                 $this->userid = $this->oPlugin->saveUser(
+                     $this->userid, $this->request['login'], $this->request['passwd'],

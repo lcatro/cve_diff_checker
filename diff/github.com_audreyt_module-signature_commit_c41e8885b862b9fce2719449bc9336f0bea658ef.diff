@@ -1,0 +1,24 @@
+From c41e8885b862b9fce2719449bc9336f0bea658ef Mon Sep 17 00:00:00 2001
+From: Audrey Tang <audreyt@audreyt.org>
+Date: Tue, 7 Apr 2015 02:37:28 +0800
+Subject: [PATCH] * Avoid loading modules from relative paths in @INC for
+ Text::Diff etc.
+
+  Also reported by John Lightsey.
+---
+ lib/Module/Signature.pm | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/lib/Module/Signature.pm b/lib/Module/Signature.pm
+index 154c592..51cef59 100644
+--- a/lib/Module/Signature.pm
++++ b/lib/Module/Signature.pm
+@@ -119,6 +119,8 @@ sub _verify {
+     my $sigtext   = shift || '';
+     my $plaintext = shift || '';
+ 
++    # Avoid loading modules from relative paths in @INC.
++    local @INC = grep { File::Spec->file_name_is_absolute($_) } @INC;
+     local $SIGNATURE = $signature if $signature ne $SIGNATURE;
+ 
+     if ($AutoKeyRetrieve and !$CanKeyRetrieve) {

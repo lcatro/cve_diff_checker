@@ -1,0 +1,56 @@
+From 03d7712b4bcd47bfe0fe14ba2fffa87e111fa086 Mon Sep 17 00:00:00 2001
+From: Prasad J Pandit <pjp@fedoraproject.org>
+Date: Tue, 23 Jul 2019 16:17:52 +0530
+Subject: [PATCH] qemu-bridge-helper: restrict interface name to IFNAMSIZ
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The network interface name in Linux is defined to be of size
+IFNAMSIZ(=16), including the terminating null('\0') byte.
+The same is applied to interface names read from 'bridge.conf'
+file to form ACL rules. If user supplied '--br=bridge' name
+is not restricted to the same length, it could lead to ACL bypass
+issue. Restrict interface name to IFNAMSIZ, including null byte.
+
+Reported-by: Riccardo Schirone <rschiron@redhat.com>
+Signed-off-by: Prasad J Pandit <pjp@fedoraproject.org>
+Reviewed-by: Stefan Hajnoczi <stefanha@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Reviewed-by: Li Qiang <liq3ea@gmail.com>
+Signed-off-by: Jason Wang <jasowang@redhat.com>
+(cherry picked from commit 6f5d8671225dc77190647f18a27a0d156d4ca97a)
+Signed-off-by: Michael Roth <mdroth@linux.vnet.ibm.com>
+---
+ qemu-bridge-helper.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/qemu-bridge-helper.c b/qemu-bridge-helper.c
+index 5396fbfbb6ca..2c9614e28ef3 100644
+--- a/qemu-bridge-helper.c
++++ b/qemu-bridge-helper.c
+@@ -109,6 +109,13 @@ static int parse_acl_file(const char *filename, ACLList *acl_list)
+         }
+         *argend = 0;
+ 
++        if (!g_str_equal(cmd, "include") && strlen(arg) >= IFNAMSIZ) {
++            fprintf(stderr, "name `%s' too long: %zu\n", arg, strlen(arg));
++            fclose(f);
++            errno = EINVAL;
++            return -1;
++        }
++
+         if (strcmp(cmd, "deny") == 0) {
+             acl_rule = g_malloc(sizeof(*acl_rule));
+             if (strcmp(arg, "all") == 0) {
+@@ -259,6 +266,10 @@ int main(int argc, char **argv)
+         usage();
+         return EXIT_FAILURE;
+     }
++    if (strlen(bridge) >= IFNAMSIZ) {
++        fprintf(stderr, "name `%s' too long: %zu\n", bridge, strlen(bridge));
++        return EXIT_FAILURE;
++    }
+ 
+     /* parse default acl file */
+     QSIMPLEQ_INIT(&acl_list);

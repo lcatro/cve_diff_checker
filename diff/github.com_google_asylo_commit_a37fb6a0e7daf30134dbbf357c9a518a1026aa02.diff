@@ -1,0 +1,26 @@
+From a37fb6a0e7daf30134dbbf357c9a518a1026aa02 Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Wed, 23 Sep 2020 14:16:30 -0700
+Subject: [PATCH] Check untrusted queue is in outside enclave
+
+PiperOrigin-RevId: 333370935
+Change-Id: Ic3f15d5db1302d95c7cb199b44172474fecb81ca
+---
+ asylo/platform/host_call/trusted/concurrency.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/asylo/platform/host_call/trusted/concurrency.cc b/asylo/platform/host_call/trusted/concurrency.cc
+index e1bd796cb..ede6bddb0 100644
+--- a/asylo/platform/host_call/trusted/concurrency.cc
++++ b/asylo/platform/host_call/trusted/concurrency.cc
+@@ -93,6 +93,10 @@ int32_t *enc_untrusted_create_wait_queue() {
+   CheckStatusAndParamCount(status, output, "enc_untrusted_create_wait_queue",
+                            2);
+   int32_t *queue = reinterpret_cast<int32_t *>(output.next<uintptr_t>());
++  if (!TrustedPrimitives::IsOutsideEnclave(queue, sizeof(int32_t))) {
++    TrustedPrimitives::BestEffortAbort(
++        "enc_untrusted_create_wait_queue: queue should be in untrusted memory");
++  }
+   int klinux_errno = output.next<int>();
+   if (queue == nullptr) {
+     errno = FromkLinuxErrorNumber(klinux_errno);

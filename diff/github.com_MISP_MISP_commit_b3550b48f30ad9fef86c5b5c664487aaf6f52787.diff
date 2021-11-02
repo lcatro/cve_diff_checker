@@ -1,0 +1,73 @@
+From b3550b48f30ad9fef86c5b5c664487aaf6f52787 Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Tue, 14 Jul 2020 14:26:11 +0200
+Subject: [PATCH] fix: [security] xss fix missing part of solution
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- the previous fix to the xss in the homepage setter was lacking the controller changes due to a partial commit (#bf4610c947c7dc372c4078f363d2dff6ae0703a8)
+
+  - as originally discovered by Mislav Božičević <mislav.bozicevic@nn.cz>
+  - persistence of the vulnerability after the lacking fix reported by DIEGO JURADO PALLARES from Ciberinteligencia
+---
+ app/Controller/UserSettingsController.php | 39 ++++++++++++-----------
+ 1 file changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/app/Controller/UserSettingsController.php b/app/Controller/UserSettingsController.php
+index 20f519d5bb..62864e3464 100644
+--- a/app/Controller/UserSettingsController.php
++++ b/app/Controller/UserSettingsController.php
+@@ -28,7 +28,6 @@ class UserSettingsController extends AppController
+     public function beforeFilter()
+     {
+         parent::beforeFilter();
+-        $this->Security->unlockedActions = array_merge($this->Security->unlockedActions, array('setHomePage'));
+     }
+ 
+     public function index()
+@@ -325,23 +324,27 @@ public function delete($id = false)
+ 
+     public function setHomePage()
+     {
+-        if (!$this->request->is('post')) {
+-            throw new MethodNotAllowedException(__('This endpoint only aaccepts POST requests.'));
+-        }
+-        if (empty($this->request->data['path'])) {
+-            $this->request->data = array('path' => $this->request->data);
+-        }
+-        if (empty($this->request->data['path'])) {
+-            throw new InvalidArgumentException(__('No path POSTed.'));
++        if ($this->request->is('post')) {
++            if (isset($this->request->data['UserSetting'])) {
++                $this->request->data = $this->request->data['UserSetting'];
++            }
++            if (!isset($this->request->data['path'])) {
++                $this->request->data = array('path' => $this->request->data);
++            }
++            if (empty($this->request->data['path'])) {
++                throw new InvalidArgumentException(__('No path POSTed.'));
++            }
++            $setting = array(
++                'UserSetting' => array(
++                    'user_id' => $this->Auth->user('id'),
++                    'setting' => 'homepage',
++                    'value' => json_encode(array('path' => $this->request->data['path']))
++                )
++            );
++            $result = $this->UserSetting->setSetting($this->Auth->user(), $setting);
++            return $this->RestResponse->saveSuccessResponse('UserSettings', 'setHomePage', false, $this->response->type(), 'Homepage set to ' . $this->request->data['path']);
++        } else {
++            $this->layout = false;
+         }
+-        $setting = array(
+-            'UserSetting' => array(
+-                'user_id' => $this->Auth->user('id'),
+-                'setting' => 'homepage',
+-                'value' => json_encode(array('path' => $this->request->data['path']))
+-            )
+-        );
+-        $result = $this->UserSetting->setSetting($this->Auth->user(), $setting);
+-        return $this->RestResponse->saveSuccessResponse('UserSettings', 'setHomePage', false, $this->response->type(), 'Homepage set to ' . $this->request->data['path']);
+     }
+ }

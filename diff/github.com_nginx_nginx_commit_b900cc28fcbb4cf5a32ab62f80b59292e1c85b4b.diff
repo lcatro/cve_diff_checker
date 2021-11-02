@@ -1,0 +1,40 @@
+From b900cc28fcbb4cf5a32ab62f80b59292e1c85b4b Mon Sep 17 00:00:00 2001
+From: Maxim Dounin <mdounin@mdounin.ru>
+Date: Wed, 13 Sep 2017 15:53:19 +0300
+Subject: [PATCH] Introduced time truncation to December 31, 9999 (ticket
+ #1368).
+
+Various buffers are allocated in an assumption that there would be
+no more than 4 year digits.  This might not be true on platforms
+with 64-bit time_t, as 64-bit time_t is able to represent more than that.
+Such dates with more than 4 year digits hardly make sense though, as
+various date formats in use do not allow them anyway.
+
+As such, all dates are now truncated by ngx_gmtime() to December 31, 9999.
+This should have no effect on valid dates, though will prevent potential
+buffer overflows on invalid ones.
+---
+ src/core/ngx_times.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/core/ngx_times.c b/src/core/ngx_times.c
+index ef63f1e3d1..b2edf1a5f9 100644
+--- a/src/core/ngx_times.c
++++ b/src/core/ngx_times.c
+@@ -311,6 +311,16 @@ ngx_gmtime(time_t t, ngx_tm_t *tp)
+     days = t / 86400;
+     sec = t % 86400;
+ 
++    /*
++     * no more than 4 year digits supported,
++     * truncate to December 31, 9999, 23:59:59
++     */
++
++    if (days > 2932896) {
++        days = 2932896;
++        sec = 86399;
++    }
++
+     /* January 1, 1970 was Thursday */
+ 
+     wday = (4 + days) % 7;

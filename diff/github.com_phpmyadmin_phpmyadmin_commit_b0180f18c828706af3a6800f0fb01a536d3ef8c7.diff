@@ -1,0 +1,70 @@
+From b0180f18c828706af3a6800f0fb01a536d3ef8c7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Fri, 17 Jun 2016 09:09:16 +0200
+Subject: [PATCH] Properly convert POST parameters
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We can get array instead of single parameter, so handle this gracefully.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ libraries/config/FormDisplay.php | 23 +++++++++++++++++++----
+ 1 file changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/libraries/config/FormDisplay.php b/libraries/config/FormDisplay.php
+index ab02fa1f70b..aeff097624d 100644
+--- a/libraries/config/FormDisplay.php
++++ b/libraries/config/FormDisplay.php
+@@ -639,12 +639,12 @@ public function save($forms, $allow_partial_save = true)
+                 // cast variables to correct type
+                 switch ($type) {
+                 case 'double':
+-                    settype($_POST[$key], 'float');
++                    settype($this->_trimString($_POST[$key]), 'float');
+                     break;
+                 case 'boolean':
+                 case 'integer':
+                     if ($_POST[$key] !== '') {
+-                        settype($_POST[$key], $type);
++                        settype($this->_trimString($_POST[$key]), $type);
+                     }
+                     break;
+                 case 'select':
+@@ -660,7 +660,7 @@ public function save($forms, $allow_partial_save = true)
+                     break;
+                 case 'string':
+                 case 'short_string':
+-                    $_POST[$key] = trim($_POST[$key]);
++                    $_POST[$key] = $this->_trimString($_POST[$key]);
+                     break;
+                 case 'array':
+                     // eliminate empty values and ensure we have an array
+@@ -876,10 +876,25 @@ private function _setComments($system_path, array &$opts)
+     private function _fillPostArrayParameters($post_values, $key)
+     {
+         foreach ($post_values as $v) {
+-            $v = trim($v);
++            $v = $this->_trimString($v);
+             if ($v !== '') {
+                 $_POST[$key][] = $v;
+             }
+         }
+     }
++
++    /*
++     * Converts given (request) paramter to string
++     *
++     * @param mixed $value Value to convert
++     *
++     * @return string
++     */
++    private function _trimString($value)
++    {
++        while (is_array($value)) {
++            $value = reset($value);
++        }
++        return trim((string)$value);
++    }
+ }

@@ -1,0 +1,145 @@
+From 415bbc74aacd53a120e54a663e941b1809982dbd Mon Sep 17 00:00:00 2001
+From: Harshavardhana <harsha@minio.io>
+Date: Tue, 12 Oct 2021 13:18:02 -0700
+Subject: [PATCH] checkKeyValid() should return owner true for rootCreds
+ (#13422)
+
+Looks like policy restriction was not working properly
+for normal users when they are not svc or STS accounts.
+
+- svc accounts are now properly fixed to get
+  right permissions when its inherited, so
+  we do not have to set 'owner = true'
+
+- sts accounts have always been using right
+  permissions, do not need an explicit lookup
+
+- regular users always have proper policy mapping
+---
+ cmd/signature-v4-utils.go      | 17 ++-------
+ cmd/signature-v4-utils_test.go | 63 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+), 14 deletions(-)
+
+diff --git a/cmd/signature-v4-utils.go b/cmd/signature-v4-utils.go
+index b28a3802079e..9569688a265e 100644
+--- a/cmd/signature-v4-utils.go
++++ b/cmd/signature-v4-utils.go
+@@ -31,7 +31,6 @@ import (
+ 	"github.com/minio/minio/internal/auth"
+ 	xhttp "github.com/minio/minio/internal/http"
+ 	"github.com/minio/minio/internal/logger"
+-	iampolicy "github.com/minio/pkg/iam/policy"
+ )
+ 
+ // http Header "x-amz-content-sha256" == "UNSIGNED-PAYLOAD" indicates that the
+@@ -150,8 +149,7 @@ func checkKeyValid(r *http.Request, accessKey string) (auth.Credentials, bool, A
+ 		return auth.Credentials{}, false, ErrServerNotInitialized
+ 	}
+ 
+-	var owner = true
+-	var cred = globalActiveCred
++	cred := globalActiveCred
+ 	if cred.AccessKey != accessKey {
+ 		// Check if the access key is part of users credentials.
+ 		ucred, ok := globalIAMSys.GetUser(accessKey)
+@@ -165,18 +163,9 @@ func checkKeyValid(r *http.Request, accessKey string) (auth.Credentials, bool, A
+ 	if s3Err != ErrNone {
+ 		return cred, false, s3Err
+ 	}
++	cred.Claims = claims
+ 
+-	if len(claims) > 0 {
+-		cred.Claims = claims
+-
+-		// Now check if we have a sessionPolicy.
+-		if _, ok := claims[iampolicy.SessionPolicyName]; ok {
+-			owner = false
+-		} else {
+-			owner = cred.AccessKey == cred.ParentUser
+-		}
+-	}
+-
++	owner := cred.AccessKey == globalActiveCred.AccessKey
+ 	return cred, owner, ErrNone
+ }
+ 
+diff --git a/cmd/signature-v4-utils_test.go b/cmd/signature-v4-utils_test.go
+index d56a20e7072c..80000c2aa5ce 100644
+--- a/cmd/signature-v4-utils_test.go
++++ b/cmd/signature-v4-utils_test.go
+@@ -18,12 +18,75 @@
+ package cmd
+ 
+ import (
++	"context"
+ 	"net/http"
++	"os"
+ 	"testing"
+ 
++	"github.com/minio/madmin-go"
++	"github.com/minio/minio/internal/auth"
+ 	xhttp "github.com/minio/minio/internal/http"
+ )
+ 
++func TestCheckValid(t *testing.T) {
++	objLayer, fsDir, err := prepareFS()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer os.RemoveAll(fsDir)
++	if err = newTestConfig(globalMinioDefaultRegion, objLayer); err != nil {
++		t.Fatalf("unable initialize config file, %s", err)
++	}
++
++	newAllSubsystems()
++
++	initAllSubsystems(context.Background(), objLayer)
++
++	globalIAMSys.InitStore(objLayer)
++
++	req, err := newTestRequest(http.MethodGet, "http://example.com:9000/bucket/object", 0, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	if err = signRequestV4(req, globalActiveCred.AccessKey, globalActiveCred.SecretKey); err != nil {
++		t.Fatal(err)
++	}
++
++	_, owner, s3Err := checkKeyValid(req, globalActiveCred.AccessKey)
++	if s3Err != ErrNone {
++		t.Fatalf("Unexpected failure with %v", errorCodes.ToAPIErr(s3Err))
++	}
++
++	if !owner {
++		t.Fatalf("Expected owner to be 'true', found %t", owner)
++	}
++
++	_, _, s3Err = checkKeyValid(req, "does-not-exist")
++	if s3Err != ErrInvalidAccessKeyID {
++		t.Fatalf("Expected error 'ErrInvalidAccessKeyID', found %v", s3Err)
++	}
++
++	ucreds, err := auth.CreateCredentials("myuser1", "mypassword1")
++	if err != nil {
++		t.Fatalf("unable create credential, %s", err)
++	}
++
++	globalIAMSys.CreateUser(ucreds.AccessKey, madmin.UserInfo{
++		SecretKey: ucreds.SecretKey,
++		Status:    madmin.AccountEnabled,
++	})
++
++	_, owner, s3Err = checkKeyValid(req, ucreds.AccessKey)
++	if s3Err != ErrNone {
++		t.Fatalf("Unexpected failure with %v", errorCodes.ToAPIErr(s3Err))
++	}
++
++	if owner {
++		t.Fatalf("Expected owner to be 'false', found %t", owner)
++	}
++}
++
+ // TestSkipContentSha256Cksum - Test validate the logic which decides whether
+ // to skip checksum validation based on the request header.
+ func TestSkipContentSha256Cksum(t *testing.T) {

@@ -1,0 +1,34 @@
+From b6da3547d8990c3c3affc3a5865aefd2a0946949 Mon Sep 17 00:00:00 2001
+From: Vincent Povirk <vincent@codeweavers.com>
+Date: Tue, 8 May 2018 12:46:20 -0500
+Subject: [PATCH] gdi32: Check that emf records are within the file.
+
+Signed-off-by: Vincent Povirk <vincent@codeweavers.com>
+Signed-off-by: Huw Davies <huw@codeweavers.com>
+Signed-off-by: Alexandre Julliard <julliard@winehq.org>
+---
+ dlls/gdi32/enhmetafile.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/dlls/gdi32/enhmetafile.c b/dlls/gdi32/enhmetafile.c
+index ffe21f01df9..2d8a9b04fb2 100644
+--- a/dlls/gdi32/enhmetafile.c
++++ b/dlls/gdi32/enhmetafile.c
+@@ -2470,6 +2470,14 @@ BOOL WINAPI EnumEnhMetaFile(
+     {
+ 	emr = (ENHMETARECORD *)((char *)emh + offset);
+ 
++        if (offset + 8 > emh->nBytes ||
++            offset > offset + emr->nSize ||
++            offset + emr->nSize > emh->nBytes)
++        {
++            WARN("record truncated\n");
++            break;
++        }
++
+         /* In Win9x mode we update the xform if the record will produce output */
+         if (hdc && IS_WIN9X() && emr_produces_output(emr->iType))
+             EMF_Update_MF_Xform(hdc, info);
+-- 
+2.20.1
+

@@ -1,0 +1,44 @@
+From f19d0107fbae1fb41836cd110d4425e407e64048 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Hubert=20Figui=C3=A8re?= <hub@figuiere.net>
+Date: Thu, 3 Aug 2017 21:53:04 -0400
+Subject: Bug 101914 - Fix crash on corrupt file
+
+- Don't go past the end iterator
+- Don't subcript an empty string
+---
+ XMPFiles/source/FormatSupport/PostScript_Support.cpp | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/XMPFiles/source/FormatSupport/PostScript_Support.cpp b/XMPFiles/source/FormatSupport/PostScript_Support.cpp
+index fec55fb..029ff0c 100644
+--- a/XMPFiles/source/FormatSupport/PostScript_Support.cpp
++++ b/XMPFiles/source/FormatSupport/PostScript_Support.cpp
+@@ -814,7 +814,8 @@ std::string PostScript_Support::ConvertToDate(const char* inString)
+ 	std::vector<PostScript_Support::DateTimeTokens>:: const_iterator itr=tokenzs.begin();
+ 	for(;itr!=tokenzs.end();itr++)
+ 	{
+-		if(itr->token[0]=='+' ||itr->token[0]=='-')
++		// token[0] is invalid on an empty string. -- Hub
++		if(!itr->token.empty() && (itr->token[0]=='+' ||itr->token[0]=='-'))
+ 		{
+ 			const char *str=itr->token.c_str();
+ 			date.offsetSign=*(str++);
+@@ -1013,7 +1014,14 @@ std::string PostScript_Support::ConvertToDate(const char* inString)
+ 					if(itr!=tokenzs.end())
+ 					{
+ 						++itr;
+-						if (itr!=tokenzs.end()&&itr->noOfDelimiter==0 && IsNumeric(itr->token[0]) )
++						if (itr == tokenzs.end())
++						{
++							// bug 101914 - corrupt file make us
++							// reach the end. -- Hub
++							// https://bugs.freedesktop.org/show_bug.cgi?id=101914
++							break;
++						}
++						if (itr->noOfDelimiter==0 && IsNumeric(itr->token[0]) )
+ 						{
+ 							const char * str=itr->token.c_str();
+ 							short day= GetNumber(&str);
+-- 
+cgit v1.2.1
+

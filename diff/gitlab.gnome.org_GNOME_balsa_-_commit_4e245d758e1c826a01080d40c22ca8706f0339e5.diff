@@ -1,0 +1,70 @@
+From 4e245d758e1c826a01080d40c22ca8706f0339e5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Albrecht=20Dre=C3=9F?= <albrecht.dress@arcor.de>
+Date: Sun, 16 Feb 2020 14:39:59 -0500
+Subject: [PATCH] imap-handle: Do not crash on PREAUTH greeting
+
+when it hasn't resulted in storing last-message.
+
+* libbalsa/imap/imap-handle.c
+    (imap_mbox_connect): do not dereference NULL ImapHandle:last_msg;
+    (ir_preauth): parse a PREAUTH greeting the same as an OK greeting.
+
+Fixes https://gitlab.gnome.org/GNOME/balsa/issues/23
+---
+ ChangeLog                   | 12 ++++++++++++
+ libbalsa/imap/imap-handle.c | 12 ++++++++----
+ 2 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 34596991e..f501d2f35 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,15 @@
++2020-02-16  Albrecht DreÃ  <albrecht.dress@arcor.de>
++
++	imap-handle: Do not crash on PREAUTH greeting
++
++	when it hasn't resulted in storing last-message.
++
++	* libbalsa/imap/imap-handle.c (imap_mbox_connect): do not
++	dereference NULL ImapHandle:last_msg;
++	(ir_preauth): parse PREAUTH greeting the same as OK.
++
++	Fixes https://gitlab.gnome.org/GNOME/balsa/issues/23
++
+ 2020-02-07  Peter Bloomfield  <pbloomfield@bellsouth.net>
+ 
+ 	mailbox: Sort when new details about a message are found
+diff --git a/libbalsa/imap/imap-handle.c b/libbalsa/imap/imap-handle.c
+index 72404301b..62e87cd81 100644
+--- a/libbalsa/imap/imap-handle.c
++++ b/libbalsa/imap/imap-handle.c
+@@ -699,7 +699,7 @@ imap_mbox_connect(ImapMboxHandle* handle)
+     imap_handle_disconnect(handle);
+     return IMAP_PROTOCOL_ERROR;
+   }
+-  handle->can_fetch_body = 
++  handle->can_fetch_body = (handle->last_msg != NULL) &&
+     (strncmp(handle->last_msg, "Microsoft Exchange", 18) != 0);
+   if((handle->tls_mode == NET_CLIENT_CRYPT_ENCRYPTED) ||
+ 	 (handle->tls_mode == NET_CLIENT_CRYPT_NONE)) {
+@@ -2344,9 +2344,13 @@ ir_bad(ImapMboxHandle *h)
+ static ImapResponse
+ ir_preauth(ImapMboxHandle *h)
+ {
+-  if(imap_mbox_handle_get_state(h) == IMHS_CONNECTED)
+-    imap_mbox_handle_set_state(h, IMHS_AUTHENTICATED);
+-  return IMR_OK;
++	ImapResponse resp;
++
++	resp = ir_ok(h);
++	if ((resp == IMR_OK) && (imap_mbox_handle_get_state(h) == IMHS_CONNECTED)) {
++		imap_mbox_handle_set_state(h, IMHS_AUTHENTICATED);
++	}
++	return resp;
+ }
+ 
+ /* ir_bye:
+-- 
+GitLab
+

@@ -1,0 +1,28 @@
+From 60660e00b80bad0fadcf39aee86f6f8756c94f91 Mon Sep 17 00:00:00 2001
+From: Martin Hecht <mrbaseman@gmx.de>
+Date: Fri, 21 Feb 2020 20:53:04 +0100
+Subject: [PATCH] correctly check return value of X509_check_host
+
+CVE-2020-7041 incorrect use of X509_check_host (regarding return value)
+is fixed with this commit.
+
+The flaw came in with #242 and prevented proper host name verification
+when openssl >= 1.0.2 was in use since openfortivpn 1.7.0.
+---
+ src/tunnel.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/tunnel.c b/src/tunnel.c
+index 9b577e44..84ca7f4d 100644
+--- a/src/tunnel.c
++++ b/src/tunnel.c
+@@ -666,7 +666,8 @@ static int ssl_verify_cert(struct tunnel *tunnel)
+ 
+ #ifdef HAVE_X509_CHECK_HOST
+ 	// Use OpenSSL native host validation if v >= 1.0.2.
+-	if (X509_check_host(cert, common_name, FIELD_SIZE, 0, NULL))
++	// correctly check return value of X509_check_host
++	if (X509_check_host(cert, common_name, FIELD_SIZE, 0, NULL) == 1)
+ 		cert_valid = 1;
+ #else
+ 	// Use explicit Common Name check if native validation not available.

@@ -1,0 +1,31 @@
+From c1b09bbec148f6ae11d0b686fdb89ac6dc0ab14e Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Mon, 17 Jul 2017 19:20:45 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/577
+
+---
+ coders/pict.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/coders/pict.c b/coders/pict.c
+index 052eff67a3..fec025bb1f 100644
+--- a/coders/pict.c
++++ b/coders/pict.c
+@@ -1744,7 +1744,16 @@ static MagickBooleanType WritePICTImage(const ImageInfo *image_info,
+   if ((buffer == (unsigned char *) NULL) ||
+       (packed_scanline == (unsigned char *) NULL) ||
+       (scanline == (unsigned char *) NULL))
+-    ThrowWriterException(ResourceLimitError,"MemoryAllocationFailed");
++    {
++      if (scanline != (unsigned char *) NULL)
++        scanline=(unsigned char *) RelinquishMagickMemory(scanline);
++      if (packed_scanline != (unsigned char *) NULL)
++        packed_scanline=(unsigned char *) RelinquishMagickMemory(
++          packed_scanline);
++      if (buffer != (unsigned char *) NULL)
++        buffer=(unsigned char *) RelinquishMagickMemory(buffer);
++      ThrowWriterException(ResourceLimitError,"MemoryAllocationFailed");
++    }
+   (void) ResetMagickMemory(scanline,0,row_bytes);
+   (void) ResetMagickMemory(packed_scanline,0,(size_t) (row_bytes+MaxCount));
+   /*

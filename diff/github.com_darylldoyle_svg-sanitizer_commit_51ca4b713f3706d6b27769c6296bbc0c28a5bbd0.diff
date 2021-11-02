@@ -1,0 +1,59 @@
+From 6a84d8d856ab397c86517475d7879e7ec67dab18 Mon Sep 17 00:00:00 2001
+From: Daryll Doyle <daryll@enshrined.co.uk>
+Date: Mon, 21 Oct 2019 23:15:33 +0100
+Subject: [PATCH 1/2] Add test to show XSS bypass using encoded tab character
+
+---
+ tests/data/hrefCleanOne.svg | 2 ++
+ tests/data/hrefTestOne.svg  | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/tests/data/hrefCleanOne.svg b/tests/data/hrefCleanOne.svg
+index 2ca51cd..40e2afd 100644
+--- a/tests/data/hrefCleanOne.svg
++++ b/tests/data/hrefCleanOne.svg
+@@ -6,4 +6,6 @@
+ 
+     <a>test 5</a>
+     <a>test 6</a>
++
++    <a>test 7</a>
+ </svg>
+\ No newline at end of file
+diff --git a/tests/data/hrefTestOne.svg b/tests/data/hrefTestOne.svg
+index 1a92c81..145a068 100644
+--- a/tests/data/hrefTestOne.svg
++++ b/tests/data/hrefTestOne.svg
+@@ -6,4 +6,6 @@
+ 
+     <a href="data:data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' onload='alert(88)'%3E%3C/svg%3E">test 5</a>
+     <a xlink:href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' onload='alert(88)'%3E%3C/svg%3E">test 6</a>
++
++    <a href="javascript&#9;:alert(document.domain)">test 7</a>
+ </svg>
+\ No newline at end of file
+
+From 38767c14d1d36cc1929bd86f48a105c19f518178 Mon Sep 17 00:00:00 2001
+From: Daryll Doyle <daryll@enshrined.co.uk>
+Date: Mon, 21 Oct 2019 23:38:30 +0100
+Subject: [PATCH 2/2] Update regex to match any whitespace between the colon
+ and text
+
+Fixes #31
+---
+ src/Sanitizer.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/Sanitizer.php b/src/Sanitizer.php
+index 761e459..1993e7e 100644
+--- a/src/Sanitizer.php
++++ b/src/Sanitizer.php
+@@ -21,7 +21,7 @@ class Sanitizer
+     /**
+      * Regex to catch script and data values in attributes
+      */
+-    const SCRIPT_REGEX = '/(?:\w+script|data):/xi';
++    const SCRIPT_REGEX = '/(?:\w+script|data)(?:\s)?:/xi';
+ 
+     /**
+      * @var \DOMDocument

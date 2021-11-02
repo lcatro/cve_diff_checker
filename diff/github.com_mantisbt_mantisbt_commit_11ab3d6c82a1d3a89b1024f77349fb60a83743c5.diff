@@ -1,0 +1,59 @@
+From 11ab3d6c82a1d3a89b1024f77349fb60a83743c5 Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Fri, 27 May 2016 11:39:58 +0200
+Subject: [PATCH] Fix XSS in custom fields management
+
+Kacper Szurek (http://security.szurek.pl/) discovered an XSS
+vulnerability in Custom fields management pages, caused by unescaped
+output of 'return URL' GPC parameter. His report describes two ways to
+exploit this issue:
+
+1. using 'accesskey' inside hidden input field (see [1]) reflects XSS to
+   the administrator in manage_custom_field_edit_page.php when the
+   keyboard shortcut is actioned
+2. using 'javascript:' URI scheme executes the code when the user clicks
+   the [Proceed] link on manage_custom_field_update.php after updating
+   a custom field
+
+This commit fixes both attack vectors:
+
+- properly escape the return URL prior to printing it on the hidden form
+  field
+- let html_operation_successful() sanitize the URL before displaying
+  it, just like html_meta_redirect() does. In this case, if the
+  string contains an URI scheme, it will be replaced by 'index.php'
+
+[1] http://blog.portswigger.net/2015/11/xss-in-hidden-input-fields.html
+
+Fixes #20956
+---
+ core/html_api.php                 | 2 +-
+ manage_custom_field_edit_page.php | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/core/html_api.php b/core/html_api.php
+index b8a3ac3eff..55696e3a15 100644
+--- a/core/html_api.php
++++ b/core/html_api.php
+@@ -647,7 +647,7 @@ function html_operation_successful( $p_redirect_url, $p_message = '' ) {
+ 	}
+ 
+ 	echo lang_get( 'operation_successful' ).'<br />';
+-	print_bracket_link( $p_redirect_url, lang_get( 'proceed' ) );
++	print_bracket_link( string_sanitize_url( $p_redirect_url ), lang_get( 'proceed' ) );
+ 	echo '</div>';
+ }
+ 
+diff --git a/manage_custom_field_edit_page.php b/manage_custom_field_edit_page.php
+index 008d457d52..b29cfd6380 100644
+--- a/manage_custom_field_edit_page.php
++++ b/manage_custom_field_edit_page.php
+@@ -73,7 +73,7 @@
+ 			<legend><span><?php echo lang_get( 'edit_custom_field_title' ) ?></span></legend>
+ 			<?php echo form_security_field( 'manage_custom_field_update' ); ?>
+ 			<input type="hidden" name="field_id" value="<?php echo $f_field_id ?>" />
+-			<input type="hidden" name="return" value="<?php echo $f_return ?>" />
++			<input type="hidden" name="return" value="<?php echo string_attribute( $f_return ); ?>" />
+ 			<div class="field-container">
+ 				<label for="custom-field-name"><span><?php echo lang_get( 'custom_field_name' ) ?></span></label>
+ 				<span class="input"><input type="text" id="custom-field-name" name="name" size="32" maxlength="64" value="<?php echo string_attribute( $t_definition['name'] ) ?>" /></span>

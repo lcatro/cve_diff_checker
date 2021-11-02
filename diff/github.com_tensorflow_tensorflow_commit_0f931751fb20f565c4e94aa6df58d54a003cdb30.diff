@@ -1,0 +1,35 @@
+From 0f931751fb20f565c4e94aa6df58d54a003cdb30 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Mon, 2 Aug 2021 13:03:44 -0700
+Subject: [PATCH] Validate dimensions of input tensor in
+ `FractionalAvgPoolGrad`
+
+PiperOrigin-RevId: 388286227
+Change-Id: Ieb7566155e92acc8993a2212c76deacadc0edc8a
+---
+ tensorflow/core/kernels/fractional_avg_pool_op.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/tensorflow/core/kernels/fractional_avg_pool_op.cc b/tensorflow/core/kernels/fractional_avg_pool_op.cc
+index 3c80e87bcf76d..63f8d67d93cc4 100644
+--- a/tensorflow/core/kernels/fractional_avg_pool_op.cc
++++ b/tensorflow/core/kernels/fractional_avg_pool_op.cc
+@@ -271,6 +271,18 @@ class FractionalAvgPoolGradOp : public OpKernel {
+     const int64_t in_rows = orig_input_tensor_shape_flat(1);
+     const int64_t in_cols = orig_input_tensor_shape_flat(2);
+     const int64_t in_depth = orig_input_tensor_shape_flat(3);
++    OP_REQUIRES(
++        context, in_batch != 0,
++        errors::InvalidArgument("Batch dimension of input must not be 0"));
++    OP_REQUIRES(
++        context, in_rows != 0,
++        errors::InvalidArgument("Rows dimension of input must not be 0"));
++    OP_REQUIRES(
++        context, in_cols != 0,
++        errors::InvalidArgument("Columns dimension of input must not be 0"));
++    OP_REQUIRES(
++        context, in_depth != 0,
++        errors::InvalidArgument("Depth dimension of input must not be 0"));
+ 
+     constexpr int tensor_in_and_out_dims = 4;
+     // Transform orig_input_tensor_shape into TensorShape

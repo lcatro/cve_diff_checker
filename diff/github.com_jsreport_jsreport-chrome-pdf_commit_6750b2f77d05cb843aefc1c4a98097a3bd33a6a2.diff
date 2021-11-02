@@ -1,0 +1,46 @@
+From 6750b2f77d05cb843aefc1c4a98097a3bd33a6a2 Mon Sep 17 00:00:00 2001
+From: BJR Matos <bjrmatos@gmail.com>
+Date: Fri, 30 Oct 2020 11:09:42 -0500
+Subject: [PATCH] block file requests
+
+---
+ lib/conversion.js | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/lib/conversion.js b/lib/conversion.js
+index 3a76d3b..747256d 100644
+--- a/lib/conversion.js
++++ b/lib/conversion.js
+@@ -38,6 +38,12 @@ module.exports = async ({ reporter, getBrowser, htmlUrl, strategy, timeout, req,
+       return
+     }
+ 
++    await page.setRequestInterception(true)
++
++    if (executionInfo.error) {
++      return
++    }
++
+     page.on('pageerror', (err) => {
+       pageLog('warn', `Page error: ${err.message}${err.stack ? ` , stack: ${err.stack}` : ''}`)
+     })
+@@ -64,6 +70,19 @@ module.exports = async ({ reporter, getBrowser, htmlUrl, strategy, timeout, req,
+       }
+ 
+       pageLog('debug', `Page request: ${r.method()} (${r.resourceType()}) ${trimUrl(r.url())}${detail}`)
++
++      const isRelativeToHtmlUrl = r.url().lastIndexOf(htmlUrl, 0) === 0
++
++      if (
++        !isRelativeToHtmlUrl &&
++        // potentially dangerous request to local file
++        r.url().lastIndexOf('file:///', 0) === 0
++      ) {
++        r.abort('accessdenied')
++        return
++      }
++
++      r.continue()
+     })
+ 
+     page.on('requestfinished', (r) => {

@@ -1,0 +1,34 @@
+From 6fd02f44810754ae7481838b6a67c5df7f909ca3 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Mon, 26 Apr 2021 16:40:49 -0700
+Subject: [PATCH] Fix `tf.raw_ops.SparseAdd ` invalid memory access failure.
+
+PiperOrigin-RevId: 370568774
+Change-Id: I5f73b31c865f2948a1c8dfb7ebd22b3cfb6405bf
+---
+ tensorflow/core/kernels/sparse_add_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/sparse_add_op.cc b/tensorflow/core/kernels/sparse_add_op.cc
+index 0cf40a709a39a..346206365af8d 100644
+--- a/tensorflow/core/kernels/sparse_add_op.cc
++++ b/tensorflow/core/kernels/sparse_add_op.cc
+@@ -14,6 +14,7 @@ limitations under the License.
+ ==============================================================================*/
+ 
+ #include "tensorflow/core/framework/op_kernel.h"
++#include "tensorflow/core/framework/op_requires.h"
+ #include "tensorflow/core/framework/register_types.h"
+ #include "tensorflow/core/framework/tensor.h"
+ #include "tensorflow/core/framework/tensor_util.h"
+@@ -101,6 +102,10 @@ class SparseAddOp : public OpKernel {
+     std::vector<T> out_values;
+     const int num_dims = a_shape->dim_size(0);
+ 
++    OP_REQUIRES(ctx, num_dims > 0,
++                errors::InvalidArgument("Invalid input_a shape. Received: ",
++                                        a_shape->DebugString()));
++
+     // The input and output sparse tensors are assumed to be ordered along
+     // increasing dimension number.
+     int64 i = 0, j = 0;

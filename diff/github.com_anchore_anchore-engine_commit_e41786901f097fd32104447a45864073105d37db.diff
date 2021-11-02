@@ -1,0 +1,29 @@
+From 3fa2fd097db469ab6e0ec98ba43eefd74e1494c9 Mon Sep 17 00:00:00 2001
+From: Daniel Nurmi <nurmi@anchore.com>
+Date: Wed, 22 Apr 2020 15:35:12 -0700
+Subject: [PATCH] Ensure only supported os overrides are used in skopeo
+ download commands. Fixes #430.
+
+Signed-off-by: Daniel Nurmi <nurmi@anchore.com>
+---
+ anchore_engine/clients/skopeo_wrapper.py | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/anchore_engine/clients/skopeo_wrapper.py b/anchore_engine/clients/skopeo_wrapper.py
+index f709ee678..4f246462b 100644
+--- a/anchore_engine/clients/skopeo_wrapper.py
++++ b/anchore_engine/clients/skopeo_wrapper.py
+@@ -110,9 +110,11 @@ def download_image(fulltag, copydir, user=None, pw=None, verify=True, manifest=N
+             if parent_manifest_data:
+                 for mlist in parent_manifest_data.get('manifests', []):
+                     imageos = mlist.get('platform', {}).get('os', "")
+-                    if imageos not in ["", 'linux'] and imageos not in os_overrides:
++                    if imageos not in ["", 'linux']:
++                        # add a windows os override to the list of override attempts, to complete the options that are supported by skopeo
+                         dest_type = 'dir'
+-                        os_overrides.insert(0, imageos)
++                        os_overrides.insert(0, "windows")
++                        break
+ 
+         for os_override in os_overrides:
+             success = False

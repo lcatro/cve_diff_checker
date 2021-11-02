@@ -1,0 +1,42 @@
+From c570e2ecfc822941335ad48f6e10df4e21f11c96 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 21 Apr 2021 17:50:10 -0700
+Subject: [PATCH] Fix issues in Conv2DBackpropFilter.
+
+PiperOrigin-RevId: 369772454
+Change-Id: I49b465f2ae2ce91def61b56cea8000197d5177d8
+---
+ tensorflow/core/kernels/conv_grad_filter_ops.cc | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/tensorflow/core/kernels/conv_grad_filter_ops.cc b/tensorflow/core/kernels/conv_grad_filter_ops.cc
+index fb48e3e285a27..2645d850ab7cf 100644
+--- a/tensorflow/core/kernels/conv_grad_filter_ops.cc
++++ b/tensorflow/core/kernels/conv_grad_filter_ops.cc
+@@ -495,6 +495,14 @@ class Conv2DCustomBackpropFilterOp : public OpKernel {
+     const int filter_total_size = dims.spatial_dims[0].filter_size *
+                                   dims.spatial_dims[1].filter_size *
+                                   dims.in_depth;
++    OP_REQUIRES(
++        context,
++        filter_total_size * dims.out_depth == filter_backprop->NumElements(),
++        errors::InvalidArgument(
++            "filter_size does not have enough elements, requested ",
++            filter_total_size * dims.out_depth, ", got ",
++            filter_backprop->NumElements()));
++
+     // The output image size is the spatial size of the output.
+     const int output_image_size =
+         dims.spatial_dims[0].output_size * dims.spatial_dims[1].output_size;
+@@ -518,6 +526,11 @@ class Conv2DCustomBackpropFilterOp : public OpKernel {
+ 
+     const size_t work_unit_size = size_A + size_B + size_C;
+ 
++    OP_REQUIRES(
++        context, work_unit_size != 0,
++        errors::InvalidArgument(
++            "Work size for convolution would be 0, which is not acceptable"));
++
+     const size_t shard_size =
+         (target_working_set_size + work_unit_size - 1) / work_unit_size;
+ 

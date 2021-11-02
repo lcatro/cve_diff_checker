@@ -1,0 +1,95 @@
+From 5f68901c2e2e062a5e0083a81d257eccea0eb760 Mon Sep 17 00:00:00 2001
+From: Aviad Reich <aviad@snyk.io>
+Date: Mon, 16 Apr 2018 13:23:41 +0300
+Subject: [PATCH] fix: prevent extracting archived files outside of target path
+
+---
+ lib/extract.js                 |  11 +++++++++-
+ test/uncompressed.js           |  38 ++++++++++++++++++++++++++++++++-
+ testData/zip-slip/zip-slip.zip | Bin 0 -> 545 bytes
+ 3 files changed, 47 insertions(+), 2 deletions(-)
+ create mode 100644 testData/zip-slip/zip-slip.zip
+
+diff --git a/lib/extract.js b/lib/extract.js
+index 143ef0f8..236c6313 100644
+--- a/lib/extract.js
++++ b/lib/extract.js
+@@ -17,8 +17,17 @@ function Extract (opts) {
+ 
+   self.on('entry', function(entry) {
+     if (entry.type == 'Directory') return;
++
++    // to avoid zip slip (writing outside of the destination), we resolve
++    // the target path, and make sure it's nested in the intended
++    // destination, or not extract it otherwise.
++    var extractPath = path.join(opts.path, entry.path);
++    if (extractPath.indexOf(opts.path) != 0) {
++      return;
++    }
++
+     entry.pipe(Writer({
+-      path: path.join(opts.path,entry.path)
++      path: extractPath
+     }))
+     .on('error',function(e) {
+       self.emit('error',e);
+diff --git a/test/uncompressed.js b/test/uncompressed.js
+index fcbf3beb..f76d8be5 100644
+--- a/test/uncompressed.js
++++ b/test/uncompressed.js
+@@ -46,4 +46,40 @@ test("extract uncompressed archive", function (t) {
+       });
+     }
+   });
+-});
+\ No newline at end of file
++});
++
++test("do not extract zip slip archive", function (t) {
++  var archive = path.join(__dirname, '../testData/zip-slip/zip-slip.zip');
++
++  temp.mkdir('node-zipslip-', function (err, dirPath) {
++    if (err) {
++      throw err;
++    }
++    var unzipExtractor = unzip.Extract({ path: dirPath });
++    unzipExtractor.on('error', function(err) {
++      throw err;
++    });
++    unzipExtractor.on('close', testNoSlip);
++
++    fs.createReadStream(archive).pipe(unzipExtractor);
++
++    function testNoSlip() {
++      if (fs.hasOwnProperty('access')) {
++        var mode = fs.F_OK | (fs.constants && fs.constants.F_OK);
++        return fs.access('/tmp/evil.txt', mode, evilFileCallback);
++      }
++      // node 0.10
++      return fs.stat('/tmp/evil.txt', evilFileCallback);
++    }
++
++    function evilFileCallback(err) {
++      if (err) {
++        t.pass('no zip slip');
++      } else {
++        t.fail('evil file created');
++      }
++      return t.end();
++    }
++
++  });
++});
+diff --git a/testData/zip-slip/zip-slip.zip b/testData/zip-slip/zip-slip.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..38b3f499de0163e62ca15ce18350a9d9a477a51b
+GIT binary patch
+literal 545
+zcmWIWW@h1H0D=Au{XYEp{-1?`Y!K#PkYPyA&ri`SsVE5z;bdU8U359h4v0%DxEUB(
+zzA-W|u!sQFm1JZVD*#cV0!Xz&eqJh90MJm76a&LlprHwl)s`S02)6*So}T`Ippx7I
+z{nWC|9FT|Lj?Pm62|-=W$Rx*%D=;L0E@xl>dYWNLBZ!3v8dgZqpan~SHzSh>Gwx6T
+jnE?Vz8bg8PfCLE8QsgiR@MdKLxrhk}K_2A>d6oeH^pk5C
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,1407 @@
+From 29014da83e5fc358d6bff0f574e9ed45e61a35ac Mon Sep 17 00:00:00 2001
+From: Chris Coulson <chris.coulson@canonical.com>
+Date: Fri, 23 Sep 2016 21:15:25 +0100
+Subject: Refactor ownership of BrowserContext (LP: #1503639, LP: #1626099)
+
+Previously, BrowserContext was reference counted inside Oxide. However, it's not reference counted in Chromium which meant we needed an additional mechanism (BrowserContextDestroyer) to ensure that it outlives any RenderProcessHosts using it. As this required a custom trait for deletion, it lead to the weird scenario where BrowserContext (a non-threadsafe class inherited from base::NonThreadSafe) had to have a thread-safe reference count.
+
+Now, the main BrowserContext is exclusively owned by the application, and is scheduled for deletion via BrowserContextDestroyer as soon as the application releases it. OTR BrowserContexts are owned by the BrowserContext that creates them, and WebContentsUnloader schedules the OTR BrowserContext for deletion as soon as the last WebContents using it is scheduled for unload.
+---
+ qt/core/browser/oxide_qt_web_context.cc           |  10 +-
+ qt/core/browser/oxide_qt_web_context.h            |   6 +-
+ qt/quick/api/oxideqquickwebview.cc                |   4 +-
+ qt/tests/qmltests/core/single-process.exclude     |   1 +
+ qt/tests/qmltests/core/tst_bug1626099.html        |  15 ++
+ qt/tests/qmltests/core/tst_bug1626099.qml         |  44 ++++
+ shared/BUILD.gn                                   |   2 +
+ shared/browser/in_process_renderer_observer.cc    |  37 ++++
+ shared/browser/in_process_renderer_observer.h     |  40 ++++
+ shared/browser/oxide_browser_context.cc           |  86 ++++----
+ shared/browser/oxide_browser_context.h            |  46 ++--
+ shared/browser/oxide_browser_context_destroyer.cc | 244 ++++++++++++++++++----
+ shared/browser/oxide_browser_context_destroyer.h  |  40 +++-
+ shared/browser/oxide_browser_main_parts.cc        |  12 +-
+ shared/browser/oxide_browser_process_main.cc      |  10 -
+ shared/browser/oxide_content_browser_client.cc    |  28 ++-
+ shared/browser/oxide_content_browser_client.h     |   7 +-
+ shared/browser/oxide_web_contents_unloader.cc     |  56 ++++-
+ shared/browser/oxide_web_contents_unloader.h      |  10 +-
+ shared/browser/oxide_web_view.cc                  |   6 +-
+ shared/browser/oxide_web_view_contents_helper.cc  |  40 +++-
+ shared/browser/oxide_web_view_contents_helper.h   |   3 +-
+ 22 files changed, 577 insertions(+), 170 deletions(-)
+ create mode 100644 qt/tests/qmltests/core/tst_bug1626099.html
+ create mode 100644 qt/tests/qmltests/core/tst_bug1626099.qml
+ create mode 100644 shared/browser/in_process_renderer_observer.cc
+ create mode 100644 shared/browser/in_process_renderer_observer.h
+
+diff --git a/qt/core/browser/oxide_qt_web_context.cc b/qt/core/browser/oxide_qt_web_context.cc
+index 3dc3c13..617fbea 100644
+--- a/qt/core/browser/oxide_qt_web_context.cc
++++ b/qt/core/browser/oxide_qt_web_context.cc
+@@ -53,7 +53,6 @@
+ #include "qt/core/browser/oxide_qt_user_script.h"
+ #include "qt/core/glue/oxide_qt_web_context_proxy_client.h"
+ #include "shared/browser/media/oxide_media_capture_devices_context.h"
+-#include "shared/browser/oxide_browser_context.h"
+ #include "shared/browser/oxide_browser_context_delegate.h"
+ #include "shared/browser/oxide_browser_process_main.h"
+ #include "shared/browser/oxide_devtools_manager.h"
+@@ -66,6 +65,7 @@
+ namespace oxide {
+ namespace qt {
+ 
++using oxide::BrowserContext;
+ using oxide::DevToolsManager;
+ using oxide::MediaCaptureDevicesContext;
+ using oxide::UserAgentSettings;
+@@ -456,7 +456,7 @@ WebContext::~WebContext() {
+ }
+ 
+ // static
+-WebContext* WebContext::FromBrowserContext(oxide::BrowserContext* context) {
++WebContext* WebContext::FromBrowserContext(BrowserContext* context) {
+   BrowserContextDelegate* delegate =
+       static_cast<BrowserContextDelegate*>(context->GetDelegate());
+   if (!delegate) {
+@@ -466,21 +466,21 @@ WebContext* WebContext::FromBrowserContext(oxide::BrowserContext* context) {
+   return delegate->context();
+ }
+ 
+-oxide::BrowserContext* WebContext::GetContext() {
++BrowserContext* WebContext::GetContext() {
+   if (context_.get()) {
+     return context_.get();
+   }
+ 
+   DCHECK(construct_props_);
+ 
+-  oxide::BrowserContext::Params params(
++  BrowserContext::Params params(
+       construct_props_->data_path,
+       construct_props_->cache_path,
+       construct_props_->max_cache_size_hint,
+       construct_props_->session_cookie_mode);
+   params.host_mapping_rules = construct_props_->host_mapping_rules;
+ 
+-  context_ = oxide::BrowserContext::Create(params);
++  context_ = BrowserContext::Create(params);
+ 
+   UserAgentSettings* ua_settings = UserAgentSettings::Get(context_.get());
+ 
+diff --git a/qt/core/browser/oxide_qt_web_context.h b/qt/core/browser/oxide_qt_web_context.h
+index db2f68f..1425b38 100644
+--- a/qt/core/browser/oxide_qt_web_context.h
++++ b/qt/core/browser/oxide_qt_web_context.h
+@@ -33,6 +33,7 @@
+ 
+ #include "qt/core/glue/oxide_qt_web_context_proxy.h"
+ #include "shared/browser/media/oxide_media_capture_devices_context_client.h"
++#include "shared/browser/oxide_browser_context.h"
+ 
+ QT_BEGIN_NAMESPACE
+ class QNetworkAccessManager;
+@@ -43,9 +44,6 @@ class CookieStore;
+ }
+ 
+ namespace oxide {
+-
+-class BrowserContext;
+-
+ namespace qt {
+ 
+ class SetCookiesContext;
+@@ -152,7 +150,7 @@ class WebContext : public WebContextProxy,
+ 
+   WebContextProxyClient* client_;
+ 
+-  scoped_refptr<BrowserContext> context_;
++  BrowserContext::UniquePtr context_;
+ 
+   struct ConstructProperties;
+   std::unique_ptr<ConstructProperties> construct_props_;
+diff --git a/qt/quick/api/oxideqquickwebview.cc b/qt/quick/api/oxideqquickwebview.cc
+index 06fe5ba..d0076ae 100644
+--- a/qt/quick/api/oxideqquickwebview.cc
++++ b/qt/quick/api/oxideqquickwebview.cc
+@@ -2042,8 +2042,8 @@ If the application doesn't set this, then WebView will use the application
+ default WebContext (Oxide::defaultWebContext).
+ 
+ The application should ensure that the provided WebContext outlives this
+-WebView. Although WebView will continue to function normally if its provided
+-WebContext is deleted, it will mean that this property is null.
++WebView. Deleting the WebContext whilst the WebView is still alive may cause
++some features to stop working.
+ 
+ If this WebView is created as a request to open a new window (via
+ newViewRequested), then the WebContext will be inherited from the opening
+diff --git a/qt/tests/qmltests/core/single-process.exclude b/qt/tests/qmltests/core/single-process.exclude
+index 8a6a683..937b64d 100644
+--- a/qt/tests/qmltests/core/single-process.exclude
++++ b/qt/tests/qmltests/core/single-process.exclude
+@@ -1,2 +1,3 @@
++tst_bug1626099.qml
+ tst_Incognito_cleanup.qml
+ tst_Incognito_cookies.qml
+diff --git a/qt/tests/qmltests/core/tst_bug1626099.html b/qt/tests/qmltests/core/tst_bug1626099.html
+new file mode 100644
+index 0000000..3ac94c5
+--- /dev/null
++++ b/qt/tests/qmltests/core/tst_bug1626099.html
+@@ -0,0 +1,15 @@
++<html>
++<head>
++<script>
++
++window.addEventListener("unload", function(e) {
++  while (true) {
++    console.log("Spinning unload handler");
++  }
++});
++
++</script>
++</head>
++<body>
++</body>
++</html>
+diff --git a/qt/tests/qmltests/core/tst_bug1626099.qml b/qt/tests/qmltests/core/tst_bug1626099.qml
+new file mode 100644
+index 0000000..d11d76d
+--- /dev/null
++++ b/qt/tests/qmltests/core/tst_bug1626099.qml
+@@ -0,0 +1,44 @@
++import QtQuick 2.0
++import QtTest 1.0
++import Oxide.testsupport 1.0
++
++Item {
++  id: top
++
++  Component {
++    id: webViewFactory
++    TestWebView {
++      incognito: true
++    }
++  }
++
++  TestCase {
++    id: test
++    name: "Incognito_cleanup"
++    when: windowShown
++
++    // Verify that the OTR browsing context is destroyed as soon as the
++    // last incognito webview using it is destroyed. This is like
++    // tst_Incognito_cleanup.qml with the exception that it runs the test
++    // with a page that spins its unload handler, in order to delay
++    // teardown of the incognito BrowserContext
++    function test_bug1626099() {
++      var webView = webViewFactory.createObject(top, {});
++      webView.url = "http://testsuite/tst_bug1626099.html";
++      verify(webView.waitForLoadSucceeded());
++
++      webView.getTestApi().evaluateCode("document.cookie = \"foo=bar\"", false);
++      compare(webView.getTestApi().evaluateCode("document.cookie", false), "foo=bar");
++
++      var webViewHelper = TestSupport.createQObjectTestHelper(webView);
++      webView.destroy();
++      TestUtils.waitFor(function() { return webViewHelper.destroyed; });
++
++      webView = webViewFactory.createObject(top, {});
++      webView.url = "http://testsuite/tst_bug1626099.html";
++      verify(webView.waitForLoadSucceeded());
++
++      compare(webView.getTestApi().evaluateCode("document.cookie", false), "");
++    }
++  }
++}
+diff --git a/shared/BUILD.gn b/shared/BUILD.gn
+index 43cafb2..c9e7e91 100644
+--- a/shared/BUILD.gn
++++ b/shared/BUILD.gn
+@@ -284,6 +284,8 @@ component("shared") {
+     "browser/input/oxide_input_method_context.h",
+     "browser/input/oxide_input_method_context_observer.cc",
+     "browser/input/oxide_input_method_context_observer.h",
++    "browser/in_process_renderer_observer.cc",
++    "browser/in_process_renderer_observer.h",
+     "browser/media/oxide_media_capture_devices_context.cc",
+     "browser/media/oxide_media_capture_devices_context.h",
+     "browser/media/oxide_media_capture_devices_context_client.h",
+diff --git a/shared/browser/in_process_renderer_observer.cc b/shared/browser/in_process_renderer_observer.cc
+new file mode 100644
+index 0000000..d69034e
+--- /dev/null
++++ b/shared/browser/in_process_renderer_observer.cc
+@@ -0,0 +1,37 @@
++// vim:expandtab:shiftwidth=2:tabstop=2:
++// Copyright (C) 2016 Canonical Ltd.
++
++// This library is free software; you can redistribute it and/or
++// modify it under the terms of the GNU Lesser General Public
++// License as published by the Free Software Foundation; either
++// version 2.1 of the License, or (at your option) any later version.
++
++// This library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++// Lesser General Public License for more details.
++
++// You should have received a copy of the GNU Lesser General Public
++// License along with this library; if not, write to the Free Software
++// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++
++#include "in_process_renderer_observer.h"
++
++#include "content/public/browser/render_process_host.h"
++
++#include "oxide_web_contents_unloader.h"
++
++namespace oxide {
++
++void InProcessRendererObserver::RenderProcessHostDestroyed(
++    content::RenderProcessHost* host) {
++  WebContentsUnloader::GetInstance()->Shutdown();
++}
++
++InProcessRendererObserver::InProcessRendererObserver() {
++  DCHECK(content::RenderProcessHost::run_renderer_in_process());
++}
++
++InProcessRendererObserver::~InProcessRendererObserver() = default;
++
++} // namespace oxide
+diff --git a/shared/browser/in_process_renderer_observer.h b/shared/browser/in_process_renderer_observer.h
+new file mode 100644
+index 0000000..03d0d2f
+--- /dev/null
++++ b/shared/browser/in_process_renderer_observer.h
+@@ -0,0 +1,40 @@
++// vim:expandtab:shiftwidth=2:tabstop=2:
++// Copyright (C) 2016 Canonical Ltd.
++
++// This library is free software; you can redistribute it and/or
++// modify it under the terms of the GNU Lesser General Public
++// License as published by the Free Software Foundation; either
++// version 2.1 of the License, or (at your option) any later version.
++
++// This library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++// Lesser General Public License for more details.
++
++// You should have received a copy of the GNU Lesser General Public
++// License along with this library; if not, write to the Free Software
++// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
++
++#ifndef _OXIDE_SHARED_BROWSER_IN_PROCESS_RENDERER_OBSERVER_H_
++#define _OXIDE_SHARED_BROWSER_IN_PROCESS_RENDERER_OBSERVER_H_
++
++#include "base/macros.h"
++#include "content/public/browser/render_process_host_observer.h"
++
++namespace oxide {
++
++class InProcessRendererObserver : public content::RenderProcessHostObserver {
++ public:
++  InProcessRendererObserver();
++  ~InProcessRendererObserver() override;
++
++ private:
++  // content::RenderProcessHostObserver implementation
++  void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
++
++  DISALLOW_COPY_AND_ASSIGN(InProcessRendererObserver);
++};
++
++} // namespace oxide
++
++#endif // _OXIDE_SHARED_BROWSER_IN_PROCESS_RENDERER_OBSERVER_H_
+diff --git a/shared/browser/oxide_browser_context.cc b/shared/browser/oxide_browser_context.cc
+index 8d2420b..00ae02b 100644
+--- a/shared/browser/oxide_browser_context.cc
++++ b/shared/browser/oxide_browser_context.cc
+@@ -558,24 +558,16 @@ class OTRBrowserContextImpl : public BrowserContext {
+  public:
+   OTRBrowserContextImpl(BrowserContextImpl* original,
+                         BrowserContextIODataImpl* original_io_data);
+-
+-  base::WeakPtr<OTRBrowserContextImpl> GetWeakPtr() {
+-    return weak_ptr_factory_.GetWeakPtr();
+-  }
++  ~OTRBrowserContextImpl() override;
+ 
+  private:
+-  ~OTRBrowserContextImpl() override;
++  BrowserContext* GetOffTheRecordContext() override { return this; }
+ 
+-  scoped_refptr<BrowserContext> GetOffTheRecordContext() override {
+-    return make_scoped_refptr(this);
+-  }
+-  BrowserContext* GetOriginalContext() const override;
++  BrowserContext* GetOriginalContext() override;
+ 
+   bool HasOffTheRecordContext() const override { return true; }
+ 
+-  scoped_refptr<BrowserContextImpl> original_context_;
+-
+-  base::WeakPtrFactory<OTRBrowserContextImpl> weak_ptr_factory_;
++  BrowserContextImpl* original_context_;
+ };
+ 
+ class BrowserContextImpl : public BrowserContext {
+@@ -583,50 +575,49 @@ class BrowserContextImpl : public BrowserContext {
+   BrowserContextImpl(const BrowserContext::Params& params);
+ 
+  private:
++  friend class BrowserContext;
++
+   ~BrowserContextImpl() override;
+ 
+-  scoped_refptr<BrowserContext> GetOffTheRecordContext() override;
++  BrowserContext* GetOffTheRecordContext() override;
+ 
+-  BrowserContext* GetOriginalContext() const override {
+-    return const_cast<BrowserContextImpl*>(this);
+-  }
++  BrowserContext* GetOriginalContext() override { return this; }
+ 
+   bool HasOffTheRecordContext() const override {
+     return otr_context_ != nullptr;
+   }
+ 
+-  base::WeakPtr<OTRBrowserContextImpl> otr_context_;
++  std::unique_ptr<OTRBrowserContextImpl> otr_context_;
+ };
+ 
+-OTRBrowserContextImpl::~OTRBrowserContextImpl() {}
+-
+-BrowserContext* OTRBrowserContextImpl::GetOriginalContext() const {
+-  return original_context_.get();
++BrowserContext* OTRBrowserContextImpl::GetOriginalContext() {
++  return original_context_;
+ }
+ 
++OTRBrowserContextImpl::~OTRBrowserContextImpl() {}
++
+ OTRBrowserContextImpl::OTRBrowserContextImpl(
+     BrowserContextImpl* original,
+     BrowserContextIODataImpl* original_io_data)
+     : BrowserContext(new OTRBrowserContextIODataImpl(original_io_data)),
+-      original_context_(original),
+-      weak_ptr_factory_(this) {
++      original_context_(original) {
+   BrowserContextDependencyManager::GetInstance()
+       ->CreateBrowserContextServices(this);
+ }
+ 
+-BrowserContextImpl::~BrowserContextImpl() {
+-  CHECK(!otr_context_);
+-}
+-
+-scoped_refptr<BrowserContext> BrowserContextImpl::GetOffTheRecordContext() {
++BrowserContext* BrowserContextImpl::GetOffTheRecordContext() {
+   if (!otr_context_) {
+-    OTRBrowserContextImpl* context = new OTRBrowserContextImpl(
+-        this,
+-        static_cast<BrowserContextIODataImpl *>(io_data()));
+-    otr_context_ = context->GetWeakPtr();
++    otr_context_ =
++        base::MakeUnique<OTRBrowserContextImpl>(
++            this,
++            static_cast<BrowserContextIODataImpl*>(io_data()));
+   }
+ 
+-  return make_scoped_refptr(otr_context_.get());
++  return otr_context_.get();
++}
++
++BrowserContextImpl::~BrowserContextImpl() {
++  CHECK(!otr_context_);
+ }
+ 
+ BrowserContextImpl::BrowserContextImpl(const BrowserContext::Params& params)
+@@ -643,8 +634,9 @@ BrowserContextImpl::BrowserContextImpl(const BrowserContext::Params& params)
+       ->CreateBrowserContextServices(this);
+ }
+ 
+-void BrowserContextTraits::Destruct(const BrowserContext* x) {
+-  BrowserContextDestroyer::DestroyContext(const_cast<BrowserContext*>(x));
++void BrowserContext::Deleter::operator()(BrowserContext* context) {
++  CHECK(!context->IsOffTheRecord());
++  BrowserContextDestroyer::DestroyContext(base::WrapUnique(context));
+ }
+ 
+ std::unique_ptr<content::ZoomLevelDelegate>
+@@ -744,8 +736,8 @@ void BrowserContext::RemoveObserver(BrowserContextObserver* observer) {
+   observers_.RemoveObserver(observer);
+ }
+ 
+-BrowserContext::BrowserContext(BrowserContextIOData* io_data) :
+-    io_data_(io_data) {
++BrowserContext::BrowserContext(BrowserContextIOData* io_data)
++    : io_data_(io_data) {
+   CHECK(BrowserProcessMain::GetInstance()->IsRunning()) <<
+       "The main browser process components must be started before " <<
+       "creating a context";
+@@ -786,9 +778,8 @@ BrowserContext::~BrowserContext() {
+ }
+ 
+ // static
+-scoped_refptr<BrowserContext> BrowserContext::Create(const Params& params) {
+-  scoped_refptr<BrowserContext> context = new BrowserContextImpl(params);
+-  return context;
++BrowserContext::UniquePtr BrowserContext::Create(const Params& params) {
++  return BrowserContext::UniquePtr(new BrowserContextImpl(params));
+ }
+ 
+ // static
+@@ -800,7 +791,10 @@ void BrowserContext::ForEach(const BrowserContextCallback& callback) {
+ 
+ // static
+ void BrowserContext::AssertNoContextsExist() {
+-  CHECK_EQ(g_all_contexts.Get().size(), static_cast<size_t>(0));
++  CHECK_EQ(g_all_contexts.Get().size(), static_cast<size_t>(0))
++      << "BrowserContexts still exist at shutdown! This is normally the result "
++      << "of an application leak, but it's possible that there might be an "
++      << "Oxide bug too";
+ }
+ 
+ BrowserContextID BrowserContext::GetID() const {
+@@ -820,6 +814,14 @@ void BrowserContext::SetDelegate(BrowserContextDelegate* delegate) {
+   data.delegate = delegate;
+ }
+ 
++// static
++void BrowserContext::DestroyOffTheRecordContextForContext(
++    BrowserContext* context) {
++  CHECK(!context->IsOffTheRecord() && context->HasOffTheRecordContext());
++  BrowserContextDestroyer::DestroyContext(
++      std::move(static_cast<BrowserContextImpl*>(context)->otr_context_));
++}
++
+ bool BrowserContext::IsOffTheRecord() const {
+   DCHECK(CalledOnValidThread());
+   return io_data()->IsOffTheRecord();
+@@ -829,7 +831,7 @@ bool BrowserContext::IsSameContext(BrowserContext* other) const {
+   DCHECK(CalledOnValidThread());
+   return other->GetOriginalContext() == this ||
+          (other->HasOffTheRecordContext() &&
+-          other->GetOffTheRecordContext().get() == this);
++          other->GetOffTheRecordContext() == this);
+ }
+ 
+ base::FilePath BrowserContext::GetPath() const {
+diff --git a/shared/browser/oxide_browser_context.h b/shared/browser/oxide_browser_context.h
+index b6c61e4..3523017 100644
+--- a/shared/browser/oxide_browser_context.h
++++ b/shared/browser/oxide_browser_context.h
+@@ -146,17 +146,10 @@ class BrowserContextIOData {
+ 
+ class BrowserContext;
+ 
+-struct OXIDE_SHARED_EXPORT BrowserContextTraits {
+-  static void Destruct(const BrowserContext* x);
+-};
+-
+ // This class holds the context needed for a browsing session. It lives on
+-// and must only be accessed on the UI thread - note that it uses a thread-safe
+-// refcount only so that we can override the delete behaviour
+-class OXIDE_SHARED_EXPORT BrowserContext
+-    : public content::BrowserContext,
+-      public base::RefCountedThreadSafe<BrowserContext, BrowserContextTraits>,
+-      public base::NonThreadSafe {
++// and must only be accessed on the UI thread
++class OXIDE_SHARED_EXPORT BrowserContext : public content::BrowserContext,
++                                           public base::NonThreadSafe {
+  public:
+ 
+   struct Params {
+@@ -176,12 +169,24 @@ class OXIDE_SHARED_EXPORT BrowserContext
+     std::vector<std::string> host_mapping_rules;
+   };
+ 
++  virtual ~BrowserContext();
++
+   static BrowserContext* FromContent(
+       content::BrowserContext* context) {
+     return static_cast<BrowserContext *>(context);
+   }
+ 
+-  static scoped_refptr<BrowserContext> Create(const Params& params);
++  struct Deleter {
++    void operator()(BrowserContext* context);
++  };
++
++  typedef std::unique_ptr<BrowserContext, Deleter> UniquePtr;
++
++  // Create a new BrowserContext. Callers should be aware that the returned
++  // std::unique_ptr is not guaranteed to delete the BrowserContext immediately
++  // when released - it schedules the BrowserContext to be deleted when it's no
++  // longer in use.
++  static UniquePtr Create(const Params& params);
+ 
+   typedef base::Callback<void(BrowserContext*)> BrowserContextCallback;
+   static void ForEach(const BrowserContextCallback& callback);
+@@ -194,10 +199,22 @@ class OXIDE_SHARED_EXPORT BrowserContext
+   BrowserContextDelegate* GetDelegate() const;
+   void SetDelegate(BrowserContextDelegate* delegate);
+ 
+-  virtual scoped_refptr<BrowserContext> GetOffTheRecordContext() = 0;
+-  virtual BrowserContext* GetOriginalContext() const = 0;
++  // Returns an OTR BrowserContext, creating it if it needs to. Callers must
++  // never delete the returned BrowserContext directly, but must pass the
++  // BrowserContext returned by GetOriginalContext() to
++  // DestroyOffTheRecordContextForContext when it's no longer required.
++  virtual BrowserContext* GetOffTheRecordContext() = 0;
++
++  // Returns the main BrowserContext associated with |this|. Callers must never
++  // delete the returned BrowserContext.
++  // The returned BrowserContext is only guaranteed to be valid until |this| is
++  // released.
++  virtual BrowserContext* GetOriginalContext() = 0;
++
+   virtual bool HasOffTheRecordContext() const = 0;
+ 
++  static void DestroyOffTheRecordContextForContext(BrowserContext* context);
++
+   bool IsOffTheRecord() const override; // from content::BrowserContext
+ 
+   bool IsSameContext(BrowserContext* other) const;
+@@ -231,10 +248,7 @@ class OXIDE_SHARED_EXPORT BrowserContext
+   BrowserContextIOData* GetIOData() const;
+ 
+  protected:
+-  friend class BrowserContextDestroyer; // for destructor
+-
+   BrowserContext(BrowserContextIOData* io_data);
+-  virtual ~BrowserContext();
+ 
+   BrowserContextIOData* io_data() const { return io_data_; }
+ 
+diff --git a/shared/browser/oxide_browser_context_destroyer.cc b/shared/browser/oxide_browser_context_destroyer.cc
+index 676de2c..e57cd36 100644
+--- a/shared/browser/oxide_browser_context_destroyer.cc
++++ b/shared/browser/oxide_browser_context_destroyer.cc
+@@ -17,8 +17,11 @@
+ 
+ #include "oxide_browser_context_destroyer.h"
+ 
++#include <list>
++
++#include "base/lazy_instance.h"
+ #include "base/logging.h"
+-#include "base/message_loop/message_loop.h"
++#include "base/threading/thread_task_runner_handle.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/render_process_host.h"
+ 
+@@ -26,76 +29,229 @@
+ 
+ namespace oxide {
+ 
++namespace {
++
++base::LazyInstance<std::list<BrowserContextDestroyer*>>
++    g_contexts_pending_deletion = LAZY_INSTANCE_INITIALIZER;
++
++std::set<content::RenderProcessHost*> 
++GetHostsForContext(BrowserContext* context) {
++  std::set<content::RenderProcessHost*> hosts;
++
++  for (auto it = content::RenderProcessHost::AllHostsIterator();
++       !it.IsAtEnd(); it.Advance()) {
++    content::RenderProcessHost* host = it.GetCurrentValue();
++    if (host->GetBrowserContext() != context) {
++      continue;
++    }
++
++    hosts.insert(host);
++  }
++
++  return std::move(hosts);
++}
++
++}
++
+ BrowserContextDestroyer::BrowserContextDestroyer(
+-    BrowserContext* context,
+-    const std::set<content::RenderProcessHost*>& hosts)
+-    : context_(context),
+-      pending_hosts_(0) {
+-  for (std::set<content::RenderProcessHost*>::iterator it = hosts.begin();
+-       it != hosts.end(); ++it) {
+-    (*it)->AddObserver(this);
+-    ++pending_hosts_;
++    std::unique_ptr<BrowserContext> context,
++    const std::set<content::RenderProcessHost*>& hosts,
++    uint32_t otr_contexts_pending_deletion)
++    : context_(std::move(context)),
++      otr_contexts_pending_deletion_(otr_contexts_pending_deletion),
++      finish_destroy_scheduled_(false) {
++  DCHECK(hosts.size() > 0 ||
++         (!context->IsOffTheRecord() &&
++          (otr_contexts_pending_deletion > 0 ||
++               context->HasOffTheRecordContext())));
++
++  g_contexts_pending_deletion.Get().push_back(this);
++
++  for (auto* host : hosts) {
++    ObserveHost(host);
+   }
+ }
+ 
+-BrowserContextDestroyer::~BrowserContextDestroyer() {}
++BrowserContextDestroyer::~BrowserContextDestroyer() = default;
++
++void BrowserContextDestroyer::ObserveHost(content::RenderProcessHost* host) {
++  DCHECK(pending_host_ids_.find(host->GetID()) == pending_host_ids_.end());
++
++  host->AddObserver(this);
++  pending_host_ids_.insert(host->GetID());
++}
++
++void BrowserContextDestroyer::MaybeScheduleFinishDestroyContext(
++    content::RenderProcessHost* host_being_destroyed) {
++  DCHECK(!finish_destroy_scheduled_);
++
++  if (pending_host_ids_.size() > 0) {
++    // We're monitoring RenderProcessHosts that are using this context, so it's
++    // not safe to delete yet
++    return;
++  }
++
++  if (!context_->IsOffTheRecord() &&
++      (otr_contexts_pending_deletion_ > 0 ||
++           context_->HasOffTheRecordContext())) {
++    // There are still live OTR BrowserContexts that depend on this context, so
++    // it can't be deleted yet
++    return;
++  }
++
++  finish_destroy_scheduled_ = true;
++
++  base::ThreadTaskRunnerHandle::Get()->PostTask(
++      FROM_HERE,
++      base::Bind(&BrowserContextDestroyer::FinishDestroyContext,
++                 // We have exclusive ownership of |this| - nobody else can
++                 // reference or delete it
++                 base::Unretained(this)));
++}
+ 
+ void BrowserContextDestroyer::FinishDestroyContext() {
+-  DCHECK_EQ(pending_hosts_, 0U);
++  DCHECK(finish_destroy_scheduled_);
++  CHECK_EQ(GetHostsForContext(context_.get()).size(), 0U)
++      << "One or more RenderProcessHosts exist whilst its BrowserContext is "
++      << "being deleted!";
+ 
+-  delete context_;
+-  context_ = nullptr;
++  g_contexts_pending_deletion.Get().remove(this);
++
++  if (context_->IsOffTheRecord()) {
++    // If this is an OTR context and its owner BrowserContext has been scheduled
++    // for deletion, update the owner's BrowserContextDestroyer
++    BrowserContextDestroyer* orig_destroyer =
++        GetForContext(context_->GetOriginalContext());
++    if (orig_destroyer) {
++      DCHECK_GT(orig_destroyer->otr_contexts_pending_deletion_, 0U);
++      DCHECK(!orig_destroyer->finish_destroy_scheduled_);
++      --orig_destroyer->otr_contexts_pending_deletion_;
++      orig_destroyer->MaybeScheduleFinishDestroyContext();
++    }
++  }
+ 
+   delete this;
+ }
+ 
++// static
++BrowserContextDestroyer* BrowserContextDestroyer::GetForContext(
++    content::BrowserContext* context) {
++  auto it = std::find_if(g_contexts_pending_deletion.Get().begin(),
++                         g_contexts_pending_deletion.Get().end(),
++                         [context](const BrowserContextDestroyer* d) {
++    return d->context_.get() == context;
++  });
++
++  if (it == g_contexts_pending_deletion.Get().end()) {
++    return nullptr;
++  }
++
++  return *it;
++}
++
+ void BrowserContextDestroyer::RenderProcessHostDestroyed(
+     content::RenderProcessHost* host) {
+-  DCHECK_GT(pending_hosts_, 0U);
+-  if (--pending_hosts_ != 0) {
+-    return;
+-  }
++  DCHECK_GT(pending_host_ids_.size(), 0U);
++
++  size_t erased = pending_host_ids_.erase(host->GetID());
++  DCHECK_GT(erased, 0U);
++
++  MaybeScheduleFinishDestroyContext(host);
++}
++
++// static
++void BrowserContextDestroyer::DestroyContext(
++    std::unique_ptr<BrowserContext> context) {
+ 
+-  if (content::RenderProcessHost::run_renderer_in_process()) {
+-    FinishDestroyContext();
++  bool has_live_otr_context = false;
++  uint32_t otr_contexts_pending_deletion = 0;
++
++  if (!context->IsOffTheRecord()) {
++    // If |context| is not an OTR BrowserContext, we need to keep track of how
++    // many OTR BrowserContexts that were owned by it are scheduled for deletion
++    // but still exist, as |context| must outlive these
++    for (auto* destroyer : g_contexts_pending_deletion.Get()) {
++      if (destroyer->context_->IsOffTheRecord() &&
++          destroyer->context_->GetOriginalContext() == context.get()) {
++        ++otr_contexts_pending_deletion;
++      }
++    }
++
++    // If |context| is not an OTR BrowserContext but currently owns a live OTR
++    // BrowserContext, then we have to outlive that
++    has_live_otr_context = context->HasOffTheRecordContext();
+   } else {
+-    base::MessageLoop::current()->PostTask(
+-        FROM_HERE,
+-        base::Bind(&BrowserContextDestroyer::FinishDestroyContext,
+-                   // We have exclusive ownership of |this| - nobody else can
+-                   // reference or delete it
+-                   base::Unretained(this)));
++    // If |context| is an OTR BrowserContext and its owner has already been
++    // scheduled for deletion, then we need to prevent the owner from being
++    // deleted until after |context|
++    BrowserContextDestroyer* orig_destroyer =
++        GetForContext(context->GetOriginalContext());
++    if (orig_destroyer) {
++      CHECK(!orig_destroyer->finish_destroy_scheduled_);
++      ++orig_destroyer->otr_contexts_pending_deletion_;
++    }
++  }
++
++  // Get all of the live RenderProcessHosts that are using |context|
++  std::set<content::RenderProcessHost*> hosts =
++      GetHostsForContext(context.get());
++
++  content::BrowserContext::NotifyWillBeDestroyed(context.get());
++
++  // |hosts| might not be empty if the application released its BrowserContext
++  // too early, or if |context| is an OTR context or this application is single
++  // process
++
++  if (!hosts.empty() ||
++      otr_contexts_pending_deletion > 0 ||
++      has_live_otr_context) {
++    // |context| is not safe to delete yet
++    new BrowserContextDestroyer(std::move(context),
++                                hosts,
++                                otr_contexts_pending_deletion);
+   }
+ }
+ 
+ // static
+-void BrowserContextDestroyer::DestroyContext(BrowserContext* context) {
+-  CHECK(context->IsOffTheRecord() || !context->HasOffTheRecordContext());
++void BrowserContextDestroyer::Shutdown() {
++  auto destroy_all_unused_contexts = []() {
++    auto it = g_contexts_pending_deletion.Get().begin();
++    while (it != g_contexts_pending_deletion.Get().end()) {
++      BrowserContextDestroyer* destroyer = *it;
++      ++it;
+ 
+-  content::BrowserContext::NotifyWillBeDestroyed(context);
+-
+-  std::set<content::RenderProcessHost*> hosts;
++      if (!destroyer->finish_destroy_scheduled_) {
++        continue;
++      }
+ 
+-  for (content::RenderProcessHost::iterator it =
+-           content::RenderProcessHost::AllHostsIterator();
+-       !it.IsAtEnd(); it.Advance()) {
+-    content::RenderProcessHost* host = it.GetCurrentValue();
+-    if (host->GetBrowserContext() != context) {
+-      continue;
++      destroyer->FinishDestroyContext();
++      // |destroyer| is invalid now
+     }
++  };
+ 
+-    hosts.insert(host);
++  // We make 2 passes over the list because the first pass can destroy an
++  // incognito BrowserContext that subsequently schedules its owner context for
++  // deletion
++  destroy_all_unused_contexts();
++  destroy_all_unused_contexts();
++}
++
++// static
++void BrowserContextDestroyer::RenderProcessHostAssignedToSiteInstance(
++    content::RenderProcessHost* host) {
++  BrowserContextDestroyer* destroyer = GetForContext(host->GetBrowserContext());
++  if (!destroyer) {
++    return;
+   }
+ 
+-  // XXX: Given that we shutdown the service worker context and that there
+-  // shouldn't be any live WebContents left, are there any circumstances
+-  // other than in single-process mode where |hosts| isn't empty?
++  CHECK(!destroyer->finish_destroy_scheduled_);
+ 
+-  if (hosts.empty()) {
+-    delete context;
+-  } else {
+-    new BrowserContextDestroyer(context, hosts);
++  if (destroyer->pending_host_ids_.find(host->GetID()) !=
++      destroyer->pending_host_ids_.end()) {
++    return;
+   }
++
++  destroyer->ObserveHost(host);
+ }
+ 
+ } // namespace oxide
+diff --git a/shared/browser/oxide_browser_context_destroyer.h b/shared/browser/oxide_browser_context_destroyer.h
+index 61d363b..037be29 100644
+--- a/shared/browser/oxide_browser_context_destroyer.h
++++ b/shared/browser/oxide_browser_context_destroyer.h
+@@ -18,12 +18,14 @@
+ #ifndef _OXIDE_SHARED_BROWSER_BROWSER_CONTEXT_DESTROYER_H_
+ #define _OXIDE_SHARED_BROWSER_BROWSER_CONTEXT_DESTROYER_H_
+ 
++#include <memory>
+ #include <set>
+ 
+ #include "base/macros.h"
+ #include "content/public/browser/render_process_host_observer.h"
+ 
+ namespace content {
++class BrowserContext;
+ class RenderProcessHost;
+ }
+ 
+@@ -31,23 +33,51 @@ namespace oxide {
+ 
+ class BrowserContext;
+ 
++// A mechanism to manage BrowserContext destruction, ensuring it stays alive
++// until consumers inside Chromium no longer require it
+ class BrowserContextDestroyer : public content::RenderProcessHostObserver {
+  public:
+-  static void DestroyContext(BrowserContext* context);
++  // Schedule |context| for deletion. If no RenderProcessHosts are using it then
++  // this will result in it being deleted immediately, else deletion will be
++  // happen after all RenderProcessHosts using it have gone away
++  static void DestroyContext(std::unique_ptr<BrowserContext> context);
++
++  // Delete all BrowserContexts that are pending deletion and safe to be deleted
++  static void Shutdown();
++
++  // Notify that |host| has been assigned to a SiteInstance. This is the first
++  // notification we get from content after a RenderProcessHost is created,
++  // although this doesn't mean it was actually just created.
++  // This ensures that |host| will be tracked if its BrowserContext has already
++  // been scheduled for deletion.
++  static void RenderProcessHostAssignedToSiteInstance(
++      content::RenderProcessHost* host);
+ 
+  private:
+-  BrowserContextDestroyer(BrowserContext* context,
+-                          const std::set<content::RenderProcessHost*>& hosts);
++  BrowserContextDestroyer(std::unique_ptr<BrowserContext> context,
++                          const std::set<content::RenderProcessHost*>& hosts,
++                          uint32_t otr_contexts_pending_deletion);
+   ~BrowserContextDestroyer() override;
+ 
++  void ObserveHost(content::RenderProcessHost* host);
++
++  void MaybeScheduleFinishDestroyContext(
++      content::RenderProcessHost* host_being_destroyed = nullptr);
+   void FinishDestroyContext();
+ 
++  static BrowserContextDestroyer* GetForContext(
++      content::BrowserContext* context);
++
+   // content::RenderProcessHostObserver implementation
+   void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
+ 
+-  BrowserContext* context_;
++  std::unique_ptr<BrowserContext> context_;
++
++  std::set<int> pending_host_ids_;
++
++  uint32_t otr_contexts_pending_deletion_;
+ 
+-  uint32_t pending_hosts_;
++  bool finish_destroy_scheduled_;
+   
+   DISALLOW_COPY_AND_ASSIGN(BrowserContextDestroyer);
+ };
+diff --git a/shared/browser/oxide_browser_main_parts.cc b/shared/browser/oxide_browser_main_parts.cc
+index 701a6e7..069a288 100644
+--- a/shared/browser/oxide_browser_main_parts.cc
++++ b/shared/browser/oxide_browser_main_parts.cc
+@@ -49,6 +49,7 @@
+ #include "shared/gpu/oxide_gl_context_dependent.h"
+ 
+ #include "oxide_browser_context.h"
++#include "oxide_browser_context_destroyer.h"
+ #include "oxide_browser_platform_integration.h"
+ #include "oxide_browser_process_main.h"
+ #include "oxide_geolocation_delegate.h"
+@@ -57,6 +58,7 @@
+ #include "oxide_lifecycle_observer.h"
+ #include "oxide_message_pump.h"
+ #include "oxide_render_process_initializer.h"
++#include "oxide_web_contents_unloader.h"
+ #include "oxide_web_contents_view.h"
+ #include "screen.h"
+ 
+@@ -341,15 +343,15 @@ bool BrowserMainParts::MainMessageLoopRun(int* result_code) {
+ }
+ 
+ void BrowserMainParts::PostMainMessageLoopRun() {
++  WebContentsUnloader::GetInstance()->Shutdown();
++
++  BrowserContextDestroyer::Shutdown();
++  BrowserContext::AssertNoContextsExist();
++
+   CompositorUtils::GetInstance()->Shutdown();
+ }
+ 
+ void BrowserMainParts::PostDestroyThreads() {
+-  if (BrowserProcessMain::GetInstance()->GetProcessModel() ==
+-      PROCESS_MODEL_SINGLE_PROCESS) {
+-    BrowserContext::AssertNoContextsExist();
+-  }
+-
+   device_client_.reset();
+ 
+   display::Screen::SetScreenInstance(nullptr);
+diff --git a/shared/browser/oxide_browser_process_main.cc b/shared/browser/oxide_browser_process_main.cc
+index 22dc77c..65d8187 100644
+--- a/shared/browser/oxide_browser_process_main.cc
++++ b/shared/browser/oxide_browser_process_main.cc
+@@ -72,10 +72,8 @@
+ #include "shared/common/oxide_content_client.h"
+ #include "shared/common/oxide_form_factor.h"
+ 
+-#include "oxide_browser_context.h"
+ #include "oxide_form_factor_detection.h"
+ #include "oxide_message_pump.h"
+-#include "oxide_web_contents_unloader.h"
+ 
+ namespace content {
+ 
+@@ -581,14 +579,6 @@ void BrowserProcessMainImpl::Shutdown() {
+ 
+   MessagePump::Get()->Stop();
+ 
+-  WebContentsUnloader::GetInstance()->Shutdown();
+-
+-  if (process_model_ != PROCESS_MODEL_SINGLE_PROCESS) {
+-    // In single process mode, we do this check after destroying
+-    // threads, as we hold the single BrowserContext alive until then
+-    BrowserContext::AssertNoContextsExist();
+-  }
+-
+   browser_main_runner_->Shutdown();
+   browser_main_runner_.reset();
+ 
+diff --git a/shared/browser/oxide_content_browser_client.cc b/shared/browser/oxide_content_browser_client.cc
+index 1023648..e10e20d 100644
+--- a/shared/browser/oxide_content_browser_client.cc
++++ b/shared/browser/oxide_content_browser_client.cc
+@@ -46,7 +46,9 @@
+ #include "shared/common/oxide_content_client.h"
+ 
+ #include "display_form_factor.h"
++#include "in_process_renderer_observer.h"
+ #include "oxide_browser_context.h"
++#include "oxide_browser_context_destroyer.h"
+ #include "oxide_browser_main_parts.h"
+ #include "oxide_browser_platform_integration.h"
+ #include "oxide_browser_process_main.h"
+@@ -92,12 +94,17 @@ content::BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
+ 
+ void ContentBrowserClient::RenderProcessWillLaunch(
+     content::RenderProcessHost* host) {
++  if (content::RenderProcessHost::run_renderer_in_process()) {
++    host->AddObserver(new InProcessRendererObserver());
++  }
++
+   host->AddFilter(new RenderMessageFilter(host));
+ }
+ 
+-std::string ContentBrowserClient::GetAcceptLangs(
+-    content::BrowserContext* browser_context) {
+-  return UserAgentSettings::Get(browser_context)->GetAcceptLangs();
++void ContentBrowserClient::SiteInstanceGotProcess(
++    content::SiteInstance* site_instance) {
++  BrowserContextDestroyer::RenderProcessHostAssignedToSiteInstance(
++      site_instance->GetProcess());
+ }
+ 
+ void ContentBrowserClient::AppendExtraCommandLineSwitches(
+@@ -130,6 +137,16 @@ void ContentBrowserClient::AppendExtraCommandLineSwitches(
+   }
+ }
+ 
++std::string
++ContentBrowserClient::GetApplicationLocale() {
++  return application_locale_;
++}
++
++std::string ContentBrowserClient::GetAcceptLangs(
++    content::BrowserContext* browser_context) {
++  return UserAgentSettings::Get(browser_context)->GetAcceptLangs();
++}
++
+ bool ContentBrowserClient::AllowGetCookie(const GURL& url,
+                                           const GURL& first_party,
+                                           const net::CookieList& cookie_list,
+@@ -339,11 +356,6 @@ ContentBrowserClient::GetOsTypeOverrideForGpuDataManager(
+ #endif
+ }
+ 
+-std::string
+-ContentBrowserClient::GetApplicationLocale() {
+-  return application_locale_;
+-}
+-
+ ContentBrowserClient::ContentBrowserClient(
+     const std::string& application_locale,
+     BrowserPlatformIntegration* integration)
+diff --git a/shared/browser/oxide_content_browser_client.h b/shared/browser/oxide_content_browser_client.h
+index 15d47c9..45f3f33 100644
+--- a/shared/browser/oxide_content_browser_client.h
++++ b/shared/browser/oxide_content_browser_client.h
+@@ -48,14 +48,15 @@ class ContentBrowserClient final : public content::ContentBrowserClient {
+ 
+  private:
+   // content::ContentBrowserClient implementation
+-  std::string GetApplicationLocale() override;
+   content::BrowserMainParts* CreateBrowserMainParts(
+       const content::MainFunctionParams& parameters) override;
+   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
+-  std::string GetAcceptLangs(
+-      content::BrowserContext* browser_context) override;
++  void SiteInstanceGotProcess(content::SiteInstance* site_instance) override;
+   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
+                                       int child_process_id) override;
++  std::string GetApplicationLocale() override;
++  std::string GetAcceptLangs(
++      content::BrowserContext* browser_context) override;
+   bool AllowGetCookie(const GURL& url,
+                       const GURL& first_party,
+                       const net::CookieList& cookie_list,
+diff --git a/shared/browser/oxide_web_contents_unloader.cc b/shared/browser/oxide_web_contents_unloader.cc
+index efc28ea..6e0d4cf 100644
+--- a/shared/browser/oxide_web_contents_unloader.cc
++++ b/shared/browser/oxide_web_contents_unloader.cc
+@@ -24,8 +24,26 @@
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/browser/web_contents_observer.h"
+ 
++#include "oxide_browser_context.h"
++#include "oxide_web_view_contents_helper.h"
++
+ namespace oxide {
+ 
++namespace {
++
++void MaybeDestroyOffTheRecordContext(BrowserContext* context) {
++  DCHECK(context->IsOffTheRecord());
++
++  if (WebViewContentsHelper::IsContextInUse(context)) {
++    return;
++  }
++
++  BrowserContext::DestroyOffTheRecordContextForContext(
++      context->GetOriginalContext());
++}
++
++}
++
+ class WebContentsUnloaderObserver : public content::WebContentsObserver {
+  public:
+   explicit WebContentsUnloaderObserver(content::WebContents* contents)
+@@ -46,10 +64,12 @@ class WebContentsUnloaderObserver : public content::WebContentsObserver {
+ WebContentsUnloader::WebContentsUnloader() = default;
+ 
+ void WebContentsUnloader::CloseContents(content::WebContents* contents) {
+-  ScopedVector<content::WebContents>::iterator it =
+-      std::find(contents_unloading_.begin(),
+-                contents_unloading_.end(),
+-                contents);
++  auto it = std::find_if(
++      contents_unloading_.begin(),
++      contents_unloading_.end(),
++      [contents](const std::unique_ptr<content::WebContents>& c) {
++    return contents == c.get();
++  });
+   DCHECK(it != contents_unloading_.end());
+ 
+   contents_unloading_.erase(it);
+@@ -64,21 +84,28 @@ WebContentsUnloader* WebContentsUnloader::GetInstance() {
+ 
+ void WebContentsUnloader::Unload(
+     std::unique_ptr<content::WebContents> contents) {
+-  if (!contents->NeedToFireBeforeUnload()) {
++  content::WebContents* c = contents.get();
++  contents_unloading_.push_back(std::move(contents));
++
++  content::BrowserContext* context = c->GetBrowserContext();
++  if (context->IsOffTheRecord()) {
++    MaybeDestroyOffTheRecordContext(BrowserContext::FromContent(context));
++  }
++
++  if (!c->NeedToFireBeforeUnload()) {
+     // Despite the name, this checks if sudden termination is allowed. If so,
+     // we shouldn't fire the unload handler particularly if this was script
+     // closed, else we'll never get an ACK
++    CloseContents(c);
++    // |c| is invalid now
+     return;
+   }
+ 
+   // To intercept render process crashes
+-  new WebContentsUnloaderObserver(contents.get());
++  new WebContentsUnloaderObserver(c);
+ 
+   // So we can intercept CloseContents
+-  contents->SetDelegate(this);
+-
+-  content::WebContents* c = contents.get();
+-  contents_unloading_.push_back(contents.release());
++  c->SetDelegate(this);
+ 
+   c->ClosePage();
+   // Note: |c| might be deleted at this point
+@@ -88,4 +115,13 @@ void WebContentsUnloader::Shutdown() {
+   contents_unloading_.clear();
+ }
+ 
++bool WebContentsUnloader::IsUnloadInProgress(content::WebContents* contents) {
++  return std::find_if(
++      contents_unloading_.begin(),
++      contents_unloading_.end(),
++      [contents](const std::unique_ptr<content::WebContents>& c) {
++    return contents == c.get();
++  }) != contents_unloading_.end();
++}
++
+ }
+diff --git a/shared/browser/oxide_web_contents_unloader.h b/shared/browser/oxide_web_contents_unloader.h
+index 00651ee..619d59e 100644
+--- a/shared/browser/oxide_web_contents_unloader.h
++++ b/shared/browser/oxide_web_contents_unloader.h
+@@ -19,9 +19,9 @@
+ #define _OXIDE_SHARED_BROWSER_WEB_CONTENTS_UNLOADER_H_
+ 
+ #include <memory>
++#include <vector>
+ 
+ #include "base/macros.h"
+-#include "base/memory/scoped_vector.h"
+ #include "content/public/browser/web_contents_delegate.h"
+ 
+ namespace base {
+@@ -48,9 +48,13 @@ class WebContentsUnloader : public content::WebContentsDelegate {
+   // takes ownership of |contents| and deletes it when complete
+   void Unload(std::unique_ptr<content::WebContents> contents);
+ 
+-  // Delete all WebContents that are currently closing
++  // Delete all WebContents that are currently closing without waiting for
++  // unload handlers to complete
+   void Shutdown();
+ 
++  // Determine whether |contents| is currently unloading
++  bool IsUnloadInProgress(content::WebContents* contents);
++
+  private:
+   friend class base::DefaultSingletonTraits<WebContentsUnloader>;
+ 
+@@ -60,7 +64,7 @@ class WebContentsUnloader : public content::WebContentsDelegate {
+   void CloseContents(content::WebContents* contents) override;
+ 
+   // The WebContents for which we are waiting to unload
+-  ScopedVector<content::WebContents> contents_unloading_;
++  std::vector<std::unique_ptr<content::WebContents>> contents_unloading_;
+ 
+   DISALLOW_COPY_AND_ASSIGN(WebContentsUnloader);
+ };
+diff --git a/shared/browser/oxide_web_view.cc b/shared/browser/oxide_web_view.cc
+index d1f2769..03520d9 100644
+--- a/shared/browser/oxide_web_view.cc
++++ b/shared/browser/oxide_web_view.cc
+@@ -994,11 +994,11 @@ WebView::WebView(const CommonParams& common_params,
+     : WebView(common_params.client) {
+   CHECK(create_params.context) << "Didn't specify a BrowserContext";
+ 
+-  scoped_refptr<BrowserContext> context = create_params.incognito ?
++  BrowserContext* context = create_params.incognito ?
+       create_params.context->GetOffTheRecordContext() :
+       create_params.context->GetOriginalContext();
+ 
+-  content::WebContents::CreateParams content_params(context.get());
++  content::WebContents::CreateParams content_params(context);
+   content_params.initial_size =
+       gfx::ToEnclosingRect(common_params.view_client->GetBounds()).size();
+   content_params.initially_hidden = !common_params.view_client->IsVisible();
+@@ -1013,7 +1013,7 @@ WebView::WebView(const CommonParams& common_params,
+   if (create_params.restore_entries.size() > 0) {
+     std::vector<std::unique_ptr<content::NavigationEntry>> entries =
+         sessions::ContentSerializedNavigationBuilder::ToNavigationEntries(
+-            create_params.restore_entries, context.get());
++            create_params.restore_entries, context);
+     web_contents_->GetController().Restore(
+         create_params.restore_index,
+         create_params.restore_type,
+diff --git a/shared/browser/oxide_web_view_contents_helper.cc b/shared/browser/oxide_web_view_contents_helper.cc
+index a0aecf2..e244345 100644
+--- a/shared/browser/oxide_web_view_contents_helper.cc
++++ b/shared/browser/oxide_web_view_contents_helper.cc
+@@ -17,6 +17,9 @@
+ 
+ #include "oxide_web_view_contents_helper.h"
+ 
++#include <set>
++
++#include "base/lazy_instance.h"
+ #include "base/logging.h"
+ #include "content/public/browser/render_view_host.h"
+ #include "content/public/browser/web_contents.h"
+@@ -26,6 +29,7 @@
+ #include "shared/common/oxide_content_client.h"
+ 
+ #include "oxide_browser_context.h"
++#include "oxide_web_contents_unloader.h"
+ #include "oxide_web_contents_view.h"
+ #include "oxide_web_preferences.h"
+ #include "oxide_web_view.h"
+@@ -34,9 +38,14 @@ namespace oxide {
+ 
+ namespace {
+ const char kWebViewContentsHelperKey[] = "oxide_web_view_contents_helper_data";
++base::LazyInstance<std::set<WebViewContentsHelper*>> g_contents_helpers =
++    LAZY_INSTANCE_INITIALIZER;
+ }
+ 
+ WebViewContentsHelper::~WebViewContentsHelper() {
++  size_t erased = g_contents_helpers.Get().erase(this);
++  DCHECK_GT(erased, 0U);
++
+   if (web_preferences() && owns_web_preferences_) {
+     WebPreferences* prefs = web_preferences();
+     WebPreferencesObserver::Observe(nullptr);
+@@ -57,14 +66,10 @@ void WebViewContentsHelper::NotifyPopupBlockerEnabledChanged() {
+   UpdateWebPreferences();
+ }
+ 
+-void WebViewContentsHelper::WebPreferencesValueChanged() {
+-  UpdateWebPreferences();
+-}
+-
+ void WebViewContentsHelper::NotifyDoNotTrackChanged() {
+   content::RendererPreferences* renderer_prefs =
+       web_contents_->GetMutableRendererPrefs();
+-  renderer_prefs->enable_do_not_track = context_->GetDoNotTrack();
++  renderer_prefs->enable_do_not_track = GetBrowserContext()->GetDoNotTrack();
+ 
+   // Send the new override string to the renderer.
+   content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+@@ -88,20 +93,25 @@ void WebViewContentsHelper::OnShellModeChanged() {
+   UpdateWebPreferences();
+ }
+ 
++void WebViewContentsHelper::WebPreferencesValueChanged() {
++  UpdateWebPreferences();
++}
++
+ WebViewContentsHelper::WebViewContentsHelper(content::WebContents* contents,
+                                              content::WebContents* opener)
+     : BrowserContextObserver(
+           BrowserContext::FromContent(contents->GetBrowserContext())),
+-      context_(BrowserContext::FromContent(contents->GetBrowserContext())),
+       web_contents_(contents),
+       owns_web_preferences_(false) {
+   DCHECK(!FromWebContents(web_contents_));
+ 
++  g_contents_helpers.Get().insert(this);
++
+   web_contents_->SetUserData(kWebViewContentsHelperKey, this);
+ 
+   content::RendererPreferences* renderer_prefs =
+       web_contents_->GetMutableRendererPrefs();
+-  renderer_prefs->enable_do_not_track = context_->GetDoNotTrack();
++  renderer_prefs->enable_do_not_track = GetBrowserContext()->GetDoNotTrack();
+ 
+   // Hardcoded selection colors to match the current Ambiance theme from the
+   // Ubuntu UI Toolkit (https://bazaar.launchpad.net/~ubuntu-sdk-team/ubuntu-ui-toolkit/trunk/view/head:/src/Ubuntu/Components/Themes/Ambiance/1.3/Palette.qml)
+@@ -135,7 +145,6 @@ WebViewContentsHelper* WebViewContentsHelper::FromWebContents(
+       contents->GetUserData(kWebViewContentsHelperKey));
+ }
+ 
+-// static
+ WebViewContentsHelper* WebViewContentsHelper::FromRenderViewHost(
+     content::RenderViewHost* rvh) {
+   content::WebContents* contents =
+@@ -147,12 +156,25 @@ WebViewContentsHelper* WebViewContentsHelper::FromRenderViewHost(
+   return FromWebContents(contents);
+ }
+ 
++// static
++bool WebViewContentsHelper::IsContextInUse(BrowserContext* context) {
++  for (auto* helper : g_contents_helpers.Get()) {
++    if (helper->GetBrowserContext() == context &&
++        !WebContentsUnloader::GetInstance()->IsUnloadInProgress(
++            helper->GetWebContents())) {
++      return true;
++    }
++  }
++
++  return false;
++}
++
+ content::WebContents* WebViewContentsHelper::GetWebContents() const {
+   return web_contents_;
+ }
+ 
+ BrowserContext* WebViewContentsHelper::GetBrowserContext() const {
+-  return context_.get();
++  return BrowserContext::FromContent(web_contents_->GetBrowserContext());
+ }
+ 
+ WebPreferences* WebViewContentsHelper::GetWebPreferences() const {
+diff --git a/shared/browser/oxide_web_view_contents_helper.h b/shared/browser/oxide_web_view_contents_helper.h
+index 9274bd5..3a5e474 100644
+--- a/shared/browser/oxide_web_view_contents_helper.h
++++ b/shared/browser/oxide_web_view_contents_helper.h
+@@ -48,6 +48,8 @@ class WebViewContentsHelper final : private BrowserContextObserver,
+   static WebViewContentsHelper* FromWebContents(content::WebContents* contents);
+   static WebViewContentsHelper* FromRenderViewHost(content::RenderViewHost* rvh);
+ 
++  static bool IsContextInUse(BrowserContext* context);
++
+   content::WebContents* GetWebContents() const;
+   BrowserContext* GetBrowserContext() const;
+ 
+@@ -72,7 +74,6 @@ class WebViewContentsHelper final : private BrowserContextObserver,
+   // WebPreferencesObserver implementation
+   void WebPreferencesValueChanged() final;
+ 
+-  scoped_refptr<BrowserContext> context_;
+   content::WebContents* web_contents_;
+ 
+   bool owns_web_preferences_;
+-- 
+cgit v1.1
+

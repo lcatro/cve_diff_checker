@@ -1,0 +1,47 @@
+From a3a7602a44d4155d51ec0fbbedc2a49e9c7e2eb8 Mon Sep 17 00:00:00 2001
+From: Michael Ganss <michael@ganss.org>
+Date: Wed, 23 Dec 2020 12:42:48 +0100
+Subject: [PATCH] Fix hex escape issue in style element
+
+---
+ src/HtmlSanitizer/HtmlSanitizer.cs |  2 +-
+ test/HtmlSanitizer.Tests/Tests.cs  | 13 +++++++++++++
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/HtmlSanitizer/HtmlSanitizer.cs b/src/HtmlSanitizer/HtmlSanitizer.cs
+index 9a42899..c941456 100644
+--- a/src/HtmlSanitizer/HtmlSanitizer.cs
++++ b/src/HtmlSanitizer/HtmlSanitizer.cs
+@@ -743,7 +743,7 @@ private void SanitizeStyleSheets(IHtmlDocument dom, string baseUrl)
+                     else i++;
+                 }
+ 
+-                styleTag.InnerHtml = styleSheet.ToCss();
++                styleTag.InnerHtml = styleSheet.ToCss().Replace("<", "\\3c");
+             }
+         }
+ 
+diff --git a/test/HtmlSanitizer.Tests/Tests.cs b/test/HtmlSanitizer.Tests/Tests.cs
+index e7cdd89..09bac18 100644
+--- a/test/HtmlSanitizer.Tests/Tests.cs
++++ b/test/HtmlSanitizer.Tests/Tests.cs
+@@ -3201,6 +3201,19 @@ public void PreParsedDocumentWithContextTest()
+ 
+             Assert.Equal("<html><head></head><body><div>hi</div></body></html>", returnedDocument.ToHtml());
+         }
++
++        [Fact]
++        public void StyleByPassTest()
++        {
++            var sanitizer = new HtmlSanitizer();
++
++            sanitizer.AllowedTags.Add("style");
++
++            var html = "aaabc<style>x[x='\\3c /style>\\3c img src onerror=alert(1)>']{}</style>";
++            var sanitized = sanitizer.Sanitize(html, "http://www.example.com");
++
++            Assert.Equal("aaabc<style>x[x=\"\\3c/style>\\3cimg src onerror=alert(1)>\"] { }</style>", sanitized);
++        }
+     }
+ }
+ 

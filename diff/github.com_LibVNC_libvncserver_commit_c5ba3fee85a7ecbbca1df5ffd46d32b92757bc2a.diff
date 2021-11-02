@@ -1,0 +1,27 @@
+From c5ba3fee85a7ecbbca1df5ffd46d32b92757bc2a Mon Sep 17 00:00:00 2001
+From: Christian Beier <dontmind@freeshell.org>
+Date: Sat, 29 Dec 2018 14:16:58 +0100
+Subject: [PATCH] LibVNCClient: ignore server-sent cut text longer than 1MB
+
+This is in line with how LibVNCServer does it
+(28afb6c537dc82ba04d5f245b15ca7205c6dbb9c) and fixes part of #273.
+---
+ libvncclient/rfbproto.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/libvncclient/rfbproto.c b/libvncclient/rfbproto.c
+index 4541e0d53..8792dbf67 100644
+--- a/libvncclient/rfbproto.c
++++ b/libvncclient/rfbproto.c
+@@ -2217,6 +2217,11 @@ HandleRFBServerMessage(rfbClient* client)
+ 
+     msg.sct.length = rfbClientSwap32IfLE(msg.sct.length);
+ 
++    if (msg.sct.length > 1<<20) {
++	    rfbClientErr("Ignoring too big cut text length sent by server: %u B > 1 MB\n", (unsigned int)msg.sct.length);
++	    return FALSE;
++    }  
++
+     buffer = malloc((uint64_t)msg.sct.length+1);
+ 
+     if (!ReadFromRFBServer(client, buffer, msg.sct.length)) {

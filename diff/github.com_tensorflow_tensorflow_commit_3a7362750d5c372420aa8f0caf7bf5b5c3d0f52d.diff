@@ -1,0 +1,45 @@
+From 3a7362750d5c372420aa8f0caf7bf5b5c3d0f52d Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 30 Jul 2021 22:02:22 -0700
+Subject: [PATCH] Prevent crash/heap OOB due to integer conversion to unsigned
+ in NMS kernels
+
+PiperOrigin-RevId: 387938262
+Change-Id: Id361a715307e7179977cf5c64391c199a966f2ad
+---
+ tensorflow/core/kernels/image/non_max_suppression_op.cc | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tensorflow/core/kernels/image/non_max_suppression_op.cc b/tensorflow/core/kernels/image/non_max_suppression_op.cc
+index 69b05cc9d84f8..1ec4c853f5f5b 100644
+--- a/tensorflow/core/kernels/image/non_max_suppression_op.cc
++++ b/tensorflow/core/kernels/image/non_max_suppression_op.cc
+@@ -169,6 +169,8 @@ void DoNonMaxSuppressionOp(OpKernelContext* context, const Tensor& scores,
+                            bool pad_to_max_output_size = false,
+                            int* ptr_num_valid_outputs = nullptr) {
+   const int output_size = max_output_size.scalar<int>()();
++  OP_REQUIRES(context, output_size >= 0,
++              errors::InvalidArgument("output size must be non-negative"));
+ 
+   std::vector<T> scores_data(num_boxes);
+   std::copy_n(scores.flat<T>().data(), num_boxes, scores_data.begin());
+@@ -768,6 +770,9 @@ class NonMaxSuppressionV4Op : public OpKernel {
+         context, scores, num_boxes, max_output_size, iou_threshold_val,
+         score_threshold_val, dummy_soft_nms_sigma, similarity_fn,
+         return_scores_tensor_, pad_to_max_output_size_, &num_valid_outputs);
++    if (!context->status().ok()) {
++      return;
++    }
+ 
+     // Allocate scalar output tensor for number of indices computed.
+     Tensor* num_outputs_t = nullptr;
+@@ -845,6 +850,9 @@ class NonMaxSuppressionV5Op : public OpKernel {
+         context, scores, num_boxes, max_output_size, iou_threshold_val,
+         score_threshold_val, soft_nms_sigma_val, similarity_fn,
+         return_scores_tensor_, pad_to_max_output_size_, &num_valid_outputs);
++    if (!context->status().ok()) {
++      return;
++    }
+ 
+     // Allocate scalar output tensor for number of indices computed.
+     Tensor* num_outputs_t = nullptr;

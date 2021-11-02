@@ -1,0 +1,78 @@
+From 8dec044d0fdabcb9b04e58037623385a97b0d288 Mon Sep 17 00:00:00 2001
+From: Reigo <reigok@gmail.com>
+Date: Tue, 27 Jan 2015 21:26:28 +0100
+Subject: [PATCH] Fix multiple XSS reflection vulnerabilities
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+discovered by Steffen Rösemann <steffen.roesemann1986@gmail.com>.
+---
+ admin/error_log.php       | 7 +++++--
+ admin/profile_data.php    | 6 +++---
+ classes/user_html.inc.php | 5 +++++
+ 3 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/admin/error_log.php b/admin/error_log.php
+index 7a39f86..dd58286 100644
+--- a/admin/error_log.php
++++ b/admin/error_log.php
+@@ -103,7 +103,10 @@
+ 
+ 		<?###### search box ######?>
+ 		<form id="searchform" name="searchform" action="<?=$site->self?>" method="GET">
+-	<? foreach($site->fdat as $fdat_field=>$fdat_value) { ?>
++	<? foreach($site->fdat as $fdat_field=>$fdat_value) {
++	$fdat_value = htmlspecialchars(xss_clean($fdat_value));
++	$fdat_field = htmlspecialchars(xss_clean($fdat_field)); 
++	?>
+ 		<input type=hidden name="<?=$fdat_field?>" value="<?=$fdat_value?>">
+ 	<? } ?>
+ 		<input type="hidden" name="otsi" value=1>
+@@ -112,7 +115,7 @@
+ 		
+ 		<td style="padding-right: 10px">
+ 			<? $search_str = $site->sys_sona(array(sona => "otsi", tyyp=>"editor")); ?>
+-	          <input name="filter" type="text" class="scms_flex_input" style="width:150px" value="<?=$site->fdat['filter']? $site->fdat['filter'] : $search_str.':'?>" onFocus="if(this.value=='<?=$search_str?>:') this.value='';" onBlur="if(this.value=='')this.value='<?=$search_str?>:';" onkeyup="javascript: if(event.keyCode==13){this.form.submit();}">
++	          <input name="filter" type="text" class="scms_flex_input" style="width:150px" value="<?=$site->fdat['filter']? htmlspecialchars(xss_clean($site->fdat['filter'])) : $search_str.':'?>" onFocus="if(this.value=='<?=$search_str?>:') this.value='';" onBlur="if(this.value=='')this.value='<?=$search_str?>:';" onkeyup="javascript: if(event.keyCode==13){this.form.submit();}">
+ 
+ 		</td>
+ 
+diff --git a/admin/profile_data.php b/admin/profile_data.php
+index c6c58f1..36398ab 100644
+--- a/admin/profile_data.php
++++ b/admin/profile_data.php
+@@ -173,14 +173,14 @@
+ 									<TD width="24" nowrap><IMG SRC="<?=$site->CONF['wwwroot'].$site->CONF['styles_path']?>/gfx/menu/search.gif" BORDER="0" ALT="">
+ 
+ 									</TD>
+-									<TD><input name="data_search" type="text" class="scms_flex_input" value="<?=$site->fdat['data_search']? $site->fdat['data_search'] : $search_str.':'?>" onFocus="if(this.value=='<?=$search_str?>:') this.value='';" onBlur="if(this.value=='')this.value='<?=$search_str?>:';" style="width:140px"></TD>
++									<TD><input name="data_search" type="text" class="scms_flex_input" value="<?=$site->fdat['data_search']? htmlspecialchars(xss_clean($site->fdat['data_search'])) : $search_str.':'?>" onFocus="if(this.value=='<?=$search_str?>:') this.value='';" onBlur="if(this.value=='')this.value='<?=$search_str?>:';" style="width:140px"></TD>
+ 									<?###### wide middle cell ######?>
+ 									<td width="100%"></td>
+ 
+ 								</TR>
+ 		<? ######## hidden ########?>
+-		<input type=hidden name=profile_search value="<?=$site->fdat['profile_search']?>">
+-		<input type=hidden name=profile_id value="<?=$site->fdat['profile_id']?>">
++		<input type=hidden name=profile_search value="<?=htmlspecialchars(xss_clean($site->fdat['profile_search']))?>">
++		<input type=hidden name=profile_id value="<?=htmlspecialchars(xss_clean($site->fdat['profile_id']))?>">
+ 		</form>
+ 						</TABLE>
+ 			<!-- //Search -->
+diff --git a/classes/user_html.inc.php b/classes/user_html.inc.php
+index b15d97e..55dd639 100644
+--- a/classes/user_html.inc.php
++++ b/classes/user_html.inc.php
+@@ -621,6 +621,11 @@ function print_search_box(){
+ 	$site->fdat['user_search'] = isset($site->fdat['user_search']) ? $site->fdat['user_search'] : "1";
+ 	$site->fdat['group_search'] = isset($site->fdat['group_search']) ? $site->fdat['group_search'] : "1";
+ 
++	$site->fdat['search_subtree'] = htmlspecialchars(xss_clean($site->fdat['search_subtree']));
++	$site->fdat['user_search'] = htmlspecialchars(xss_clean($site->fdat['user_search']));
++	$site->fdat['group_search'] = htmlspecialchars(xss_clean($site->fdat['group_search']));
++	$site->fdat['search'] = htmlspecialchars(xss_clean($site->fdat['search']));
++
+ 	$out = '
+ 			<!-- Search -->
+ 						<TABLE width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor=white style="padding-left:4; padding-right:4; padding-top:2">

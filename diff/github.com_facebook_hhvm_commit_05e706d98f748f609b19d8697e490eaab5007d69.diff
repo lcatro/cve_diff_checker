@@ -1,0 +1,146 @@
+From 05e706d98f748f609b19d8697e490eaab5007d69 Mon Sep 17 00:00:00 2001
+From: "mwilliams@fb.com" <mwilliams@fb.com>
+Date: Mon, 1 Aug 2016 15:13:00 -0700
+Subject: [PATCH] Fix recursion checks in array_*_recursive
+
+Summary:
+array_merge_recursive and array_replace_recursive do recursion checks,
+but use the fact that normal arrays can't contain cycles except
+through references to avoid most of the checking.
+
+Unfortunately the $GLOBALS array is special, and /can/ contain cycles
+without references, and ProxyArrays could potentially do the same (via
+an as-yet unimplemented extension).
+
+Reviewed By: mxw
+
+Differential Revision: D3622612
+
+fbshipit-source-id: ed90b747096a05919a80c4793e2a2b7c57584d56
+---
+ hphp/runtime/ext/array/ext_array.cpp          | 41 ++++++++++++-------
+ .../slow/array_functions/self_recursive.php   | 20 +++++++++
+ .../self_recursive.php.expectf                | 12 ++++++
+ 3 files changed, 58 insertions(+), 15 deletions(-)
+ create mode 100644 hphp/test/slow/array_functions/self_recursive.php
+ create mode 100644 hphp/test/slow/array_functions/self_recursive.php.expectf
+
+diff --git a/hphp/runtime/ext/array/ext_array.cpp b/hphp/runtime/ext/array/ext_array.cpp
+index 8c922af6bb2f..d702c9831c68 100644
+--- a/hphp/runtime/ext/array/ext_array.cpp
++++ b/hphp/runtime/ext/array/ext_array.cpp
+@@ -379,14 +379,17 @@ static void php_array_merge(Array &arr1, const Array& arr2) {
+   arr1.merge(arr2);
+ }
+ 
++static bool couldRecur(const Variant& v, const Array& arr) {
++  return v.isReferenced() ||
++    arr.get()->kind() == ArrayData::kGlobalsKind ||
++    arr.get()->kind() == ArrayData::kProxyKind;
++}
++
+ static void php_array_merge_recursive(PointerSet &seen, bool check,
+                                       Array &arr1, const Array& arr2) {
+-  if (check) {
+-    if (seen.find((void*)arr1.get()) != seen.end()) {
+-      raise_warning("array_merge_recursive(): recursion detected");
+-      return;
+-    }
+-    seen.insert((void*)arr1.get());
++  if (check && !seen.insert((void*)arr1.get()).second) {
++    raise_warning("array_merge_recursive(): recursion detected");
++    return;
+   }
+ 
+   for (ArrayIter iter(arr2); iter; ++iter) {
+@@ -399,7 +402,9 @@ static void php_array_merge_recursive(PointerSet &seen, bool check,
+       // in the array.
+       Variant &v = arr1.lvalAt(key, AccessFlags::Key);
+       auto subarr1 = v.toArray().copy();
+-      php_array_merge_recursive(seen, v.isReferenced(), subarr1,
++      php_array_merge_recursive(seen,
++                                couldRecur(v, subarr1),
++                                subarr1,
+                                 value.toArray());
+       v.unset(); // avoid contamination of the value that was strongly bound
+       v = subarr1;
+@@ -566,12 +571,18 @@ static void php_array_replace(Array &arr1, const Array& arr2) {
+ 
+ static void php_array_replace_recursive(PointerSet &seen, bool check,
+                                         Array &arr1, const Array& arr2) {
+-  if (check) {
+-    if (seen.find((void*)arr1.get()) != seen.end()) {
+-      raise_warning("array_replace_recursive(): recursion detected");
+-      return;
+-    }
+-    seen.insert((void*)arr1.get());
++  if (arr1.get() == arr2.get()) {
++    // This is an optimization, but it also avoids an assert in
++    // setWithRef (Variant::setWithRef asserts that its source
++    // and destination are not the same).
++    // If the arrays are self recursive, this does change the behavior
++    // slightly - it skips the "recursion detected" warning.
++    return;
++  }
++
++  if (check && !seen.insert((void*)arr1.get()).second) {
++    raise_warning("array_replace_recursive(): recursion detected");
++    return;
+   }
+ 
+   for (ArrayIter iter(arr2); iter; ++iter) {
+@@ -582,8 +593,8 @@ static void php_array_replace_recursive(PointerSet &seen, bool check,
+       if (v.isArray()) {
+         Array subarr1 = v.toArray();
+         const ArrNR& arr_value = value.toArrNR();
+-        php_array_replace_recursive(seen, v.isReferenced(), subarr1,
+-                                    arr_value);
++        php_array_replace_recursive(seen, couldRecur(v, subarr1),
++                                    subarr1, arr_value);
+         v = subarr1;
+       } else {
+         arr1.set(key, value, true);
+diff --git a/hphp/test/slow/array_functions/self_recursive.php b/hphp/test/slow/array_functions/self_recursive.php
+new file mode 100644
+index 000000000000..09920767439c
+--- /dev/null
++++ b/hphp/test/slow/array_functions/self_recursive.php
+@@ -0,0 +1,20 @@
++<?php
++
++function test($g) {
++  $GLOBALS['g'] = $GLOBALS;
++
++  array_replace_recursive($GLOBALS, $g);
++
++  $GLOBALS['g'] = $GLOBALS;
++  array_merge_recursive($GLOBALS, $g);
++}
++
++function main() {
++  $a = array();
++  $a['g'] = &$a;
++
++  test($a);
++  test($GLOBALS);
++}
++
++main();
+diff --git a/hphp/test/slow/array_functions/self_recursive.php.expectf b/hphp/test/slow/array_functions/self_recursive.php.expectf
+new file mode 100644
+index 000000000000..0a3eff14b497
+--- /dev/null
++++ b/hphp/test/slow/array_functions/self_recursive.php.expectf
+@@ -0,0 +1,12 @@
++
++Warning: array_replace_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 6
++
++Warning: array_merge_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 9
++
++Warning: array_merge_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 9
++
++Warning: array_merge_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 9
++
++Warning: array_merge_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 9
++
++Warning: array_merge_recursive(): recursion detected in %s/test/slow/array_functions/self_recursive.php on line 9

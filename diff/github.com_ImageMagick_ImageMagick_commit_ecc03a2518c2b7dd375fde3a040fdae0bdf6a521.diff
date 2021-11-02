@@ -1,0 +1,35 @@
+From ecc03a2518c2b7dd375fde3a040fdae0bdf6a521 Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Fri, 5 Aug 2016 16:33:16 -0400
+Subject: [PATCH] Prevent memory use after free
+
+---
+ ChangeLog    | 2 ++
+ coders/pwp.c | 2 --
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index e0bdcd1224..8199991cc4 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,5 +1,7 @@
+ 2016-08-03  6.9.5-5 Cristy  <quetzlzacatenango@image...>
+   * Prevent buffer overflow (bug report from Max Thrane).
++  * Prevent memory use after free (reference
++    https://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=30245).
+ 
+ 2016-07-30  6.9.5-4 Cristy  <quetzlzacatenango@image...>
+   * Release ImageMagick version 6.9.5-4, GIT revision 10973:a00fa93:20160729.
+diff --git a/coders/pwp.c b/coders/pwp.c
+index b55eda0544..9432daad63 100644
+--- a/coders/pwp.c
++++ b/coders/pwp.c
+@@ -248,8 +248,6 @@ static Image *ReadPWPImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     (void) close(unique_file);
+   (void) RelinquishUniqueFileResource(read_info->filename);
+   read_info=DestroyImageInfo(read_info);
+-  (void) CloseBlob(pwp_image);
+-  pwp_image=DestroyImage(pwp_image);
+   if (EOFBlob(image) != MagickFalse)
+     {
+       char

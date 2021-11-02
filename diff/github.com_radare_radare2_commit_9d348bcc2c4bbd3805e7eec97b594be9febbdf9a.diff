@@ -1,0 +1,38 @@
+From 9d348bcc2c4bbd3805e7eec97b594be9febbdf9a Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Tue, 24 Apr 2018 09:55:19 +0200
+Subject: [PATCH] Fix #9943 - Invalid free on RAnal.avr
+
+---
+ libr/anal/p/anal_avr.c | 2 +-
+ libr/core/cmd_anal.c   | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/libr/anal/p/anal_avr.c b/libr/anal/p/anal_avr.c
+index 1da1ab05515..93d72ce52ad 100644
+--- a/libr/anal/p/anal_avr.c
++++ b/libr/anal/p/anal_avr.c
+@@ -619,7 +619,7 @@ INST_HANDLER (cpi) { // CPI Rd, K
+ INST_HANDLER (cpse) {	// CPSE Rd, Rr
+ 	int r = (buf[0] & 0xf) | ((buf[1] & 0x2) << 3);
+ 	int d = ((buf[0] >> 4) & 0xf) | ((buf[1] & 0x1) << 4);
+-	RAnalOp next_op;
++	RAnalOp next_op = {0};
+ 
+ 	// calculate next instruction size (call recursively avr_op_analyze)
+ 	// and free next_op's esil string (we dont need it now)
+diff --git a/libr/core/cmd_anal.c b/libr/core/cmd_anal.c
+index ed079135c1d..969cf32a33d 100644
+--- a/libr/core/cmd_anal.c
++++ b/libr/core/cmd_anal.c
+@@ -4350,8 +4350,9 @@ static void cmd_anal_esil(RCore *core, const char *input) {
+ 		{
+ 			// anal ESIL to REIL.
+ 			RAnalEsil *esil = r_anal_esil_new (stacksize, iotrap, addrsize);
+-			if (!esil)
++			if (!esil) {
+ 				return;
++			}
+ 			r_anal_esil_to_reil_setup (esil, core->anal, romem, stats);
+ 			r_anal_esil_set_pc (esil, core->offset);
+ 			r_anal_esil_parse (esil, input + 2);

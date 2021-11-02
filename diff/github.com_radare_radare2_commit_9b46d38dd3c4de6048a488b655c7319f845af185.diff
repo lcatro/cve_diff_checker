@@ -1,0 +1,40 @@
+From 9b46d38dd3c4de6048a488b655c7319f845af185 Mon Sep 17 00:00:00 2001
+From: radare <pancake@nopcode.org>
+Date: Mon, 3 Dec 2018 01:46:58 +0100
+Subject: [PATCH] Fix #12372 and #12373 - Crash in x86 assembler (#12380)
+
+0 ,0,[bP-bL-bP-bL-bL-r-bL-bP-bL-bL-
+mov ,0,[ax+Bx-ax+Bx-ax+ax+Bx-ax+Bx--
+leA ,0,[bP-bL-bL-bP-bL-bP-bL-60@bL-
+leA ,0,[bP-bL-r-bP-bL-bP-bL-60@bL-
+mov ,0,[ax+Bx-ax+Bx-ax+ax+Bx-ax+Bx--
+---
+ libr/asm/p/asm_x86_nz.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/libr/asm/p/asm_x86_nz.c b/libr/asm/p/asm_x86_nz.c
+index 623892b6d7c..79abc9d60d3 100644
+--- a/libr/asm/p/asm_x86_nz.c
++++ b/libr/asm/p/asm_x86_nz.c
+@@ -4575,14 +4575,17 @@ static int parseOperand(RAsm *a, const char *str, Operand *op, bool isrepop) {
+ 			if (last_type == TT_SPECIAL) {
+ 				if (str[pos] == '+' || str[pos] == '-' || str[pos] == ']') {
+ 					if (reg != X86R_UNDEFINED) {
+-						op->regs[reg_index] = reg;
+-						op->scale[reg_index] = temp;
++						if (reg_index < 2) {
++							op->regs[reg_index] = reg;
++							op->scale[reg_index] = temp;
++						}
+ 						++reg_index;
+ 					} else {
+ 						op->offset += temp;
+-						op->regs[reg_index] = X86R_UNDEFINED;
++						if (reg_index < 2) {
++							op->regs[reg_index] = X86R_UNDEFINED;
++						}
+ 					}
+-
+ 					temp = 1;
+ 					reg = X86R_UNDEFINED;
+ 				} else if (str[pos] == '*') {

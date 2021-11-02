@@ -1,0 +1,26 @@
+From f851613f8f0fb0c838d160ced13c134f778e3ce7 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 21 Apr 2021 16:20:48 -0700
+Subject: [PATCH] Fix heap buffer overflow caused by rounding.
+
+This was hard to fix. Due to the way we compute the pixels that influence an output pixel in resized images, for certain input configuration we might have issued a read to a pixel that is outside of boundary of the original image. This is because of floating errors that affected truncation results.
+
+PiperOrigin-RevId: 369757871
+Change-Id: If89425fff930983829a2168203c11858883eebc9
+---
+ tensorflow/core/kernels/quantized_resize_bilinear_op.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantized_resize_bilinear_op.cc b/tensorflow/core/kernels/quantized_resize_bilinear_op.cc
+index 07453c7e73284..2fd807f6df961 100644
+--- a/tensorflow/core/kernels/quantized_resize_bilinear_op.cc
++++ b/tensorflow/core/kernels/quantized_resize_bilinear_op.cc
+@@ -64,6 +64,8 @@ inline void ComputeInterpolationWeights(
+         std::max(static_cast<int64>(in_f), static_cast<int64>(0));
+     interpolation->upper[i] =
+         std::min(static_cast<int64>(std::ceil(in)), in_size - 1);
++    interpolation->lower[i] =
++        std::min(interpolation->lower[i], interpolation->upper[i]);
+     interpolation->lerp[i] = in - in_f;
+     interpolation->ilerp[i] =
+         static_cast<T_SCALE>((in - in_f) * (1 << resolution));

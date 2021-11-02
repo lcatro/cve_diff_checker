@@ -1,0 +1,84 @@
+From 46003b4ab564b2abcd8470035fc324fe36aa8c75 Mon Sep 17 00:00:00 2001
+From: Mat Hostetter <mjh@fb.com>
+Date: Sat, 6 Apr 2019 08:53:56 -0700
+Subject: [PATCH] Prevent strrpos and strripos from visiting out-of-bounds
+ memory.
+
+Reviewed By: alexeyt
+
+Differential Revision: D14669668
+
+fbshipit-source-id: 16bb4674bccf83ffd737e60d1fd9fd4a0093f77c
+---
+ hphp/runtime/base/zend-string.cpp                | 5 +++--
+ hphp/test/slow/ext_string/ext_string.php         | 9 +++++++++
+ hphp/test/slow/ext_string/ext_string.php.expectf | 8 ++++++++
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/hphp/runtime/base/zend-string.cpp b/hphp/runtime/base/zend-string.cpp
+index 40267cffd6f7..e128af3ecd41 100644
+--- a/hphp/runtime/base/zend-string.cpp
++++ b/hphp/runtime/base/zend-string.cpp
+@@ -21,6 +21,7 @@
+ 
+ #include "hphp/util/lock.h"
+ #include "hphp/util/overflow.h"
++#include <algorithm>
+ #include <cmath>
+ 
+ #ifndef _MSC_VER
+@@ -385,13 +386,13 @@ int string_rfind(const char *input, int len, const char *s, int s_len,
+     if (pos >= 0) {
+       ptr = bstrrstr(input + pos, len - pos, s, s_len);
+     } else {
+-      ptr = bstrrstr(input, len + pos + s_len, s, s_len);
++      ptr = bstrrstr(input, len + std::min(pos + s_len, 0), s, s_len);
+     }
+   } else {
+     if (pos >= 0) {
+       ptr = bstrrcasestr(input + pos, len - pos, s, s_len);
+     } else {
+-      ptr = bstrrcasestr(input, len + pos + s_len, s, s_len);
++      ptr = bstrrcasestr(input, len + std::min(pos + s_len, 0), s, s_len);
+     }
+   }
+   if (ptr != nullptr) {
+diff --git a/hphp/test/slow/ext_string/ext_string.php b/hphp/test/slow/ext_string/ext_string.php
+index 836d8b0c6843..ce3f3651280b 100644
+--- a/hphp/test/slow/ext_string/ext_string.php
++++ b/hphp/test/slow/ext_string/ext_string.php
+@@ -391,6 +391,15 @@ function main_ext_string() {
+ 
+ var_dump(strripos("abcdef abcdef", "A"));
+ 
++var_dump(strrpos("abc", "c\0", -1));
++var_dump(strripos("abc", "c\0", -1));
++var_dump(strrpos("abc", "abc", -3));
++var_dump(strripos("abc", "abc", -3));
++var_dump(strrpos("aaaa", "aa", -1));
++var_dump(strripos("aaaa", "aa", -1));
++var_dump(strrpos("aaaa", "aa", -2));
++var_dump(strripos("aaaa", "aa", -2));
++
+ $text = "This is a test";
+ var_dump(substr_count($text, "is"));
+ var_dump(substr_count($text, "is", 3));
+diff --git a/hphp/test/slow/ext_string/ext_string.php.expectf b/hphp/test/slow/ext_string/ext_string.php.expectf
+index 6ba58f635e9f..f9bb69954ad6 100644
+--- a/hphp/test/slow/ext_string/ext_string.php.expectf
++++ b/hphp/test/slow/ext_string/ext_string.php.expectf
+@@ -220,6 +220,14 @@ int(17)
+ int(27)
+ bool(false)
+ int(7)
++bool(false)
++bool(false)
++int(0)
++int(0)
++int(2)
++int(2)
++int(2)
++int(2)
+ int(2)
+ int(1)
+ int(0)

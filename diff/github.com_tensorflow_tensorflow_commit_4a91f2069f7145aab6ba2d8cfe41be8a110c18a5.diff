@@ -1,0 +1,57 @@
+From 4a91f2069f7145aab6ba2d8cfe41be8a110c18a5 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 16 Jul 2021 09:59:39 -0700
+Subject: [PATCH] Fix a null pointer exception caused by branching on
+ uninitialized data.
+
+This is due to not checking that the params for the quantization exists. If there is no quantization, we should not access the `.params` field.
+
+PiperOrigin-RevId: 385168337
+Change-Id: I28661e4f12ba1c92cfeae23d22a3fb2df2a2c6a4
+---
+ tensorflow/lite/kernels/unidirectional_sequence_lstm.cc | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/unidirectional_sequence_lstm.cc b/tensorflow/lite/kernels/unidirectional_sequence_lstm.cc
+index 56363f489c248..590a9e95a05a9 100644
+--- a/tensorflow/lite/kernels/unidirectional_sequence_lstm.cc
++++ b/tensorflow/lite/kernels/unidirectional_sequence_lstm.cc
+@@ -62,8 +62,12 @@ TfLiteStatus PopulateQuantizedLstmParams8x8_16(
+       context,
+       GetOutputSafe(context, node, lstm::full::kOutputTensor, &output_tensor));
+ 
++  TF_LITE_ENSURE(context,
++                 cell_state->quantization.type != kTfLiteNoQuantization);
+   auto* cell_state_params =
+       static_cast<TfLiteAffineQuantization*>(cell_state->quantization.params);
++  TF_LITE_ENSURE(context,
++                 output_tensor->quantization.type != kTfLiteNoQuantization);
+   auto* proj_params = static_cast<TfLiteAffineQuantization*>(
+       output_tensor->quantization.params);
+   if (cell_clip > 0.0) {
+@@ -160,6 +164,8 @@ TfLiteStatus PopulateQuantizedLstmParams8x8_16(
+       TfLiteTensor* intermediate;
+       TF_LITE_ENSURE_OK(context,
+                         GetIntermediatesSafe(context, node, i, &intermediate));
++      TF_LITE_ENSURE(context,
++                     intermediate->quantization.type != kTfLiteNoQuantization);
+       auto* params = static_cast<TfLiteAffineQuantization*>(
+           intermediate->quantization.params);
+       intermediate_scale.push_back(params->scale->data[0]);
+@@ -174,6 +180,7 @@ TfLiteStatus PopulateQuantizedLstmParams8x8_16(
+   // is ignored.
+   TfLiteTensor* hidden;
+   TF_LITE_ENSURE_OK(context, GetIntermediatesSafe(context, node, 4, &hidden));
++  TF_LITE_ENSURE(context, hidden->quantization.type != kTfLiteNoQuantization);
+   auto* hidden_params =
+       static_cast<TfLiteAffineQuantization*>(hidden->quantization.params);
+   intermediate_scale.push_back(hidden_params->scale->data[0]);
+@@ -760,6 +767,8 @@ TfLiteStatus PopulatePrecomputedZPTimesWeightsWithBias(TfLiteContext* context,
+ 
+   const TfLiteTensor* intermediate =
+       &context->tensors[node->intermediates->data[4]];
++  TF_LITE_ENSURE(context,
++                 intermediate->quantization.type != kTfLiteNoQuantization);
+   const auto* params =
+       static_cast<TfLiteAffineQuantization*>(intermediate->quantization.params);
+   const int32_t hidden_zp = params->zero_point->data[0];

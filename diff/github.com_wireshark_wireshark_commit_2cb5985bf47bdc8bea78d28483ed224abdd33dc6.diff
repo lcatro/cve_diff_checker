@@ -1,0 +1,111 @@
+From 2cb5985bf47bdc8bea78d28483ed224abdd33dc6 Mon Sep 17 00:00:00 2001
+From: Michael Mann <mmann78@netscape.net>
+Date: Sun, 1 May 2016 12:55:23 -0400
+Subject: [PATCH] Make class "type" for USB conversations.
+
+USB dissectors can't assume that only their class type has been passed around in the conversation.  Make explicit check that class type expected matches the dissector and stop/prevent dissection if there isn't a match.
+
+Bug: 12356
+Change-Id: Ib23973a4ebd0fbb51952ffc118daf95e3389a209
+Reviewed-on: https://code.wireshark.org/review/15212
+Petri-Dish: Michael Mann <mmann78@netscape.net>
+Reviewed-by: Martin Kaiser <wireshark@kaiser.cx>
+Petri-Dish: Martin Kaiser <wireshark@kaiser.cx>
+Tested-by: Petri Dish Buildbot <buildbot-no-reply@wireshark.org>
+Reviewed-by: Michael Mann <mmann78@netscape.net>
+---
+ epan/dissectors/packet-u3v.c            | 4 ++++
+ epan/dissectors/packet-usb-audio.c      | 4 ++++
+ epan/dissectors/packet-usb-masstorage.c | 5 ++++-
+ epan/dissectors/packet-usb-video.c      | 4 ++++
+ epan/dissectors/packet-usb.h            | 5 ++++-
+ 5 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/epan/dissectors/packet-u3v.c b/epan/dissectors/packet-u3v.c
+index 3359766a74b..8e1a979eddc 100644
+--- a/epan/dissectors/packet-u3v.c
++++ b/epan/dissectors/packet-u3v.c
+@@ -1683,6 +1683,10 @@ dissect_u3v(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data)
+     if (!u3v_conv_info) {
+         u3v_conv_info = wmem_new0(wmem_file_scope(), u3v_conv_info_t);
+         usb_conv_info->class_data = u3v_conv_info;
++        usb_conv_info->class_data_type = USB_CONV_U3V;
++    } else if (usb_conv_info->class_data_type != USB_CONV_U3V) {
++        /* Don't dissect if another USB type is in the conversation */
++        return 0;
+     }
+ 
+     prefix = tvb_get_letohl(tvb, 0);
+diff --git a/epan/dissectors/packet-usb-audio.c b/epan/dissectors/packet-usb-audio.c
+index 90c8e74aa3a..df6e9ef7dff 100644
+--- a/epan/dissectors/packet-usb-audio.c
++++ b/epan/dissectors/packet-usb-audio.c
+@@ -435,8 +435,12 @@ dissect_ac_if_hdr_body(tvbuff_t *tvb, gint offset, packet_info *pinfo _U_,
+     if(!audio_conv_info) {
+         audio_conv_info = wmem_new(wmem_file_scope(), audio_conv_info_t);
+         usb_conv_info->class_data = audio_conv_info;
++        usb_conv_info->class_data_type = USB_CONV_AUDIO;
+         /* XXX - set reasonable default values for all components
+            that are not filled in by this function */
++    } else if (usb_conv_info->class_data_type != USB_CONV_AUDIO) {
++        /* Don't dissect if another USB type is in the conversation */
++        return 0;
+     }
+     audio_conv_info->ver_major = ver_major;
+     offset += 2;
+diff --git a/epan/dissectors/packet-usb-masstorage.c b/epan/dissectors/packet-usb-masstorage.c
+index 743775be72b..919f7ef3643 100644
+--- a/epan/dissectors/packet-usb-masstorage.c
++++ b/epan/dissectors/packet-usb-masstorage.c
+@@ -199,9 +199,12 @@ dissect_usb_ms_bulk(tvbuff_t *tvb, packet_info *pinfo, proto_tree *parent_tree,
+         usb_ms_conv_info->itl=wmem_tree_new(wmem_file_scope());
+         usb_ms_conv_info->itlq=wmem_tree_new(wmem_file_scope());
+         usb_conv_info->class_data=usb_ms_conv_info;
++        usb_conv_info->class_data_type = USB_CONV_MASS_STORAGE;
++    } else if (usb_conv_info->class_data_type != USB_CONV_MASS_STORAGE) {
++        /* Don't dissect if another USB type is in the conversation */
++        return 0;
+     }
+ 
+-
+     is_request=(pinfo->srcport==NO_ENDPOINT);
+ 
+     col_set_str(pinfo->cinfo, COL_PROTOCOL, "USBMS");
+diff --git a/epan/dissectors/packet-usb-video.c b/epan/dissectors/packet-usb-video.c
+index 0bc292000f4..3bf08f6156f 100644
+--- a/epan/dissectors/packet-usb-video.c
++++ b/epan/dissectors/packet-usb-video.c
+@@ -1035,6 +1035,10 @@ dissect_usb_video_control_interface_descriptor(proto_tree *parent_tree, tvbuff_t
+             video_conv_info = wmem_new(wmem_file_scope(), video_conv_info_t);
+             video_conv_info->entities = wmem_tree_new(wmem_file_scope());
+             usb_conv_info->class_data = video_conv_info;
++            usb_conv_info->class_data_type = USB_CONV_VIDEO;
++        } else if (usb_conv_info->class_data_type != USB_CONV_VIDEO) {
++            /* Stop dissection if another USB type is in the conversation */
++            return descriptor_len;
+         }
+ 
+         entity = (video_entity_t*) wmem_tree_lookup32(video_conv_info->entities, entity_id);
+diff --git a/epan/dissectors/packet-usb.h b/epan/dissectors/packet-usb.h
+index 20ecc80b04c..261592db5d3 100644
+--- a/epan/dissectors/packet-usb.h
++++ b/epan/dissectors/packet-usb.h
+@@ -90,6 +90,8 @@ typedef struct _usb_trans_info_t {
+     guint64 usb_id;
+ } usb_trans_info_t;
+ 
++enum usb_conv_class_data_type {USB_CONV_UNKNOWN = 0, USB_CONV_U3V, USB_CONV_AUDIO, USB_CONV_VIDEO, USB_CONV_MASS_STORAGE};
++
+ /* Conversation Structure
+  * there is one such structure for each device/endpoint conversation */
+ struct _usb_conv_info_t {
+@@ -113,7 +115,8 @@ struct _usb_conv_info_t {
+     wmem_tree_t *transactions;
+     usb_trans_info_t *usb_trans_info; /* pointer to the current transaction */
+ 
+-    void *class_data;	/* private class/id decode data */
++    void *class_data;           /* private class/id decode data */
++    enum usb_conv_class_data_type class_data_type;
+ 
+     wmem_array_t *alt_settings;
+ };

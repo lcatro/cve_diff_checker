@@ -1,0 +1,46 @@
+From 85384297a60900004e27e417eac56d24267054cb Mon Sep 17 00:00:00 2001
+From: Dominik Schilling <dominikschilling+git@gmail.com>
+Date: Thu, 26 Jan 2017 13:33:45 +0000
+Subject: [PATCH] Query: Ensure that queries work correctly with post type
+ names with special characters. Built from
+ https://develop.svn.wordpress.org/trunk@39952
+
+git-svn-id: http://core.svn.wordpress.org/trunk@39889 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/class-wp-query.php | 6 +++---
+ wp-includes/version.php        | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/wp-includes/class-wp-query.php b/wp-includes/class-wp-query.php
+index eb68f219ce9b..00a085dfaa76 100644
+--- a/wp-includes/class-wp-query.php
++++ b/wp-includes/class-wp-query.php
+@@ -2257,12 +2257,12 @@ public function get_posts() {
+ 			if ( empty( $in_search_post_types ) ) {
+ 				$where .= ' AND 1=0 ';
+ 			} else {
+-				$where .= " AND {$wpdb->posts}.post_type IN ('" . join("', '", $in_search_post_types ) . "')";
++				$where .= " AND {$wpdb->posts}.post_type IN ('" . join( "', '", array_map( 'esc_sql', $in_search_post_types ) ) . "')";
+ 			}
+ 		} elseif ( !empty( $post_type ) && is_array( $post_type ) ) {
+-			$where .= " AND {$wpdb->posts}.post_type IN ('" . join("', '", $post_type) . "')";
++			$where .= " AND {$wpdb->posts}.post_type IN ('" . join("', '", esc_sql( $post_type ) ) . "')";
+ 		} elseif ( ! empty( $post_type ) ) {
+-			$where .= " AND {$wpdb->posts}.post_type = '$post_type'";
++			$where .= $wpdb->prepare( " AND {$wpdb->posts}.post_type = %s", $post_type );
+ 			$post_type_object = get_post_type_object ( $post_type );
+ 		} elseif ( $this->is_attachment ) {
+ 			$where .= " AND {$wpdb->posts}.post_type = 'attachment'";
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index a394476d10f4..fc69fd2007b5 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.8-alpha-39951';
++$wp_version = '4.8-alpha-39952';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

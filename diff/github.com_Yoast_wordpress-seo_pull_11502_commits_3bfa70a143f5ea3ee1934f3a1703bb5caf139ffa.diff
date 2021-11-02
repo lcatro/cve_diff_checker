@@ -1,0 +1,551 @@
+From 3bfa70a143f5ea3ee1934f3a1703bb5caf139ffa Mon Sep 17 00:00:00 2001
+From: Joost de Valk <joost@yoast.com>
+Date: Mon, 5 Nov 2018 11:47:09 +0100
+Subject: [PATCH] Change import settings logic
+
+---
+ admin/class-config.php                 |  34 ------
+ admin/class-export.php                 | 163 ++-----------------------
+ admin/import/class-import-settings.php | 139 +--------------------
+ admin/views/tabs/tool/wpseo-export.php |  10 +-
+ admin/views/tabs/tool/wpseo-import.php |  22 ++--
+ admin/views/tool-import-export.php     |   4 +-
+ 6 files changed, 40 insertions(+), 332 deletions(-)
+
+diff --git a/admin/class-config.php b/admin/class-config.php
+index 956e62a3ef9..f8ed2f6fad9 100644
+--- a/admin/class-config.php
++++ b/admin/class-config.php
+@@ -41,24 +41,10 @@ public function init() {
+ 			wp_redirect( admin_url( 'admin.php?page=' . WPSEO_Configuration_Page::PAGE_IDENTIFIER ) );
+ 		}
+ 
+-		add_action( 'admin_init', array( $this, 'admin_init' ) );
+ 		add_action( 'admin_enqueue_scripts', array( $this, 'config_page_scripts' ) );
+ 		add_action( 'admin_enqueue_scripts', array( $this, 'config_page_styles' ) );
+ 	}
+ 
+-	/**
+-	 * Run admin-specific actions.
+-	 */
+-	public function admin_init() {
+-
+-		$page         = filter_input( INPUT_GET, 'page' );
+-		$tool         = filter_input( INPUT_GET, 'tool' );
+-		$export_nonce = filter_input( INPUT_POST, WPSEO_Export::NONCE_NAME );
+-
+-		if ( 'wpseo_tools' === $page && 'import-export' === $tool && $export_nonce !== null ) {
+-			$this->do_yoast_export();
+-		}
+-	}
+ 
+ 	/**
+ 	 * Loads the required styles for the config page.
+@@ -158,24 +144,4 @@ private function enqueue_tools_scripts() {
+ 			$this->asset_manager->enqueue_script( 'bulk-editor' );
+ 		}
+ 	}
+-
+-	/**
+-	 * Runs the yoast exporter class to possibly init the file download.
+-	 */
+-	private function do_yoast_export() {
+-		check_admin_referer( WPSEO_Export::NONCE_ACTION, WPSEO_Export::NONCE_NAME );
+-
+-		if ( ! WPSEO_Capability_Utils::current_user_can( 'wpseo_manage_options' ) ) {
+-			return;
+-		}
+-
+-		$wpseo_post       = filter_input( INPUT_POST, 'wpseo' );
+-		$include_taxonomy = ! empty( $wpseo_post['include_taxonomy'] );
+-		$export           = new WPSEO_Export( $include_taxonomy );
+-
+-		if ( $export->has_error() ) {
+-			add_action( 'admin_notices', array( $export, 'set_error_hook' ) );
+-
+-		}
+-	}
+ } /* End of class */
+diff --git a/admin/class-export.php b/admin/class-export.php
+index 8b1f540a5e7..7b1af5e7ee5 100644
+--- a/admin/class-export.php
++++ b/admin/class-export.php
+@@ -11,12 +11,7 @@
+  * Class with functionality to export the WP SEO settings
+  */
+ class WPSEO_Export {
+-
+-	const ZIP_FILENAME = 'yoast-seo-settings-export.zip';
+-	const INI_FILENAME = 'settings.ini';
+-
+ 	const NONCE_ACTION = 'wpseo_export';
+-	const NONCE_NAME   = 'wpseo_export_nonce';
+ 
+ 	/**
+ 	 * @var string
+@@ -28,38 +23,28 @@ class WPSEO_Export {
+ 	 */
+ 	private $error = '';
+ 
+-	/**
+-	 * @var string
+-	 */
+-	public $export_zip_url = '';
+-
+ 	/**
+ 	 * @var boolean
+ 	 */
+ 	public $success;
+ 
+ 	/**
+-	 * Whether or not the export will include taxonomy metadata
+-	 *
+-	 * @var boolean
+-	 */
+-	private $include_taxonomy;
+-
+-	/**
+-	 * @var array
++	 * Class constructor
+ 	 */
+-	private $dir = array();
++	public function __construct() {
++		check_admin_referer( WPSEO_Export::NONCE_ACTION );
++		$this->export_settings();
++		$this->output();
++	}
+ 
+ 	/**
+-	 * Class constructor
+-	 *
+-	 * @param boolean $include_taxonomy Whether to include the taxonomy metadata the plugin creates.
++	 * Outputs the export.
+ 	 */
+-	public function __construct( $include_taxonomy = false ) {
+-		$this->include_taxonomy = $include_taxonomy;
+-		$this->dir              = wp_upload_dir();
+-
+-		$this->export_settings();
++	public function output() {
++		/* translators: %1$s expands to Import settings */
++		printf( esc_html__( 'Copy all these settings to another site\'s %1$s tab and click "%1$s" there.', 'wordpress-seo' ), __( 'Import settings', 'wordpress-seo' ) );
++		echo '<br/><br/>';
++		echo '<textarea id="wpseo-export" rows="20" cols="100">' . $this->export . '</textarea>';
+ 	}
+ 
+ 	/**
+@@ -88,25 +73,11 @@ public function set_error_hook() {
+ 	 * Exports the current site's WP SEO settings.
+ 	 */
+ 	private function export_settings() {
+-
+ 		$this->export_header();
+ 
+ 		foreach ( WPSEO_Options::get_option_names() as $opt_group ) {
+ 			$this->write_opt_group( $opt_group );
+ 		}
+-
+-		$this->taxonomy_metadata();
+-
+-		if ( ! $this->write_settings_file() ) {
+-			$this->error = __( 'Could not write settings to file.', 'wordpress-seo' );
+-
+-			return;
+-		}
+-
+-		if ( $this->zip_file() ) {
+-			// Just exit, because there is a download being served.
+-			exit;
+-		}
+ 	}
+ 
+ 	/**
+@@ -119,10 +90,7 @@ private function export_header() {
+ 			'Yoast SEO',
+ 			'Yoast.com'
+ 		);
+-		$this->write_line( '; ' . $header . ' - ' . esc_url( WPSEO_Shortlinker::get( 'https://yoa.st/1yd' ) ) );
+-		if ( $this->include_taxonomy ) {
+-			$this->write_line( '; ' . __( 'This export includes taxonomy metadata', 'wordpress-seo' ) );
+-		}
++		$this->write_line( '; ' . $header );
+ 	}
+ 
+ 	/**
+@@ -178,109 +146,4 @@ private function write_setting( $key, $val ) {
+ 		}
+ 		$this->write_line( $key . ' = ' . $val );
+ 	}
+-
+-	/**
+-	 * Adds the taxonomy meta data if there is any
+-	 */
+-	private function taxonomy_metadata() {
+-		if ( $this->include_taxonomy ) {
+-			$taxonomy_meta = get_option( 'wpseo_taxonomy_meta' );
+-			if ( is_array( $taxonomy_meta ) ) {
+-				$this->write_line( '[wpseo_taxonomy_meta]', true );
+-				$this->write_setting( 'wpseo_taxonomy_meta', urlencode( wp_json_encode( $taxonomy_meta ) ) );
+-			}
+-			else {
+-				$this->write_line( '; ' . __( 'No taxonomy metadata found', 'wordpress-seo' ), true );
+-			}
+-		}
+-	}
+-
+-	/**
+-	 * Writes the settings to our temporary settings.ini file
+-	 *
+-	 * @return boolean unsigned
+-	 */
+-	private function write_settings_file() {
+-		$handle = fopen( $this->dir['path'] . '/' . self::INI_FILENAME, 'w' );
+-		if ( ! $handle ) {
+-			return false;
+-		}
+-
+-		$res = fwrite( $handle, $this->export );
+-		if ( ! $res ) {
+-			return false;
+-		}
+-
+-		fclose( $handle );
+-
+-		return true;
+-	}
+-
+-	/**
+-	 * Zips the settings ini file
+-	 *
+-	 * @return bool|null
+-	 */
+-	private function zip_file() {
+-		$is_zip_created = $this->create_zip();
+-
+-		// The settings.ini isn't needed, because it's in the zipfile.
+-		$this->remove_settings_ini();
+-
+-		if ( ! $is_zip_created ) {
+-			$this->error = __( 'Could not zip settings-file.', 'wordpress-seo' );
+-
+-			return false;
+-		}
+-
+-		$this->serve_settings_export();
+-		$this->remove_zip();
+-
+-		return true;
+-	}
+-
+-	/**
+-	 * Creates the zipfile and returns true if it created successful.
+-	 *
+-	 * @return bool
+-	 */
+-	private function create_zip() {
+-		chdir( $this->dir['path'] );
+-		$zip = new PclZip( './' . self::ZIP_FILENAME );
+-		if ( 0 === $zip->create( './' . self::INI_FILENAME ) ) {
+-			return false;
+-		}
+-
+-		return file_exists( self::ZIP_FILENAME );
+-	}
+-
+-	/**
+-	 * Downloads the zip file.
+-	 */
+-	private function serve_settings_export() {
+-		// Clean any content that has been already output. For example by other plugins or faulty PHP files.
+-		if ( ob_get_contents() ) {
+-			ob_clean();
+-		}
+-		header( 'Content-Type: application/octet-stream; charset=utf-8' );
+-		header( 'Content-Transfer-Encoding: Binary' );
+-		header( 'Content-Disposition: attachment; filename=' . self::ZIP_FILENAME );
+-		header( 'Content-Length: ' . filesize( self::ZIP_FILENAME ) );
+-
+-		readfile( self::ZIP_FILENAME );
+-	}
+-
+-	/**
+-	 * Removes the settings ini file.
+-	 */
+-	private function remove_settings_ini() {
+-		unlink( './' . self::INI_FILENAME );
+-	}
+-
+-	/**
+-	 * Removes the files because they are already downloaded.
+-	 */
+-	private function remove_zip() {
+-		unlink( './' . self::ZIP_FILENAME );
+-	}
+ }
+diff --git a/admin/import/class-import-settings.php b/admin/import/class-import-settings.php
+index 5c0c100f27a..d56c421211c 100644
+--- a/admin/import/class-import-settings.php
++++ b/admin/import/class-import-settings.php
+@@ -19,146 +19,35 @@ class WPSEO_Import_Settings {
+ 	/**
+ 	 * @var array
+ 	 */
+-	private $file;
+-
+-	/**
+-	 * @var string
+-	 */
+-	private $filename;
++	private $content;
+ 
+ 	/**
+ 	 * @var string
+ 	 */
+ 	private $old_wpseo_version = null;
+ 
+-	/**
+-	 * @var string
+-	 */
+-	private $path;
+-
+-	/**
+-	 * @var array
+-	 */
+-	private $upload_dir;
+-
+ 	/**
+ 	 * Class constructor
+ 	 */
+ 	public function __construct() {
+-		$this->status = new WPSEO_Import_Status( 'import', false );
+-		if ( ! $this->handle_upload() ) {
+-			return $this->status;
+-		}
+-
+-		$this->determine_path();
+-
+-		if ( ! $this->unzip_file() ) {
+-			$this->clean_up();
+-
++		$this->status  = new WPSEO_Import_Status( 'import', false );
++		$this->content = filter_input( INPUT_POST, 'settings_import' );
++		if ( empty( $this->content ) ) {
+ 			return $this->status;
+ 		}
+ 
+ 		$this->parse_options();
+-
+-		$this->clean_up();
+-	}
+-
+-	/**
+-	 * Handle the file upload
+-	 *
+-	 * @return boolean Import status.
+-	 */
+-	private function handle_upload() {
+-		$overrides  = array( 'mimes' => array( 'zip' => 'application/zip' ) ); // Explicitly allow zip in multisite.
+-		$this->file = wp_handle_upload( $_FILES['settings_import_file'], $overrides );
+-
+-		if ( is_wp_error( $this->file ) ) {
+-			$this->status->set_msg( __( 'Settings could not be imported:', 'wordpress-seo' ) . ' ' . $this->file->get_error_message() );
+-
+-			return false;
+-		}
+-
+-		if ( is_array( $this->file ) && isset( $this->file['error'] ) ) {
+-			$this->status->set_msg( __( 'Settings could not be imported:', 'wordpress-seo' ) . ' ' . $this->file['error'] );
+-
+-			return false;
+-		}
+-
+-		if ( ! isset( $this->file['file'] ) ) {
+-			$this->status->set_msg( __( 'Settings could not be imported:', 'wordpress-seo' ) . ' ' . __( 'Upload failed.', 'wordpress-seo' ) );
+-
+-			return false;
+-		}
+-
+-		return true;
+-	}
+-
+-	/**
+-	 * Determine the path to the import file
+-	 */
+-	private function determine_path() {
+-		$this->upload_dir = wp_upload_dir();
+-
+-		if ( ! defined( 'DIRECTORY_SEPARATOR' ) ) {
+-			define( 'DIRECTORY_SEPARATOR', '/' );
+-		}
+-		$this->path = $this->upload_dir['basedir'] . DIRECTORY_SEPARATOR . 'wpseo-import' . DIRECTORY_SEPARATOR;
+-
+-		if ( ! isset( $GLOBALS['wp_filesystem'] ) || ! is_object( $GLOBALS['wp_filesystem'] ) ) {
+-			$url         = wp_nonce_url(
+-				self_admin_url( 'admin.php?page=wpseo_tools&tool=import-export' ),
+-				'wpseo-import'
+-			);
+-			$credentials = request_filesystem_credentials( esc_url_raw( $url ) );
+-			WP_Filesystem( $credentials );
+-		}
+-	}
+-
+-	/**
+-	 * Unzip the file
+-	 *
+-	 * @return boolean
+-	 */
+-	private function unzip_file() {
+-		$unzipped = unzip_file( $this->file['file'], $this->path );
+-		$msg_base = __( 'Settings could not be imported:', 'wordpress-seo' ) . ' ';
+-
+-		if ( is_wp_error( $unzipped ) ) {
+-			/* translators: %s expands to an error message. */
+-			$this->status->set_msg( $msg_base . sprintf( __( 'Unzipping failed with error "%s".', 'wordpress-seo' ), $unzipped->get_error_message() ) );
+-
+-			return false;
+-		}
+-
+-		$this->filename = $this->path . 'settings.ini';
+-		if ( ! is_file( $this->filename ) || ! is_readable( $this->filename ) ) {
+-			$this->status->set_msg( $msg_base . __( 'Unzipping failed - file settings.ini not found.', 'wordpress-seo' ) );
+-
+-			return false;
+-		}
+-
+-		return true;
+ 	}
+ 
+ 	/**
+ 	 * Parse the option file
+ 	 */
+ 	private function parse_options() {
+-		if ( defined( 'INI_SCANNER_RAW' ) ) {
+-			/*
+-			 * Implemented INI_SCANNER_RAW to make sure variables aren't parsed.
+-			 *
+-			 * http://php.net/manual/en/function.parse-ini-file.php#99943
+-			 */
+-			$options = parse_ini_file( $this->filename, true, INI_SCANNER_RAW );
+-		}
+-		else {
+-			// PHP 5.2 does not implement the 3rd argument, this is a fallback.
+-			$options = parse_ini_file( $this->filename, true );
+-		}
++		$options = parse_ini_string( $this->content, true, INI_SCANNER_RAW );
+ 
+ 		if ( is_array( $options ) && $options !== array() ) {
+ 			$this->import_options( $options );
++
+ 			return;
+ 		}
+ 		$this->status->set_msg( __( 'Settings could not be imported:', 'wordpress-seo' ) . ' ' . __( 'No settings found in file.', 'wordpress-seo' ) );
+@@ -179,22 +68,6 @@ private function parse_option_group( $name, $option_group, $options ) {
+ 		}
+ 	}
+ 
+-	/**
+-	 * Remove the files
+-	 */
+-	private function clean_up() {
+-		if ( file_exists( $this->filename ) && is_writable( $this->filename ) ) {
+-			unlink( $this->filename );
+-		}
+-		if ( ! empty( $this->file['file'] ) && file_exists( $this->file['file'] ) && is_writable( $this->file['file'] ) ) {
+-			unlink( $this->file['file'] );
+-		}
+-		if ( file_exists( $this->path ) && is_writable( $this->path ) ) {
+-			$wp_file = new WP_Filesystem_Direct( $this->path );
+-			$wp_file->rmdir( $this->path, true );
+-		}
+-	}
+-
+ 	/**
+ 	 * Imports the options if found.
+ 	 *
+diff --git a/admin/views/tabs/tool/wpseo-export.php b/admin/views/tabs/tool/wpseo-export.php
+index ed31c00545f..1f2e484c1d4 100644
+--- a/admin/views/tabs/tool/wpseo-export.php
++++ b/admin/views/tabs/tool/wpseo-export.php
+@@ -18,9 +18,14 @@
+ /* translators: %1$s expands to Yoast SEO */
+ $submit_button_value = sprintf( __( 'Export your %1$s settings', 'wordpress-seo' ), 'Yoast SEO' );
+ 
++if ( filter_input( INPUT_POST, 'do_export' ) ) {
++	$export = new WPSEO_Export();
++	return;
++}
++
+ $wpseo_export_phrase = sprintf(
+ 	/* translators: %1$s expands to Yoast SEO */
+-	__( 'Export your %1$s settings here, to import them again later or to import them on another site.', 'wordpress-seo' ),
++	__( 'Export your %1$s settings here, to copy them on another site.', 'wordpress-seo' ),
+ 	'Yoast SEO'
+ );
+ ?>
+@@ -30,6 +35,7 @@
+ 	action="<?php echo esc_url( admin_url( 'admin.php?page=wpseo_tools&tool=import-export#top#wpseo-export' ) ); ?>"
+ 	method="post"
+ 	accept-charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>">
+-	<?php wp_nonce_field( WPSEO_Export::NONCE_ACTION, WPSEO_Export::NONCE_NAME ); ?>
++	<?php wp_nonce_field( WPSEO_Export::NONCE_ACTION ); ?>
++	<input type="hidden" name="do_export" value="1" />
+ 	<button type="submit" class="button button-primary" id="export-button"><?php echo esc_html( $submit_button_value ); ?></button>
+ </form>
+diff --git a/admin/views/tabs/tool/wpseo-import.php b/admin/views/tabs/tool/wpseo-import.php
+index 25aa37f3161..51eeaf3e709 100644
+--- a/admin/views/tabs/tool/wpseo-import.php
++++ b/admin/views/tabs/tool/wpseo-import.php
+@@ -15,27 +15,27 @@
+ 	exit();
+ }
+ 
++if ( ! defined( 'WPSEO_NAMESPACES' ) || ! WPSEO_NAMESPACES ) {
++	esc_html_e( 'Import of settings is only supported on servers that run PHP 5.3 or higher.', 'wordpress-seo' );
++	return;
++}
+ ?>
+ <p>
+ 	<?php
+ 	printf(
+-		/* translators: 1: emphasis opener; 2: emphasis closer. */
+-		esc_html__( 'Import settings by locating %1$ssettings.zip%2$s and clicking "Import settings"', 'wordpress-seo' ),
+-		'<em>',
+-		'</em>'
++		/* translators: 1: Import settings button string from below. */
++		esc_html__( 'Import settings by pasting the settings you copied from another site here and clicking "%s".', 'wordpress-seo' ),
++		__( 'Import settings', 'wordpress-seo' )
+ 	);
+ 	?>
+ </p>
+ 
+ <form
+ 	action="<?php echo esc_url( admin_url( 'admin.php?page=wpseo_tools&tool=import-export#top#wpseo-import' ) ); ?>"
+-	method="post" enctype="multipart/form-data"
++	method="post"
+ 	accept-charset="<?php echo esc_attr( get_bloginfo( 'charset' ) ); ?>">
+-	<?php wp_nonce_field( 'wpseo-import-file', '_wpnonce', true, true ); ?>
+-	<label class="screen-reader-text" for="settings-import-file"><?php esc_html_e( 'Choose your settings.zip file', 'wordpress-seo' ); ?></label>
+-	<input type="file" name="settings_import_file" id="settings-import-file"
+-		accept="application/x-zip,application/x-zip-compressed,application/zip"/>
+-	<input type="hidden" name="action" value="wp_handle_upload"/><br/>
+-	<br/>
++	<?php wp_nonce_field( 'wpseo-import-settings', '_wpnonce', true, true ); ?>
++	<label class="screen-reader-text" for="settings-import"><?php esc_html_e( 'Choose your settings.zip file', 'wordpress-seo' ); ?></label>
++	<textarea id="settings-import" rows="10" cols="140" name="settings_import"></textarea><br/>
+ 	<input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Import settings', 'wordpress-seo' ); ?>"/>
+ </form>
+diff --git a/admin/views/tool-import-export.php b/admin/views/tool-import-export.php
+index 1b476d5eefc..a844fec93c8 100644
+--- a/admin/views/tool-import-export.php
++++ b/admin/views/tool-import-export.php
+@@ -42,8 +42,8 @@
+ 		$import = new WPSEO_Import_Plugin( new $class(), 'cleanup' );
+ 	}
+ }
+-elseif ( isset( $_FILES['settings_import_file'] ) ) {
+-	check_admin_referer( 'wpseo-import-file' );
++elseif ( filter_input( INPUT_POST, 'settings_import' ) ) {
++	check_admin_referer( 'wpseo-import-settings' );
+ 
+ 	$import = new WPSEO_Import_Settings();
+ }

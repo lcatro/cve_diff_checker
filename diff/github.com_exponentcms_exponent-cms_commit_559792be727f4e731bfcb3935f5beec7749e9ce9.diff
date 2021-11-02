@@ -1,0 +1,328 @@
+From 559792be727f4e731bfcb3935f5beec7749e9ce9 Mon Sep 17 00:00:00 2001
+From: dleffler <dleffler@hughes.net>
+Date: Thu, 3 Nov 2016 21:34:43 -0400
+Subject: [PATCH] fix sql injection security vulnerability which failed to
+ account for sef urls adequately; reported by many, many users
+
+---
+ framework/core/subsystems/expRouter.php | 135 +++++++++++++++++-------
+ 1 file changed, 96 insertions(+), 39 deletions(-)
+
+diff --git a/framework/core/subsystems/expRouter.php b/framework/core/subsystems/expRouter.php
+index 88d794bf67..5600779a5d 100644
+--- a/framework/core/subsystems/expRouter.php
++++ b/framework/core/subsystems/expRouter.php
+@@ -38,9 +38,9 @@ class expRouter {
+      * either 'sef' or 'query'
+      * @var string
+      */
+-    public  $url_style = '';
++    private $url_style = '';
+     public  $params = array();
+-    public  $sefPath = null;
++    private $sefPath = null;
+ 
+     function __construct() {
+         self::getRouterMaps();
+@@ -189,7 +189,11 @@ public function plainPath() {
+     public function routeRequest() {
+         global $user;
+ 
+-        // strip out possible xss exploits via url
++        // start splitting the URL into it's different parts
++        $this->splitURL();
++        // edebug($this,1);
++
++        // strip out possible xss exploits via old school url
+         foreach ($_GET as $key=>$var) {
+             if (is_string($var) && strpos($var,'">')) {
+                 unset(
+@@ -198,24 +202,30 @@ public function routeRequest() {
+                 );
+             }
+         }
++        //fixme only old school url and forms have these variables here
+         // conventional method to ensure the 'id' is only an id
+         if (isset($_REQUEST['id'])) {
++            $_REQUEST['id'] = intval($_REQUEST['id']);
+             if (isset($_GET['id']))
+-                $_GET['id'] = intval($_GET['id']);
++                $_GET['id'] = $_REQUEST['id'];
+             if (isset($_POST['id']))
+-                $_POST['id'] = intval($_POST['id']);
+-
+-            $_REQUEST['id'] = intval($_REQUEST['id']);
++                $_POST['id'] = $_REQUEST['id'];
+         }
+         // do the same for the other id's
+         foreach ($_REQUEST as $key=>$var) {
+             if (is_string($var) && strlen($key) >= 3 && strrpos($key,'_id',-3) !== false) {
++                $_REQUEST[$key] = intval($_REQUEST[$key]);
+                 if (isset($_GET[$key]))
+-                    $_GET[$key] = intval($_GET[$key]);
++                    $_GET[$key] = $_REQUEST[$key];
+                 if (isset($_POST[$key]))
+-                    $_POST[$key] = intval($_POST[$key]);
+-
+-                $_REQUEST[$key] = intval($_REQUEST[$key]);
++                    $_POST[$key] = $_REQUEST[$key];
++            }
++            if ($key == 'src') {
++                $_REQUEST[$key] = preg_replace("/[^A-Za-z0-9@-]/", '', $_REQUEST[$key]);
++                if (isset($_GET[$key]))
++                    $_GET[$key] = $_REQUEST[$key];
++                if (isset($_POST[$key]))
++                    $_POST[$key] = $_REQUEST[$key];
+             }
+         }
+         if (empty($user->id) || (!empty($user->id) && !$user->isAdmin())) {  //FIXME why would $user be empty here unless $db is down?
+@@ -223,10 +233,6 @@ public function routeRequest() {
+             expString::sanitize($_REQUEST);  // strip other exploits like sql injections
+         }
+ 
+-        // start splitting the URL into it's different parts
+-        $this->splitURL();
+-        // edebug($this,1);
+-
+         if ($this->url_style == 'sef') {
+             if ($this->url_type == 'page' || $this->url_type == 'base') {
+                 $ret = $this->routePageRequest();               // if we hit this the formatting of the URL looks like the user is trying to go to a page.
+@@ -248,8 +254,7 @@ public function routeRequest() {
+                     $module = !empty($_POST['controller']) ? expString::sanitize($_POST['controller']) : expString::sanitize($_POST['module']);
+                     // Figure out if this is module or controller request - WE ONLY NEED THIS CODE UNTIL WE PULL OUT THE OLD MODULES
+                     if (expModules::controllerExists($module)) {
+-                        $_POST['controller'] = $module;
+-                        $_REQUEST['controller'] = $module;
++                        $_POST['controller'] = $_REQUEST['controller'] = $module;
+                     }
+                 }
+             }
+@@ -305,6 +310,9 @@ public function updateHistory($section=null) {
+         $db->insertObject($trackingObject,'tracking_rawdata');
+     }
+ 
++    /**
++     * Assign url_type & url_style
++     */
+     public function splitURL() {
+         global $db;
+ 
+@@ -317,19 +325,23 @@ public function splitURL() {
+ 
+             // remove empty first and last url_parts if they exist
+             //if (empty($this->url_parts[count($this->url_parts)-1])) array_pop($this->url_parts);
+-            if ($this->url_parts[count($this->url_parts)-1] == '') array_pop($this->url_parts);
+-            if (empty($this->url_parts[0])) array_shift($this->url_parts);
++            if ($this->url_parts[count($this->url_parts)-1] == '')
++                array_pop($this->url_parts);
++            if (empty($this->url_parts[0]))
++                array_shift($this->url_parts);
++            else
++                $this->url_parts[0] = expString::escape($this->url_parts[0]);
+ 
+             if (count($this->url_parts) < 1 || (empty($this->url_parts[0]) && count($this->url_parts) == 1) ) {
+                 $this->url_type = 'base';  // no params
+-            } elseif (count($this->url_parts) == 1 || $db->selectObject('section', "sef_name='" . substr($this->sefPath,1) . "'") != null) {
++            } elseif (count($this->url_parts) == 1 || $db->selectObject('section', "sef_name='" . substr($this->sefPath, 1) . "'") != null) {
+                 $this->url_type = 'page';  // single param is page name
+             } elseif ($_SERVER['REQUEST_METHOD'] == 'POST') {
+                 $this->url_type = 'post';  // params via form/post
+             } else {
+                 // take a peek and see if a page exists with the same name as the first value...if so we probably have a page with
+                 // extra perms...like printerfriendly=1 or ajax_action=1;
+-                if (($db->selectObject('section', "sef_name='" . $this->url_parts[0] . "'") != null) && (in_array(array('printerfriendly','exportaspdf','ajax_action'), $this->url_parts))) {
++                if (($db->selectObject('section', "sef_name='" . $this->url_parts[0]) . "'" != null) && (in_array(array('printerfriendly','exportaspdf','ajax_action'), $this->url_parts))) {
+                     $this->url_type = 'page';
+                 } else {
+                     $this->url_type = 'action';
+@@ -337,7 +349,7 @@ public function splitURL() {
+             }
+             $this->params = $this->convertPartsToParams();
+         } elseif ($_SERVER['REQUEST_METHOD'] == 'POST') {
+-            $this->url_style = 'sef';
++            $this->url_style = 'sef';  // even if it's old school, they all come in the same
+             $this->url_type = 'post';
+             $this->params = $this->convertPartsToParams();
+         } elseif (isset($_SERVER['REQUEST_URI'])) {
+@@ -350,6 +362,7 @@ public function splitURL() {
+                 $sefPath = explode('%22%3E',$_SERVER['REQUEST_URI']);  // remove any attempts to close the command
+                 $_SERVER['REQUEST_URI'] = $sefPath[0];
+                 $this->url_style = 'query';
++                //note 'query' doesn't need $params
+             }
+         } else {
+             $this->url_type = 'base';
+@@ -362,6 +375,11 @@ public function splitURL() {
+         define('EXPORT_AS_PDF_LANDSCAPE', (isset($_REQUEST['landscapepdf']) || isset($this->params['landscapepdf'])) ? 1 : 0);
+     }
+ 
++    /**
++     * Set up for page request, but check store category/product also
++     *
++     * @return bool
++     */
+     public function routePageRequest() {
+ //        global $db;
+ 
+@@ -430,7 +448,7 @@ public function routePageRequest() {
+                     return $this->routeActionRequest();
+                 }
+ //fixme we may want to log missed pages (no existing store cat/product) requests and set up/use a redirect table (404)??
+-//fixme and we may also want to log any redirects taken??
++//fixme and we may also want to log any redirects taken from that table??
+                 return false;
+             }
+             #########################################################
+@@ -493,7 +511,8 @@ public function isMappedURL() {
+                     }
+                 }
+ 
+-                $this->params = $this->convertPartsToParams();
++                $this->params = $this->convertPartsToParams(); // update params to new re-mapped url_parts
++                //fixme do we need to re-sanitize them???
+                 return true;
+             }
+         }
+@@ -501,6 +520,11 @@ public function isMappedURL() {
+         return false;
+     }
+ 
++    /**
++     * Check and set up for an action request
++     *
++     * @return bool
++     */
+     public function routeActionRequest() {
+         $return_params = array('controller'=>'','action'=>'','url_parts'=>array());
+ 
+@@ -520,7 +544,7 @@ public function routeActionRequest() {
+         // now figure out the name<=>value pairs
+         if (count($this->url_parts) == 3) {
+             if ( is_numeric($this->url_parts[2])) {
+-                $return_params['url_parts']['id'] = $this->url_parts[2];
++                $return_params['url_parts']['id'] = intval($this->url_parts[2]);
+             }
+         } else {
+             for ($i = 2, $iMax = count($this->url_parts); $i < $iMax; $i++) {
+@@ -530,10 +554,8 @@ public function routeActionRequest() {
+             }
+         }
+ 
+-        // Set the module or controller - this how the actual routing happens
+-        $_REQUEST[$requestType] = $return_params['controller']; //url_parts[0];
+-        $_GET[$requestType] = $return_params['controller'];
+-        $_POST[$requestType] = $return_params['controller'];
++        // Set the controller - this how the actual routing happens
++        $_REQUEST[$requestType] = $_GET[$requestType] = $_POST[$requestType] = $return_params['controller'];
+ 
+         // Set the action for this module or controller
+         if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+@@ -544,15 +566,11 @@ public function routeActionRequest() {
+             $action = $return_params['action'];
+         }
+ 
+-        $_REQUEST['action'] = $action;
+-        $_GET['action'] = $action;
+-        $_POST['action'] = $action;
++        $_REQUEST['action'] = $_GET['action'] = $_POST['action'] = $action;
+ 
+-        // pass off the name<=>value pairs
++        // pass off the name<=>value pairs for old school url
+         foreach($return_params['url_parts'] as $key=>$value) {
+-            $save_value = expString::sanitize($value);
+-            $_REQUEST[$key] = $save_value;
+-            $_GET[$key] = $save_value;
++            $_REQUEST[$key] = $_GET[$key] = expString::sanitize($value);
+         }
+ 
+         return true;
+@@ -561,7 +579,16 @@ public function routeActionRequest() {
+     public function buildCurrentUrl() {
+         $url =  URL_BASE;
+         if ($this->url_style == 'sef') {
+-            $url .= substr(PATH_RELATIVE,0,-1).$this->sefPath;
++            if (count($this->params) > 2) {
++                $url .= substr(PATH_RELATIVE,0,-1).'/'.$this->params['controller'].'/'.$this->params['action'];
++                foreach ($this->params as $key=>$value) {
++                    if ($key != 'controller' && $key != 'action') {
++                        $url .= '/' . $key . '/' . $value;
++                    }
++                }
++            } else {
++                $url .= substr(PATH_RELATIVE,0,-1).$this->sefPath;  //fixme do we need to clean this up?
++            }
+         } else {
+             $url .= urldecode((empty($_SERVER['REQUEST_URI'])) ? $_ENV['REQUEST_URI'] : $_SERVER['REQUEST_URI']);
+         }
+@@ -665,6 +692,11 @@ public function convertToOldSchoolUrl() {
+         return $this->makeLink($params, true);
+     }
+ 
++    /**
++     * Convert url_parts() or $_REQUEST to $params
++     *
++     * @return array|string
++     */
+     public function convertPartsToParams() {
+         $params = array();
+         if ($this->url_type == 'base') {
+@@ -681,7 +713,8 @@ public function convertPartsToParams() {
+                 }
+             }
+         } elseif ($this->url_type == 'post') {
+-            if (isset($_REQUEST['PHPSESSID'])) unset($_REQUEST['PHPSESSID']);
++            if (isset($_REQUEST['PHPSESSID']))
++                unset($_REQUEST['PHPSESSID']);
+ //            foreach($_REQUEST as $name=>$val) {
+ ////                if (get_magic_quotes_gpc()) $val = stripslashes($val);  // magic quotes fix??
+ ////                $params[$name] = $val;
+@@ -693,9 +726,28 @@ public function convertPartsToParams() {
+         }
+         //TODO: fully sanitize all params values here for ---We already do this!
+ //        if (isset($params['src'])) $params['src'] = expString::sanitize(htmlspecialchars($params['src']));
++        // conventional method to ensure the 'id' is only an id
++        if (isset($params['id'])) {
++            $params['id'] = intval($params['id']);
++        }
++        // do the same for the other id's
++        foreach ($params as $key=>$var) {
++            if (is_string($var) && strlen($key) >= 3 && strrpos($key,'_id',-3) !== false) {
++                $params[$key] = intval($params[$key]);
++            }
++            if ($key == 'src') {
++                $params[$key] = preg_replace("/[^A-Za-z0-9@-]/", '', $params[$key]);
++            }
++        }
+         return $params;
+     }
+ 
++    /**
++     * Attempt to locate a page by name or id
++     *
++     * @param $url_name
++     * @return null|object|void
++     */
+     public function getPageByName($url_name) {
+         global $db;
+ 
+@@ -721,6 +773,10 @@ public function getPageByName($url_name) {
+         return $section;
+     }
+ 
++    /**
++     * Get the SEF URL from the server
++     * if we got an old school url, it will only contain the 'index.php'
++     */
+     private function buildSEFPath () {
+         // Apache
+         if (strpos($_SERVER['SERVER_SOFTWARE'],'Apache') !== false || strpos($_SERVER['SERVER_SOFTWARE'],'WebServerX') !== false) {
+@@ -775,7 +831,8 @@ private function buildSEFPath () {
+                 }
+             }
+         }
+-        if (substr($this->sefPath,-1) == "/") $this->sefPath = substr($this->sefPath,0,-1);
++        if (substr($this->sefPath,-1) == "/")
++            $this->sefPath = substr($this->sefPath,0,-1);  //fixme isn't this redundant from above?
+         // sanitize it
+         $sefPath = explode('">',$this->sefPath);  // remove any attempts to close the command
+         $this->sefPath = expString::escape(expString::sanitize($sefPath[0]));

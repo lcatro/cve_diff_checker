@@ -1,0 +1,88 @@
+From 39582c04cc5e34054b2936b423072fb9df2ff6ef Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sat, 29 Jul 2017 18:52:38 +0100
+Subject: [PATCH] CVE-2017-13042/HNCP: add DHCPv6-Data bounds checks
+
+hncp_print_rec() validates each HNCP TLV to be within the declared as
+well as the on-the-wire packet space. However, dhcpv6_print() in the same
+file didn't do the same for the DHCPv6 options within the HNCP
+DHCPv6-Data TLV value, which could cause an out-of-bounds read when
+decoding an invalid packet. Add missing checks to dhcpv6_print().
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-hncp.c                    |   4 ++++
+ tests/TESTLIST                  |   6 ++++++
+ tests/hncp_dhcpv6data-oobr.out  |   7 +++++++
+ tests/hncp_dhcpv6data-oobr.pcap | Bin 0 -> 148 bytes
+ 4 files changed, 17 insertions(+)
+ create mode 100644 tests/hncp_dhcpv6data-oobr.out
+ create mode 100644 tests/hncp_dhcpv6data-oobr.pcap
+
+diff --git a/print-hncp.c b/print-hncp.c
+index 32adafa9c..d0c9a3ea6 100644
+--- a/print-hncp.c
++++ b/print-hncp.c
+@@ -318,6 +318,8 @@ dhcpv6_print(netdissect_options *ndo,
+ 
+     i = 0;
+     while (i < length) {
++        if (i + 4 > length)
++            return -1;
+         tlv = cp + i;
+         type = EXTRACT_16BITS(tlv);
+         optlen = EXTRACT_16BITS(tlv + 2);
+@@ -329,6 +331,8 @@ dhcpv6_print(netdissect_options *ndo,
+ 
+         ND_PRINT((ndo, "%s", tok2str(dh6opt_str, "Unknown", type)));
+         ND_PRINT((ndo," (%u)", optlen + 4 ));
++        if (i + 4 + optlen > length)
++            return -1;
+ 
+         switch (type) {
+             case DH6OPT_DNS_SERVERS:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index a8811bc69..c72f7de6f 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -554,6 +554,12 @@ radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
+ ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
+ ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
++# The case below depends on the bug in print-hncp.c, which at the time of
++# discovery had codepoints for DHCPv6-Data and DHCPv4-Data swapped around.
++# After the bugfix the output will be different because of the different
++# code path and will not test the vulnerability unless modified respectively.
++# The .pcap file is truncated after the 1st packet.
++hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/hncp_dhcpv6data-oobr.out b/tests/hncp_dhcpv6data-oobr.out
+new file mode 100644
+index 000000000..376502d90
+--- /dev/null
++++ b/tests/hncp_dhcpv6data-oobr.out
+@@ -0,0 +1,7 @@
++IP6 (flowlabel 0x01cc3, hlim 234, next-header UDP (17) payload length: 11025) 400::e4ff:ffff:adf9:8900:0.1646 > 62:9de3:ff47:ebec:8206:ff00:ad:ff00.8231: hncp (11017)
++	Future use: type=16384 (5)
++	DHCPv6-Data (25)
++		Unknown (4)
++		Unknown (4)
++		SNTP-servers (61956)  (invalid)
++	[|hncp]
+diff --git a/tests/hncp_dhcpv6data-oobr.pcap b/tests/hncp_dhcpv6data-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..3430e9a8587613a3a7849bbb18dc29993332ef42
+GIT binary patch
+literal 148
+zcmca|c+)~A1{MYo_z%K-3=E7wns-Tt01E>XLpG4@_fLS~z#f+c;tULjH9e;>wB1c$
+zkU6X^DEJDZ@5%rF|JVNP1gd06n)~>_`|CGNY(TTt{%2szQ&2x_C-B4pWT>EsCxaS;
+msK_IbLLiX;#IXM0frHcP4m>%qVEbGS23P(!TjugVU;qG&z%SbX
+
+literal 0
+HcmV?d00001
+

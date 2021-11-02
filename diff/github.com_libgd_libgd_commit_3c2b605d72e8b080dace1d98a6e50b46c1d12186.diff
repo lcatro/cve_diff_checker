@@ -1,0 +1,66 @@
+From 3c2b605d72e8b080dace1d98a6e50b46c1d12186 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20Sur=C3=BD?= <ondrej@sury.org>
+Date: Tue, 12 Jul 2016 14:20:16 +0200
+Subject: [PATCH] bug #248, fix Out-Of-Bounds Read in read_image_tga
+
+---
+ src/gd_tga.c | 34 ++++++++++++++++++++++++++--------
+ 1 file changed, 26 insertions(+), 8 deletions(-)
+
+diff --git a/src/gd_tga.c b/src/gd_tga.c
+index b4f8fa629..6420cae65 100644
+--- a/src/gd_tga.c
++++ b/src/gd_tga.c
+@@ -278,14 +278,23 @@ int read_image_tga( gdIOCtx *ctx, oTga *tga )
+ 		buffer_caret = 0;
+ 
+ 		while( bitmap_caret < image_block_size ) {
+-
++			
+ 			if ((decompression_buffer[buffer_caret] & TGA_RLE_FLAG) == TGA_RLE_FLAG) {
+ 				encoded_pixels = ( ( decompression_buffer[ buffer_caret ] & 127 ) + 1 );
+ 				buffer_caret++;
+ 
+-				for (i = 0; i < encoded_pixels; i++) {
+-					for (j = 0; j < pixel_block_size; j++, bitmap_caret++) {
+-						tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
++				if (encoded_pixels != 0) {
++				
++					if (!((buffer_caret + (encoded_pixels * pixel_block_size)) < image_block_size)) {
++						gdFree( decompression_buffer );
++						gdFree( conversion_buffer );
++						return -1;
++					}
++
++					for (i = 0; i < encoded_pixels; i++) {
++						for (j = 0; j < pixel_block_size; j++, bitmap_caret++) {
++							tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
++						}
+ 					}
+ 				}
+ 				buffer_caret += pixel_block_size;
+@@ -293,11 +302,20 @@ int read_image_tga( gdIOCtx *ctx, oTga *tga )
+ 				encoded_pixels = decompression_buffer[ buffer_caret ] + 1;
+ 				buffer_caret++;
+ 
+-				for (i = 0; i < encoded_pixels; i++) {
+-					for( j = 0; j < pixel_block_size; j++, bitmap_caret++ ) {
+-						tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
++				if (encoded_pixels != 0) {
++				
++					if (!((buffer_caret + (encoded_pixels * pixel_block_size)) < image_block_size)) {
++						gdFree( decompression_buffer );
++						gdFree( conversion_buffer );
++						return -1;
++					}
++
++					for (i = 0; i < encoded_pixels; i++) {
++						for( j = 0; j < pixel_block_size; j++, bitmap_caret++ ) {
++							tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
++						}
++						buffer_caret += pixel_block_size;
+ 					}
+-					buffer_caret += pixel_block_size;
+ 				}
+ 			}
+ 		}

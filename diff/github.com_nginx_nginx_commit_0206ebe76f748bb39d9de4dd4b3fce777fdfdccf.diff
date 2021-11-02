@@ -1,0 +1,55 @@
+From 0206ebe76f748bb39d9de4dd4b3fce777fdfdccf Mon Sep 17 00:00:00 2001
+From: Maxim Dounin <mdounin@mdounin.ru>
+Date: Wed, 13 Sep 2017 15:52:01 +0300
+Subject: [PATCH] Fixed ngx_gmtime() on 32-bit platforms with 64-bit time_t.
+
+In ngx_gmtime(), instead of casting to ngx_uint_t we now work with
+time_t directly.  This allows using dates after 2038 on 32-bit platforms
+which use 64-bit time_t, notably NetBSD and OpenBSD.
+
+As the code is not able to work with negative time_t values, argument
+is now set to 0 for negative values.  As a positive side effect, this
+results in Epoch being used for such values instead of a date in distant
+future.
+---
+ src/core/ngx_times.c | 18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/ngx_times.c b/src/core/ngx_times.c
+index 1e36675e36..ef63f1e3d1 100644
+--- a/src/core/ngx_times.c
++++ b/src/core/ngx_times.c
+@@ -300,23 +300,25 @@ void
+ ngx_gmtime(time_t t, ngx_tm_t *tp)
+ {
+     ngx_int_t   yday;
+-    ngx_uint_t  n, sec, min, hour, mday, mon, year, wday, days, leap;
++    ngx_uint_t  sec, min, hour, mday, mon, year, wday, days, leap;
+ 
+     /* the calculation is valid for positive time_t only */
+ 
+-    n = (ngx_uint_t) t;
++    if (t < 0) {
++        t = 0;
++    }
+ 
+-    days = n / 86400;
++    days = t / 86400;
++    sec = t % 86400;
+ 
+     /* January 1, 1970 was Thursday */
+ 
+     wday = (4 + days) % 7;
+ 
+-    n %= 86400;
+-    hour = n / 3600;
+-    n %= 3600;
+-    min = n / 60;
+-    sec = n % 60;
++    hour = sec / 3600;
++    sec %= 3600;
++    min = sec / 60;
++    sec %= 60;
+ 
+     /*
+      * the algorithm based on Gauss' formula,

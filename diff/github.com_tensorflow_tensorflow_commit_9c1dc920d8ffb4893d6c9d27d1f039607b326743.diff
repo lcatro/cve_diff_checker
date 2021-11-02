@@ -1,0 +1,24 @@
+From 9c1dc920d8ffb4893d6c9d27d1f039607b326743 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 17:47:46 -0700
+Subject: [PATCH] Prevent infinite loop/stack overflow in TFLite `while` op.
+
+PiperOrigin-RevId: 370800333
+Change-Id: I6a2e4ff849da339545c449db2af7e11ce6ff02c3
+---
+ tensorflow/lite/kernels/while.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/while.cc b/tensorflow/lite/kernels/while.cc
+index e05959fe2a682..74ab81c2a9599 100644
+--- a/tensorflow/lite/kernels/while.cc
++++ b/tensorflow/lite/kernels/while.cc
+@@ -138,6 +138,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
+   auto* subgraphs = this_subgraph->GetSubgraphs();
+   TF_LITE_ENSURE(context, op_data->cond_subgraph_index < subgraphs->size());
+   TF_LITE_ENSURE(context, op_data->body_subgraph_index < subgraphs->size());
++  TF_LITE_ENSURE(context,
++                 op_data->cond_subgraph_index != op_data->body_subgraph_index);
+ 
+   Subgraph* cond_subgraph = (*subgraphs)[op_data->cond_subgraph_index].get();
+   Subgraph* body_subgraph = (*subgraphs)[op_data->body_subgraph_index].get();

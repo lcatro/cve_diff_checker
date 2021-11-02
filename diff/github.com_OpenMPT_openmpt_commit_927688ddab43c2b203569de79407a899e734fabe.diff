@@ -1,0 +1,90 @@
+From 927688ddab43c2b203569de79407a899e734fabe Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=B6rn=20Heusipp?= <manx@openmpt.org>
+Date: Wed, 2 Oct 2019 13:37:46 +0000
+Subject: [PATCH] [Fix] libmodplug: C API: Limit the length of strings copied
+ to the output buffer of ModPlug_InstrumentName() and ModPlug_SampleName() to
+ 32 bytes (including terminating null) as is done by original libmodplug. This
+ avoids potential buffer overflows in software relying on this limit instead
+ of querying the required buffer size beforehand. libopenmpt can return
+ strings longer than 32 bytes here beacuse the internal limit of 32 bytes
+ applies to strings encoded in arbitrary character encodings but the API
+ returns them converted to UTF-8, which can be longer. (reported by Antonio
+ Morales Maldonado of Semmle Security Research Team)
+
+git-svn-id: https://source.openmpt.org/svn/openmpt/trunk/OpenMPT@12127 56274372-70c3-4bfc-bfc3-4c3a0b034d27
+---
+ libopenmpt/libopenmpt_modplug.c | 46 ++++++++++-----------------------
+ 1 file changed, 14 insertions(+), 32 deletions(-)
+
+diff --git a/libopenmpt/libopenmpt_modplug.c b/libopenmpt/libopenmpt_modplug.c
+index d5b4695523..da13edc3f4 100644
+--- a/libopenmpt/libopenmpt_modplug.c
++++ b/libopenmpt/libopenmpt_modplug.c
+@@ -478,53 +478,35 @@ LIBOPENMPT_MODPLUG_API unsigned int ModPlug_NumChannels(ModPlugFile* file)
+ LIBOPENMPT_MODPLUG_API unsigned int ModPlug_SampleName(ModPlugFile* file, unsigned int qual, char* buff)
+ {
+ 	const char* str;
+-	unsigned int retval;
+-	size_t tmpretval;
++	char buf[32];
+ 	if(!file) return 0;
+ 	str = openmpt_module_get_sample_name(file->mod,qual-1);
+-	if(!str){
+-		if(buff){
+-			*buff = '\0';
+-		}
+-		return 0;
+-	}
+-	tmpretval = strlen(str);
+-	if(tmpretval>=INT_MAX){
+-		tmpretval = INT_MAX-1;
++	memset(buf,0,32);
++	if(str){
++		strncpy(buf,str,31);
++		openmpt_free_string(str);
+ 	}
+-	retval = (int)tmpretval;
+ 	if(buff){
+-		memcpy(buff,str,retval+1);
+-		buff[retval] = '\0';
++		strncpy(buff,buf,32);
+ 	}
+-	openmpt_free_string(str);
+-	return retval;
++	return (unsigned int)strlen(buf);
+ }
+ 
+ LIBOPENMPT_MODPLUG_API unsigned int ModPlug_InstrumentName(ModPlugFile* file, unsigned int qual, char* buff)
+ {
+ 	const char* str;
+-	unsigned int retval;
+-	size_t tmpretval;
++	char buf[32];
+ 	if(!file) return 0;
+ 	str = openmpt_module_get_instrument_name(file->mod,qual-1);
+-	if(!str){
+-		if(buff){
+-			*buff = '\0';
+-		}
+-		return 0;
+-	}
+-	tmpretval = strlen(str);
+-	if(tmpretval>=INT_MAX){
+-		tmpretval = INT_MAX-1;
++	memset(buf,0,32);
++	if(str){
++		strncpy(buf,str,31);
++		openmpt_free_string(str);
+ 	}
+-	retval = (int)tmpretval;
+ 	if(buff){
+-		memcpy(buff,str,retval+1);
+-		buff[retval] = '\0';
++		strncpy(buff,buf,32);
+ 	}
+-	openmpt_free_string(str);
+-	return retval;
++	return (unsigned int)strlen(buf);
+ }
+ 
+ LIBOPENMPT_MODPLUG_API ModPlugNote* ModPlug_GetPattern(ModPlugFile* file, int pattern, unsigned int* numrows)

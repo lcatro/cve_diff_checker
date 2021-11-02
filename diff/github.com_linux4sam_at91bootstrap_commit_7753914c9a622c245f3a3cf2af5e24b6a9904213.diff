@@ -1,0 +1,31 @@
+From 7753914c9a622c245f3a3cf2af5e24b6a9904213 Mon Sep 17 00:00:00 2001
+From: Eugen Hristev <eugen.hristev@microchip.com>
+Date: Tue, 10 Mar 2020 09:40:02 +0200
+Subject: [PATCH] driver: secure: use consttime_memequal for memory comparison
+
+Do  not  use memcmp() to compare security critical data, such as
+cryptographic secrets, because the required CPU time depends on the
+number of equal bytes.
+Instead, a function that performs comparisons in constant time is required.
+Warning: consttime_memequal returns 0 if data are NOT equal, and 1 if they are
+equal.
+
+Signed-off-by: Eugen Hristev <eugen.hristev@microchip.com>
+Reviewed-by: Nicolas Ferre <nicolas.ferre@microchip.com>
+---
+ driver/secure.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/driver/secure.c b/driver/secure.c
+index cd4dc880d..ffb38e0e4 100644
+--- a/driver/secure.c
++++ b/driver/secure.c
+@@ -103,7 +103,7 @@ int secure_decrypt(void *data, unsigned int data_length, int is_signed)
+ 		/* Check the CMAC */
+ 		fixed_length = at91_aes_roundup(data_length);
+ 		cmac = (const unsigned int *)((char *)data + fixed_length);
+-		if (memcmp(cmac, computed_cmac, AT91_AES_BLOCK_SIZE_BYTE))
++		if (!consttime_memequal(cmac, computed_cmac, AT91_AES_BLOCK_SIZE_BYTE))
+ 			goto exit;
+ 	}
+ 

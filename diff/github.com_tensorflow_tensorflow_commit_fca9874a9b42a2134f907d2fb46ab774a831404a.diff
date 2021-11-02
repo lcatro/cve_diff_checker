@@ -1,0 +1,26 @@
+From fca9874a9b42a2134f907d2fb46ab774a831404a Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Mon, 19 Apr 2021 17:33:11 -0700
+Subject: [PATCH] Prevent another division by zero.
+
+PiperOrigin-RevId: 369338598
+Change-Id: I55471d363e401fdcf8d259670ad4eef672b731e2
+---
+ tensorflow/core/kernels/conv_grad_shape_utils.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/kernels/conv_grad_shape_utils.cc b/tensorflow/core/kernels/conv_grad_shape_utils.cc
+index 7543ce669923a..805f5809a472e 100644
+--- a/tensorflow/core/kernels/conv_grad_shape_utils.cc
++++ b/tensorflow/core/kernels/conv_grad_shape_utils.cc
+@@ -127,6 +127,10 @@ Status ConvBackpropComputeDimensionsV2(
+   // dimensions of the filter Tensor.
+   VLOG(2) << "input vs filter_in depth " << dims->in_depth << " "
+           << filter_shape.dim_size(num_dims - 2);
++  if (filter_shape.dim_size(num_dims - 2) <= 0) {
++    return errors ::InvalidArgument(
++        label, ": filter depth must be strictly greated than zero");
++  }
+   if (dims->in_depth % filter_shape.dim_size(num_dims - 2)) {
+     return errors::InvalidArgument(
+         label, ": input depth must be evenly divisible by filter depth");

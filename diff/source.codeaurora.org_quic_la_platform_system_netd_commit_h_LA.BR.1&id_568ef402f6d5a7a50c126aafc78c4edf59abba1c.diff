@@ -1,0 +1,99 @@
+From 568ef402f6d5a7a50c126aafc78c4edf59abba1c Mon Sep 17 00:00:00 2001
+From: Arun Padma <padmaa@codeaurora.org>
+Date: Mon, 14 Sep 2015 11:15:08 +0530
+Subject: system/netd/server: Added zero balance block rule for tethering.
+
+-- Added a new forward chain named zero_balance_fwd in IPtable.
+-- Added zero balance block rule for tethering to above chain.
+
+Change-Id: I2038348a83510281805e91636b7d52ae1e268f71
+CRs-Fixed: 888368
+---
+ server/BandwidthController.cpp | 17 ++++++++++++++++-
+ server/CommandListener.cpp     |  1 +
+ server/oem_iptables_hook.cpp   |  7 +++++++
+ server/oem_iptables_hook.h     |  1 +
+ 4 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/server/BandwidthController.cpp b/server/BandwidthController.cpp
+index 81c1228..696ba8e 100644
+--- a/server/BandwidthController.cpp
++++ b/server/BandwidthController.cpp
+@@ -624,6 +624,14 @@ int BandwidthController::blockAllData() {
+     } else {
+         ALOGE("Passed to add zero balance block rule for 8.8.8.8");
+     }
++
++    iptCmd = "-I zero_balance_fwd -j DROP";
++    if (runIpxtablesCmd(iptCmd.c_str(), IptJumpNoAdd)) {
++        ALOGE("Failed to add zero balance block rules for tethering");
++        return -1;
++    } else {
++        ALOGE("Passed to add zero balance block rules for tethering");
++    }
+     return 0;
+ 
+ }
+@@ -632,9 +640,16 @@ int BandwidthController::unblockAllData() {
+     if (runIpxtablesCmd(iptCmd.c_str(), IptJumpNoAdd)) {
+         ALOGE("Failed to flush zero balance block rules");
+         return -1;
+-    }else{
++    } else {
+         ALOGE("Passed to flush zero balance block rules");
+     }
++    iptCmd = "-F zero_balance_fwd";
++    if (runIpxtablesCmd(iptCmd.c_str(), IptJumpNoAdd)) {
++        ALOGE("Failed to flush zero balance block rules for tethering");
++        return -1;
++    } else {
++        ALOGE("Passed to flush zero balance block rules for tethering");
++    }
+    return 0;
+ }
+ 
+diff --git a/server/CommandListener.cpp b/server/CommandListener.cpp
+index 3ecbcbe..a1454cc 100755
+--- a/server/CommandListener.cpp
++++ b/server/CommandListener.cpp
+@@ -123,6 +123,7 @@ static const char* FILTER_FORWARD[] = {
+         FirewallController::LOCAL_FORWARD,
+         BandwidthController::LOCAL_FORWARD,
+         NatController::LOCAL_FORWARD,
++        ZEROBALANCE_IPTABLES_FILTER_FORWARD,
+         NULL,
+ };
+ 
+diff --git a/server/oem_iptables_hook.cpp b/server/oem_iptables_hook.cpp
+index 3fb5e86..92b4f6a 100644
+--- a/server/oem_iptables_hook.cpp
++++ b/server/oem_iptables_hook.cpp
+@@ -64,6 +64,13 @@ static bool oemCleanupHooks() {
+             "zero_balance_out"
+     };
+     runIptablesCmd(ARRAY_SIZE(cmd4), cmd4);
++
++    const char *cmd5[] = {
++            IPTABLES_PATH,
++            "-F",
++            "zero_balance_fwd"
++    };
++    runIptablesCmd(ARRAY_SIZE(cmd5), cmd5);
+     return true;
+ }
+ 
+diff --git a/server/oem_iptables_hook.h b/server/oem_iptables_hook.h
+index 82f67ef..a7cec6b 100644
+--- a/server/oem_iptables_hook.h
++++ b/server/oem_iptables_hook.h
+@@ -21,6 +21,7 @@
+ #define OEM_IPTABLES_FILTER_FORWARD "oem_fwd"
+ #define OEM_IPTABLES_NAT_PREROUTING "oem_nat_pre"
+ #define ZEROBALANCE_IPTABLES_FILTER_OUTPUT "zero_balance_out"
++#define ZEROBALANCE_IPTABLES_FILTER_FORWARD "zero_balance_fwd"
+ 
+ void setupOemIptablesHook();
+ 
+-- 
+cgit v1.1
+

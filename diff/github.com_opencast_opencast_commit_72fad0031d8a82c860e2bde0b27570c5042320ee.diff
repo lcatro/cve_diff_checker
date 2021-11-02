@@ -1,0 +1,56 @@
+From 72fad0031d8a82c860e2bde0b27570c5042320ee Mon Sep 17 00:00:00 2001
+From: Lars Kiesow <lkiesow@uos.de>
+Date: Thu, 16 Jan 2020 16:40:23 +0100
+Subject: [PATCH] Remove ROLE_COURSE_ADMIN
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Users with the role `ROLE_COURSE_ADMIN` can use the user-utils endpoint
+to create new users not including the role ROLE_ADMIN. For example:
+
+```sh
+% curl -i -u admin:opencast 'https://example.opencast.org/user-utils/xy.json' -X PUT \
+  --data 'password=f&roles=%5B%22ROLE_COURSE_ADMIN%22%5D'
+HTTP/2 201
+
+% curl -i -u xy:f 'https://example.opencast.org/user-utils/ab.json' -X PUT \
+  --data 'password=f&roles=%5B%22ROLE_COURSE_ADMIN%22%5D'
+HTTP/2 201
+```
+
+`ROLE_COURSE_ADMIN` is a non-standard role in Opencast which is
+referenced neither in the documentation nor in any code (except for
+tests) but only in the security configuration. From the name – implying
+an admin for a specific course – users would never expect that this role
+allows user creation.
+
+This patch fixes the problem by dropping the default access rules for
+`ROLE_COURSE_ADMIN`. Users which use and need this custom role can
+easily configure this specific to their needs. There is no reason to
+ship this by default.
+---
+ etc/security/mh_default_org.xml | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/etc/security/mh_default_org.xml b/etc/security/mh_default_org.xml
+index e1f03ad938f..9364ee605db 100644
+--- a/etc/security/mh_default_org.xml
++++ b/etc/security/mh_default_org.xml
+@@ -297,11 +297,11 @@
+     <sec:intercept-url pattern="/transcripts/watson/results*" method="POST" access="ROLE_ANONYMOUS" />
+ 
+     <!-- Everything else is for the admin users -->
+-    <sec:intercept-url pattern="/admin-ng" method="GET" access="ROLE_ADMIN, ROLE_ADMIN_UI, ROLE_COURSE_ADMIN" />
+-    <sec:intercept-url pattern="/admin-ng/" method="GET" access="ROLE_ADMIN, ROLE_ADMIN_UI, ROLE_COURSE_ADMIN" />
+-    <sec:intercept-url pattern="/admin-ng/index.html" access="ROLE_ADMIN, ROLE_ADMIN_UI, ROLE_COURSE_ADMIN" />
+-    <sec:intercept-url pattern="/index.html" access="ROLE_ADMIN, ROLE_ADMIN_UI, ROLE_COURSE_ADMIN" />
+-    <sec:intercept-url pattern="/**" access="ROLE_ADMIN, ROLE_COURSE_ADMIN" />
++    <sec:intercept-url pattern="/admin-ng" method="GET" access="ROLE_ADMIN, ROLE_ADMIN_UI" />
++    <sec:intercept-url pattern="/admin-ng/" method="GET" access="ROLE_ADMIN, ROLE_ADMIN_UI" />
++    <sec:intercept-url pattern="/admin-ng/index.html" access="ROLE_ADMIN, ROLE_ADMIN_UI" />
++    <sec:intercept-url pattern="/index.html" access="ROLE_ADMIN, ROLE_ADMIN_UI" />
++    <sec:intercept-url pattern="/**" access="ROLE_ADMIN" />
+ 
+     <!-- ############################# -->
+     <!-- # LOGIN / LOGOUT MECHANISMS # -->

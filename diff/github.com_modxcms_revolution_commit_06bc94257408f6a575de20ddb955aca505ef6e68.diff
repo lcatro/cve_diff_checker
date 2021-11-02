@@ -1,0 +1,182 @@
+From f6b236fe3f3d36d00ca33cfa05fe12014484f6d4 Mon Sep 17 00:00:00 2001
+From: Ivan Klimchuk <ivan.klimchuk@1pt.com>
+Date: Sat, 7 Jul 2018 11:46:19 +0300
+Subject: [PATCH 1/4] Some code cleanup before fix
+
+---
+ core/model/phpthumb/modphpthumb.class.php | 40 ++++++++++++++---------
+ 1 file changed, 24 insertions(+), 16 deletions(-)
+
+diff --git a/core/model/phpthumb/modphpthumb.class.php b/core/model/phpthumb/modphpthumb.class.php
+index 28f49e4c650..e369b99852a 100644
+--- a/core/model/phpthumb/modphpthumb.class.php
++++ b/core/model/phpthumb/modphpthumb.class.php
+@@ -1,9 +1,7 @@
+ <?php
+-/**
+- * @package modx
+- * @subpackage phpthumb
+- */
+-require_once MODX_CORE_PATH.'model/phpthumb/phpthumb.class.php';
++
++require_once MODX_CORE_PATH . 'model/phpthumb/phpthumb.class.php';
++
+ /**
+  * Helper class to extend phpThumb and simplify thumbnail generation process
+  * since phpThumb class is overly convoluted and doesn't do enough.
+@@ -11,27 +9,36 @@
+  * @package modx
+  * @subpackage phpthumb
+  */
+-class modPhpThumb extends phpThumb {
+-
++class modPhpThumb extends phpThumb
++{
+     public $modx;
+-    public $config;
+ 
+-    function __construct(modX &$modx,array $config = array()) {
++    public $config = array();
++
++    /**
++     * modPhpThumb constructor.
++     * @param modX $modx
++     * @param array $config
++     */
++    public function __construct(modX &$modx, array $config = array())
++    {
+         $this->modx =& $modx;
+-        $this->config = array_merge(array(
++        $this->config = $config;
+ 
+-        ),$config);
+         parent::__construct();
+     }
+ 
+     /**
+      * Setup some site-wide phpthumb options from modx config
+      */
+-    public function initialize() {
++    public function initialize()
++    {
+         $cachePath = $this->modx->getOption('core_path',null,MODX_CORE_PATH).'cache/phpthumb/';
+-        if (!is_dir($cachePath)) $this->modx->cacheManager->writeTree($cachePath);
+-        $this->setParameter('config_cache_directory',$cachePath);
+-        $this->setParameter('config_temp_directory',$cachePath);
++        if (!is_dir($cachePath)) {
++            $this->modx->cacheManager->writeTree($cachePath);
++        }
++        $this->setParameter('config_cache_directory', $cachePath);
++        $this->setParameter('config_temp_directory', $cachePath);
+         $this->setCacheDirectory();
+ 
+         $this->setParameter('config_allow_src_above_docroot',(boolean)$this->modx->getOption('phpthumb_allow_src_above_docroot',$this->config,false));
+@@ -69,6 +76,7 @@ public function initialize() {
+         foreach ($this->config as $property => $value) {
+             $this->setParameter($property,$value);
+         }
++
+         return true;
+     }
+ 
+@@ -317,5 +325,5 @@ function ResolveFilenameToAbsolute($filename) {
+         }
+         return $AbsoluteFilename;
+     }
+-
+ }
++
+
+From a43671e5dcd4f0d06594c295f8a8d5e766345639 Mon Sep 17 00:00:00 2001
+From: Ivan Klimchuk <ivan.klimchuk@1pt.com>
+Date: Sat, 7 Jul 2018 11:50:52 +0300
+Subject: [PATCH 2/4] Limit parameters incoming from users to only allowed from
+ phpthumb
+
+---
+ core/model/phpthumb/modphpthumb.class.php | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/core/model/phpthumb/modphpthumb.class.php b/core/model/phpthumb/modphpthumb.class.php
+index e369b99852a..9620d0b54b2 100644
+--- a/core/model/phpthumb/modphpthumb.class.php
++++ b/core/model/phpthumb/modphpthumb.class.php
+@@ -72,9 +72,22 @@ public function initialize()
+             $this->setParameter('config_document_root',$documentRoot);
+         }
+ 
++        // Only public parameters of phpThumb should be allowed to pass from user input.
++        // List properties between START PARAMETERS and START PARAMETERS in src/core/model/phpthumb/phpthumb.class.php
++        $allowed = array(
++            'src', 'new', 'w', 'h', 'wp', 'hp', 'wl', 'hl', 'ws', 'hs',
++            'f', 'q', 'sx', 'sy', 'sw', 'sh', 'zc', 'bc', 'bg', 'fltr',
++            'goto', 'err', 'xto', 'ra', 'ar', 'aoe', 'far', 'iar', 'maxb', 'down',
++            'md5s', 'sfn', 'dpi', 'sia', 'phpThumbDebug'
++        );
++
+         /* iterate through properties */
+         foreach ($this->config as $property => $value) {
+-            $this->setParameter($property,$value);
++            if (!in_array($property, $allowed)) {
++                $this->modx->log(modX::LOG_LEVEL_WARN,"Detected attempt of using private parameter `$property` (for internal usage) of phpThumb that not allowed and insecure");
++                continue;
++            }
++            $this->setParameter($property, $value);
+         }
+ 
+         return true;
+
+From d0d8f5d73dbbc26cd82794eb1dbdd371f309273c Mon Sep 17 00:00:00 2001
+From: Ivan Klimchuk <ivan.klimchuk@1pt.com>
+Date: Sat, 7 Jul 2018 12:02:49 +0300
+Subject: [PATCH 3/4] Returns the missed in the past the considering to
+ phpthumb_imagemagick_path system setting
+
+---
+ core/model/phpthumb/modphpthumb.class.php | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/core/model/phpthumb/modphpthumb.class.php b/core/model/phpthumb/modphpthumb.class.php
+index 9620d0b54b2..eed80f63485 100644
+--- a/core/model/phpthumb/modphpthumb.class.php
++++ b/core/model/phpthumb/modphpthumb.class.php
+@@ -58,13 +58,15 @@ public function initialize()
+         $this->setParameter('config_nooffsitelink_erase_image',(boolean)$this->modx->getOption('phpthumb_nooffsitelink_erase_image',$this->config,true));
+         $this->setParameter('config_nooffsitelink_watermark_src',(string)$this->modx->getOption('phpthumb_nooffsitelink_watermark_src',$this->config,''));
+         $this->setParameter('config_nooffsitelink_text_message',(string)$this->modx->getOption('phpthumb_nooffsitelink_text_message',$this->config,'Off-server linking is not allowed'));
++        $this->setParameter('config_ttf_directory', (string)$this->modx->getOption('core_path', $this->config, MODX_CORE_PATH) . 'model/phpthumb/fonts/');
++        $this->setParameter('config_imagemagick_path', (string)$this->modx->getOption('phpthumb_imagemagick_path', $this->config, null));
++
+         $this->setParameter('cache_source_enabled',(boolean)$this->modx->getOption('phpthumb_cache_source_enabled',$this->config,false));
+         $this->setParameter('cache_source_directory',$cachePath.'source/');
+         $this->setParameter('allow_local_http_src',true);
+         $this->setParameter('zc',$this->modx->getOption('zc',$_REQUEST,$this->modx->getOption('phpthumb_zoomcrop',$this->config,0)));
+         $this->setParameter('far',$this->modx->getOption('far',$_REQUEST,$this->modx->getOption('phpthumb_far',$this->config,'C')));
+         $this->setParameter('cache_directory_depth',4);
+-        $this->setParameter('config_ttf_directory',$this->modx->getOption('core_path',$this->config,MODX_CORE_PATH).'model/phpthumb/fonts/');
+ 
+         $documentRoot = $this->modx->getOption('phpthumb_document_root',$this->config, '');
+         if ($documentRoot == '') $documentRoot = $this->modx->getOption('base_path', null, '');
+
+From a55c4028cea58d922456d4dbd5970ead28a3ae8b Mon Sep 17 00:00:00 2001
+From: Ivan Klimchuk <ivan.klimchuk@1pt.com>
+Date: Sat, 7 Jul 2018 17:06:23 +0300
+Subject: [PATCH 4/4] Added strict mode for in_array
+
+---
+ core/model/phpthumb/modphpthumb.class.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/model/phpthumb/modphpthumb.class.php b/core/model/phpthumb/modphpthumb.class.php
+index eed80f63485..ff81eabf107 100644
+--- a/core/model/phpthumb/modphpthumb.class.php
++++ b/core/model/phpthumb/modphpthumb.class.php
+@@ -85,7 +85,7 @@ public function initialize()
+ 
+         /* iterate through properties */
+         foreach ($this->config as $property => $value) {
+-            if (!in_array($property, $allowed)) {
++            if (!in_array($property, $allowed, true)) {
+                 $this->modx->log(modX::LOG_LEVEL_WARN,"Detected attempt of using private parameter `$property` (for internal usage) of phpThumb that not allowed and insecure");
+                 continue;
+             }

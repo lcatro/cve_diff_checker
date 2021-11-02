@@ -1,0 +1,46 @@
+From 39458efcd5286d50e6b7f905fedcdc1059354e6e Mon Sep 17 00:00:00 2001
+From: netniV <netniv@hotmail.com>
+Date: Sun, 26 Jul 2020 23:40:44 +0000
+Subject: [PATCH] Improper escaping of error message leads to XSS during
+ template import preview (#3723)
+
+Closes #3723
+---
+ CHANGELOG      | 1 +
+ lib/import.php | 4 ++--
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 08ade23d7..7fabcffac 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -3,6 +3,7 @@ Cacti CHANGELOG
+ 1.2.14
+ -issue#3695: Spikekill `percent` is converted from percent to decimal twice, making it 1/100 of the true size
+ -issue#3676: Device not showing up in device page but showing up in Monitor tab (continued)
++-issue#3723: Improper escaping of error message leads to XSS during template import preview
+ -feature#3619: Spikekill percent does not go high enough
+ -feature#3615: Spikekill user options differ from Spikekill global options
+ 
+diff --git a/lib/import.php b/lib/import.php
+index e41754d79..cd90da166 100644
+--- a/lib/import.php
++++ b/lib/import.php
+@@ -981,7 +981,7 @@ function xml_to_data_query($hash, &$xml_array, &$hash_cache) {
+ 		$path = str_replace('<path_cacti>', $config['base_path'], $save['xml_path']);
+ 
+ 		if (!file_exists($path) || !is_readable($path)) {
+-			raise_message('resource_missing_' . $counter, __('Resource File: \'%s\' is missing or not readable.  Make sure you install it before using Data Query: \'%s\'', $path, $save['name']), MESSAGE_LEVEL_ERROR);
++			raise_message('resource_missing_' . $counter, __esc('Resource File: \'%s\' is missing or not readable.  Make sure you install it before using Data Query: \'%s\'', $path, $save['name']), MESSAGE_LEVEL_ERROR);
+ 			$counter++;
+ 		}
+ 	}
+@@ -2090,7 +2090,7 @@ function import_display_results($import_debug_info, $filestatus, $web = false, $
+ 
+ 			print "<ul>";
+ 			foreach($filestatus as $filename => $status) {
+-				print "<li>" . ($preview ? __("[preview] "):"") . $filename . " [" . $status . "]</li>\n";
++				print "<li>" . ($preview ? __("[preview] "):"") . html_escape($filename) . " [" . $status . "]</li>\n";
+ 			}
+ 			print "</ul>";
+ 		} else {

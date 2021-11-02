@@ -1,0 +1,44 @@
+From 7e768f8a473409215fe3fff8f6e31f8a3a0103c6 Mon Sep 17 00:00:00 2001
+From: Joakim Bech <joakim.bech@linaro.org>
+Date: Fri, 7 Sep 2018 09:46:25 +0200
+Subject: [PATCH] core: clear the entire TA area
+
+Previously we cleared (memset to zero) the size corresponding to code
+and data segments, however the allocation for the TA is made on the
+granularity of the memory pool, meaning that we did not clear all memory
+and because of that we could potentially leak code and data of a
+previous loaded TA.
+
+Fixes: OP-TEE-2018-0006: "Potential disclosure of previously loaded TA
+code and data"
+
+Signed-off-by: Joakim Bech <joakim.bech@linaro.org>
+Tested-by: Joakim Bech <joakim.bech@linaro.org> (QEMU v7, v8)
+Suggested-by: Jens Wiklander <jens.wiklander@linaro.org>
+Reviewed-by: Jens Wiklander <jens.wiklander@linaro.org>
+Reported-by: Riscure <inforequest@riscure.com>
+Reported-by: Alyssa Milburn <a.a.milburn@vu.nl>
+Acked-by: Etienne Carriere <etienne.carriere@linaro.org>
+---
+ core/arch/arm/kernel/user_ta.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/core/arch/arm/kernel/user_ta.c b/core/arch/arm/kernel/user_ta.c
+index 808cffd439f..e70061e3686 100644
+--- a/core/arch/arm/kernel/user_ta.c
++++ b/core/arch/arm/kernel/user_ta.c
+@@ -197,8 +197,12 @@ static struct mobj *alloc_ta_mem(size_t size)
+ #else
+ 	struct mobj *mobj = mobj_mm_alloc(mobj_sec_ddr, size, &tee_mm_sec_ddr);
+ 
+-	if (mobj)
+-		memset(mobj_get_va(mobj, 0), 0, size);
++	if (mobj) {
++		size_t granularity = BIT(tee_mm_sec_ddr.shift);
++
++		/* Round up to allocation granularity size */
++		memset(mobj_get_va(mobj, 0), 0, ROUNDUP(size, granularity));
++	}
+ 	return mobj;
+ #endif
+ }

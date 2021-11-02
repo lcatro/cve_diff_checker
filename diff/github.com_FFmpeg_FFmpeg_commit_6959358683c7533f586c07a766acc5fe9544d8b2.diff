@@ -1,0 +1,39 @@
+From 6959358683c7533f586c07a766acc5fe9544d8b2 Mon Sep 17 00:00:00 2001
+From: Steven Liu <lq@chinaffmpeg.org>
+Date: Fri, 29 May 2020 11:39:05 +0800
+Subject: [PATCH] avformat/hls: check segment duration value of EXTINF
+
+fix ticket: 8673
+set the default EXTINF duration to 1ms if duration is smaller than 1ms
+
+Signed-off-by: Steven Liu <lq@chinaffmpeg.org>
+(cherry picked from commit 9dfb19baeb86a8bb02c53a441682c6e9a6e104cc)
+---
+ libavformat/hls.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index bccaf67fa139..77d7aeba17b8 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -806,8 +806,6 @@ static int parse_playlist(HLSContext *c, const char *url,
+                     ret = AVERROR(ENOMEM);
+                     goto fail;
+                 }
+-                seg->duration = duration;
+-                seg->key_type = key_type;
+                 if (has_iv) {
+                     memcpy(seg->iv, iv, sizeof(iv));
+                 } else {
+@@ -837,6 +835,11 @@ static int parse_playlist(HLSContext *c, const char *url,
+                     goto fail;
+                 }
+ 
++                if (duration < 0.001 * AV_TIME_BASE) {
++                    duration = 0.001 * AV_TIME_BASE;
++                }
++                seg->duration = duration;
++                seg->key_type = key_type;
+                 dynarray_add(&pls->segments, &pls->n_segments, seg);
+                 is_segment = 0;
+ 

@@ -1,0 +1,110 @@
+From 032f2c9be6520d9d1a1608aa4f1d5d1f184f2472 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Lang <jp_lang@yahoo.fr>
+Date: Sun, 13 Sep 2015 14:35:20 +0000
+Subject: [PATCH] Open redirect vulnerability (#19577).
+
+Patch by Holger Just.
+
+git-svn-id: http://svn.redmine.org/redmine/trunk@14560 e93f8b46-1217-0410-a6f0-8f06a7374b81
+---
+ app/controllers/application_controller.rb  | 34 +++++++++++++++++-----
+ test/functional/account_controller_test.rb | 11 ++++++-
+ 2 files changed, 36 insertions(+), 9 deletions(-)
+
+diff --git a/app/controllers/application_controller.rb b/app/controllers/application_controller.rb
+index 5949f47b641..9f307c3e2d3 100644
+--- a/app/controllers/application_controller.rb
++++ b/app/controllers/application_controller.rb
+@@ -396,8 +396,8 @@ def back_url
+ 
+   def redirect_back_or_default(default, options={})
+     back_url = params[:back_url].to_s
+-    if back_url.present? && valid_back_url?(back_url)
+-      redirect_to(back_url)
++    if back_url.present? && valid_url = validate_back_url(back_url)
++      redirect_to(valid_url)
+       return
+     elsif options[:referer]
+       redirect_to_referer_or default
+@@ -407,8 +407,9 @@ def redirect_back_or_default(default, options={})
+     false
+   end
+ 
+-  # Returns true if back_url is a valid url for redirection, otherwise false
+-  def valid_back_url?(back_url)
++  # Returns a validated URL string if back_url is a valid url for redirection,
++  # otherwise false
++  def validate_back_url(back_url)
+     if CGI.unescape(back_url).include?('..')
+       return false
+     end
+@@ -419,19 +420,36 @@ def valid_back_url?(back_url)
+       return false
+     end
+ 
+-    if uri.host.present? && uri.host != request.host
++    [:scheme, :host, :port].each do |component|
++      if uri.send(component).present? && uri.send(component) != request.send(component)
++        return false
++      end
++      uri.send(:"#{component}=", nil)
++    end
++    # Always ignore basic user:password in the URL
++    uri.userinfo = nil
++
++    path = uri.to_s
++    # Ensure that the remaining URL starts with a slash, followed by a
++    # non-slash character or the end
++    if path !~ %r{\A/([^/]|\z)}
+       return false
+     end
+ 
+-    if uri.path.match(%r{/(login|account/register)})
++    if path.match(%r{/(login|account/register)})
+       return false
+     end
+ 
+-    if relative_url_root.present? && !uri.path.starts_with?(relative_url_root)
++    if relative_url_root.present? && !path.starts_with?(relative_url_root)
+       return false
+     end
+ 
+-    return true
++    return path
++  end
++  private :validate_back_url
++
++  def valid_back_url?(back_url)
++    !!validate_back_url(back_url)
+   end
+   private :valid_back_url?
+ 
+diff --git a/test/functional/account_controller_test.rb b/test/functional/account_controller_test.rb
+index e7b4c4fc170..362af68a23a 100644
+--- a/test/functional/account_controller_test.rb
++++ b/test/functional/account_controller_test.rb
+@@ -63,6 +63,7 @@ def test_login_should_redirect_to_back_url_param
+     # request.uri is "test.host" in test environment
+     back_urls = [
+       'http://test.host/issues/show/1',
++      'http://test.host/',
+       '/'
+     ]
+     back_urls.each do |back_url|
+@@ -108,7 +109,15 @@ def test_login_with_suburi_should_not_redirect_to_another_suburi
+       'http://test.host/fake/issues',
+       'http://test.host/redmine/../fake',
+       'http://test.host/redmine/../fake/issues',
+-      'http://test.host/redmine/%2e%2e/fake'
++      'http://test.host/redmine/%2e%2e/fake',
++      '//test.foo/fake',
++      'http://test.host//fake',
++      'http://test.host/\n//fake',
++      '//bar@test.foo',
++      '//test.foo',
++      '////test.foo',
++      '@test.foo',
++      'fake@test.foo'
+     ]
+     back_urls.each do |back_url|
+       post :login, :username => 'jsmith', :password => 'jsmith', :back_url => back_url

@@ -1,0 +1,29 @@
+From e925bc5addd881543fa503470c8a859e112cca62 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Luis=20D=C3=ADaz=20M=C3=A1s?= <piponazo@gmail.com>
+Date: Mon, 15 Jul 2019 20:04:39 +0200
+Subject: [PATCH] Fix integer overflow by checking size against header_size
+
+Note that the problem occurs when data_size is less than header_size
+what causes a buffer overflow in &data[i]
+
+Co-Authored-By: D4N <dan.cermak@cgc-instruments.com>
+---
+ src/webpimage.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/webpimage.cpp b/src/webpimage.cpp
+index 3e4773f0a..8bf98d33e 100644
+--- a/src/webpimage.cpp
++++ b/src/webpimage.cpp
+@@ -827,8 +827,9 @@ namespace Exiv2 {
+         }
+     }
+ 
+-    long WebPImage::getHeaderOffset(byte *data, long data_size,
+-                                    byte *header, long header_size) {
++    long WebPImage::getHeaderOffset(byte* data, long data_size, byte* header, long header_size)
++    {
++        if (data_size < header_size) { return -1; }
+         long pos = -1;
+         for (long i=0; i < data_size - header_size; i++) {
+             if (memcmp(header, &data[i], header_size) == 0) {

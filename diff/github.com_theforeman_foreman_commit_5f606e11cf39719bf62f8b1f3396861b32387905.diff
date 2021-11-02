@@ -1,0 +1,4073 @@
+From 5f606e11cf39719bf62f8b1f3396861b32387905 Mon Sep 17 00:00:00 2001
+From: Daniel Lobato Garcia <me@daniellobato.me>
+Date: Thu, 20 Oct 2016 18:06:38 +0200
+Subject: [PATCH] Fixes #16982 - Scope properly when no taxonomies are set
+
+The default scope for hosts and other objects did not restrict
+properly by taxonomies. An user without organizations or
+locations, could do anything it's permissions allow to.
+The list of hosts was unrestricted and showed hosts in
+any location or organization.
+
+This is fixed to work so that:
+
+Users without taxonomies, when set to 'any context' cannot see
+anything (at all)
+
+Users with taxonomies, when set to 'any context' can see
+everything within all of their taxonomies context (including
+children taxonomies).
+
+Admins set to 'any context' can see everything - regardless
+of whether it has a taxonomy or not.
+
+Users or admins set to some organization/location scope
+can only see stuff within scope.
+---
+ .../foreman/controller/smart_proxy_auth.rb    |   8 +-
+ app/controllers/users_controller.rb           |   2 +-
+ app/models/concerns/taxonomix.rb              |  68 +++++---
+ app/models/host/base.rb                       |   4 +-
+ app/services/sso/base.rb                      |   2 +-
+ app/services/sso/oauth.rb                     |   2 +-
+ app/services/tax_host.rb                      |   6 +-
+ .../20130908100439_delete_orphaned_records.rb |  28 ++--
+ db/seeds.d/07-provisioning_templates.rb       |  11 +-
+ db/seeds.d/08-partition_tables.rb             |   6 +-
+ db/seeds.d/10-installation_media.rb           |   4 +-
+ test/active_support_test_case_helper.rb       |   8 +-
+ .../v1/auth_source_ldaps_controller_test.rb   |   4 +-
+ .../v1/compute_resources_controller_test.rb   |  10 +-
+ .../v1/config_templates_controller_test.rb    |   4 +-
+ .../api/v1/domains_controller_test.rb         |   4 +-
+ .../api/v1/environments_controller_test.rb    |   4 +-
+ .../api/v1/hostgroups_controller_test.rb      |  10 +-
+ .../api/v1/media_controller_test.rb           |   4 +-
+ .../api/v1/ptables_controller_test.rb         |   6 +-
+ .../api/v1/smart_proxies_controller_test.rb   |  20 +--
+ .../api/v1/subnets_controller_test.rb         |  12 +-
+ .../api/v1/users_controller_test.rb           |  18 +--
+ .../v2/auth_source_ldaps_controller_test.rb   |   4 +-
+ .../v2/compute_resources_controller_test.rb   |  10 +-
+ .../api/v2/config_reports_controller_test.rb  |  13 +-
+ .../v2/config_templates_controller_test.rb    |   6 +-
+ .../api/v2/domains_controller_test.rb         |  10 +-
+ .../api/v2/environments_controller_test.rb    |   4 +-
+ .../api/v2/hostgroups_controller_test.rb      |  13 +-
+ .../api/v2/hosts_controller_test.rb           |  24 ++-
+ .../api/v2/locations_controller_test.rb       |  17 +-
+ .../api/v2/media_controller_test.rb           |   4 +-
+ .../api/v2/parameters_controller_test.rb      |  15 +-
+ .../provisioning_templates_controller_test.rb |   4 +-
+ .../api/v2/ptables_controller_test.rb         |   8 +-
+ .../api/v2/realms_controller_test.rb          |  15 +-
+ .../api/v2/reports_controller_test.rb         |   1 +
+ .../api/v2/smart_proxies_controller_test.rb   |  34 ++--
+ .../api/v2/subnets_controller_test.rb         |  12 +-
+ .../api/v2/users_controller_test.rb           |  14 +-
+ .../application_controller_subclass_test.rb   |   8 +-
+ .../auth_source_ldaps_controller_test.rb      |  40 ++---
+ .../compute_resources_controller_test.rb      |  14 +-
+ .../compute_resources_vms_controller_test.rb  |   2 +
+ test/controllers/domains_controller_test.rb   |  10 +-
+ .../environments_controller_test.rb           |  39 ++---
+ .../fact_values_controller_test.rb            |   4 +-
+ .../controllers/hostgroups_controller_test.rb |  40 +++--
+ test/controllers/hosts_controller_test.rb     |  49 +++---
+ test/controllers/images_controller_test.rb    |  14 +-
+ test/controllers/locations_controller_test.rb |  41 ++---
+ test/controllers/media_controller_test.rb     |   6 +-
+ .../organizations_controller_test.rb          |  39 ++---
+ .../provisioning_templates_controller_test.rb |  18 ++-
+ .../puppetclasses_controller_test.rb          |  48 +++---
+ test/controllers/realms_controller_test.rb    |   8 +-
+ .../smart_proxies_controller_test.rb          |   5 +-
+ test/controllers/subnets_controller_test.rb   |  24 +--
+ .../controllers/unattended_controller_test.rb |  13 +-
+ test/controllers/users_controller_test.rb     |  31 ++--
+ .../variable_lookup_keys_controller_test.rb   |   9 +-
+ test/factories/domain.rb                      |   2 +
+ test/factories/host_related.rb                |   8 +-
+ test/factories/smart_proxy.rb                 |   3 +
+ test/factories/subnet.rb                      |   2 +
+ test/factories/user_related.rb                |   2 +
+ test/fixtures/taxable_taxonomies.yml          |  80 +++++++---
+ test/integration/location_test.rb             |   4 +-
+ test/integration/organization_test.rb         |   2 +-
+ .../concerns/api_taxonomy_scope_test.rb       |   3 -
+ test/models/fact_value_test.rb                |   8 +-
+ test/models/host_test.rb                      |   7 +-
+ test/models/nic_test.rb                       |   8 +-
+ test/models/report_test.rb                    |   8 +-
+ test/models/shared/taxonomies_base_test.rb    |  35 +++--
+ test/models/subnet/ipv6_test.rb               |   2 +-
+ test/models/subnet_test.rb                    |   2 +-
+ test/models/taxonomix_test.rb                 | 148 ++++++++++++------
+ test/models/taxonomy_test.rb                  |   2 +-
+ test/models/user_test.rb                      |  42 +++--
+ test/test_helper.rb                           |   7 +-
+ test/unit/has_many_common_test.rb             |   4 +
+ test/unit/puppet_class_importer_test.rb       |   6 +-
+ test/unit/sso/basic_test.rb                   |   1 +
+ test/unit/tasks/seeds_test.rb                 |  58 +++----
+ 86 files changed, 802 insertions(+), 557 deletions(-)
+
+diff --git a/app/controllers/concerns/foreman/controller/smart_proxy_auth.rb b/app/controllers/concerns/foreman/controller/smart_proxy_auth.rb
+index 999760df54f..01704ea7bcd 100644
+--- a/app/controllers/concerns/foreman/controller/smart_proxy_auth.rb
++++ b/app/controllers/concerns/foreman/controller/smart_proxy_auth.rb
+@@ -30,7 +30,11 @@ def add_smart_proxy_filters(actions, options = {})
+   # Permits registered Smart Proxies or a user with permission
+   def require_smart_proxy_or_login(features = nil)
+     features = features.call if features.respond_to?(:call)
+-    allowed_smart_proxies = features.blank? ? SmartProxy.all : SmartProxy.with_features(*features)
++    allowed_smart_proxies = if features.blank?
++                              SmartProxy.unscoped.all
++                            else
++                              SmartProxy.unscoped.with_features(*features)
++                            end
+ 
+     if !Setting[:restrict_registered_smart_proxies] || auth_smart_proxy(allowed_smart_proxies, Setting[:require_ssl_smart_proxies])
+       set_admin_user
+@@ -47,7 +51,7 @@ def require_smart_proxy_or_login(features = nil)
+ 
+   # Filter requests to only permit from hosts with a registered smart proxy
+   # Uses rDNS of the request to match proxy hostnames
+-  def auth_smart_proxy(proxies = SmartProxy.all, require_cert = true)
++  def auth_smart_proxy(proxies = SmartProxy.unscoped.all, require_cert = true)
+     request_hosts = nil
+     if request.ssl?
+       # If we have the client certficate in the request environment we can extract the dn and sans from there
+diff --git a/app/controllers/users_controller.rb b/app/controllers/users_controller.rb
+index 9823438c28f..b94c12f1d50 100644
+--- a/app/controllers/users_controller.rb
++++ b/app/controllers/users_controller.rb
+@@ -158,7 +158,7 @@ def parameter_filter_context
+   end
+ 
+   def verify_active_session
+-    if !request.post? && params[:status].blank? && User.exists?(session[:user].presence)
++    if !request.post? && params[:status].blank? && User.unscoped.exists?(session[:user].presence)
+       warning _("You have already logged in")
+       redirect_back_or_to hosts_path
+       return
+diff --git a/app/models/concerns/taxonomix.rb b/app/models/concerns/taxonomix.rb
+index c3ffd48d7e2..fb36601fe66 100644
+--- a/app/models/concerns/taxonomix.rb
++++ b/app/models/concerns/taxonomix.rb
+@@ -1,15 +1,15 @@
+ module Taxonomix
+   extend ActiveSupport::Concern
+   include DirtyAssociations
++  TAXONOMY_JOIN_TABLE = :taxable_taxonomies
+ 
+   included do
+-    taxonomy_join_table = :taxable_taxonomies
+-    has_many taxonomy_join_table.to_sym, :dependent => :destroy, :as => :taxable
++    has_many TAXONOMY_JOIN_TABLE, :dependent => :destroy, :as => :taxable
+     has_many :locations, -> { where(:type => 'Location') },
+-             :through => taxonomy_join_table, :source => :taxonomy,
++             :through => TAXONOMY_JOIN_TABLE, :source => :taxonomy,
+              :validate => false
+     has_many :organizations, -> { where(:type => 'Organization') },
+-             :through => taxonomy_join_table, :source => :taxonomy,
++             :through => TAXONOMY_JOIN_TABLE, :source => :taxonomy,
+              :validate => false
+     after_initialize :set_current_taxonomy
+ 
+@@ -28,10 +28,11 @@ module ClassMethods
+ 
+     # default inner_method includes children (subtree_ids)
+     def with_taxonomy_scope(loc = Location.current, org = Organization.current, inner_method = :subtree_ids)
++      scope = block_given? ? yield : where(nil)
++      return scope unless Taxonomy.enabled_taxonomies.present?
+       self.which_ancestry_method = inner_method
+       self.which_location        = Location.expand(loc) if SETTINGS[:locations_enabled]
+       self.which_organization    = Organization.expand(org) if SETTINGS[:organizations_enabled]
+-      scope = block_given? ? yield : where('1=1')
+       scope = scope_by_taxable_ids(scope)
+       scope.readonly(false)
+     end
+@@ -69,26 +70,45 @@ def enforce_default
+     end
+ 
+     def taxable_ids(loc = which_location, org = which_organization, inner_method = which_ancestry_method)
+-      if SETTINGS[:locations_enabled] && loc.present?
+-        inner_ids_loc = if Location.ignore?(self.to_s)
+-                          self.unscoped.pluck("#{table_name}.id")
+-                        else
+-                          inner_select(loc, inner_method)
+-                        end
++      # Return everything (represented by nil), including objects without
++      # taxonomies. This value should only be returned for admin users.
++      return nil if any_context?(loc) && any_context?(org) &&
++        User.current.try(:admin?)
++
++      ids = unscoped.pluck(:id)
++      ids &= inner_ids(loc, Location, inner_method) if SETTINGS[:locations_enabled]
++      ids &= inner_ids(org, Organization, inner_method) if SETTINGS[:organizations_enabled]
++
++      if self == User
++        # In the case of users we want the taxonomy scope to get both the users
++        # of the taxonomy, admins, and the current user.
++        ids.concat(admin_ids)
++        ids << User.current.id if User.current.present?
+       end
+-      if SETTINGS[:organizations_enabled] && org.present?
+-        inner_ids_org = if Organization.ignore?(self.to_s)
+-                          self.unscoped.pluck("#{table_name}.id")
+-                        else
+-                          inner_select(org, inner_method)
+-                        end
+-      end
+-      inner_ids   = inner_ids_loc & inner_ids_org if (inner_ids_loc && inner_ids_org)
+-      inner_ids ||= inner_ids_loc if inner_ids_loc
+-      inner_ids ||= inner_ids_org if inner_ids_org
+-      # In the case of users we want the taxonomy scope to get both the users of the taxonomy and admins.
+-      inner_ids.concat(admin_ids) if inner_ids && self == User
+-      inner_ids
++
++      ids
++    end
++
++    # Returns the IDs available for the passed context.
++    # Passing a nil or [] value as taxonomy equates to "Any context".
++    # Any other value will be understood as 'IDs available in this taxonomy'.
++    def inner_ids(taxonomy, taxonomy_class, inner_method)
++      return unscoped.pluck("#{table_name}.id") if taxonomy_class.ignore?(to_s)
++      return inner_select(taxonomy, inner_method) if taxonomy.present?
++      return [] unless User.current.present?
++      # Any available taxonomy to the current user
++      return unscoped.pluck("#{table_name}.id") if User.current.admin?
++
++      taxonomy_relation = taxonomy_class.to_s.underscore.pluralize
++      any_context_taxonomies = User.current.
++        taxonomy_and_child_ids(:"#{taxonomy_relation}")
++      unscoped.joins(TAXONOMY_JOIN_TABLE).
++        where("#{TAXONOMY_JOIN_TABLE}.taxonomy_id" => any_context_taxonomies).
++        pluck(:id)
++    end
++
++    def any_context?(taxonomy)
++      taxonomy.blank?
+     end
+ 
+     # taxonomy can be either specific taxonomy object or array of these objects
+diff --git a/app/models/host/base.rb b/app/models/host/base.rb
+index 3cdc0a1d790..8a2c8954744 100644
+--- a/app/models/host/base.rb
++++ b/app/models/host/base.rb
+@@ -49,8 +49,8 @@ def self.taxonomy_conditions
+       org = Organization.expand(Organization.current) if SETTINGS[:organizations_enabled]
+       loc = Location.expand(Location.current) if SETTINGS[:locations_enabled]
+       conditions = {}
+-      conditions[:organization_id] = Array(org).map { |o| o.subtree_ids }.flatten.uniq if org.present?
+-      conditions[:location_id] = Array(loc).map { |l| l.subtree_ids }.flatten.uniq if loc.present?
++      conditions[:organization_id] = Array(org).map { |o| o.subtree_ids }.flatten.uniq unless org.nil?
++      conditions[:location_id] = Array(loc).map { |l| l.subtree_ids }.flatten.uniq unless loc.nil?
+       conditions
+     end
+ 
+diff --git a/app/services/sso/base.rb b/app/services/sso/base.rb
+index ab9b5e63eae..a4640952215 100644
+--- a/app/services/sso/base.rb
++++ b/app/services/sso/base.rb
+@@ -41,7 +41,7 @@ def authenticate!
+     end
+ 
+     def current_user
+-      User.except_hidden.find_by_login(self.user)
++      User.unscoped.except_hidden.find_by_login(self.user)
+     end
+   end
+ end
+diff --git a/app/services/sso/oauth.rb b/app/services/sso/oauth.rb
+index 33253b3b824..c8ed60b0ff9 100644
+--- a/app/services/sso/oauth.rb
++++ b/app/services/sso/oauth.rb
+@@ -20,7 +20,7 @@ def authenticate!
+       if OAuth::Signature.verify(request, :consumer_secret => Setting['oauth_consumer_secret'])
+         if Setting['oauth_map_users']
+           user_name = request.headers['HTTP_FOREMAN_USER'].to_s
+-          User.find_by_login(user_name).tap do |obj|
++          User.unscoped.find_by_login(user_name).tap do |obj|
+             Rails.logger.warn "Oauth: mapping to user '#{user_name}' failed" if obj.nil?
+           end.try(:login)
+         else
+diff --git a/app/services/tax_host.rb b/app/services/tax_host.rb
+index 40976702aac..d03b0ac94a6 100644
+--- a/app/services/tax_host.rb
++++ b/app/services/tax_host.rb
+@@ -27,11 +27,11 @@ def selected_ids
+     ids = default_ids_hash
+     #types NOT ignored - get ids that are selected
+     hash_keys.each do |col|
+-      ids[col] = Array(taxonomy.send(col))
++      ids[col] = Array(taxonomy.send(col)).uniq
+     end
+     #types that ARE ignored - get ALL ids for object
+     Array(taxonomy.ignore_types).each do |taxonomy_type|
+-      ids["#{taxonomy_type.tableize.singularize}_ids"] = taxonomy_type.constantize.pluck(:id)
++      ids["#{taxonomy_type.tableize.singularize}_ids"] = taxonomy_type.constantize.pluck(:id).uniq
+     end
+ 
+     ids["#{opposite_taxonomy_type}_ids"] = Array(taxonomy.send("#{opposite_taxonomy_type}_ids"))
+@@ -213,7 +213,7 @@ def substract_deep_hashes(h1, h2)
+   def default_ids_hash(populate_values = false)
+     ids = HashWithIndifferentAccess.new
+     hash_keys.each do |col|
+-      ids[col] = populate_values ? Array(self.send(col)) : []
++      ids[col] = populate_values ? Array(self.send(col)).uniq : []
+     end
+     ids
+   end
+diff --git a/db/migrate/20130908100439_delete_orphaned_records.rb b/db/migrate/20130908100439_delete_orphaned_records.rb
+index 915947c8e03..cff9d8d4f21 100644
+--- a/db/migrate/20130908100439_delete_orphaned_records.rb
++++ b/db/migrate/20130908100439_delete_orphaned_records.rb
+@@ -37,23 +37,23 @@ def up
+     TrendCounter.where("trend_id NOT IN (?)", Trend.pluck(:id)).delete_all
+ 
+     # NULLIFY FOREIGN KEY VALUE IF IT HAS AN ORPHANED FOREIGN KEY
+-    Audit.unscoped.where("user_id NOT IN (?)", User.pluck(:id)).update_all(:user_id => nil)
++    Audit.unscoped.where("user_id NOT IN (?)", User.unscoped.pluck(:id)).update_all(:user_id => nil)
+     FakeConfigTemplate.where("template_kind_id NOT IN (?)", TemplateKind.pluck(:id)).update_all(:template_kind_id => nil)
+-    Domain.where("dns_id NOT IN (?)", SmartProxy.pluck(:id)).update_all(:dns_id => nil)
+-    Subnet.where("dhcp_id NOT IN (?)", SmartProxy.pluck(:id)).update_all(:dhcp_id => nil)
+-    Subnet.where("dns_id NOT IN (?)", SmartProxy.pluck(:id)).update_all(:dns_id => nil)
+-    Subnet.where("tftp_id NOT IN (?)", SmartProxy.pluck(:id)).update_all(:tftp_id => nil)
+-    Image.where("architecture_id NOT IN (?)", Architecture.pluck(:id)).update_all(:architecture_id => nil)
+-    Image.where("compute_resource_id NOT IN (?)", ComputeResource.pluck(:id)).update_all(:compute_resource_id => nil)
++    Domain.where("dns_id NOT IN (?)", SmartProxy.unscoped.pluck(:id)).update_all(:dns_id => nil)
++    Subnet.where("dhcp_id NOT IN (?)", SmartProxy.unscoped.pluck(:id)).update_all(:dhcp_id => nil)
++    Subnet.where("dns_id NOT IN (?)", SmartProxy.unscoped.pluck(:id)).update_all(:dns_id => nil)
++    Subnet.where("tftp_id NOT IN (?)", SmartProxy.unscoped.pluck(:id)).update_all(:tftp_id => nil)
++    Image.where("architecture_id NOT IN (?)", Architecture.unscoped.pluck(:id)).update_all(:architecture_id => nil)
++    Image.where("compute_resource_id NOT IN (?)", ComputeResource.unscoped.pluck(:id)).update_all(:compute_resource_id => nil)
+     Image.where("operatingsystem_id NOT IN (?)", Operatingsystem.unscoped.pluck(:id)).update_all(:operatingsystem_id => nil)
+-    Nic::Base.where("domain_id NOT IN (?)", Domain.pluck(:id)).update_all(:domain_id => nil)
+-    Nic::Base.where("host_id NOT IN (?)", Host::Base.pluck(:id)).update_all(:host_id => nil)
+-    Nic::Base.where("subnet_id NOT IN (?)", Subnet.pluck(:id)).update_all(:subnet_id => nil)
+-    OsDefaultTemplate.where("config_template_id NOT IN (?)", FakeConfigTemplate.pluck(:id)).update_all(:config_template_id => nil)
++    Nic::Base.where("domain_id NOT IN (?)", Domain.unscoped.pluck(:id)).update_all(:domain_id => nil)
++    Nic::Base.where("host_id NOT IN (?)", Host::Base.unscoped.pluck(:id)).update_all(:host_id => nil)
++    Nic::Base.where("subnet_id NOT IN (?)", Subnet.unscoped.pluck(:id)).update_all(:subnet_id => nil)
++    OsDefaultTemplate.where("config_template_id NOT IN (?)", FakeConfigTemplate.unscoped.pluck(:id)).update_all(:config_template_id => nil)
+     OsDefaultTemplate.where("operatingsystem_id NOT IN (?)", Operatingsystem.unscoped.pluck(:id)).update_all(:operatingsystem_id => nil)
+-    OsDefaultTemplate.where("template_kind_id NOT IN (?)", TemplateKind.pluck(:id)).update_all(:template_kind_id => nil)
+-    TemplateCombination.where("config_template_id NOT IN (?)", FakeConfigTemplate.pluck(:id)).update_all(:config_template_id => nil)
+-    TemplateCombination.where("environment_id NOT IN (?)", Environment.pluck(:id)).update_all(:environment_id => nil)
++    OsDefaultTemplate.where("template_kind_id NOT IN (?)", TemplateKind.unscoped.pluck(:id)).update_all(:template_kind_id => nil)
++    TemplateCombination.where("config_template_id NOT IN (?)", FakeConfigTemplate.unscoped.pluck(:id)).update_all(:config_template_id => nil)
++    TemplateCombination.where("environment_id NOT IN (?)", Environment.unscoped.pluck(:id)).update_all(:environment_id => nil)
+     TemplateCombination.where("hostgroup_id NOT IN (?)", Hostgroup.unscoped.pluck(:id)).update_all(:hostgroup_id => nil)
+ 
+     host_groups_up
+diff --git a/db/seeds.d/07-provisioning_templates.rb b/db/seeds.d/07-provisioning_templates.rb
+index e30d237be85..8fda75123e4 100644
+--- a/db/seeds.d/07-provisioning_templates.rb
++++ b/db/seeds.d/07-provisioning_templates.rb
+@@ -7,14 +7,14 @@
+ # Template kinds
+ kinds = {}
+ TemplateKind.default_template_labels.keys.collect(&:to_sym).each do |type|
+-  kinds[type] = TemplateKind.find_by_name(type)
+-  kinds[type] ||= TemplateKind.create(:name => type)
++  kinds[type] = TemplateKind.unscoped.find_by_name(type)
++  kinds[type] ||= TemplateKind.unscoped.create(:name => type)
+   raise "Unable to create template kind: #{format_errors kinds[type]}" if kinds[type].nil? || kinds[type].errors.any?
+ end
+ 
+ # Provisioning templates
+-organizations = Organization.all
+-locations = Location.all
++organizations = Organization.unscoped.all
++locations = Location.unscoped.all
+ ProvisioningTemplate.without_auditing do
+   [
+     # Generic PXE files
+@@ -81,7 +81,6 @@
+     { :name => 'puppet.conf', :source => 'snippets/_puppet.conf.erb', :snippet => true },
+     { :name => 'puppet_setup', :source => 'snippets/_puppet_setup.erb', :snippet => true },
+     { :name => 'puppetlabs_repo', :source => 'snippets/_puppetlabs_repo.erb', :snippet => true },
+-    { :name => 'pxelinux_discovery', :source => 'snippets/_pxelinux_discovery.erb', :snippet => true },
+     { :name => 'redhat_register', :source => 'snippets/_redhat_register.erb', :snippet => true },
+     { :name => 'remote_execution_ssh_keys', :source => 'snippets/_remote_execution_ssh_keys.erb', :snippet => true },
+     { :name => 'saltstack_minion', :source => 'snippets/_saltstack_minion.erb', :snippet => true },
+@@ -95,7 +94,7 @@
+   ].each do |input|
+     contents = File.read(File.join("#{Rails.root}/app/views/unattended", input.delete(:source)))
+ 
+-    if (t = ProvisioningTemplate.find_by_name(input[:name])) && !audit_modified?(ProvisioningTemplate, input[:name])
++    if (t = ProvisioningTemplate.unscoped.find_by_name(input[:name])) && !audit_modified?(ProvisioningTemplate, input[:name])
+       if t.template != contents
+         t.template = contents
+         raise "Unable to update template #{t.name}: #{format_errors t}" unless t.save
+diff --git a/db/seeds.d/08-partition_tables.rb b/db/seeds.d/08-partition_tables.rb
+index 4c1152262bc..68495625f5e 100644
+--- a/db/seeds.d/08-partition_tables.rb
++++ b/db/seeds.d/08-partition_tables.rb
+@@ -1,6 +1,6 @@
+ # Partition tables
+-organizations = Organization.all
+-locations = Location.all
++organizations = Organization.unscoped.all
++locations = Location.unscoped.all
+ Ptable.without_auditing do
+   [
+     { :name => 'AutoYaST entire SCSI disk', :os_family => 'Suse', :source => 'autoyast/disklayout_scsi.erb' },
+@@ -19,7 +19,7 @@
+   ].each do |input|
+     contents = File.read(File.join("#{Rails.root}/app/views/unattended", input.delete(:source)))
+ 
+-    if (p = Ptable.find_by_name(input[:name])) && !audit_modified?(Ptable, input[:name])
++    if (p = Ptable.unscoped.find_by_name(input[:name])) && !audit_modified?(Ptable, input[:name])
+       if p.layout != contents
+         p.layout = contents
+         raise "Unable to update partition table: #{format_errors p}" unless p.save
+diff --git a/db/seeds.d/10-installation_media.rb b/db/seeds.d/10-installation_media.rb
+index 06286c8c7fa..959ef459515 100644
+--- a/db/seeds.d/10-installation_media.rb
++++ b/db/seeds.d/10-installation_media.rb
+@@ -1,4 +1,4 @@
+-os_suse = Operatingsystem.where(:type => "Suse") || Operatingsystem.where("name LIKE ?", "suse")
++os_suse = Operatingsystem.unscoped.where(:type => "Suse") || Operatingsystem.unscoped.where("name LIKE ?", "suse")
+ 
+ # Installation media: default mirrors
+ Medium.without_auditing do
+@@ -12,7 +12,7 @@
+     { :name => "Ubuntu mirror", :os_family => "Debian", :path => "http://archive.ubuntu.com/ubuntu" },
+     { :name => "CoreOS mirror", :os_family => "Coreos", :path => "http://$release.release.core-os.net" }
+   ].each do |input|
+-    next if Medium.where(['name = ? OR path = ?', input[:name], input[:path]]).any?
++    next if Medium.unscoped.where(['name = ? OR path = ?', input[:name], input[:path]]).any?
+     next if audit_modified? Medium, input[:name]
+     m = Medium.create input
+     raise "Unable to create medium: #{format_errors m}" if m.nil? || m.errors.any?
+diff --git a/test/active_support_test_case_helper.rb b/test/active_support_test_case_helper.rb
+index f6da26cd692..bee4f9e5893 100644
+--- a/test/active_support_test_case_helper.rb
++++ b/test/active_support_test_case_helper.rb
+@@ -9,6 +9,7 @@ class ActiveSupport::TestCase
+   setup :begin_gc_deferment
+   setup :reset_setting_cache
+   setup :skip_if_plugin_asked_to
++  setup :set_admin
+ 
+   teardown :reconsider_gc_deferment
+   teardown :clear_current_user
+@@ -40,6 +41,10 @@ def skip_if_plugin_asked_to
+     end
+   end
+ 
++  def set_admin
++    User.current = users(:admin)
++  end
++
+   def clear_current_user
+     User.current = nil
+   end
+@@ -125,7 +130,8 @@ def setup_users
+   def setup_user(operation, type = "", search = nil, user = :one)
+     @one = users(user)
+     as_admin do
+-      permission = Permission.find_by_name("#{operation}_#{type}") || FactoryGirl.create(:permission, :name => "#{operation}_#{type}")
++      permission = Permission.find_by_name("#{operation}_#{type}") ||
++        FactoryGirl.create(:permission, :name => "#{operation}_#{type}")
+       filter = FactoryGirl.build(:filter, :search => search)
+       filter.permissions = [ permission ]
+       role = Role.where(:name => "#{operation}_#{type}").first_or_create
+diff --git a/test/controllers/api/v1/auth_source_ldaps_controller_test.rb b/test/controllers/api/v1/auth_source_ldaps_controller_test.rb
+index 4e68d5dabbe..f67273e495b 100644
+--- a/test/controllers/api/v1/auth_source_ldaps_controller_test.rb
++++ b/test/controllers/api/v1/auth_source_ldaps_controller_test.rb
+@@ -19,7 +19,7 @@ class Api::V1::AuthSourceLdapsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create auth_source_ldap" do
+-    assert_difference('AuthSourceLdap.count', 1) do
++    assert_difference('AuthSourceLdap.unscoped.count', 1) do
+       post :create, { :auth_source_ldap => valid_attrs }
+     end
+     assert_response :success
+@@ -31,7 +31,7 @@ class Api::V1::AuthSourceLdapsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy auth_source_ldap" do
+-    assert_difference('AuthSourceLdap.count', -1) do
++    assert_difference('AuthSourceLdap.unscoped.count', -1) do
+       auth = auth_sources(:one)
+       User.where(:auth_source_id => auth.id).update_all(:auth_source_id => nil)
+       delete :destroy, { :id => auth.id }
+diff --git a/test/controllers/api/v1/compute_resources_controller_test.rb b/test/controllers/api/v1/compute_resources_controller_test.rb
+index a9b44a80279..2659f8ad203 100644
+--- a/test/controllers/api/v1/compute_resources_controller_test.rb
++++ b/test/controllers/api/v1/compute_resources_controller_test.rb
+@@ -35,12 +35,13 @@ def teardown
+ 
+   test "should update compute resource" do
+     put :update, { :id => compute_resources(:mycompute).to_param, :compute_resource => { :description => "new_description" } }
+-    assert_equal "new_description", ComputeResource.find_by_name('mycompute').description
++    assert_equal "new_description",
++      ComputeResource.unscoped.find_by_name('mycompute').description
+     assert_response :success
+   end
+ 
+   test "should destroy compute resource" do
+-    assert_difference('ComputeResource.count', -1) do
++    assert_difference('ComputeResource.unscoped.count', -1) do
+       delete :destroy, { :id => compute_resources(:yourcompute).id }
+     end
+     assert_response :success
+@@ -66,12 +67,13 @@ def teardown
+   test "should update compute resource for owner" do
+     setup_user 'edit', 'compute_resources', "id = #{compute_resources(:mycompute).id}"
+     put :update, { :id => compute_resources(:mycompute).to_param, :compute_resource => { :description => "new_description" } }
+-    assert_equal "new_description", ComputeResource.find_by_name('mycompute').description
++    assert_equal "new_description",
++      ComputeResource.unscoped.find_by_name('mycompute').description
+     assert_response :success
+   end
+ 
+   test "should destroy compute resource for owner" do
+-    assert_difference('ComputeResource.count', -1) do
++    assert_difference('ComputeResource.unscoped.count', -1) do
+       setup_user 'destroy', 'compute_resources', "id = #{compute_resources(:mycompute).id}"
+       delete :destroy, { :id => compute_resources(:mycompute).id }
+     end
+diff --git a/test/controllers/api/v1/config_templates_controller_test.rb b/test/controllers/api/v1/config_templates_controller_test.rb
+index dfb523402b8..1a579460242 100644
+--- a/test/controllers/api/v1/config_templates_controller_test.rb
++++ b/test/controllers/api/v1/config_templates_controller_test.rb
+@@ -51,7 +51,7 @@ class Api::V1::ConfigTemplatesControllerTest < ActionController::TestCase
+     config_template = templates(:pxekickstart)
+     delete :destroy, { :id => config_template.to_param }
+     assert_response :unprocessable_entity
+-    assert ProvisioningTemplate.exists?(config_template.id)
++    assert ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "should destroy" do
+@@ -59,7 +59,7 @@ class Api::V1::ConfigTemplatesControllerTest < ActionController::TestCase
+     config_template.os_default_templates.clear
+     delete :destroy, { :id => config_template.to_param }
+     assert_response :success
+-    refute ProvisioningTemplate.exists?(config_template.id)
++    refute ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "should build pxe menu" do
+diff --git a/test/controllers/api/v1/domains_controller_test.rb b/test/controllers/api/v1/domains_controller_test.rb
+index ee5a002705f..e5981ed359d 100644
+--- a/test/controllers/api/v1/domains_controller_test.rb
++++ b/test/controllers/api/v1/domains_controller_test.rb
+@@ -27,8 +27,8 @@ class Api::V1::DomainsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should update valid domain" do
+-    put :update, { :id => Domain.first.to_param, :domain => { :name => "domain.new" } }
+-    assert_equal "domain.new", Domain.first.name
++    put :update, { :id => Domain.unscoped.first.to_param, :domain => { :name => "domain.new" } }
++    assert_equal "domain.new", Domain.unscoped.first.name
+     assert_response :success
+   end
+ 
+diff --git a/test/controllers/api/v1/environments_controller_test.rb b/test/controllers/api/v1/environments_controller_test.rb
+index 52d2e784912..81e509e34d1 100644
+--- a/test/controllers/api/v1/environments_controller_test.rb
++++ b/test/controllers/api/v1/environments_controller_test.rb
+@@ -19,7 +19,7 @@ class Api::V1::EnvironmentsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create environment" do
+-    assert_difference('Environment.count') do
++    assert_difference('Environment.unscoped.count') do
+       post :create, { :environment => development_environment }
+     end
+     assert_response :success
+@@ -31,7 +31,7 @@ class Api::V1::EnvironmentsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy environments" do
+-    assert_difference('Environment.count', -1) do
++    assert_difference('Environment.unscoped.count', -1) do
+       delete :destroy, { :id => environments(:testing).to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v1/hostgroups_controller_test.rb b/test/controllers/api/v1/hostgroups_controller_test.rb
+index 040f586fb32..ec0968c2ac0 100644
+--- a/test/controllers/api/v1/hostgroups_controller_test.rb
++++ b/test/controllers/api/v1/hostgroups_controller_test.rb
+@@ -35,7 +35,7 @@ def valid_attrs_with_root(extra_attrs = {})
+   end
+ 
+   test "should create hostgroup" do
+-    assert_difference('Hostgroup.count') do
++    assert_difference('Hostgroup.unscoped.count') do
+       post :create, { :hostgroup => valid_attrs }
+     end
+     assert_response :success
+@@ -48,7 +48,7 @@ def valid_attrs_with_root(extra_attrs = {})
+ 
+   test "should destroy hostgroups" do
+     hostgroup = FactoryGirl.create(:hostgroup)
+-    assert_difference('Hostgroup.count', -1) do
++    assert_difference('Hostgroup.unscoped.count', -1) do
+       delete :destroy, :id => hostgroup
+     end
+     assert_response :success
+@@ -56,14 +56,14 @@ def valid_attrs_with_root(extra_attrs = {})
+ 
+   test "blocks API deletion of hosts with children" do
+     assert hostgroups(:parent).has_children?
+-    assert_no_difference('Hostgroup.count') do
++    assert_no_difference('Hostgroup.unscoped.count') do
+       delete :destroy, { :id => hostgroups(:parent).to_param }
+     end
+     assert_response :conflict
+   end
+ 
+   test "should create nested hostgroup with a parent" do
+-    assert_difference('Hostgroup.count') do
++    assert_difference('Hostgroup.unscoped.count') do
+       post :create, { :hostgroup => valid_attrs.merge(:parent_id => hostgroups(:common).id) }
+     end
+     assert_response :success
+@@ -73,7 +73,7 @@ def valid_attrs_with_root(extra_attrs = {})
+   test "should update a hostgroup to nested by passing parent_id" do
+     put :update, { :id => hostgroups(:db).to_param, :hostgroup => {:parent_id => hostgroups(:common).id} }
+     assert_response :success
+-    assert_equal hostgroups(:common).id.to_s, Hostgroup.find_by_name("db").ancestry
++    assert_equal hostgroups(:common).id.to_s, Hostgroup.unscoped.find_by_name("db").ancestry
+   end
+ 
+   private
+diff --git a/test/controllers/api/v1/media_controller_test.rb b/test/controllers/api/v1/media_controller_test.rb
+index c41814ffc8d..175a36f7fa2 100644
+--- a/test/controllers/api/v1/media_controller_test.rb
++++ b/test/controllers/api/v1/media_controller_test.rb
+@@ -23,7 +23,7 @@ class Api::V1::MediaControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create medium" do
+-    assert_difference('Medium.count', +1) do
++    assert_difference('Medium.unscoped.count', +1) do
+       post :create, { :medium => new_medium }
+     end
+     assert_response :created
+@@ -37,7 +37,7 @@ class Api::V1::MediaControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy medium" do
+-    assert_difference('Medium.count', -1) do
++    assert_difference('Medium.unscoped.count', -1) do
+       delete :destroy, { :id => media(:unused).id.to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v1/ptables_controller_test.rb b/test/controllers/api/v1/ptables_controller_test.rb
+index 94636403fe8..90ac5f207bc 100644
+--- a/test/controllers/api/v1/ptables_controller_test.rb
++++ b/test/controllers/api/v1/ptables_controller_test.rb
+@@ -23,7 +23,7 @@ def setup
+   end
+ 
+   test "should create ptable" do
+-    assert_difference('Ptable.count') do
++    assert_difference('Ptable.unscoped.count') do
+       post :create, { :ptable => valid_attrs }
+     end
+     assert_response :success
+@@ -37,14 +37,14 @@ def setup
+   test "should NOT destroy ptable in use" do
+     FactoryGirl.create(:host, :ptable_id => @ptable.id)
+ 
+-    assert_difference('Ptable.count', -0) do
++    assert_difference('Ptable.unscoped.count', -0) do
+       delete :destroy, { :id => @ptable.to_param }
+     end
+     assert_response :unprocessable_entity
+   end
+ 
+   test "should destroy ptable that is NOT in use" do
+-    assert_difference('Ptable.count', -1) do
++    assert_difference('Ptable.unscoped.count', -1) do
+       delete :destroy, { :id => @ptable.to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v1/smart_proxies_controller_test.rb b/test/controllers/api/v1/smart_proxies_controller_test.rb
+index e52283d895a..cf12029ca9c 100644
+--- a/test/controllers/api/v1/smart_proxies_controller_test.rb
++++ b/test/controllers/api/v1/smart_proxies_controller_test.rb
+@@ -44,7 +44,7 @@ class Api::V1::SmartProxiesControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create smart_proxy" do
+-    assert_difference('SmartProxy.count') do
++    assert_difference('SmartProxy.unscoped.count') do
+       post :create, { :smart_proxy => valid_attrs }
+     end
+     assert_response :success
+@@ -56,7 +56,7 @@ class Api::V1::SmartProxiesControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy smart_proxy" do
+-    assert_difference('SmartProxy.count', -1) do
++    assert_difference('SmartProxy.unscoped.count', -1) do
+       delete :destroy, { :id => smart_proxies(:four).to_param }
+     end
+     assert_response :success
+@@ -128,7 +128,7 @@ def setup_import_classes
+       Puppetclass.destroy_all
+       Environment.destroy_all
+     end
+-    assert_difference('Environment.count', 2) do
++    assert_difference('Environment.unscoped.count', 2) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -144,7 +144,7 @@ def setup_import_classes
+         Hostgroup.update_all(:environment_id => nil)
+         Puppetclass.destroy_all
+         Environment.destroy_all
+-        assert_difference('Puppetclass.count', 1) do
++        assert_difference('Puppetclass.unscoped.count', 1) do
+           post :import_puppetclasses,
+                { :id => smart_proxies(:puppetmaster).id }.merge(dryrun_param),
+                set_session_user
+@@ -161,7 +161,7 @@ def setup_import_classes
+       Hostgroup.update_all(:environment_id => nil)
+       Puppetclass.destroy_all
+       Environment.destroy_all
+-      assert_difference('Puppetclass.count', 0) do
++      assert_difference('Puppetclass.unscoped.count', 0) do
+         post :import_puppetclasses, { :id => smart_proxies(:puppetmaster).id, :dryrun => true }, set_session_user
+       end
+     end
+@@ -173,7 +173,7 @@ def setup_import_classes
+     as_admin do
+       Environment.create!(:name => 'xyz')
+     end
+-    assert_difference('Environment.count', -1) do
++    assert_difference('Environment.unscoped.count', -1) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -182,7 +182,7 @@ def setup_import_classes
+   test "should obsolete puppetclasses" do
+     setup_import_classes
+     as_admin do
+-      assert_difference('Environment.find_by_name("env1").puppetclasses.count', -2) do
++      assert_difference('Environment.unscoped.find_by_name("env1").puppetclasses.count', -2) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+       end
+     end
+@@ -192,7 +192,7 @@ def setup_import_classes
+   test "should update puppetclass smart class parameters" do
+     setup_import_classes
+     LookupKey.destroy_all
+-    assert_difference('LookupKey.count', 1) do
++    assert_difference('LookupKey.unscoped.count', 1) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -202,7 +202,7 @@ def setup_import_classes
+     setup_import_classes
+     Puppetclass.find_by_name('b').destroy
+     Puppetclass.find_by_name('c').destroy
+-    assert_difference('Environment.count', 0) do
++    assert_difference('Environment.unscoped.count', 0) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -215,7 +215,7 @@ def setup_import_classes
+     as_admin do
+       env_name = 'env1'
+       assert Environment.find_by_name(env_name).destroy
+-      assert_difference('Environment.count', 1) do
++      assert_difference('Environment.unscoped.count', 1) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :environment_id => env_name}, set_session_user
+       end
+       assert_response :success
+diff --git a/test/controllers/api/v1/subnets_controller_test.rb b/test/controllers/api/v1/subnets_controller_test.rb
+index 89ef5f1006c..fa61574a1a8 100644
+--- a/test/controllers/api/v1/subnets_controller_test.rb
++++ b/test/controllers/api/v1/subnets_controller_test.rb
+@@ -20,19 +20,19 @@ def test_index
+   end
+ 
+   test "should create IPv4 subnet" do
+-    assert_difference('Subnet::Ipv4.count') do
++    assert_difference('Subnet::Ipv4.unscoped.count') do
+       post :create, { :subnet => valid_v4_attrs }
+     end
+     assert_response :success
+-    assert_equal 'Subnet::Ipv4', Subnet.find_by_name('QA2').type
++    assert_equal 'Subnet::Ipv4', Subnet.unscoped.find_by_name('QA2').type
+   end
+ 
+   test "should create IPv6 subnet" do
+-    assert_difference('Subnet::Ipv6.count') do
++    assert_difference('Subnet::Ipv6.unscoped.count') do
+       post :create, { :subnet => valid_v6_attrs }
+     end
+     assert_response :success
+-    assert_equal 'Subnet::Ipv6', Subnet.find_by_name('QA2').type
++    assert_equal 'Subnet::Ipv6', Subnet.unscoped.find_by_name('QA2').type
+   end
+ 
+   test "does not create subnet with non-existent domain" do
+@@ -46,14 +46,14 @@ def test_index
+   end
+ 
+   test "should destroy subnets" do
+-    assert_difference('Subnet.count', -1) do
++    assert_difference('Subnet.unscoped.count', -1) do
+       delete :destroy, { :id => subnets(:four).to_param }
+     end
+     assert_response :success
+   end
+ 
+   test "should NOT destroy subnet that is in use" do
+-    assert_difference('Subnet.count', 0) do
++    assert_difference('Subnet.unscoped.count', 0) do
+       delete :destroy, { :id => subnets(:one).to_param }
+     end
+     assert_response :unprocessable_entity
+diff --git a/test/controllers/api/v1/users_controller_test.rb b/test/controllers/api/v1/users_controller_test.rb
+index 1b57c58a48e..689e29fd794 100644
+--- a/test/controllers/api/v1/users_controller_test.rb
++++ b/test/controllers/api/v1/users_controller_test.rb
+@@ -31,7 +31,7 @@ def setup
+     put :update, { :id => user.id, :user => valid_attrs }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.login == "johnsmith"
+   end
+ 
+@@ -40,7 +40,7 @@ def setup
+     put :update, { :id => user.id, :user => { :admin => true } }
+ 
+     assert_response :success
+-    assert User.find_by_id(user.id).admin?
++    assert User.unscoped.find_by_id(user.id).admin?
+   end
+ 
+   test "should not remove the default role" do
+@@ -51,7 +51,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith" } }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+ 
+     assert mod_user.roles =([roles(:default_role)])
+   end
+@@ -64,7 +64,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith", :password => "dummy", :password_confirmation => "dummy" } }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.matching_password?("dummy")
+   end
+ 
+@@ -76,7 +76,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith", :password => "dummy", :password_confirmation => "DUMMY" } }
+     assert_response :unprocessable_entity
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.matching_password?("changeme")
+   end
+ 
+@@ -86,7 +86,7 @@ def setup
+     delete :destroy, { :id => user.id }
+     assert_response :success
+ 
+-    assert !User.exists?(user.id)
++    refute User.unscoped.exists?(user.id)
+   end
+ 
+   test "should not delete same user" do
+@@ -100,7 +100,7 @@ def setup
+       response = ActiveSupport::JSON.decode(@response.body)
+       assert response['details'] == "You are trying to delete your own account"
+       assert response['message'] == "Access denied"
+-      assert User.exists?(user.id)
++      assert User.unscoped.exists?(user.id)
+     end
+   end
+ 
+@@ -138,7 +138,7 @@ def user_one_as_anonymous_viewer
+         :admin => true, :login => 'new_admin', :auth_source_id => auth_sources(:one).id }
+       }
+       assert_response :success
+-      assert User.find_by_login('new_admin').admin?
++      assert User.unscoped.find_by_login('new_admin').admin?
+     end
+   end
+ 
+@@ -175,7 +175,7 @@ def user_one_as_anonymous_viewer
+     assert_response :forbidden
+   end
+ 
+-  test "#update should allow updating mysel without any special permissions" do
++  test "#update should allow updating myself without any special permissions" do
+     user = User.create :login => "foo", :mail => "foo@bar.com", :auth_source => auth_sources(:one)
+     as_user user do
+       put :update, { :id => user.id, :user => valid_attrs }
+diff --git a/test/controllers/api/v2/auth_source_ldaps_controller_test.rb b/test/controllers/api/v2/auth_source_ldaps_controller_test.rb
+index f6bd44f9e3a..97f337a5fb1 100644
+--- a/test/controllers/api/v2/auth_source_ldaps_controller_test.rb
++++ b/test/controllers/api/v2/auth_source_ldaps_controller_test.rb
+@@ -19,7 +19,7 @@ class Api::V2::AuthSourceLdapsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create auth_source_ldap" do
+-    assert_difference('AuthSourceLdap.count', 1) do
++    assert_difference('AuthSourceLdap.unscoped.count', 1) do
+       post :create, { :auth_source_ldap => valid_attrs }
+     end
+     assert_response :created
+@@ -31,7 +31,7 @@ class Api::V2::AuthSourceLdapsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy auth_source_ldap" do
+-    assert_difference('AuthSourceLdap.count', -1) do
++    assert_difference('AuthSourceLdap.unscoped.count', -1) do
+       auth = auth_sources(:one)
+       User.where(:auth_source_id => auth.id).update_all(:auth_source_id => nil)
+       delete :destroy, { :id => auth.id }
+diff --git a/test/controllers/api/v2/compute_resources_controller_test.rb b/test/controllers/api/v2/compute_resources_controller_test.rb
+index 469dcadf310..87350870c3d 100644
+--- a/test/controllers/api/v2/compute_resources_controller_test.rb
++++ b/test/controllers/api/v2/compute_resources_controller_test.rb
+@@ -35,12 +35,13 @@ def teardown
+ 
+   test "should update compute resource" do
+     put :update, { :id => compute_resources(:mycompute).to_param, :compute_resource => { :description => "new_description" } }
+-    assert_equal "new_description", ComputeResource.find_by_name('mycompute').description
++    assert_equal "new_description",
++      ComputeResource.unscoped.find_by_name('mycompute').description
+     assert_response :success
+   end
+ 
+   test "should destroy compute resource" do
+-    assert_difference('ComputeResource.count', -1) do
++    assert_difference('ComputeResource.unscoped.count', -1) do
+       delete :destroy, { :id => compute_resources(:yourcompute).id }
+     end
+     assert_response :success
+@@ -66,12 +67,13 @@ def teardown
+   test "should update compute resource for owner" do
+     setup_user 'edit', 'compute_resources', "id = #{compute_resources(:mycompute).id}"
+     put :update, { :id => compute_resources(:mycompute).to_param, :compute_resource => { :description => "new_description" } }
+-    assert_equal "new_description", ComputeResource.find_by_name('mycompute').description
++    assert_equal "new_description",
++      ComputeResource.unscoped.find_by_name('mycompute').description
+     assert_response :success
+   end
+ 
+   test "should destroy compute resource for owner" do
+-    assert_difference('ComputeResource.count', -1) do
++    assert_difference('ComputeResource.unscoped.count', -1) do
+       setup_user 'destroy', 'compute_resources', "id = #{compute_resources(:mycompute).id}"
+       delete :destroy, { :id => compute_resources(:mycompute).id }
+     end
+diff --git a/test/controllers/api/v2/config_reports_controller_test.rb b/test/controllers/api/v2/config_reports_controller_test.rb
+index f1ac1a12766..2e08b9ad92b 100644
+--- a/test/controllers/api/v2/config_reports_controller_test.rb
++++ b/test/controllers/api/v2/config_reports_controller_test.rb
+@@ -48,9 +48,10 @@ def test_create_duplicate
+       Setting[:require_ssl_smart_proxies] = false
+ 
+       proxy = smart_proxies(:puppetmaster)
++      proxy.update_attribute(:url, 'http://configreports.foreman')
+       host = URI.parse(proxy.url).host
+       Resolv.any_instance.stubs(:getnames).returns([host])
+-      post :create, {:config_report => create_a_puppet_transaction_report }
++      post :create, { :config_report => create_a_puppet_transaction_report }
+       assert_equal proxy, @controller.detected_proxy
+       assert_response :created
+     end
+@@ -61,7 +62,7 @@ def test_create_duplicate
+ 
+       Resolv.any_instance.stubs(:getnames).returns(['another.host'])
+       post :create, {:config_report => create_a_puppet_transaction_report }
+-      assert_equal 403, @response.status
++      assert_response :forbidden
+     end
+ 
+     test 'hosts with a registered smart proxy and SSL cert should create a report successfully' do
+@@ -83,7 +84,7 @@ def test_create_duplicate
+       @request.env['SSL_CLIENT_S_DN'] = 'CN=another.host'
+       @request.env['SSL_CLIENT_VERIFY'] = 'SUCCESS'
+       post :create, {:config_report => create_a_puppet_transaction_report }
+-      assert_equal 403, @response.status
++      assert_response :forbidden
+     end
+ 
+     test 'hosts with an unverified SSL cert should not be able to create a report' do
+@@ -94,7 +95,7 @@ def test_create_duplicate
+       @request.env['SSL_CLIENT_S_DN'] = 'CN=else.where'
+       @request.env['SSL_CLIENT_VERIFY'] = 'FAILED'
+       post :create, {:config_report => create_a_puppet_transaction_report }
+-      assert_equal 403, @response.status
++      assert_response :forbidden
+     end
+ 
+     test 'when "require_ssl_smart_proxies" and "require_ssl" are true, HTTP requests should not be able to create a report' do
+@@ -104,7 +105,7 @@ def test_create_duplicate
+ 
+       Resolv.any_instance.stubs(:getnames).returns(['else.where'])
+       post :create, {:config_report => create_a_puppet_transaction_report }
+-      assert_equal 403, @response.status
++      assert_response :forbidden
+     end
+ 
+     test 'when "require_ssl_smart_proxies" is true and "require_ssl" is false, HTTP requests should be able to create reports' do
+@@ -142,7 +143,7 @@ def test_create_duplicate
+       delete :destroy, { :id => report.to_param }
+     end
+     assert_response :success
+-    refute Report.find_by_id(report.id)
++    refute Report.unscoped.find_by_id(report.id)
+   end
+ 
+   test "should get reports for given host only" do
+diff --git a/test/controllers/api/v2/config_templates_controller_test.rb b/test/controllers/api/v2/config_templates_controller_test.rb
+index 2a95c5021ce..cc9b45ac5b8 100644
+--- a/test/controllers/api/v2/config_templates_controller_test.rb
++++ b/test/controllers/api/v2/config_templates_controller_test.rb
+@@ -65,7 +65,7 @@ class Api::V2::ConfigTemplatesControllerTest < ActionController::TestCase
+     config_template = templates(:pxekickstart)
+     delete :destroy, { :id => config_template.to_param }
+     assert_response 422
+-    assert ProvisioningTemplate.exists?(config_template.id)
++    assert ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "should destroy" do
+@@ -73,7 +73,7 @@ class Api::V2::ConfigTemplatesControllerTest < ActionController::TestCase
+     config_template.os_default_templates.clear
+     delete :destroy, { :id => config_template.to_param }
+     assert_response :ok
+-    refute ProvisioningTemplate.exists?(config_template.id)
++    refute ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "should build pxe menu" do
+@@ -126,6 +126,8 @@ class Api::V2::ConfigTemplatesControllerTest < ActionController::TestCase
+ 
+   test "should show template with non-admin user" do
+     setup_user('view', 'provisioning_templates')
++    templates(:pxekickstart).organizations = User.current.organizations
++    templates(:pxekickstart).locations = User.current.locations
+     get :show, { :id => templates(:pxekickstart).to_param }, set_session_user.merge(:user => User.current.id)
+     assert_response :success
+   end
+diff --git a/test/controllers/api/v2/domains_controller_test.rb b/test/controllers/api/v2/domains_controller_test.rb
+index 17bcc030309..48ea9e3d9fb 100644
+--- a/test/controllers/api/v2/domains_controller_test.rb
++++ b/test/controllers/api/v2/domains_controller_test.rb
+@@ -40,7 +40,7 @@ class Api::V2::DomainsControllerTest < ActionController::TestCase
+ 
+   test "should update valid domain" do
+     put :update, { :id => Domain.first.to_param, :domain => { :name => "domain.new" } }
+-    assert_equal "domain.new", Domain.first.name
++    assert_equal "domain.new", Domain.unscoped.first.name
+     assert_response :success
+   end
+ 
+@@ -69,15 +69,15 @@ def setup
+   test "should get domains for location only" do
+     get :index, {:location_id => taxonomies(:location1).id }
+     assert_response :success
+-    assert_equal 2, assigns(:domains).length
+-    assert_equal assigns(:domains), [domains(:mydomain), domains(:yourdomain)]
++    assert_equal taxonomies(:location1).domains.length, assigns(:domains).length
++    assert_equal assigns(:domains), taxonomies(:location1).domains
+   end
+ 
+   test "should get domains for organization only" do
+     get :index, {:organization_id => taxonomies(:organization1).id }
+     assert_response :success
+-    assert_equal 1, assigns(:domains).length
+-    assert_equal assigns(:domains), [domains(:mydomain)]
++    assert_equal taxonomies(:organization1).domains.length, assigns(:domains).length
++    assert_equal taxonomies(:organization1).domains, assigns(:domains)
+   end
+ 
+   test "should get domains for both location and organization" do
+diff --git a/test/controllers/api/v2/environments_controller_test.rb b/test/controllers/api/v2/environments_controller_test.rb
+index 5bed9566363..16a4bf7bafd 100644
+--- a/test/controllers/api/v2/environments_controller_test.rb
++++ b/test/controllers/api/v2/environments_controller_test.rb
+@@ -28,7 +28,7 @@ class Api::V2::EnvironmentsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create environment" do
+-    assert_difference('Environment.count') do
++    assert_difference('Environment.unscoped.count') do
+       post :create, { :environment => development_environment }
+     end
+     assert_response :created
+@@ -40,7 +40,7 @@ class Api::V2::EnvironmentsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy environments" do
+-    assert_difference('Environment.count', -1) do
++    assert_difference('Environment.unscoped.count', -1) do
+       delete :destroy, { :id => environments(:testing).to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v2/hostgroups_controller_test.rb b/test/controllers/api/v2/hostgroups_controller_test.rb
+index d1ca3bd8c44..b22893f588a 100644
+--- a/test/controllers/api/v2/hostgroups_controller_test.rb
++++ b/test/controllers/api/v2/hostgroups_controller_test.rb
+@@ -35,7 +35,7 @@ def valid_attrs_with_root(extra_attrs = {})
+   end
+ 
+   test "should create hostgroup" do
+-    assert_difference('Hostgroup.count') do
++    assert_difference('Hostgroup.unscoped.count') do
+       post :create, { :hostgroup => valid_attrs }
+     end
+     assert_response :created
+@@ -47,14 +47,14 @@ def valid_attrs_with_root(extra_attrs = {})
+   end
+ 
+   test "should destroy hostgroups" do
+-    assert_difference('Hostgroup.count', -1) do
++    assert_difference('Hostgroup.unscoped.count', -1) do
+       delete :destroy, { :id => hostgroups(:unusual).to_param }
+     end
+     assert_response :success
+   end
+ 
+   test "should clone hostgroup" do
+-    assert_difference('Hostgroup.count') do
++    assert_difference('Hostgroup.unscoped.count') do
+       post :clone, { :id => hostgroups(:common).to_param, :name => Time.now.utc.to_s }
+     end
+     assert_response :success
+@@ -62,14 +62,14 @@ def valid_attrs_with_root(extra_attrs = {})
+ 
+   test "blocks API deletion of hosts with children" do
+     assert hostgroups(:parent).has_children?
+-    assert_no_difference('Hostgroup.count') do
++    assert_no_difference('Hostgroup.unscoped.count') do
+       delete :destroy, { :id => hostgroups(:parent).to_param }
+     end
+     assert_response :conflict
+   end
+ 
+   test "should create nested hostgroup with a parent" do
+-    assert_difference('Hostgroup.count') do
++    assert_difference('Hostgroup.unscoped.count') do
+       post :create, { :hostgroup => valid_attrs.merge(:parent_id => hostgroups(:common).id) }
+     end
+     assert_response :success
+@@ -79,7 +79,8 @@ def valid_attrs_with_root(extra_attrs = {})
+   test "should update a hostgroup to nested by passing parent_id" do
+     put :update, { :id => hostgroups(:db).to_param, :hostgroup => {:parent_id => hostgroups(:common).id} }
+     assert_response :success
+-    assert_equal hostgroups(:common).id.to_s, Hostgroup.find_by_name("db").ancestry
++    assert_equal hostgroups(:common).id.to_s,
++      Hostgroup.unscoped.find_by_name("db").ancestry
+   end
+ 
+   test "user without view_params permission can't see hostgroup parameters" do
+diff --git a/test/controllers/api/v2/hosts_controller_test.rb b/test/controllers/api/v2/hosts_controller_test.rb
+index 6f8a63a2874..91ef2ea5dd9 100644
+--- a/test/controllers/api/v2/hosts_controller_test.rb
++++ b/test/controllers/api/v2/hosts_controller_test.rb
+@@ -235,9 +235,14 @@ def expect_attribute_modifier(modifier_class, args)
+     post :create, { :host => basic_attrs_with_profile(compute_attrs).merge(:interfaces_attributes =>  nics_attrs) }
+     assert_response :created
+ 
+-    assert_equal compute_attrs.vm_interfaces.count, last_record.interfaces.count
+-    assert_equal expected_compute_attributes(compute_attrs, 0), last_record.interfaces.find_by_mac('00:11:22:33:44:00').compute_attributes
+-    assert_equal expected_compute_attributes(compute_attrs, 1), last_record.interfaces.find_by_mac('00:11:22:33:44:01').compute_attributes
++    as_admin do
++      assert_equal compute_attrs.vm_interfaces.count,
++        last_record.interfaces.count
++      assert_equal expected_compute_attributes(compute_attrs, 0),
++        last_record.interfaces.find_by_mac('00:11:22:33:44:00').compute_attributes
++      assert_equal expected_compute_attributes(compute_attrs, 1),
++        last_record.interfaces.find_by_mac('00:11:22:33:44:01').compute_attributes
++    end
+   end
+ 
+   test "should create host with managed is false if parameter is passed" do
+@@ -280,10 +285,12 @@ def expect_attribute_modifier(modifier_class, args)
+     put :update, { :id => @host.to_param, :host => basic_attrs_with_profile(compute_attrs) }
+     assert_response :success
+ 
+-    @host.interfaces.reload
+-    assert_equal compute_attrs.vm_interfaces.count, @host.interfaces.count
+-    assert_equal expected_compute_attributes(compute_attrs, 0), @host.interfaces.find_by_primary(true).compute_attributes
+-    assert_equal expected_compute_attributes(compute_attrs, 1), @host.interfaces.find_by_primary(false).compute_attributes
++    as_admin do
++      @host.interfaces.reload
++      assert_equal compute_attrs.vm_interfaces.count, @host.interfaces.count
++      assert_equal expected_compute_attributes(compute_attrs, 0), @host.interfaces.find_by_primary(true).compute_attributes
++      assert_equal expected_compute_attributes(compute_attrs, 1), @host.interfaces.find_by_primary(false).compute_attributes
++    end
+   end
+ 
+   test "should update host without :host root node and rails wraps it correctly" do
+@@ -488,7 +495,7 @@ def test_create_invalid
+     facts['foreman_hostgroup'] = hostgroup.title
+     post :facts, {:name => hostname, :facts => facts}
+     assert_response :success
+-    assert_equal hostgroup, Host.find_by(:name => hostname).hostgroup
++    assert_equal hostgroup.id, Host.find_by(:name => hostname).hostgroup_id
+   end
+ 
+   test 'assign hostgroup attributes when foreman_hostgroup present in facts' do
+@@ -521,6 +528,7 @@ def test_create_invalid
+     Setting[:require_ssl_smart_proxies] = false
+ 
+     proxy = smart_proxies(:puppetmaster)
++    proxy.update_attribute(:url, 'https://factsimporter.foreman')
+     host = URI.parse(proxy.url).host
+     Resolv.any_instance.stubs(:getnames).returns([host])
+     hostname = fact_json['name']
+diff --git a/test/controllers/api/v2/locations_controller_test.rb b/test/controllers/api/v2/locations_controller_test.rb
+index 7633bf725c8..d6294bd2d44 100644
+--- a/test/controllers/api/v2/locations_controller_test.rb
++++ b/test/controllers/api/v2/locations_controller_test.rb
+@@ -65,7 +65,7 @@ def setup
+   end
+ 
+   test "should destroy location if hosts do not use it" do
+-    assert_difference('Location.count', -1) do
++    assert_difference('Location.unscoped.count', -1) do
+       delete :destroy, { :id => taxonomies(:location2).to_param }
+     end
+     assert_response :success
+@@ -86,7 +86,7 @@ def setup
+ 
+   test "should dissociate hosts from the destroyed location" do
+     host = FactoryGirl.create(:host, :location => taxonomies(:location1))
+-    assert_difference('Location.count', -1) do
++    assert_difference('Location.unscoped.count', -1) do
+       delete :destroy, { :id => taxonomies(:location1).to_param }
+     end
+     assert_response :success
+@@ -95,11 +95,20 @@ def setup
+ 
+   test "should update *_ids. test for domain_ids" do
+     # ignore all but Domain
+-    @location.ignore_types = ["Hostgroup", "Environment", "User", "Medium", "Subnet", "SmartProxy", "ProvisioningTemplate", "ComputeResource", "Realm"]
++    @location.ignore_types = ["Hostgroup", "Environment", "User", "Medium",
++                              "Subnet", "SmartProxy", "ProvisioningTemplate",
++                              "ComputeResource", "Realm"]
+     as_admin do
+       @location.save(:validate => false)
+       assert_difference('@location.domains.count', 2) do
+-        put :update, { :id => @location.to_param, :location => { :domain_ids => Domain.pluck(:id) } }
++        put :update, {
++          :id => @location.to_param,
++          :location => { :domain_ids => Domain.unscoped.pluck(:id) }
++        }
++        User.current = users(:admin)
++        # as_admin gets invalidated after the call, so we need to restore it
++        # in order to make the call to @location.domains.count  in the right
++        # context
+       end
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v2/media_controller_test.rb b/test/controllers/api/v2/media_controller_test.rb
+index 8cdf380f938..41dd28eaa43 100644
+--- a/test/controllers/api/v2/media_controller_test.rb
++++ b/test/controllers/api/v2/media_controller_test.rb
+@@ -23,7 +23,7 @@ class Api::V2::MediaControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create medium" do
+-    assert_difference('Medium.count', +1) do
++    assert_difference('Medium.unscoped.count', +1) do
+       post :create, { :medium => new_medium }
+     end
+     assert_response :created
+@@ -37,7 +37,7 @@ class Api::V2::MediaControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy medium" do
+-    assert_difference('Medium.count', -1) do
++    assert_difference('Medium.unscoped.count', -1) do
+       delete :destroy, { :id => media(:unused).id.to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v2/parameters_controller_test.rb b/test/controllers/api/v2/parameters_controller_test.rb
+index 3813ad9a6fc..5bb3d1f6e8a 100644
+--- a/test/controllers/api/v2/parameters_controller_test.rb
++++ b/test/controllers/api/v2/parameters_controller_test.rb
+@@ -157,31 +157,36 @@ def setup
+   test "should update nested host parameter" do
+     put :update, { :host_id => @host.to_param, :id => @host.parameters.first.to_param, :parameter => valid_attrs }
+     assert_response :success
+-    assert_equal '123', Host.find_by_name(@host.name).parameters.order("parameters.updated_at").last.value
++    assert_equal '123', Host.unscoped.find_by_name(@host.name).parameters.
++      order("parameters.updated_at").last.value
+   end
+ 
+   test "should update nested domain parameter" do
+     put :update, { :domain_id => domains(:mydomain).to_param, :id => parameters(:domain).to_param, :parameter => valid_attrs }
+     assert_response :success
+-    assert_equal Domain.find_by_name("mydomain.net").parameters.order("parameters.updated_at").last.value, "123"
++    assert_equal Domain.unscoped.find_by_name("mydomain.net").parameters.
++      order("parameters.updated_at").last.value, "123"
+   end
+ 
+   test "should update nested subnet parameter" do
+     put :update, { :subnet_id => subnets(:five).to_param, :id => parameters(:subnet).to_param, :parameter => valid_attrs }
+     assert_response :success
+-    assert_equal Subnet.find_by_name("five").parameters.order("parameters.updated_at").last.value, "123"
++    assert_equal Subnet.unscoped.find_by_name("five").parameters.
++      order("parameters.updated_at").last.value, "123"
+   end
+ 
+   test "should update nested hostgroup parameter" do
+     put :update, { :hostgroup_id => hostgroups(:common).to_param, :id => parameters(:group).to_param, :parameter => valid_attrs }
+     assert_response :success
+-    assert_equal Hostgroup.find_by_name("Common").group_parameters.order("parameters.updated_at").last.value, "123"
++    assert_equal Hostgroup.unscoped.find_by_name("Common").group_parameters.
++      order("parameters.updated_at").last.value, "123"
+   end
+ 
+   test "should update nested os parameter" do
+     put :update, { :operatingsystem_id => operatingsystems(:redhat).to_param, :id => parameters(:os).to_param, :parameter => valid_attrs }
+     assert_response :success
+-    assert_equal Operatingsystem.find_by_name("Redhat").parameters.order("parameters.updated_at").last.value, "123"
++    assert_equal Operatingsystem.unscoped.find_by_name("Redhat").parameters.
++      order("parameters.updated_at").last.value, "123"
+   end
+ 
+   test "should destroy nested host parameter" do
+diff --git a/test/controllers/api/v2/provisioning_templates_controller_test.rb b/test/controllers/api/v2/provisioning_templates_controller_test.rb
+index 02452317657..8a8e3ec0282 100644
+--- a/test/controllers/api/v2/provisioning_templates_controller_test.rb
++++ b/test/controllers/api/v2/provisioning_templates_controller_test.rb
+@@ -53,7 +53,7 @@ class Api::V2::ProvisioningTemplatesControllerTest < ActionController::TestCase
+     provisioning_template = templates(:pxekickstart)
+     delete :destroy, { :id => provisioning_template.to_param }
+     assert_response 422
+-    assert ProvisioningTemplate.exists?(provisioning_template.id)
++    assert ProvisioningTemplate.unscoped.exists?(provisioning_template.id)
+   end
+ 
+   test "should destroy" do
+@@ -61,7 +61,7 @@ class Api::V2::ProvisioningTemplatesControllerTest < ActionController::TestCase
+     provisioning_template.os_default_templates.clear
+     delete :destroy, { :id => provisioning_template.to_param }
+     assert_response :ok
+-    refute ProvisioningTemplate.exists?(provisioning_template.id)
++    refute ProvisioningTemplate.unscoped.exists?(provisioning_template.id)
+   end
+ 
+   test "should build pxe menu" do
+diff --git a/test/controllers/api/v2/ptables_controller_test.rb b/test/controllers/api/v2/ptables_controller_test.rb
+index 97128d888ac..8775e560b8e 100644
+--- a/test/controllers/api/v2/ptables_controller_test.rb
++++ b/test/controllers/api/v2/ptables_controller_test.rb
+@@ -23,14 +23,14 @@ def setup
+   end
+ 
+   test "should create ptable" do
+-    assert_difference('Ptable.count') do
++    assert_difference('Ptable.unscoped.count') do
+       post :create, { :ptable => valid_attrs }
+     end
+     assert_response :created
+   end
+ 
+   test "should created ptable with unwrapped 'layout'" do
+-    assert_difference('Ptable.count') do
++    assert_difference('Ptable.unscoped.count') do
+       post :create, valid_attrs
+     end
+     assert_response :created
+@@ -52,14 +52,14 @@ def setup
+ 
+   test "should NOT destroy ptable in use" do
+     FactoryGirl.create(:host, :ptable_id => @ptable.id)
+-    assert_difference('Ptable.count', -0) do
++    assert_difference('Ptable.unscoped.count', 0) do
+       delete :destroy, { :id => @ptable.to_param }
+     end
+     assert_response :unprocessable_entity
+   end
+ 
+   test "should destroy ptable that is NOT in use" do
+-    assert_difference('Ptable.count', -1) do
++    assert_difference('Ptable.unscoped.count', -1) do
+       delete :destroy, { :id => @ptable.to_param }
+     end
+     assert_response :success
+diff --git a/test/controllers/api/v2/realms_controller_test.rb b/test/controllers/api/v2/realms_controller_test.rb
+index eccac0c8b6a..5c5e809f4c5 100644
+--- a/test/controllers/api/v2/realms_controller_test.rb
++++ b/test/controllers/api/v2/realms_controller_test.rb
+@@ -27,8 +27,9 @@ class Api::V2::RealmsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should update valid realm" do
+-    put :update, { :id => Realm.first.to_param, :realm => { :name => "realm.new" } }
+-    assert_equal "realm.new", Realm.first.name
++    realm_id = Realm.unscoped.first.id
++    put :update, { :id => realm_id, :realm => { :name => "realm.new" } }
++    assert_equal "realm.new", Realm.unscoped.find(realm_id).name
+     assert_response :success
+   end
+ 
+@@ -44,7 +45,7 @@ class Api::V2::RealmsControllerTest < ActionController::TestCase
+     delete :destroy, { :id => realm.to_param }
+     realm = ActiveSupport::JSON.decode(@response.body)
+     assert_response :ok
+-    refute Realm.find_by_id(realm['id'])
++    refute Realm.unscoped.find_by_id(realm['id'])
+   end
+ 
+   #test that taxonomy scope works for api for realms
+@@ -56,15 +57,15 @@ def setup
+   test "should get realms for location only" do
+     get :index, {:location_id => taxonomies(:location1).id }
+     assert_response :success
+-    assert_equal 2, assigns(:realms).length
+-    assert_equal assigns(:realms), [realms(:myrealm), realms(:yourrealm)]
++    assert_equal taxonomies(:location1).realms.length, assigns(:realms).length
++    assert_equal assigns(:realms), taxonomies(:location1).realms
+   end
+ 
+   test "should get realms for organization only" do
+     get :index, {:organization_id => taxonomies(:organization1).id }
+     assert_response :success
+-    assert_equal 1, assigns(:realms).length
+-    assert_equal assigns(:realms), [realms(:myrealm)]
++    assert_equal taxonomies(:organization1).realms.length, assigns(:realms).length
++    assert_equal assigns(:realms), taxonomies(:organization1).realms
+   end
+ 
+   test "should get realms for both location and organization" do
+diff --git a/test/controllers/api/v2/reports_controller_test.rb b/test/controllers/api/v2/reports_controller_test.rb
+index b67ffdab93f..6b087a862dd 100644
+--- a/test/controllers/api/v2/reports_controller_test.rb
++++ b/test/controllers/api/v2/reports_controller_test.rb
+@@ -53,6 +53,7 @@ def test_create_duplicate
+       Setting[:require_ssl_smart_proxies] = false
+ 
+       proxy = smart_proxies(:puppetmaster)
++      proxy.update_attribute(:url, 'http://foremanimporter.report')
+       host = URI.parse(proxy.url).host
+       Resolv.any_instance.stubs(:getnames).returns([host])
+       post :create, {:report => create_a_puppet_transaction_report }
+diff --git a/test/controllers/api/v2/smart_proxies_controller_test.rb b/test/controllers/api/v2/smart_proxies_controller_test.rb
+index c76a53f3e4d..8f56a860d58 100644
+--- a/test/controllers/api/v2/smart_proxies_controller_test.rb
++++ b/test/controllers/api/v2/smart_proxies_controller_test.rb
+@@ -23,7 +23,7 @@ class Api::V2::SmartProxiesControllerTest < ActionController::TestCase
+     refute_empty smart_proxies
+ 
+     returned_proxy_ids = smart_proxies['results'].map { |p| p["id"] }
+-    expected_proxy_ids = SmartProxy.with_features("TFTP").map { |p| p.id }
++    expected_proxy_ids = SmartProxy.unscoped.with_features("TFTP").map { |p| p.id }
+     assert_equal expected_proxy_ids, returned_proxy_ids
+   end
+ 
+@@ -35,7 +35,7 @@ class Api::V2::SmartProxiesControllerTest < ActionController::TestCase
+     refute_empty smart_proxies
+ 
+     returned_proxy_ids = smart_proxies['results'].map { |p| p["id"] }
+-    expected_proxy_ids = SmartProxy.with_features("TFTP").map { |p| p.id }
++    expected_proxy_ids = SmartProxy.unscoped.with_features("TFTP").map { |p| p.id }
+     assert_equal expected_proxy_ids, returned_proxy_ids
+   end
+ 
+@@ -47,7 +47,7 @@ class Api::V2::SmartProxiesControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create smart_proxy" do
+-    assert_difference('SmartProxy.count') do
++    assert_difference('SmartProxy.unscoped.count') do
+       post :create, { :smart_proxy => valid_attrs }
+     end
+     assert_response :created
+@@ -59,7 +59,7 @@ class Api::V2::SmartProxiesControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy smart_proxy" do
+-    assert_difference('SmartProxy.count', -1) do
++    assert_difference('SmartProxy.unscoped.count', -1) do
+       delete :destroy, { :id => smart_proxies(:four).to_param }
+     end
+     assert_response :success
+@@ -131,7 +131,7 @@ def setup_import_classes
+       Puppetclass.destroy_all
+       Environment.destroy_all
+     end
+-    assert_difference('Environment.count', 2) do
++    assert_difference('Environment.unscoped.count', 2) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -147,7 +147,7 @@ def setup_import_classes
+         Hostgroup.update_all(:environment_id => nil)
+         Puppetclass.destroy_all
+         Environment.destroy_all
+-        assert_difference('Puppetclass.count', 1) do
++        assert_difference('Puppetclass.unscoped.count', 1) do
+           post :import_puppetclasses,
+                { :id => smart_proxies(:puppetmaster).id }.merge(dryrun_param),
+                set_session_user
+@@ -164,7 +164,7 @@ def setup_import_classes
+       Hostgroup.update_all(:environment_id => nil)
+       Puppetclass.destroy_all
+       Environment.destroy_all
+-      assert_difference('Puppetclass.count', 0) do
++      assert_difference('Puppetclass.unscoped.count', 0) do
+         post :import_puppetclasses, { :id => smart_proxies(:puppetmaster).id, :dryrun => true }, set_session_user
+       end
+     end
+@@ -176,7 +176,7 @@ def setup_import_classes
+     as_admin do
+       Environment.create!(:name => 'xyz')
+     end
+-    assert_difference('Environment.count', -1) do
++    assert_difference('Environment.unscoped.count', -1) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -185,7 +185,7 @@ def setup_import_classes
+   test "should obsolete puppetclasses" do
+     setup_import_classes
+     as_admin do
+-      assert_difference('Environment.find_by_name("env1").puppetclasses.count', -2) do
++      assert_difference('Environment.unscoped.find_by_name("env1").puppetclasses.count', -2) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+       end
+     end
+@@ -195,7 +195,7 @@ def setup_import_classes
+   test "should update puppetclass smart class parameters" do
+     setup_import_classes
+     LookupKey.destroy_all
+-    assert_difference('LookupKey.count', 1) do
++    assert_difference('LookupKey.unscoped.count', 1) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -205,7 +205,7 @@ def setup_import_classes
+     setup_import_classes
+     Puppetclass.find_by_name('b').destroy
+     Puppetclass.find_by_name('c').destroy
+-    assert_difference('Environment.count', 0) do
++    assert_difference('Environment.unscoped.count', 0) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+     end
+     assert_response :success
+@@ -218,7 +218,7 @@ def setup_import_classes
+     as_admin do
+       env_name = 'env1'
+       assert Environment.find_by_name(env_name).destroy
+-      assert_difference('Environment.count', 1) do
++      assert_difference('Environment.unscoped.count', 1) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :environment_id => env_name}, set_session_user
+       end
+       assert_response :success
+@@ -232,7 +232,7 @@ def setup_import_classes
+     as_admin do
+       Environment.create!(:name => 'xyz')
+     end
+-    assert_difference('Environment.count', 0) do
++    assert_difference('Environment.unscoped.count', 0) do
+       post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :except => 'obsolete'}, set_session_user
+     end
+     assert_response :success
+@@ -241,8 +241,8 @@ def setup_import_classes
+   test "should NOT add or update puppetclass smart class parameters if pass ?except=new,updated" do
+     setup_import_classes
+     LookupKey.destroy_all
+-    assert_difference('LookupKey.count', 0) do
+-     post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :except => 'new,updated'}, set_session_user
++    assert_difference('LookupKey.unscoped.count', 0) do
++      post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :except => 'new,updated'}, set_session_user
+     end
+     assert_response :success
+   end
+@@ -265,7 +265,7 @@ def setup_import_classes
+     end
+ 
+     test "should import puppetclasses for specified environment only" do
+-      assert_difference('Puppetclass.count', 1) do
++      assert_difference('Puppetclass.unscoped.count', 1) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id, :environment_id => 'env1'}, set_session_user
+         assert_includes Puppetclass.pluck(:name), 'a'
+         refute_includes Puppetclass.pluck(:name), 'b'
+@@ -274,7 +274,7 @@ def setup_import_classes
+     end
+ 
+     test "should import puppetclasses for all environments if none specified" do
+-      assert_difference('Puppetclass.count', 2) do
++      assert_difference('Puppetclass.unscoped.count', 2) do
+         post :import_puppetclasses, {:id => smart_proxies(:puppetmaster).id}, set_session_user
+         assert_includes Puppetclass.pluck(:name), 'a'
+         assert_includes Puppetclass.pluck(:name), 'b'
+diff --git a/test/controllers/api/v2/subnets_controller_test.rb b/test/controllers/api/v2/subnets_controller_test.rb
+index f607bdb462a..5607563904b 100644
+--- a/test/controllers/api/v2/subnets_controller_test.rb
++++ b/test/controllers/api/v2/subnets_controller_test.rb
+@@ -20,23 +20,23 @@ class Api::V2::SubnetsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create IPv4 subnet" do
+-    assert_difference('Subnet.count') do
++    assert_difference('Subnet.unscoped.count') do
+       post :create, { :subnet => valid_v4_attrs }
+     end
+     assert_response :created
+   end
+ 
+   test "should create IPv4 subnet if type is not defined" do
+-    assert_difference('Subnet.count') do
++    assert_difference('Subnet.unscoped.count') do
+       post :create, { :subnet => valid_v4_attrs.reject {|k, v| k == :network_type} }
+     end
+-    subnet = Subnet.find_by_name(valid_v4_attrs[:name])
++    subnet = Subnet.unscoped.find_by_name(valid_v4_attrs[:name])
+     assert_equal valid_v4_attrs[:network_type], subnet.network_type
+     assert_response :created
+   end
+ 
+   test "should create IPv6 subnet" do
+-    assert_difference('Subnet.count') do
++    assert_difference('Subnet.unscoped.count') do
+       post :create, { :subnet => valid_v6_attrs }
+     end
+     assert_response :created
+@@ -58,14 +58,14 @@ class Api::V2::SubnetsControllerTest < ActionController::TestCase
+   end
+ 
+   test "should destroy subnets" do
+-    assert_difference('Subnet.count', -1) do
++    assert_difference('Subnet.unscoped.count', -1) do
+       delete :destroy, { :id => subnets(:four).to_param }
+     end
+     assert_response :success
+   end
+ 
+   test "should NOT destroy subnet that is in use" do
+-    assert_difference('Subnet.count', 0) do
++    assert_difference('Subnet.unscoped.count', 0) do
+       delete :destroy, { :id => subnets(:one).to_param }
+     end
+     assert_response :unprocessable_entity
+diff --git a/test/controllers/api/v2/users_controller_test.rb b/test/controllers/api/v2/users_controller_test.rb
+index 21cd9ce2e3e..e9fd275b753 100644
+--- a/test/controllers/api/v2/users_controller_test.rb
++++ b/test/controllers/api/v2/users_controller_test.rb
+@@ -61,7 +61,7 @@ def setup
+     put :update, { :id => user.id, :user => valid_attrs }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.login == "johnsmith"
+   end
+ 
+@@ -70,7 +70,7 @@ def setup
+     put :update, { :id => user.id, :user => { :admin => true } }
+ 
+     assert_response :success
+-    assert User.find_by_id(user.id).admin?
++    assert User.unscoped.find_by_id(user.id).admin?
+   end
+ 
+   test "should not remove the default role" do
+@@ -81,7 +81,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith" } }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+ 
+     assert mod_user.roles =([roles(:default_role)])
+   end
+@@ -94,7 +94,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith", :password => "dummy", :password_confirmation => "dummy" } }
+     assert_response :success
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.matching_password?("dummy")
+   end
+ 
+@@ -106,7 +106,7 @@ def setup
+     put :update, { :id => user.id, :user => { :login => "johnsmith", :password => "dummy", :password_confirmation => "DUMMY" } }
+     assert_response :unprocessable_entity
+ 
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+     assert mod_user.matching_password?("changeme")
+   end
+ 
+@@ -116,7 +116,7 @@ def setup
+     delete :destroy, { :id => user.id }
+     assert_response :success
+ 
+-    assert !User.exists?(user.id)
++    refute User.unscoped.exists?(user.id)
+   end
+ 
+   test "should not delete same user" do
+@@ -130,7 +130,7 @@ def setup
+       response = ActiveSupport::JSON.decode(@response.body)
+       assert_equal "You are trying to delete your own account", response['error']['details']
+       assert_equal "Access denied", response['error']['message']
+-      assert User.exists?(user.id)
++      assert User.unscoped.exists?(user.id)
+     end
+   end
+ 
+diff --git a/test/controllers/application_controller_subclass_test.rb b/test/controllers/application_controller_subclass_test.rb
+index 1dfc59a548d..a089eda570a 100644
+--- a/test/controllers/application_controller_subclass_test.rb
++++ b/test/controllers/application_controller_subclass_test.rb
+@@ -80,10 +80,12 @@ class TestableResourcesControllerTest < ActionController::TestCase
+     end
+ 
+     it "requires an account with mail" do
+-      user = FactoryGirl.create(:user)
+-      get :index, {}, set_session_user.merge(:user => user.id)
++      as_admin do
++        @user = FactoryGirl.create(:user)
++      end
++      get :index, {}, set_session_user.merge(:user => @user.id)
+       assert_response :redirect
+-      assert_redirected_to edit_user_path(user)
++      assert_redirected_to edit_user_path(@user)
+       assert_equal "An email address is required, please update your account details", flash[:error]
+     end
+ 
+diff --git a/test/controllers/auth_source_ldaps_controller_test.rb b/test/controllers/auth_source_ldaps_controller_test.rb
+index 76a35964a61..4a06cddfff9 100644
+--- a/test/controllers/auth_source_ldaps_controller_test.rb
++++ b/test/controllers/auth_source_ldaps_controller_test.rb
+@@ -2,7 +2,7 @@
+ 
+ class AuthSourceLdapsControllerTest < ActionController::TestCase
+   setup do
+-    @model = AuthSourceLdap.first
++    @model = AuthSourceLdap.unscoped.first
+   end
+ 
+   basic_index_test
+@@ -17,42 +17,42 @@ def test_create_invalid
+ 
+   def test_create_valid
+     AuthSourceLdap.any_instance.stubs(:valid?).returns(true)
+-    post :create, {:auth_source_ldap => {:name => AuthSourceLdap.first.name}}, set_session_user
++    post :create, {:auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name}}, set_session_user
+     assert_redirected_to auth_source_ldaps_url
+   end
+ 
+   def test_update_invalid
+     AuthSourceLdap.any_instance.stubs(:valid?).returns(false)
+-    put :update, {:id => AuthSourceLdap.first, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    put :update, {:id => AuthSourceLdap.unscoped.first, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_formats_valid
+     AuthSourceLdap.any_instance.stubs(:valid?).returns(false)
+-    put :update, {:id => AuthSourceLdap.first.id, :format => "weird", :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    put :update, {:id => AuthSourceLdap.unscoped.first.id, :format => "weird", :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_response :success
+ 
+-    wierd_id = "#{AuthSourceLdap.first.id}.weird"
+-    put :update, {:id => wierd_id, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    wierd_id = "#{AuthSourceLdap.unscoped.first.id}.weird"
++    put :update, {:id => wierd_id, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_response :success
+ 
+-    parameterized_id = "#{AuthSourceLdap.first.id}-#{AuthSourceLdap.first.name.parameterize}"
+-    put :update, {:id => parameterized_id, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    parameterized_id = "#{AuthSourceLdap.unscoped.first.id}-#{AuthSourceLdap.unscoped.first.name.parameterize}"
++    put :update, {:id => parameterized_id, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_response :success
+   end
+ 
+   def test_update_valid
+     AuthSourceLdap.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => AuthSourceLdap.first, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    put :update, {:id => AuthSourceLdap.unscoped.first, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_redirected_to auth_source_ldaps_url
+   end
+ 
+   def test_destroy
+-    auth_source_ldap = AuthSourceLdap.first
+-    User.where(:auth_source_id => auth_source_ldap.id).update_all(:auth_source_id => nil)
++    auth_source_ldap = AuthSourceLdap.unscoped.first
++    User.unscoped.where(:auth_source_id => auth_source_ldap.id).update_all(:auth_source_id => nil)
+     delete :destroy, {:id => auth_source_ldap}, set_session_user
+     assert_redirected_to auth_source_ldaps_url
+-    assert !AuthSourceLdap.exists?(auth_source_ldap.id)
++    refute AuthSourceLdap.unscoped.exists?(auth_source_ldap.id)
+   end
+ 
+   context 'user with viewer rights' do
+@@ -66,7 +66,7 @@ def test_destroy
+     end
+ 
+     test 'should fail to edit authentication source' do
+-      get :edit, { :id => AuthSourceLdap.first.id },
++      get :edit, { :id => AuthSourceLdap.unscoped.first.id },
+         set_session_user(users(:one))
+       assert_response :forbidden
+       assert_includes @response.body, 'edit_authenticators'
+@@ -79,7 +79,7 @@ def test_destroy
+     as_admin do
+       put :update, {:commit => "Update", :id => auth_source_ldap.id, :auth_source_ldap => {:name => auth_source_ldap.name} }, set_session_user
+     end
+-    auth_source_ldap = AuthSourceLdap.find(auth_source_ldap.id)
++    auth_source_ldap = AuthSourceLdap.unscoped.find(auth_source_ldap.id)
+     assert_equal old_pass, auth_source_ldap.account_password
+   end
+ 
+@@ -94,26 +94,26 @@ def test_destroy
+ 
+   test "LDAP test succeeded" do
+     AuthSourceLdap.any_instance.stubs(:test_connection).returns(:success => true)
+-    put :test_connection, {:id => AuthSourceLdap.first, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    put :test_connection, {:id => AuthSourceLdap.unscoped.first, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_response :success
+   end
+ 
+   test "LDAP test failed" do
+     AuthSourceLdap.any_instance.stubs(:test_connection).raises(Foreman::Exception, 'Exception message')
+-    put :test_connection, {:id => AuthSourceLdap.first, :auth_source_ldap => {:name => AuthSourceLdap.first.name} }, set_session_user
++    put :test_connection, {:id => AuthSourceLdap.unscoped.first, :auth_source_ldap => {:name => AuthSourceLdap.unscoped.first.name} }, set_session_user
+     assert_response :unprocessable_entity
+   end
+ 
+   test 'organizations/locations can be assigned to it' do
+-    auth_source_ldap_params = { :name => AuthSourceLdap.first.name,
++    auth_source_ldap_params = { :name => AuthSourceLdap.unscoped.first.name,
+                                 :organization_ids => [taxonomies(:organization1).id],
+                                 :location_names => [taxonomies(:location1).name] }
+-    put :update, { :id => AuthSourceLdap.first,
++    put :update, { :id => AuthSourceLdap.unscoped.first,
+                    :auth_source_ldap => auth_source_ldap_params },
+                    set_session_user
+     assert_equal [taxonomies(:organization1)],
+-      AuthSourceLdap.first.organizations.to_a
++      AuthSourceLdap.unscoped.first.organizations.to_a
+     assert_equal [taxonomies(:location1)],
+-      AuthSourceLdap.first.locations.to_a
++      AuthSourceLdap.unscoped.first.locations.to_a
+   end
+ end
+diff --git a/test/controllers/compute_resources_controller_test.rb b/test/controllers/compute_resources_controller_test.rb
+index c9ba1590ea8..23d64353914 100644
+--- a/test/controllers/compute_resources_controller_test.rb
++++ b/test/controllers/compute_resources_controller_test.rb
+@@ -33,7 +33,7 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+ 
+   test "should not create compute resource when not permitted" do
+     setup_user "view"
+-    assert_difference('ComputeResource.count', 0) do
++    assert_difference('ComputeResource.unscoped.count', 0) do
+       attrs = {:name => "test", :provider => "Libvirt", :url => "qemu://host/system"}
+       post :create, {:compute_resource => attrs}, set_session_user
+     end
+@@ -42,7 +42,7 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+ 
+   test "should create compute resource" do
+     setup_user "create"
+-    assert_difference('ComputeResource.count', +1) do
++    assert_difference('ComputeResource.unscoped.count', +1) do
+       attrs = {:name => "test", :provider => "Libvirt", :url => "qemu://host/system"}
+       post :create, {:compute_resource => attrs}, set_session_user
+     end
+@@ -78,14 +78,14 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+     old_password = @compute_resource.password
+     setup_user "edit"
+     put :update, {:id => @compute_resource.to_param, :compute_resource => {:name => "editing_self"}}, set_session_user
+-    @compute_resource = ComputeResource.find(@compute_resource.id)
++    @compute_resource = ComputeResource.unscoped.find(@compute_resource.id)
+     assert_equal old_password, @compute_resource.password
+   end
+ 
+   test 'blank password submitted in compute resource edit form unsets password' do
+     setup_user "edit"
+     put :update, {:id => @compute_resource.to_param, :compute_resource => {:name => "editing_self", :password => ''}}, set_session_user
+-    @compute_resource = ComputeResource.find(@compute_resource.id)
++    @compute_resource = ComputeResource.unscoped.find(@compute_resource.id)
+     assert @compute_resource.password.empty?
+   end
+ 
+@@ -121,7 +121,7 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+ 
+   test "should not destroy compute resource when not permitted" do
+     setup_user "view"
+-    assert_difference('ComputeResource.count', 0) do
++    assert_difference('ComputeResource.unscoped.count', 0) do
+       delete :destroy, {:id => @compute_resource.to_param}, set_session_user
+     end
+ 
+@@ -130,7 +130,7 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+ 
+   test "should not destroy compute resource when restricted" do
+     setup_user "destroy"
+-    assert_difference('ComputeResource.count', 0) do
++    assert_difference('ComputeResource.unscoped.count', 0) do
+       delete :destroy, {:id => @your_compute_resource.to_param}, set_session_user
+     end
+ 
+@@ -139,7 +139,7 @@ class ComputeResourcesControllerTest < ActionController::TestCase
+ 
+   test "should destroy compute resource" do
+     setup_user "destroy"
+-    assert_difference('ComputeResource.count', -1) do
++    assert_difference('ComputeResource.unscoped.count', -1) do
+       delete :destroy, {:id => @compute_resource.to_param}, set_session_user
+     end
+ 
+diff --git a/test/controllers/compute_resources_vms_controller_test.rb b/test/controllers/compute_resources_vms_controller_test.rb
+index 0607a2eadfd..571caa917bf 100644
+--- a/test/controllers/compute_resources_vms_controller_test.rb
++++ b/test/controllers/compute_resources_vms_controller_test.rb
+@@ -139,6 +139,8 @@ def test_should_create_vm(name = "new_test")
+     @test_vm = @compute_resource.vms.create({:flavor_ref => 2, :name => 'test', :image_ref => 2})
+     as_admin { @compute_resource.save }
+     setup_user "power"
++    @compute_resource.organizations = User.current.organizations
++    @compute_resource.locations = User.current.locations
+ 
+     Fog::Compute::OpenStack::Server.any_instance.expects(:state).returns('ACTIVE').at_least_once
+     Fog::Compute::OpenStack::Server.any_instance.expects(:pause).returns(true)
+diff --git a/test/controllers/domains_controller_test.rb b/test/controllers/domains_controller_test.rb
+index f80e52355f4..b37f42186f1 100644
+--- a/test/controllers/domains_controller_test.rb
++++ b/test/controllers/domains_controller_test.rb
+@@ -2,7 +2,7 @@
+ 
+ class DomainsControllerTest < ActionController::TestCase
+   setup do
+-    @model = Domain.first
++    @model = domains(:mydomain)
+   end
+ 
+   basic_index_test
+@@ -23,18 +23,18 @@ def test_create_valid
+ 
+   def test_update_invalid
+     Domain.any_instance.stubs(:valid?).returns(false)
+-    put :update, {:id => Domain.first.to_param, :domain => {:name => Domain.first.name }}, set_session_user
++    put :update, {:id => @model.to_param, :domain => {:name => @model.name }}, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_update_valid
+     Domain.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => Domain.first.to_param, :domain => {:name => Domain.first.name }}, set_session_user
++    put :update, {:id => @model.to_param, :domain => {:name => @model.name }}, set_session_user
+     assert_redirected_to domains_url
+   end
+ 
+   def test_destroy
+-    domain = Domain.first
++    domain = @model
+     domain.hosts.clear
+     domain.hostgroups.clear
+     domain.subnets.clear
+@@ -45,7 +45,7 @@ def test_destroy
+ 
+   def user_with_viewer_rights_should_fail_to_edit_a_domain
+     setup_users
+-    get :edit, {:id => Domain.first.id}
++    get :edit, {:id => @model.id}
+     assert @response.status == '403 Forbidden'
+   end
+ 
+diff --git a/test/controllers/environments_controller_test.rb b/test/controllers/environments_controller_test.rb
+index cce70ce82f2..54672d0dbbe 100644
+--- a/test/controllers/environments_controller_test.rb
++++ b/test/controllers/environments_controller_test.rb
+@@ -10,7 +10,7 @@ class EnvironmentsControllerTest < ActionController::TestCase
+   basic_edit_test
+ 
+   test "should create new environment" do
+-    assert_difference 'Environment.count' do
++    assert_difference 'Environment.unscoped.count' do
+       post :create, { :commit => "Create", :environment => {:name => "some_environment"} }, set_session_user
+     end
+     assert_redirected_to environments_path
+@@ -22,7 +22,7 @@ class EnvironmentsControllerTest < ActionController::TestCase
+     assert environment.save!
+ 
+     put :update, { :commit => "Update", :id => environment.name, :environment => {:name => "other_environment"} }, set_session_user
+-    env = Environment.find(environment.id)
++    env = Environment.unscoped.find(environment.id)
+     assert env.name == "other_environment"
+ 
+     assert_redirected_to environments_path
+@@ -33,7 +33,7 @@ class EnvironmentsControllerTest < ActionController::TestCase
+     environment = Environment.new :name => "some_environment"
+     assert environment.save!
+ 
+-    assert_difference('Environment.count', -1) do
++    assert_difference('Environment.unscoped.count', -1) do
+       delete :destroy, {:id => environment.name}, set_session_user
+     end
+ 
+@@ -83,7 +83,8 @@ def setup_import_classes
+       }, set_session_user
+     assert_redirected_to environments_url
+     assert_equal "Successfully updated environments and Puppet classes from the on-disk Puppet installation", flash[:notice]
+-    assert Environment.find_by_name("env1").puppetclasses.map(&:name).sort == ["a", "b", "c"]
++    assert_equal ["a", "b", "c"],
++      Environment.unscoped.find_by_name("env1").puppetclasses.map(&:name).sort
+   end
+ 
+   test "should handle disk environment containing less classes" do
+@@ -103,8 +104,8 @@ def setup_import_classes
+       }, set_session_user
+     assert_redirected_to environments_url
+     assert_equal "Successfully updated environments and Puppet classes from the on-disk Puppet installation", flash[:notice]
+-    envs = Environment.find_by_name("env1").puppetclasses.map(&:name).sort
+-    assert envs == ["a", "b", "c"]
++    envs = Environment.unscoped.find_by_name("env1").puppetclasses.map(&:name).sort
++    assert_equal ["a", "b", "c"], envs
+   end
+   test "should handle disk environment containing less environments" do
+     setup_import_classes
+@@ -122,7 +123,7 @@ def setup_import_classes
+       }, set_session_user
+     assert_redirected_to environments_url
+     assert_equal "Successfully updated environments and Puppet classes from the on-disk Puppet installation", flash[:notice]
+-    assert Environment.find_by_name("env3").puppetclasses.map(&:name).sort == []
++    assert_equal [], Environment.unscoped.find_by_name("env3").puppetclasses.map(&:name).sort
+   end
+ 
+   test "should fail to remove active environments" do
+@@ -140,13 +141,13 @@ def setup_import_classes
+     # assert_template "puppetclasses_or_envs_changed". This assertion will fail. And it should fail. See above.
+     post :obsolete_and_new,
+       {"changed"=>
+-        {"obsolete" =>
+-          {"env1"  => '["a","b","c","_destroy_"]'}
+-        }
+-      }, set_session_user
+-    assert Environment.find_by_name("env1").hosts.count > 0
++       {"obsolete" =>
++        {"env1"  => '["a","b","c","_destroy_"]'}
++       }
++    }, set_session_user
++    assert Environment.unscoped.find_by_name("env1").hosts.count > 0
+     #assert flash[:error] =~ /^Failed to update the environments and puppetclasses from the on-disk puppet installation/
+-    assert Environment.find_by_name("env1")
++    assert Environment.unscoped.find_by_name("env1")
+   end
+ 
+   test "should obey config/ignored_environments.yml" do
+@@ -207,11 +208,11 @@ def setup_user
+     ProxyAPI::Puppet.any_instance.stubs(:environments).returns(["new"])
+     get :import_environments, {:proxy => smart_proxies(:puppetmaster)}, set_session_user
+     post :obsolete_and_new,
+-         {"changed" =>
+-              {"new" =>
+-                   {"new" => '{"a":{"new":{}}}'}
+-              }
+-         }, set_session_user
+-    assert(Environment.all.map(&:name).include?('new'), 'Should include environment with name "new"')
++      {"changed" =>
++       {"new" =>
++        {"new" => '{"a":{"new":{}}}'}
++       }
++    }, set_session_user
++    assert(Environment.unscoped.all.map(&:name).include?('new'), 'Should include environment with name "new"')
+   end
+ end
+diff --git a/test/controllers/fact_values_controller_test.rb b/test/controllers/fact_values_controller_test.rb
+index 09e04b8bdbb..b08652256c3 100644
+--- a/test/controllers/fact_values_controller_test.rb
++++ b/test/controllers/fact_values_controller_test.rb
+@@ -13,7 +13,9 @@ def test_index
+   end
+ 
+   test 'user with viewer rights should succeed in viewing facts' do
+-    users(:one).roles = [Role.default, Role.find_by_name('Viewer')]
++    as_admin do
++      users(:one).roles = [Role.default, Role.find_by_name('Viewer')]
++    end
+     get :index, {}, set_session_user.merge(:user => users(:one).id)
+     assert_response :success
+   end
+diff --git a/test/controllers/hostgroups_controller_test.rb b/test/controllers/hostgroups_controller_test.rb
+index b8606f6d749..776bbf9366c 100644
+--- a/test/controllers/hostgroups_controller_test.rb
++++ b/test/controllers/hostgroups_controller_test.rb
+@@ -12,7 +12,7 @@ def test_new
+   end
+ 
+   def test_nest
+-    get :nest, {:id => Hostgroup.first.id}, set_session_user
++    get :nest, {:id => hostgroups(:common).id}, set_session_user
+     assert_template 'new'
+   end
+ 
+@@ -31,22 +31,22 @@ def test_create_valid
+   end
+ 
+   def test_clone
+-    get :clone, {:id => Hostgroup.first}, set_session_user
++    get :clone, {:id => hostgroups(:common)}, set_session_user
+     assert_template 'new'
+   end
+ 
+   def test_edit
+-    get :edit, {:id => Hostgroup.first}, set_session_user
++    get :edit, {:id => hostgroups(:common)}, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_update_invalid
+-    put :update, {:id => Hostgroup.first, :hostgroup => { :name => '' }}, set_session_user
++    put :update, {:id => hostgroups(:common), :hostgroup => { :name => '' }}, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_update_valid
+-    put :update, {:id => Hostgroup.first, :hostgroup => { :name => Hostgroup.first.name }}, set_session_user
++    put :update, {:id => hostgroups(:common), :hostgroup => { :name => hostgroups(:common).name }}, set_session_user
+     assert_redirected_to hostgroups_url
+   end
+ 
+@@ -63,8 +63,8 @@ def setup_user(operation, type = 'hostgroups')
+ 
+   test 'user with viewer rights should fail to edit a hostgroup ' do
+     setup_user "view"
+-    get :edit, {:id => Hostgroup.first.id}, set_session_user.merge(:user => users(:one).id)
+-    assert_equal @response.status, 403
++    get :edit, {:id => hostgroups(:common).id}, set_session_user.merge(:user => users(:one).id)
++    assert_response :forbidden
+   end
+ 
+   test 'user with viewer rights should succeed in viewing hostgroups' do
+@@ -124,19 +124,19 @@ def setup_user(operation, type = 'hostgroups')
+     subnet = FactoryGirl.create(:subnet_ipv4)
+     domain.subnets << subnet
+     domain.save
+-    xhr :post, :domain_selected, {:id => Hostgroup.first, :hostgroup => {}, :domain_id => domain.id, :format => :json}, set_session_user
++    xhr :post, :domain_selected, {:id => hostgroups(:common), :hostgroup => {}, :domain_id => domain.id, :format => :json}, set_session_user
+     assert_equal subnet.name, JSON.parse(response.body)[0]["subnet"]["name"]
+     assert_equal subnet.unused_ip.suggest_new?, JSON.parse(response.body)[0]["subnet"]["unused_ip"]["suggest_new"]
+   end
+ 
+   test "domain_selected should return empty on no domain_id" do
+-    xhr :post, :domain_selected, {:id => Hostgroup.first, :hostgroup => {}, :format => :json, :domain_id => nil}, set_session_user
++    xhr :post, :domain_selected, {:id => hostgroups(:common), :hostgroup => {}, :format => :json, :domain_id => nil}, set_session_user
+     assert_response :success
+     assert_empty JSON.parse(response.body)
+   end
+ 
+   test "architecture_selected should not fail when no architecture selected" do
+-    post :architecture_selected, {:id => Hostgroup.first, :hostgroup => {}, :architecture_id => nil}, set_session_user
++    post :architecture_selected, {:id => hostgroups(:common), :hostgroup => {}, :architecture_id => nil}, set_session_user
+     assert_response :success
+     assert_template :partial => "common/os_selection/_architecture"
+   end
+@@ -202,8 +202,10 @@ def setup_user(operation, type = 'hostgroups')
+       post :create, {"hostgroup" => {"name"=>"test_it", "parent_id" => @base.id, :realm_id => realms(:myrealm).id,
+                                      :group_parameters_attributes => {"0" => {:name => "x", :value =>"overridden", :_destroy => ""}}}}, set_session_user
+       assert_redirected_to hostgroups_url
+-      hostgroup = Hostgroup.where(:name => "test_it").last
+-      assert_equal "overridden", hostgroup.parameters["x"]
++      hostgroup = Hostgroup.unscoped.where(:name => "test_it").last
++      as_admin do
++        assert_equal "overridden", hostgroup.parameters["x"]
++      end
+     end
+ 
+     it "updates a hostgroup with a parent parameter" do
+@@ -214,8 +216,10 @@ def setup_user(operation, type = 'hostgroups')
+       post :update, {"id" => child.id, "hostgroup" => {"name" => child.name,
+                                                        :group_parameters_attributes => {"0" => {:name => "x", :value =>"overridden", :_destroy => ""}}}}, set_session_user
+       assert_redirected_to hostgroups_url
+-      child.reload
+-      assert_equal "overridden", child.parameters["x"]
++      as_admin do
++        child.reload
++        assert_equal "overridden", child.parameters["x"]
++      end
+     end
+ 
+     it "updates a hostgroup with a parent parameter, allows empty values" do
+@@ -227,9 +231,11 @@ def setup_user(operation, type = 'hostgroups')
+                                                        :group_parameters_attributes => {"0" => {:name => "x", :value => "", :_destroy => ""},
+                                                                                         "1" => {:name => "y", :value => "overridden", :_destroy => ""}}}}, set_session_user
+       assert_redirected_to hostgroups_url
+-      child.reload
+-      assert_equal "overridden", child.parameters["y"]
+-      assert_equal "", child.parameters["x"]
++      as_admin do
++        child.reload
++        assert_equal "overridden", child.parameters["y"]
++        assert_equal "", child.parameters["x"]
++      end
+     end
+ 
+     it "changes the hostgroup's parent and check the parameters are updated" do
+diff --git a/test/controllers/hosts_controller_test.rb b/test/controllers/hosts_controller_test.rb
+index 55b89baba20..d92b842e575 100644
+--- a/test/controllers/hosts_controller_test.rb
++++ b/test/controllers/hosts_controller_test.rb
+@@ -63,7 +63,7 @@ def host_attributes(host)
+   end
+ 
+   test "should create new host" do
+-    assert_difference 'Host.count' do
++    assert_difference 'Host.unscoped.count' do
+       post :create, { :commit => "Create",
+         :host => {:name => "myotherfullhost",
+           :mac => "aabbecddee06",
+@@ -91,7 +91,7 @@ def host_attributes(host)
+     leftovers = Host.search_for('myotherfullhost').first
+     refute leftovers
+     hostgroup = hostgroups(:common)
+-    assert_difference 'Host.count' do
++    assert_difference 'Host.unscoped.count' do
+       post :create, { :commit => "Create",
+         :host => {:name => "myotherfullhost",
+           :mac => "aabbecddee06",
+@@ -141,7 +141,7 @@ def test_update_valid
+   end
+ 
+   test "should destroy host" do
+-    assert_difference('Host.count', -1) do
++    assert_difference('Host.unscoped.count', -1) do
+       delete :destroy, {:id => @host.name}, set_session_user
+     end
+     assert_redirected_to hosts_url
+@@ -302,6 +302,8 @@ def setup_user_and_host(operation, filter = nil, &block)
+     as_admin do
+       @host1.owner = @one
+       @host2.owner = users(:two)
++      @host2.organization = users(:two).organizations.first
++      @host2.location = users(:two).locations.first
+       @host1.save!
+       @host2.save!
+     end
+@@ -382,8 +384,9 @@ def setup_user_and_host(operation, filter = nil, &block)
+     assert_response :redirect
+ 
+     # reloads hosts
+-    hosts.map! {|h| Host.find(h.id)}
+-    hosts.each { |host| assert_equal hostgroup, host.hostgroup }
++    as_admin do
++      hosts.each { |host| assert_equal hostgroup, host.reload.hostgroup }
++    end
+   end
+ 
+   test 'multiple hostgroup change by host names' do
+@@ -402,9 +405,11 @@ def setup_user_and_host(operation, filter = nil, &block)
+     assert_response :redirect
+ 
+     host_names.each do |name|
+-      host = Host.find_by_name name
+-      assert_not_nil host
+-      assert_equal host.hostgroup, hostgroup
++      as_admin do
++        host = Host.unscoped.find_by_name(name)
++        assert_not_nil host
++        assert_equal host.hostgroup, hostgroup
++      end
+     end
+   end
+ 
+@@ -423,8 +428,10 @@ def setup_multiple_environments
+     post :update_multiple_environment, { :host_ids => [@host1.id, @host2.id],
+       :environment => { :id => environments(:global_puppetmaster).id}},
+       set_session_user.merge(:user => users(:admin).id)
+-    assert_equal environments(:global_puppetmaster), Host.find(@host1.id).environment
+-    assert_equal environments(:global_puppetmaster), Host.find(@host2.id).environment
++    as_admin do
++      assert_equal environments(:global_puppetmaster), @host1.reload.environment
++      assert_equal environments(:global_puppetmaster), @host2.reload.environment
++    end
+     assert_equal "Updated hosts: changed environment", flash[:notice]
+   end
+ 
+@@ -449,8 +456,8 @@ def setup_multiple_environments
+     post :update_multiple_environment, params,
+       set_session_user.merge(:user => users(:admin).id)
+ 
+-    assert Host.find(@host1.id).environment == hostgroup.environment
+-    assert Host.find(@host2.id).environment == hostgroup.environment
++    assert_equal hostgroup.environment_id, Host.unscoped.find(@host1.id).environment_id
++    assert_equal hostgroup.environment_id, Host.unscoped.find(@host2.id).environment_id
+   end
+ 
+   test "user with edit host rights with update owner should change owner" do
+@@ -461,8 +468,10 @@ def setup_multiple_environments
+     post :update_multiple_owner, { :host_ids => [@host1.id, @host2.id],
+       :owner => { :id => users(:one).id_and_type}},
+       set_session_user.merge(:user => users(:admin).id)
+-    assert_equal users(:one).id_and_type, Host.find(@host1.id).is_owned_by
+-    assert_equal users(:one).id_and_type, Host.find(@host2.id).is_owned_by
++    as_admin do
++      assert_equal users(:one).id_and_type, @host1.reload.is_owned_by
++      assert_equal users(:one).id_and_type, @host2.reload.is_owned_by
++    end
+   end
+ 
+   def setup_multiple_compute_resource
+@@ -552,7 +561,9 @@ def setup_multiple_compute_resource
+       assert_empty flash[:error]
+ 
+       @hosts.each do |host|
+-        assert_equal proxy, host.reload.puppet_ca_proxy
++        as_admin do
++          assert_equal proxy, host.reload.puppet_ca_proxy
++        end
+       end
+     end
+ 
+@@ -640,11 +651,11 @@ def setup_multiple_compute_resource
+ 
+   test "if only authorize_login_delegation is set, REMOTE_USER should be
+         ignored for API requests" do
++    host = Host.first
+     Setting[:authorize_login_delegation] = true
+     Setting[:authorize_login_delegation_api] = false
+     set_remote_user_to users(:admin)
+     User.current = nil # User.current is admin at this point (from initialize_host)
+-    host = Host.first
+     get :show, {:id => host.to_param, :format => 'json'}
+     assert_response 401
+     get :show, {:id => host.to_param}
+@@ -931,7 +942,7 @@ def test_unset_manage
+     @request.env['HTTP_REFERER'] = hosts_path
+     location = taxonomies(:location1)
+     cnt_hosts_location = location.hosts.count
+-    assert_difference "location.hosts.count", (Host.count - cnt_hosts_location) do
++    assert_difference "location.hosts.count", (Host.unscoped.count - cnt_hosts_location) do
+       post :update_multiple_location, {
+         :location => {:id => location.id, :optimistic_import => "yes"},
+         :host_ids => Host.pluck('hosts.id')
+@@ -1002,7 +1013,7 @@ def test_unset_manage
+     @request.env['HTTP_REFERER'] = hosts_path
+     organization = taxonomies(:organization1)
+     cnt_hosts_organization = organization.hosts.count
+-    assert_difference "organization.hosts.count", (Host.count - cnt_hosts_organization) do
++    assert_difference "organization.hosts.count", (Host.unscoped.count - cnt_hosts_organization) do
+       post :update_multiple_organization, {
+         :organization => {:id => organization.id, :optimistic_import => "yes"},
+         :host_ids => Host.pluck('hosts.id')
+@@ -1083,6 +1094,8 @@ class Host::Valid < Host::Managed; end
+ 
+   test "test non admin multiple action" do
+     setup_user 'edit', 'hosts', "owner_type = User and owner_id = #{users(:restricted).id}", :restricted
++    User.current.organizations << taxonomies(:organization1)
++    User.current.locations << taxonomies(:location1)
+     host = FactoryGirl.create(:host)
+     host_ids = [host.id]
+     #the ajax can be any of the multiple actions, toke multiple_parameters for example
+diff --git a/test/controllers/images_controller_test.rb b/test/controllers/images_controller_test.rb
+index 8734ef748d1..289c8b69c02 100644
+--- a/test/controllers/images_controller_test.rb
++++ b/test/controllers/images_controller_test.rb
+@@ -18,12 +18,14 @@ class ImagesControllerTest < ActionController::TestCase
+   end
+ 
+   test "should create image" do
+-    assert_difference('Image.count') do
++    assert_difference('Image.unscoped.count') do
+       image_attributes = {:name => 'gold', :username => 'ec2-user', :uuid => Foreman.uuid.to_s, :operatingsystem_id => Operatingsystem.first.id, :architecture_id => Architecture.first.id, :compute_resource_id => @image.compute_resource_id}
+       post :create, { :image => image_attributes, :compute_resource_id => @image.compute_resource_id }, set_session_user
+     end
+ 
+-    assert_redirected_to compute_resource_path(@image.compute_resource)
++    as_admin do
++      assert_redirected_to compute_resource_path(@image.compute_resource)
++    end
+   end
+ 
+   test "should get edit" do
+@@ -33,7 +35,9 @@ class ImagesControllerTest < ActionController::TestCase
+ 
+   test "should update image" do
+     put :update, { :id => @image.to_param, :image => {:name => 'lala', :username => 'ec2-user'}, :compute_resource_id => @image.compute_resource_id }, set_session_user
+-    assert_redirected_to compute_resource_path(@image.compute_resource)
++    as_admin do
++      assert_redirected_to compute_resource_path(@image.compute_resource)
++    end
+   end
+ 
+   test "should destroy image" do
+@@ -41,7 +45,9 @@ class ImagesControllerTest < ActionController::TestCase
+       delete :destroy, { :id => @image.to_param, :compute_resource_id => @image.compute_resource_id }, set_session_user
+     end
+ 
+-    assert_redirected_to compute_resource_path(@image.compute_resource)
++    as_admin do
++      assert_redirected_to compute_resource_path(@image.compute_resource)
++    end
+   end
+ 
+   # listing images in /hosts/new requries a JSON response from this controller
+diff --git a/test/controllers/locations_controller_test.rb b/test/controllers/locations_controller_test.rb
+index 4e30d4cf972..0ef10bb3362 100644
+--- a/test/controllers/locations_controller_test.rb
++++ b/test/controllers/locations_controller_test.rb
+@@ -151,40 +151,31 @@ class LocationsControllerTest < ActionController::TestCase
+     assert_response :success
+     assert_match "Clone", @response.body
+   end
+-  test "should clone location with assocations" do
++  test "should clone location with associations" do
+     location = taxonomies(:location1)
+     FactoryGirl.create(:host, :location => nil)
+     location_dup = location.clone
+ 
+-    assert_difference "Location.count", 1 do
+-      post :create, {:location => {:name => "location_dup_name",
+-                                 :environment_ids => location_dup.environment_ids,
+-                                 :hostgroup_ids => location_dup.hostgroup_ids,
+-                                 :subnet_ids => location_dup.hostgroup_ids,
+-                                 :domain_ids => location_dup.domain_ids,
+-                                 :medium_ids => location_dup.medium_ids,
+-                                 :user_ids => location_dup.user_ids,
+-                                 :smart_proxy_ids => location_dup.smart_proxy_ids,
+-                                 :provisioning_template_ids => location_dup.provisioning_template_ids,
+-                                 :compute_resource_ids => location_dup.compute_resource_ids,
+-                                 :organization_ids => location_dup.organization_ids
+-                               }
+-                   }, set_session_user
++    assert_difference "Location.unscoped.count", 1 do
++      post :create, {
++        :location => location_dup.selected_ids.each { |_,v| v.uniq! }
++          .merge(:name => 'location_dup_name')
++      }, set_session_user
+     end
+ 
+     new_location = Location.unscoped.order(:id).last
+     assert_redirected_to :controller => :locations, :action => :step2, :id => new_location.to_param
+ 
+-    assert_equal new_location.environment_ids.sort, location.environment_ids.sort
+-    assert_equal new_location.hostgroup_ids.sort, location.hostgroup_ids.sort
+-    assert_equal new_location.environment_ids.sort, location.environment_ids.sort
+-    assert_equal new_location.domain_ids.sort, location.domain_ids.sort
+-    assert_equal new_location.medium_ids.sort, location.medium_ids.sort
+-    assert_equal new_location.user_ids.sort, location.user_ids.sort
+-    assert_equal new_location.smart_proxy_ids.sort, location.smart_proxy_ids.sort
+-    assert_equal new_location.provisioning_template_ids.sort, location.provisioning_template_ids.sort
+-    assert_equal new_location.compute_resource_ids.sort, location.compute_resource_ids.sort
+-    assert_equal new_location.organization_ids.sort, location.organization_ids.sort
++    assert_equal new_location.environment_ids.uniq.sort, location.environment_ids.uniq.sort
++    assert_equal new_location.hostgroup_ids.uniq.sort, location.hostgroup_ids.uniq.sort
++    assert_equal new_location.environment_ids.uniq.sort, location.environment_ids.uniq.sort
++    assert_equal new_location.domain_ids.uniq.sort, location.domain_ids.uniq.sort
++    assert_equal new_location.medium_ids.uniq.sort, location.medium_ids.uniq.sort
++    assert_equal new_location.user_ids.uniq.sort, location.user_ids.uniq.sort
++    assert_equal new_location.smart_proxy_ids.uniq.sort, location.smart_proxy_ids.uniq.sort
++    assert_equal new_location.provisioning_template_ids.uniq.sort, location.provisioning_template_ids.uniq.sort
++    assert_equal new_location.compute_resource_ids.uniq.sort, location.compute_resource_ids.uniq.sort
++    assert_equal new_location.organization_ids.uniq.sort, location.organization_ids.uniq.sort
+   end
+ 
+   test "should clear out Location.current" do
+diff --git a/test/controllers/media_controller_test.rb b/test/controllers/media_controller_test.rb
+index 1b11445ac90..0d2cae45c9d 100644
+--- a/test/controllers/media_controller_test.rb
++++ b/test/controllers/media_controller_test.rb
+@@ -23,13 +23,13 @@ def test_create_valid
+ 
+   def test_update_invalid
+     Medium.any_instance.stubs(:valid?).returns(false)
+-    put :update, {:id => Medium.first, :medium => {:name => nil}}, set_session_user
++    put :update, {:id => @model, :medium => {:name => nil}}, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_update_valid
+     Medium.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => Medium.first, :medium => {:name => "MyUpdatedMedia"}}, set_session_user
++    put :update, {:id => @model, :medium => {:name => "MyUpdatedMedia"}}, set_session_user
+     assert_redirected_to media_url
+   end
+ 
+@@ -47,7 +47,7 @@ def setup_user
+ 
+   test 'user with viewer rights should fail to edit a medium' do
+     setup_user
+-    get :edit, {:id => Medium.first.id}, set_session_user.merge(:user => users(:one).id)
++    get :edit, {:id => @model.id}, set_session_user.merge(:user => users(:one).id)
+     assert_equal @response.status, 403
+   end
+ 
+diff --git a/test/controllers/organizations_controller_test.rb b/test/controllers/organizations_controller_test.rb
+index d7a00f9dbb4..da9a384784e 100644
+--- a/test/controllers/organizations_controller_test.rb
++++ b/test/controllers/organizations_controller_test.rb
+@@ -163,40 +163,31 @@ class OrganizationsControllerTest < ActionController::TestCase
+     assert_response :success
+     assert_match "Clone", @response.body
+   end
+-  test "should clone organization with assocations" do
++  test "should clone organization with associations" do
+     organization = taxonomies(:organization1)
+     FactoryGirl.create(:host, :organization => nil)
+     organization_dup = organization.clone
+ 
+-    assert_difference "Organization.count", 1 do
+-      post :create, {:organization => {:name => "organization_dup_name",
+-                                       :environment_ids => organization_dup.environment_ids,
+-                                       :hostgroup_ids => organization_dup.hostgroup_ids,
+-                                       :subnet_ids => organization_dup.hostgroup_ids,
+-                                       :domain_ids => organization_dup.domain_ids,
+-                                       :medium_ids => organization_dup.medium_ids,
+-                                       :user_ids => organization_dup.user_ids,
+-                                       :smart_proxy_ids => organization_dup.smart_proxy_ids,
+-                                       :provisioning_template_ids => organization_dup.provisioning_template_ids,
+-                                       :compute_resource_ids => organization_dup.compute_resource_ids,
+-                                       :location_ids => organization_dup.location_ids
+-      }
++    assert_difference "Organization.unscoped.count", 1 do
++      post :create, {
++        :organization => organization_dup.selected_ids.each { |_,v| v.uniq! }
++          .merge(:name => 'organization_dup_name')
+       }, set_session_user
+     end
+ 
+     new_organization = Organization.unscoped.order(:id).last
+     assert_redirected_to :controller => :organizations, :action => :step2, :id => new_organization.to_param
+ 
+-    assert_equal new_organization.environment_ids.sort, organization.environment_ids.sort
+-    assert_equal new_organization.hostgroup_ids.sort, organization.hostgroup_ids.sort
+-    assert_equal new_organization.environment_ids.sort, organization.environment_ids.sort
+-    assert_equal new_organization.domain_ids.sort, organization.domain_ids.sort
+-    assert_equal new_organization.medium_ids.sort, organization.medium_ids.sort
+-    assert_equal new_organization.user_ids.sort, organization.user_ids.sort
+-    assert_equal new_organization.smart_proxy_ids.sort, organization.smart_proxy_ids.sort
+-    assert_equal new_organization.provisioning_template_ids.sort, organization.provisioning_template_ids.sort
+-    assert_equal new_organization.compute_resource_ids.sort, organization.compute_resource_ids.sort
+-    assert_equal new_organization.location_ids.sort, organization.location_ids.sort
++    assert_equal new_organization.environment_ids.uniq.sort, organization.environment_ids.uniq.sort
++    assert_equal new_organization.hostgroup_ids.uniq.sort, organization.hostgroup_ids.uniq.sort
++    assert_equal new_organization.environment_ids.uniq.sort, organization.environment_ids.uniq.sort
++    assert_equal new_organization.domain_ids.uniq.sort, organization.domain_ids.uniq.sort
++    assert_equal new_organization.medium_ids.uniq.sort, organization.medium_ids.uniq.sort
++    assert_equal new_organization.user_ids.uniq.sort, organization.user_ids.uniq.sort
++    assert_equal new_organization.smart_proxy_ids.uniq.sort, organization.smart_proxy_ids.uniq.sort
++    assert_equal new_organization.provisioning_template_ids.uniq.sort, organization.provisioning_template_ids.uniq.sort
++    assert_equal new_organization.compute_resource_ids.uniq.sort, organization.compute_resource_ids.uniq.sort
++    assert_equal new_organization.location_ids.uniq.sort, organization.location_ids.uniq.sort
+   end
+ 
+   test "should clear out Organization.current" do
+diff --git a/test/controllers/provisioning_templates_controller_test.rb b/test/controllers/provisioning_templates_controller_test.rb
+index 4422b5fbc59..fcaedceca87 100644
+--- a/test/controllers/provisioning_templates_controller_test.rb
++++ b/test/controllers/provisioning_templates_controller_test.rb
+@@ -40,14 +40,14 @@ class ProvisioningTemplatesControllerTest < ActionController::TestCase
+     @request.env['HTTP_REFERER'] = provisioning_templates_path
+     get :lock, {:id => templates(:pxekickstart).to_param }, set_session_user
+     assert_redirected_to provisioning_templates_path
+-    assert_equal ProvisioningTemplate.find(templates(:pxekickstart).id).locked, true
++    assert_equal ProvisioningTemplate.unscoped.find(templates(:pxekickstart).id).locked, true
+   end
+ 
+   test "unlock" do
+     @request.env['HTTP_REFERER'] = provisioning_templates_path
+     get :unlock, {:id => templates(:locked).to_param }, set_session_user
+     assert_redirected_to provisioning_templates_path
+-    assert_equal ProvisioningTemplate.find(templates(:locked).id).locked, false
++    assert_equal ProvisioningTemplate.unscoped.find(templates(:locked).id).locked, false
+   end
+ 
+   test "clone" do
+@@ -79,7 +79,7 @@ class ProvisioningTemplatesControllerTest < ActionController::TestCase
+     config_template = templates(:pxekickstart)
+     delete :destroy, {:id => config_template.to_param }, set_session_user
+     assert_redirected_to provisioning_templates_url
+-    assert ProvisioningTemplate.exists?(config_template.id)
++    assert ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "destroy" do
+@@ -87,7 +87,7 @@ class ProvisioningTemplatesControllerTest < ActionController::TestCase
+     config_template.os_default_templates.clear
+     delete :destroy, {:id => config_template.to_param }, set_session_user
+     assert_redirected_to provisioning_templates_url
+-    assert !ProvisioningTemplate.exists?(config_template.id)
++    assert !ProvisioningTemplate.unscoped.exists?(config_template.id)
+   end
+ 
+   test "audit comment" do
+@@ -199,8 +199,8 @@ class ProvisioningTemplatesControllerTest < ActionController::TestCase
+         :template_kind_id => TemplateKind.find_by_name('iPXE').id,
+         :template_combinations_attributes => { '3923' => template_combination }
+       }
+-      assert_difference('TemplateCombination.count', 1) do
+-        assert_difference('ProvisioningTemplate.count', 1) do
++      assert_difference('TemplateCombination.unscoped.count', 1) do
++        assert_difference('ProvisioningTemplate.unscoped.count', 1) do
+           post :create, {
+             :provisioning_template => provisioning_template
+           }, set_session_user
+@@ -230,8 +230,10 @@ class ProvisioningTemplatesControllerTest < ActionController::TestCase
+           }
+         }, set_session_user
+         assert_response :found
+-        @template_combination.reload
+-        assert_equal new_environment, @template_combination.environment
++        as_admin do
++          @template_combination.reload
++          assert_equal new_environment, @template_combination.environment
++        end
+       end
+ 
+       test 'can be destroyed' do
+diff --git a/test/controllers/puppetclasses_controller_test.rb b/test/controllers/puppetclasses_controller_test.rb
+index 00bc6416df6..6b92ea0f745 100644
+--- a/test/controllers/puppetclasses_controller_test.rb
++++ b/test/controllers/puppetclasses_controller_test.rb
+@@ -109,10 +109,12 @@ def setup_user(operation = nil, type = "", search = nil, user = :one)
+     post :parameters, {:id => puppetclass.id, :host_id => host.id,
+                        :host => existing_host_attributes }, set_session_user
+     assert_response :success
+-    lookup_keys_added = overridable_lookup_keys(puppetclass, assigns(:obj))
+-    assert_equal 1, lookup_keys_added.count
+-    assert lookup_keys_added.map(&:key).include?("special_info")
+-    refute lookup_keys_added.map(&:key).include?("custom_class_param")
++    as_admin do
++      lookup_keys_added = overridable_lookup_keys(puppetclass, assigns(:obj))
++      assert_equal 1, lookup_keys_added.count
++      assert lookup_keys_added.map(&:key).include?("special_info")
++      refute lookup_keys_added.map(&:key).include?("custom_class_param")
++    end
+   end
+ 
+   test 'puppetclass lookup keys are added to partial _class_parameters on EXISTING hostgroup form through ajax POST to parameters' do
+@@ -123,10 +125,12 @@ def setup_user(operation = nil, type = "", search = nil, user = :one)
+     post :parameters, {:id => puppetclass.id, :host_id => hostgroup.id,
+                        :hostgroup => existing_hostgroup_attributes }, set_session_user
+     assert_response :success
+-    lookup_keys_added = overridable_lookup_keys(puppetclass, hostgroup)
+-    assert_equal 2, lookup_keys_added.count
+-    assert lookup_keys_added.map(&:key).include?("special_info")
+-    assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    as_admin do
++      lookup_keys_added = overridable_lookup_keys(puppetclass, hostgroup)
++      assert_equal 2, lookup_keys_added.count
++      assert lookup_keys_added.map(&:key).include?("special_info")
++      assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    end
+   end
+ 
+   test 'puppetclass lookup keys are added to partial _class_parameters on NEW host form through ajax POST to parameters' do
+@@ -136,10 +140,12 @@ def setup_user(operation = nil, type = "", search = nil, user = :one)
+     post :parameters, {:id => puppetclass.id, :host_id => 'null',
+                        :host => new_host_attributes }, set_session_user
+     assert_response :success
+-    lookup_keys_added = overridable_lookup_keys(puppetclass, host)
+-    assert_equal 2, lookup_keys_added.count
+-    assert lookup_keys_added.map(&:key).include?("special_info")
+-    assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    as_admin do
++      lookup_keys_added = overridable_lookup_keys(puppetclass, host)
++      assert_equal 2, lookup_keys_added.count
++      assert lookup_keys_added.map(&:key).include?("special_info")
++      assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    end
+   end
+ 
+   test 'puppetclass lookup keys are added to partial _class_parameters on NEW hostgroup form through ajax POST to parameters' do
+@@ -150,10 +156,12 @@ def setup_user(operation = nil, type = "", search = nil, user = :one)
+     post :parameters, {:id => puppetclass.id, :host_id => 'null',
+                        :hostgroup => new_hostgroup_attributes }, set_session_user
+     assert_response :success
+-    lookup_keys_added = overridable_lookup_keys(puppetclass, hostgroup)
+-    assert_equal 2, lookup_keys_added.count
+-    assert lookup_keys_added.map(&:key).include?("special_info")
+-    assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    as_admin do
++      lookup_keys_added = overridable_lookup_keys(puppetclass, hostgroup)
++      assert_equal 2, lookup_keys_added.count
++      assert lookup_keys_added.map(&:key).include?("special_info")
++      assert lookup_keys_added.map(&:key).include?("custom_class_param")
++    end
+   end
+ 
+   test "sorting by environment name on the index screen should work" do
+@@ -205,7 +213,9 @@ def test_override_none
+ 
+   test 'user with edit_puppetclasses permission should succeed in overriding all parameters' do
+     setup_user "edit", "puppetclasses"
+-    env = FactoryGirl.create(:environment)
++    env = FactoryGirl.create(:environment,
++                             :organizations => [users(:one).organizations.first],
++                             :locations => [users(:one).locations.first])
+     pc = FactoryGirl.create(:puppetclass, :with_parameters, :environments => [env])
+     refute pc.class_params.first.override
+     post :override, {:id => pc.to_param, :enable => 'true'}, set_session_user.merge(:user => users(:one).id)
+@@ -215,7 +225,9 @@ def test_override_none
+ 
+   test 'user without edit_puppetclasses permission should fail in overriding all parameters' do
+     setup_user "view", "puppetclasses"
+-    env = FactoryGirl.create(:environment)
++    env = FactoryGirl.create(:environment,
++                             :organizations => [users(:one).organizations.first],
++                             :locations => [users(:one).locations.first])
+     pc = FactoryGirl.create(:puppetclass, :with_parameters, :environments => [env])
+     refute pc.class_params.first.override
+     post :override, {:id => pc.to_param, :enable => 'true'}, set_session_user.merge(:user => users(:one).id)
+diff --git a/test/controllers/realms_controller_test.rb b/test/controllers/realms_controller_test.rb
+index 364bbe2c499..886614b98c9 100644
+--- a/test/controllers/realms_controller_test.rb
++++ b/test/controllers/realms_controller_test.rb
+@@ -36,9 +36,11 @@ def test_update_invalid
+ 
+   def test_update_valid
+     Realm.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => Realm.first.name,
+-                  :realm => { :realm_proxy_id => SmartProxy.first.id } }, set_session_user
+-    assert_equal SmartProxy.first.id, Realm.first.realm_proxy_id
++    realm_id = Realm.unscoped.first.id
++    proxy_id = SmartProxy.unscoped.first.id
++    put :update, {:id => realm_id,
++                  :realm => { :realm_proxy_id => proxy_id } }, set_session_user
++    assert_equal proxy_id, Realm.unscoped.find(realm_id).realm_proxy_id
+     assert_redirected_to realms_url
+   end
+ 
+diff --git a/test/controllers/smart_proxies_controller_test.rb b/test/controllers/smart_proxies_controller_test.rb
+index 1e1c4c7421f..b6a006464bc 100644
+--- a/test/controllers/smart_proxies_controller_test.rb
++++ b/test/controllers/smart_proxies_controller_test.rb
+@@ -38,8 +38,9 @@ def test_update_invalid
+ 
+   def test_update_valid
+     SmartProxy.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => SmartProxy.first,:smart_proxy => {:url => "http://elsewhere.com:8443"}}, set_session_user
+-    assert_equal "http://elsewhere.com:8443", SmartProxy.first.url
++    put :update, {:id => SmartProxy.unscoped.first,
++                  :smart_proxy => {:url => "http://elsewhere.com:8443"}}, set_session_user
++    assert_equal "http://elsewhere.com:8443", SmartProxy.unscoped.first.url
+     assert_redirected_to smart_proxies_url
+   end
+ 
+diff --git a/test/controllers/subnets_controller_test.rb b/test/controllers/subnets_controller_test.rb
+index db4c3070c9a..c4735c4a8a3 100644
+--- a/test/controllers/subnets_controller_test.rb
++++ b/test/controllers/subnets_controller_test.rb
+@@ -2,7 +2,7 @@
+ 
+ class SubnetsControllerTest < ActionController::TestCase
+   setup do
+-    @model = Subnet.first
++    @model = subnets(:one)
+   end
+ 
+   basic_index_test
+@@ -27,14 +27,15 @@ def test_create_valid_with_type
+ 
+   def test_update_invalid
+     Subnet.any_instance.stubs(:valid?).returns(false)
+-    put :update, {:id => Subnet.first, :subnet => {:network => nil}}, set_session_user
++    subnet_id = @model
++    put :update, {:id => subnet_id, :subnet => {:network => nil}}, set_session_user
+     assert_template 'edit'
+   end
+ 
+   def test_update_valid
+     Subnet.any_instance.stubs(:valid?).returns(true)
+-    put :update, {:id => Subnet.first, :subnet => {:network => '192.168.100.10'}}, set_session_user
+-    assert_equal '192.168.100.10', Subnet.first.network
++    put :update, {:id => @model, :subnet => {:network => '192.168.100.10'}}, set_session_user
++    assert_equal '192.168.100.10', Subnet.unscoped.find(@model).network
+     assert_redirected_to subnets_url
+   end
+ 
+@@ -42,17 +43,16 @@ def test_should_not_destroy_if_used_by_hosts
+     subnet = subnets(:one)
+     delete :destroy, {:id => subnet}, set_session_user
+     assert_redirected_to subnets_url
+-    assert Subnet.exists?(subnet.id)
++    assert Subnet.unscoped.exists?(subnet.id)
+   end
+ 
+   def test_destroy
+-    subnet = Subnet.first
+-    subnet.hosts.clear
+-    subnet.interfaces.clear
+-    subnet.domains.clear
+-    delete :destroy, {:id => subnet}, set_session_user
++    @model.hosts.clear
++    @model.interfaces.clear
++    @model.domains.clear
++    delete :destroy, {:id => @model}, set_session_user
+     assert_redirected_to subnets_url
+-    assert !Subnet.exists?(subnet.id)
++    refute Subnet.exists?(@model.id)
+   end
+ 
+   context 'freeip' do
+@@ -153,7 +153,7 @@ def test_destroy
+                     :cidr => sample_subnet.cidr,
+                     :ipam => sample_subnet.ipam,
+                     :boot_mode => sample_subnet.boot_mode }
+-    assert_difference 'Subnet.count', 1 do
++    assert_difference 'Subnet.unscoped.count', 1 do
+       post :create_multiple, { :subnets => [subnet_hash] }, set_session_user
+     end
+     assert_response :redirect
+diff --git a/test/controllers/unattended_controller_test.rb b/test/controllers/unattended_controller_test.rb
+index c8bc6a0c1e3..2e5b5c498a7 100644
+--- a/test/controllers/unattended_controller_test.rb
++++ b/test/controllers/unattended_controller_test.rb
+@@ -289,6 +289,8 @@ class UnattendedControllerTest < ActionController::TestCase
+       @secret_param = FactoryGirl.create(:host_parameter, :host => @rh_host, :name => 'secret_param')
+       setup_user 'view', 'hosts'
+       setup_user 'view', 'params', 'name = my_param'
++      users(:one).organizations << @rh_host.organization
++      users(:one).locations << @rh_host.location
+       @rh_host.provisioning_template(:kind => :provision).update_attribute(:template, "params: <%= @host.params['my_param'] %>, <%= @host.params['secret_param'] %>")
+     end
+ 
+@@ -438,8 +440,11 @@ class UnattendedControllerTest < ActionController::TestCase
+   end
+ 
+   test 'should render a template to user with valid filter' do
+-    user = FactoryGirl.create(:user, :with_mail, :admin => false)
+-    FactoryGirl.create(:filter, :role => user.roles.first, :permissions => Permission.where(:name => 'view_hosts'), :search => "name = #{@rh_host.name}")
++    user = FactoryGirl.create(:user, :with_mail, :admin => false,
++                              :organizations => [@org], :locations => [@loc])
++    FactoryGirl.create(:filter, :role => user.roles.first,
++                       :permissions => Permission.where(:name => 'view_hosts'),
++                       :search => "name = #{@rh_host.name}")
+     get :host_template, {:kind => 'PXELinux', :spoof => @rh_host.ip, :format => 'text'}, set_session_user(user)
+     assert_response :success
+     assert @response.body.include?("linux")
+@@ -447,7 +452,9 @@ class UnattendedControllerTest < ActionController::TestCase
+ 
+   test 'should not render a template to user with invalid filter' do
+     user = FactoryGirl.create(:user, :with_mail, :admin => false)
+-    FactoryGirl.create(:filter, :role => user.roles.first, :permissions => Permission.where(:name => 'view_hosts'), :search => "name = does_not_exist")
++    FactoryGirl.create(:filter, :role => user.roles.first,
++                       :permissions => Permission.where(:name => 'view_hosts'),
++                       :search => "name = does_not_exist")
+     get :host_template, {:kind => 'PXELinux', :spoof => @rh_host.ip, :format => 'text'}, set_session_user(user)
+     assert_response :not_found
+     assert_match /unable to find a host/, @response.body
+diff --git a/test/controllers/users_controller_test.rb b/test/controllers/users_controller_test.rb
+index 45a7aefca92..c70887c3e07 100644
+--- a/test/controllers/users_controller_test.rb
++++ b/test/controllers/users_controller_test.rb
+@@ -32,7 +32,7 @@ class UsersControllerTest < ActionController::TestCase
+       }
+     }, set_session_user
+     assert_redirected_to users_path
+-    refute User.find_by_login('foo').admin
++    refute User.unscoped.find_by_login('foo').admin
+   end
+ 
+   test 'should create admin user' do
+@@ -46,14 +46,14 @@ class UsersControllerTest < ActionController::TestCase
+       }
+     }, set_session_user
+     assert_redirected_to users_path
+-    assert User.find_by_login('foo').admin
++    assert User.unscoped.find_by_login('foo').admin
+   end
+ 
+   test "should update user" do
+     user = User.create :login => "foo", :mail => "foo@bar.com", :auth_source => auth_sources(:one)
+ 
+     put :update, { :id => user.id, :user => {:login => "johnsmith"} }, set_session_user
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+ 
+     assert mod_user.login == "johnsmith"
+     assert_redirected_to users_path
+@@ -63,7 +63,7 @@ class UsersControllerTest < ActionController::TestCase
+     user = FactoryGirl.create(:user, :with_mail)
+     notification = FactoryGirl.create(:mail_notification)
+     put :update, { :id => user.id, :user => {:user_mail_notifications_attributes => {'0' => {:mail_notification_id => notification.id, :interval => 'Subscribe'}}}}, set_session_user
+-    user = User.find_by_id(user.id)
++    user = User.unscoped.find_by_id(user.id)
+     assert user.mail_notifications.include? notification
+   end
+ 
+@@ -86,7 +86,7 @@ class UsersControllerTest < ActionController::TestCase
+     assert user.roles =([roles(:default_role)])
+ 
+     put :update, { :id => user.id, :user => {:login => "johnsmith"} }, set_session_user
+-    mod_user = User.find_by_id(user.id)
++    mod_user = User.unscoped.find_by_id(user.id)
+ 
+     assert mod_user.roles =([roles(:default_role)])
+   end
+@@ -101,7 +101,8 @@ class UsersControllerTest < ActionController::TestCase
+                     :login => "johnsmith", :password => "dummy", :password_confirmation => "dummy"
+                   }
+                  }, set_session_user
+-    mod_user = User.find_by_id(user.id)
++
++    mod_user = User.unscoped.find_by_id(user.id)
+ 
+     assert mod_user.matching_password?("dummy")
+     assert_redirected_to users_path
+@@ -117,7 +118,6 @@ class UsersControllerTest < ActionController::TestCase
+                     :login => "johnsmith", :password => "dummy", :password_confirmation => "DUMMY"
+                   }
+                  }, set_session_user
+-
+     user.reload
+     assert user.matching_password?("changeme")
+     assert_template :edit
+@@ -176,7 +176,7 @@ class UsersControllerTest < ActionController::TestCase
+     user.update_attribute :admin, true
+     delete :destroy, {:id => user.id}, set_session_user.merge(:user => user.id)
+     assert_redirected_to users_url
+-    assert User.exists?(user.id)
++    assert User.unscoped.exists?(user.id)
+     assert @request.flash[:notice] == "You cannot delete this user while logged in as this user."
+   end
+ 
+@@ -206,7 +206,7 @@ class UsersControllerTest < ActionController::TestCase
+       "id"     => user.id}
+     put :update, update_hash, set_session_user.merge(:user => user.id)
+ 
+-    assert !User.find_by_login(user.login).mail.blank?
++    assert !User.unscoped.find_by_login(user.login).mail.blank?
+   end
+ 
+   test "should login external user" do
+@@ -243,7 +243,7 @@ class UsersControllerTest < ActionController::TestCase
+     @request.session.clear
+     @request.env['REMOTE_USER'] = 'ares'
+     get :extlogin, {}, {}
+-    assert_redirected_to edit_user_path(User.find_by_login('ares'))
++    assert_redirected_to edit_user_path(User.unscoped.find_by_login('ares'))
+   end
+ 
+   test "should use intercept if available" do
+@@ -283,7 +283,7 @@ class UsersControllerTest < ActionController::TestCase
+ 
+   test 'user with edit permission should be able to edit another user' do
+     setup_user 'edit', 'users'
+-    get :edit, { :id => users(:two) }
++    get :edit, { :id => users(:two) }, set_session_user
+     assert_response :success
+   end
+ 
+@@ -295,7 +295,8 @@ class UsersControllerTest < ActionController::TestCase
+ 
+   test 'user with update permission should be able to update another user' do
+     setup_user 'edit', 'users'
+-    put :update, { :id => users(:two).id, :user => { :firstname => 'test' } }
++    put :update, { :id => users(:two).id, :user => { :firstname => 'test' } },
++      set_session_user
+ 
+     assert_response :redirect
+   end
+@@ -351,12 +352,14 @@ class UsersControllerTest < ActionController::TestCase
+     attrs = {:firstname=>"foo", :mail=>"foo#bar", :login=>"ldap-user", :auth_source_id=>auth_sources(:one).id}
+     AuthSourceLdap.any_instance.stubs(:authenticate).returns(attrs)
+     AuthSourceLdap.any_instance.stubs(:update_usergroups).returns(true)
++    AuthSourceLdap.any_instance.stubs(:organizations).returns([taxonomies(:organization1)])
++    AuthSourceLdap.any_instance.stubs(:locations).returns([taxonomies(:location1)])
+     post :login, {:login => {'login' => 'ldap-user', 'password' => 'password'}}
+     assert_redirected_to hosts_path
+     assert_match /mail.*invalid/i, flash[:warning]
+ 
+     # Subsequent redirects to the user edit page should preserve the warning
+-    user = User.find_by_login('ldap-user')
++    user = User.unscoped.find_by_login('ldap-user')
+     get :index, {}, set_session_user.merge(:user => user.id)
+     assert_redirected_to edit_user_path(user)
+ 
+@@ -429,7 +432,7 @@ class UsersControllerTest < ActionController::TestCase
+                                 :default_organization_id => taxonomies(:organization1).id } }
+       assert_redirected_to users_path
+ 
+-      updated_user = User.find(users(:one).id)
++      updated_user = User.unscoped.find(users(:one).id)
+       assert_equal taxonomies(:location1),     updated_user.default_location
+       assert_equal taxonomies(:organization1), updated_user.default_organization
+     end
+diff --git a/test/controllers/variable_lookup_keys_controller_test.rb b/test/controllers/variable_lookup_keys_controller_test.rb
+index 3dff3504780..dfaefca97ee 100644
+--- a/test/controllers/variable_lookup_keys_controller_test.rb
++++ b/test/controllers/variable_lookup_keys_controller_test.rb
+@@ -33,19 +33,14 @@ class VariableLookupKeysControllerTest < ActionController::TestCase
+     assert_redirected_to variable_lookup_keys_path
+   end
+ 
+-  def setup_user
+-    @request.session[:user] = users(:one).id
+-    users(:one).roles       = [Role.default, Role.find_by_name('Viewer')]
+-  end
+-
+   test 'user with viewer rights should fail to edit an external variable' do
+-    setup_user
++    setup_users
+     get :edit, {:id => VariableLookupKey.first.id}, set_session_user.merge(:user => users(:one).id)
+     assert_equal response.status, 403
+   end
+ 
+   test 'user with viewer rights should succeed in viewing external variables' do
+-    setup_user
++    setup_users
+     get :index, {}, set_session_user.merge(:user => users(:one).id)
+     assert_response :success
+   end
+diff --git a/test/factories/domain.rb b/test/factories/domain.rb
+index e3bd14b018c..4885b91f0a2 100644
+--- a/test/factories/domain.rb
++++ b/test/factories/domain.rb
+@@ -6,6 +6,8 @@
+   factory :domain do
+     sequence(:name) {|n| "example#{n}.com" }
+     fullname { |n| n.name }
++    organizations { [Organization.find_by_name('Organization 1')] } if SETTINGS[:organizations_enabled]
++    locations { [Location.find_by_name('Location 1')] } if SETTINGS[:locations_enabled]
+ 
+     trait :with_parameter do
+       after(:create) do |domain,evaluator|
+diff --git a/test/factories/host_related.rb b/test/factories/host_related.rb
+index 31104059e1b..9051c114a8f 100644
+--- a/test/factories/host_related.rb
++++ b/test/factories/host_related.rb
+@@ -17,6 +17,8 @@ def set_nic_attributes(host, attributes, evaluator)
+     sequence(:name) { |n| "ptable#{n}" }
+     layout 'zerombr\nclearpart --all    --initlabel\npart /boot --fstype ext3 --size=<%= 10 * 10 %> --asprimary\npart /     --f   stype ext3 --size=1024 --grow\npart swap  --recommended'
+     os_family 'Redhat'
++    organizations { [Organization.find_by_name('Organization 1')] } if SETTINGS[:organizations_enabled]
++    locations { [Location.find_by_name('Location 1')] } if SETTINGS[:locations_enabled]
+ 
+     trait :ubuntu do
+       sequence(:name) { |n| "ubuntu default#{n}" }
+@@ -110,6 +112,8 @@ def set_nic_attributes(host, attributes, evaluator)
+     sequence(:name) { |n| "host#{n}" }
+     sequence(:hostname) { |n| "host#{n}" }
+     root_pass 'xybxa6JUkz63w'
++    organization { Organization.find_by_name('Organization 1') } if SETTINGS[:organizations_enabled]
++    location { Location.find_by_name('Location 1') } if SETTINGS[:locations_enabled]
+ 
+     # This allows a test to declare build/create(:host, :ip => '1.2.3.4') and
+     # have the primary interface correctly updated with the specified attrs
+@@ -232,8 +236,6 @@ def set_nic_attributes(host, attributes, evaluator)
+       architecture { operatingsystem.try(:architectures).try(:first) }
+       medium { operatingsystem.try(:media).try(:first) }
+       ptable { operatingsystem.try(:ptables).try(:first) }
+-      location
+-      organization
+       domain
+       interfaces { [ FactoryGirl.build(:nic_primary_and_provision) ] }
+       association :operatingsystem, :with_associations
+@@ -431,6 +433,8 @@ def set_nic_attributes(host, attributes, evaluator)
+ 
+   factory :hostgroup do
+     sequence(:name) { |n| "hostgroup#{n}" }
++    organizations { [Organization.find_by_name('Organization 1')] } if SETTINGS[:organizations_enabled]
++    locations { [Location.find_by_name('Location 1')] } if SETTINGS[:locations_enabled]
+ 
+     trait :with_parent do
+       association :parent, :factory => :hostgroup
+diff --git a/test/factories/smart_proxy.rb b/test/factories/smart_proxy.rb
+index 580002d105a..3d7fbef625d 100644
+--- a/test/factories/smart_proxy.rb
++++ b/test/factories/smart_proxy.rb
+@@ -2,6 +2,9 @@
+   factory :smart_proxy do
+     sequence(:name) {|n| "proxy#{n}" }
+     sequence(:url) {|n| "https://somewhere#{n}.net:8443" }
++    organizations { [Organization.find_by_name('Organization 1')] } if SETTINGS[:organizations_enabled]
++    locations { [Location.find_by_name('Location 1')] } if SETTINGS[:locations_enabled]
++
+     before(:create, :build, :build_stubbed) do
+       ProxyAPI::Features.any_instance.stubs(:features => Feature.name_map.keys)
+     end
+diff --git a/test/factories/subnet.rb b/test/factories/subnet.rb
+index 1897e4d8593..be3ce26c7c4 100644
+--- a/test/factories/subnet.rb
++++ b/test/factories/subnet.rb
+@@ -6,6 +6,8 @@
+   factory :subnet do
+     sequence(:name) {|n| "subnet#{n}" }
+     ipam "None"
++    organizations { [Organization.find_by_name('Organization 1')] } if SETTINGS[:organizations_enabled]
++    locations { [Location.find_by_name('Location 1')] } if SETTINGS[:locations_enabled]
+ 
+     trait :tftp do
+       association :tftp, :factory => :template_smart_proxy
+diff --git a/test/factories/user_related.rb b/test/factories/user_related.rb
+index c5ea7ea5972..a5004c89b03 100644
+--- a/test/factories/user_related.rb
++++ b/test/factories/user_related.rb
+@@ -14,6 +14,8 @@
+     auth_source { AuthSourceInternal.first }
+     password 'password'
+     sequence(:login) {|n| "user#{n}" }
++    organizations { [ Organization.find_by_name('Organization 1') ] }
++    locations { [ Location.find_by_name('Location 1') ] }
+ 
+     trait :admin do
+       admin { true }
+diff --git a/test/fixtures/taxable_taxonomies.yml b/test/fixtures/taxable_taxonomies.yml
+index 7c58182060c..ff2e77e96a8 100644
+--- a/test/fixtures/taxable_taxonomies.yml
++++ b/test/fixtures/taxable_taxonomies.yml
+@@ -4,21 +4,11 @@
+ # model remove the '{}' from the fixture names and add the columns immediately
+ # below each fixture, per the syntax in the comments below
+ #
+-one:
+-  taxonomy: location1
+-  taxable: one
+-  taxable_type: "Subnet"
+-
+ two:
+   taxonomy: location1
+   taxable: one
+   taxable_type: "SmartProxy"
+ 
+-three:
+-  taxonomy: organization1
+-  taxable: one
+-  taxable_type: "Subnet"
+-
+ four:
+   taxonomy: organization1
+   taxable: one
+@@ -54,16 +44,6 @@ nine:
+   taxable: mydomain
+   taxable_type: "Domain"
+ 
+-ten:
+-  taxonomy: location1
+-  taxable: one
+-  taxable_type: "Medium"
+-
+-ten2:
+-  taxonomy: organization1
+-  taxable: one
+-  taxable_type: "Medium"
+-
+ eleven:
+   taxonomy: location1
+   taxable: one
+@@ -153,3 +133,63 @@ scoped_user_location1:
+   taxonomy: location1
+   taxable: scoped
+   taxable_type: User
++
++user_one_org:
++  taxonomy: organization1
++  taxable: one
++  taxable_type: "User"
++
++user_one_loc:
++  taxonomy: location1
++  taxable: one
++  taxable_type: "User"
++
++subnet_one_org:
++  taxonomy: organization1
++  taxable: one
++  taxable_type: "Subnet"
++
++subnet_one_loc:
++  taxonomy: location1
++  taxable: one
++  taxable_type: "Subnet"
++
++compute_mycompute_org:
++  taxonomy: organization1
++  taxable: mycompute
++  taxable_type: "ComputeResource"
++
++compute_mycompute_loc:
++  taxonomy: location1
++  taxable: mycompute
++  taxable_type: "ComputeResource"
++
++hostgroup_common_org:
++  taxonomy: organization1
++  taxable: common
++  taxable_type: "Hostgroup"
++
++hostgroup_common_loc:
++  taxonomy: location1
++  taxable: common
++  taxable_type: "Hostgroup"
++
++medium_one_org:
++  taxonomy: organization1
++  taxable: one
++  taxable_type: "Medium"
++
++medium_one_loc:
++  taxonomy: location1
++  taxable: one
++  taxable_type: "Medium"
++
++auth_source_ldap_one_org:
++  taxonomy: organization1
++  taxable: one
++  taxable_type: "AuthSource"
++
++auth_source_ldap_one_loc:
++  taxonomy: location1
++  taxable: one
++  taxable_type: "AuthSource"
+diff --git a/test/integration/location_test.rb b/test/integration/location_test.rb
+index be4a29fb813..960ce5e9cf1 100644
+--- a/test/integration/location_test.rb
++++ b/test/integration/location_test.rb
+@@ -2,7 +2,7 @@
+ 
+ class LocationIntegrationTest < ActionDispatch::IntegrationTest
+   def setup
+-    FactoryGirl.create(:host)
++    FactoryGirl.create(:host, :location => nil)
+   end
+ 
+   test "index page" do
+@@ -35,7 +35,7 @@ def setup
+ 
+   # content - click Assign All
+   test "create new page when some hosts are not assigned a location and click Assign All" do
+-    assert_new_button(locations_path,"New Location",new_location_path)
++    assert_new_button(locations_path, "New Location", new_location_path)
+     fill_in "location_name", :with => "Raleigh"
+     click_button "Submit"
+     assert_current_path step2_location_path(Location.unscoped.order(:id).last)
+diff --git a/test/integration/organization_test.rb b/test/integration/organization_test.rb
+index 79c3bdab35e..3d0831b606e 100644
+--- a/test/integration/organization_test.rb
++++ b/test/integration/organization_test.rb
+@@ -2,7 +2,7 @@
+ 
+ class OrganizationIntegrationTest < ActionDispatch::IntegrationTest
+   def setup
+-    FactoryGirl.create(:host)
++    FactoryGirl.create(:host, :organization => nil)
+   end
+ 
+   test "index page" do
+diff --git a/test/models/concerns/api_taxonomy_scope_test.rb b/test/models/concerns/api_taxonomy_scope_test.rb
+index 0ff4bb6f16e..6795a69052c 100644
+--- a/test/models/concerns/api_taxonomy_scope_test.rb
++++ b/test/models/concerns/api_taxonomy_scope_test.rb
+@@ -42,7 +42,6 @@ class ApiTaxonomyScopeTest < ActiveSupport::TestCase
+     end
+ 
+     test "set_taxonomy_scope respects user association to orgs and locs, fails on not allowed organization" do
+-      users(:one).locations << taxonomies(:location1)
+       Location.expects(:my_locations).returns(Location.where(:id => taxonomies(:location1).id))
+       Organization.expects(:my_organizations).returns(Organization.where(:id => nil))
+       @dummy.expects(:not_found)
+@@ -52,8 +51,6 @@ class ApiTaxonomyScopeTest < ActiveSupport::TestCase
+     end
+ 
+     test "set_taxonomy_scope respects user association to orgs and locs, sets both if allowed" do
+-      users(:one).locations << taxonomies(:location1)
+-      users(:one).organizations << taxonomies(:organization1)
+       Location.expects(:my_locations).returns(Location.where(:id => taxonomies(:location1).id))
+       Organization.expects(:my_organizations).returns(Organization.where(:id => taxonomies(:organization1).id))
+       as_user :one do
+diff --git a/test/models/fact_value_test.rb b/test/models/fact_value_test.rb
+index 80ed5d01617..d438845a243 100644
+--- a/test/models/fact_value_test.rb
++++ b/test/models/fact_value_test.rb
+@@ -120,7 +120,13 @@ def setup
+ 
+     test 'returns visible facts for unlimited user' do
+       user_role = FactoryGirl.create(:user_user_role)
+-      FactoryGirl.create(:filter, :role => user_role.role, :permissions => Permission.where(:name => 'view_hosts'), :unlimited => true)
++      FactoryGirl.create(:filter, :role => user_role.role,
++                         :permissions => Permission.unscoped.where(:name => 'view_hosts'),
++                         :unlimited => true)
++      target_host.organization = user_role.owner.organizations.first
++      target_host.location = user_role.owner.locations.first
++      other_host.organization = user_role.owner.organizations.first
++      other_host.location = user_role.owner.locations.first
+       as_user user_role.owner do
+         assert_empty (target_host.fact_values + other_host.fact_values).map(&:id) - FactValue.my_facts.map(&:id)
+       end
+diff --git a/test/models/host_test.rb b/test/models/host_test.rb
+index 23d2155bfa0..845b4a57251 100644
+--- a/test/models/host_test.rb
++++ b/test/models/host_test.rb
+@@ -175,10 +175,12 @@ def teardown
+   test "non-admin user should be able to create host with new lookup value" do
+     User.current = users(:one)
+     User.current.roles << [roles(:manager)]
+-    assert_difference('LookupValue.count') do
++    assert_difference('LookupValue.unscoped.count') do
+       assert Host.create! :name => "abc.mydomain.net", :mac => "aabbecddeeff", :ip => "3.3.4.3",
+       :domain => domains(:mydomain), :operatingsystem => operatingsystems(:redhat),
+-      :subnet => subnets(:two), :architecture => architectures(:x86_64), :puppet_proxy => smart_proxies(:puppetmaster), :medium => media(:one),
++      :subnet => subnets(:two), :architecture => architectures(:x86_64),
++      :puppet_proxy => smart_proxies(:puppetmaster), :medium => media(:one),
++      :organization => nil, :location => nil,
+       :environment => environments(:production), :disk => "empty partition",
+       :lookup_values_attributes => {"new_123456" => {"lookup_key_id" => lookup_keys(:complex).id, "value"=>"some_value", "match" => "fqdn=abc.mydomain.net"}}
+     end
+@@ -655,6 +657,7 @@ def teardown
+     org2 = FactoryGirl.create(:organization)
+     org3 = FactoryGirl.create(:organization)
+     user = FactoryGirl.create(:user, :organizations => [org1, org2])
++    users(:one).organizations << [org1, org2, org3]
+     host1 = FactoryGirl.create(:host, :organization => org1)
+     host2 = FactoryGirl.create(:host, :organization => org2)
+     host3 = FactoryGirl.create(:host, :organization => org3)
+diff --git a/test/models/nic_test.rb b/test/models/nic_test.rb
+index 83ec3d4ad97..25050c5b95a 100644
+--- a/test/models/nic_test.rb
++++ b/test/models/nic_test.rb
+@@ -59,7 +59,13 @@ def teardown
+   test "should delegate subnet attributes" do
+     subnet = subnets(:two)
+     domain = (subnet.domains.any? ? subnet.domains : subnet.domains << Domain.first).first
+-    interface = Nic::Managed.create! :ip => "3.3.4.127", :mac => "cabbccddeeff", :host => FactoryGirl.create(:host), :subnet => subnet, :name => "a" + FactoryGirl.create(:host).name, :domain => domain
++    interface = FactoryGirl.build(:nic_managed,
++                                  :ip => "3.3.4.127",
++                                  :mac => "cabbccddeeff",
++                                  :host => FactoryGirl.create(:host),
++                                  :subnet => subnet,
++                                  :name => "a" + FactoryGirl.create(:host).name,
++                                  :domain => domain)
+     assert_equal subnet.network, interface.network
+     assert_equal subnet.vlanid, interface.vlanid
+   end
+diff --git a/test/models/report_test.rb b/test/models/report_test.rb
+index c0317b11899..52e04a41e13 100644
+--- a/test/models/report_test.rb
++++ b/test/models/report_test.rb
+@@ -41,11 +41,9 @@ def setup
+     end
+ 
+     test 'returns visible reports for filtered user' do
+-      user_role = FactoryGirl.create(:user_user_role)
+-      FactoryGirl.create(:filter, :role => user_role.role, :permissions => Permission.where(:name => 'view_hosts'), :search => "hostgroup_id = #{@target_host.hostgroup_id}")
+-      as_user user_role.owner do
+-        assert_equal @target_reports.map(&:id).sort, Report.my_reports.map(&:id).sort
+-      end
++      setup_user('view', 'hosts',
++                 "hostgroup_id = #{@target_host.hostgroup_id}")
++      assert_equal @target_reports.map(&:id).sort, Report.my_reports.map(&:id).sort
+     end
+ 
+     test "only return reports from host in user's taxonomies" do
+diff --git a/test/models/shared/taxonomies_base_test.rb b/test/models/shared/taxonomies_base_test.rb
+index ce9b63c5943..8afbd558b5c 100644
+--- a/test/models/shared/taxonomies_base_test.rb
++++ b/test/models/shared/taxonomies_base_test.rb
+@@ -52,6 +52,7 @@ module TaxonomiesBaseTest
+     test 'it should return array of used ids by hosts' do
+       taxonomy = taxonomies(:"#{taxonomy_name}1")
+       subnet = FactoryGirl.create(:subnet_ipv4,
++                                  :"#{opposite_taxonomy}_ids" => [],
+                                   :"#{taxonomy_name.pluralize}" => [taxonomy])
+       domain = FactoryGirl.create(:domain)
+       FactoryGirl.create(:host,
+@@ -126,24 +127,24 @@ module TaxonomiesBaseTest
+       # check if they match
+       assert_equal selected_ids[:environment_ids].sort, environment_ids.sort
+       assert_equal selected_ids[:hostgroup_ids].sort, hostgroup_ids.sort
+-      assert_equal selected_ids[:subnet_ids].sort, subnet_ids.sort
++      assert_equal selected_ids[:subnet_ids].sort, subnet_ids.uniq.sort
+       assert_equal selected_ids[:domain_ids].sort, domain_ids.sort
+       assert_equal selected_ids[:realm_ids].sort, realm_ids.sort
+-      assert_equal selected_ids[:medium_ids].sort, medium_ids.sort
++      assert_equal selected_ids[:medium_ids].sort, medium_ids.uniq.sort
+       assert_equal selected_ids[:user_ids].sort, user_ids.sort
+       assert_equal selected_ids[:smart_proxy_ids].sort, smart_proxy_ids.sort
+       assert_equal selected_ids[:provisioning_template_ids].sort, provisioning_template_ids.sort
+       assert_equal selected_ids[:compute_resource_ids].sort, compute_resource_ids.sort
+       # match to manually generated taxable_taxonomies
+       assert_equal selected_ids[:environment_ids], [environments(:production).id]
+-      assert_equal selected_ids[:hostgroup_ids], []
++      assert_equal selected_ids[:hostgroup_ids], [hostgroups(:common).id]
+       assert_equal selected_ids[:subnet_ids], [subnets(:one).id]
+       assert_equal selected_ids[:domain_ids], [domains(:mydomain).id, domains(:yourdomain).id]
+       assert_equal selected_ids[:medium_ids], [media(:one).id]
+-      assert_equal selected_ids[:user_ids], [users(:scoped).id]
++      assert_equal selected_ids[:user_ids], [users(:one).id, users(:scoped).id]
+       assert_equal selected_ids[:smart_proxy_ids].sort, [smart_proxies(:puppetmaster).id, smart_proxies(:one).id, smart_proxies(:two).id, smart_proxies(:three).id, smart_proxies(:realm).id].sort
+       assert_equal selected_ids[:provisioning_template_ids], [templates(:mystring2).id]
+-      assert_equal selected_ids[:compute_resource_ids], [compute_resources(:one).id]
++      assert_equal selected_ids[:compute_resource_ids], [compute_resources(:one).id, compute_resources(:mycompute).id]
+     end
+ 
+     test 'it should return selected_ids array of ALL values (when types are ignored)' do
+@@ -168,8 +169,8 @@ module TaxonomiesBaseTest
+     test "it should clone organization with all associations" do
+       taxonomy = taxonomies(:"#{taxonomy_name}1")
+       taxonomy_dup = taxonomy.dup
+-      taxonomy_dup.name = "taxonomy_dup_name"
+-      assert taxonomy_dup.save!
++      taxonomy_dup.name = "taxonomy_dup_name_#{rand}"
++      assert taxonomy_dup.save
+       assert_equal taxonomy_dup.environment_ids, taxonomy.environment_ids
+       assert_equal taxonomy_dup.hostgroup_ids, taxonomy.hostgroup_ids
+       assert_equal taxonomy_dup.subnet_ids, taxonomy.subnet_ids
+@@ -213,7 +214,7 @@ module TaxonomiesBaseTest
+       as_admin do
+         assert_equal expected.sort,
+           taxonomy_class.public_send(:"my_#{taxonomy_name.pluralize}",
+-                                     users(:one)).pluck(:id).sort
++                                     users(:one)).sort
+       end
+     end
+ 
+@@ -238,7 +239,9 @@ module TaxonomiesBaseTest
+       parent = taxonomies(:"#{taxonomy_name}1")
+       taxonomy = taxonomy_class.create :name => "rack1", :parent_id => parent.id
+       # check that inherited_ids of taxonomy matches selected_ids of parent
+-      assert_equal parent.selected_ids, taxonomy.inherited_ids
++      as_admin do
++        assert_equal parent.selected_ids, taxonomy.inherited_ids
++      end
+     end
+ 
+     test "selected_or_inherited_ids for inherited taxonomy" do
+@@ -258,8 +261,8 @@ module TaxonomiesBaseTest
+       subnet = FactoryGirl.create(:subnet_ipv4, :organizations => [taxonomies(:organization1)])
+       domain1 = FactoryGirl.create(:domain)
+       domain2 = FactoryGirl.create(:domain)
+-      parent.update_attribute(:domains,[domain1,domain2])
+-      parent.update_attribute(:subnets,[subnet])
++      parent.update_attribute(:domains, [domain1, domain2])
++      parent.update_attribute(:subnets, [subnet])
+       # we're no longer using the fixture dhcp/dns/tftp proxy to create the host, so remove them
+       parent.update_attribute(:smart_proxies,[smart_proxies(:puppetmaster),smart_proxies(:realm)])
+ 
+@@ -268,7 +271,7 @@ module TaxonomiesBaseTest
+                          :compute_resource => compute_resources(:one),
+                          :domain           => domain1,
+                          :environment      => environments(:production),
+-                         :"#{taxonomy_name}"         => parent,
++                         :"#{taxonomy_name}" => parent,
+                          :organization     => taxonomies(:organization1),
+                          :medium           => media(:one),
+                          :operatingsystem  => operatingsystems(:centos5_3),
+@@ -277,7 +280,7 @@ module TaxonomiesBaseTest
+                          :realm            => realms(:myrealm),
+                          :subnet           => subnet)
+       FactoryGirl.create(:host,
+-                         :"#{taxonomy_name}"         => parent,
++                         :"#{taxonomy_name}" => parent,
+                          :domain           => domain2)
+       FactoryGirl.create(:os_default_template,
+                          :provisioning_template  => templates(:mystring2),
+@@ -285,8 +288,8 @@ module TaxonomiesBaseTest
+                          :template_kind    => TemplateKind.find_by_name('provision'))
+ 
+       # check that inherited_ids of taxonomy matches selected_ids of parent
+-      taxonomy.selected_or_inherited_ids.each do |k,v|
+-        assert_equal v.sort, parent.used_and_selected_ids[k].sort
++      taxonomy.inherited_ids.each do |k,v|
++        assert_equal v.sort, parent.selected_ids[k].sort
+       end
+     end
+ 
+@@ -299,7 +302,7 @@ module TaxonomiesBaseTest
+       end
+     end
+ 
+-    test "multiple inheritence" do
++    test "multiple inheritance" do
+       parent1 = taxonomies(:"#{taxonomy_name}1")
+       assert_equal [subnets(:one).id], parent1.selected_ids["subnet_ids"]
+ 
+diff --git a/test/models/subnet/ipv6_test.rb b/test/models/subnet/ipv6_test.rb
+index e47818321a4..63d08e28ac6 100644
+--- a/test/models/subnet/ipv6_test.rb
++++ b/test/models/subnet/ipv6_test.rb
+@@ -26,7 +26,7 @@ def setup
+ 
+   test "should find the subnet by ip" do
+     subnet = FactoryGirl.create(:subnet_ipv6)
+-    assert_equal subnet, Subnet::Ipv6.subnet_for(get_ip(subnet, 10))
++    assert_equal subnet, Subnet::Ipv6.unscoped.subnet_for(get_ip(subnet, 10))
+   end
+ 
+   test "from cant be bigger than to range" do
+diff --git a/test/models/subnet_test.rb b/test/models/subnet_test.rb
+index 9ab4a035bed..8901562f212 100644
+--- a/test/models/subnet_test.rb
++++ b/test/models/subnet_test.rb
+@@ -96,7 +96,7 @@ class Subnet::Test < Subnet; end
+     hostgroup = FactoryGirl.create(:hostgroup, :with_subnet)
+     subnet = hostgroup.subnet
+     refute subnet.destroy
+-    assert_match /is being used by/, subnet.errors.full_messages.join("\n")
++    assert_match /is used by/, subnet.errors.full_messages.join("\n")
+   end
+ 
+   test "should not destroy if host uses it" do
+diff --git a/test/models/taxonomix_test.rb b/test/models/taxonomix_test.rb
+index 2d842748290..92b9473809e 100644
+--- a/test/models/taxonomix_test.rb
++++ b/test/models/taxonomix_test.rb
+@@ -70,7 +70,8 @@ def setup
+     test 'expands organizations and locations to actual values' do
+       org2 = FactoryGirl.create(:organization)
+       org3 = FactoryGirl.create(:organization)
+-      user = FactoryGirl.create(:user, :organizations => [@org, org2])
++      user = FactoryGirl.create(:user, :organizations => [@org, org2],
++                                :locations => [])
+ 
+       as_user(user) do
+         @dummy.class.with_taxonomy_scope(nil, nil)
+@@ -162,47 +163,67 @@ def setup
+     assert_includes used_organizations, org4.id
+   end
+ 
+-  test ".taxable_ids can work with empty array returning nil" do
+-    dummy_class = @dummy.class
+-    assert_nil dummy_class.taxable_ids([], [])
+-  end
++  describe '#taxable_ids' do
++    test "can work with empty array returning nil" do
++      assert_nil @dummy.class.taxable_ids([], [])
++    end
+ 
+-  test ".taxable_ids (and .inner_select) can work with array of taxonomies" do
+-    loc1 = FactoryGirl.create(:location)
+-    loc2 = FactoryGirl.create(:location, :parent_id => loc1.id)
+-    loc3 = FactoryGirl.create(:location, :parent_id => loc2.id)
+-    loc4 = FactoryGirl.create(:location)
+-    org = FactoryGirl.create(:organization)
+-    env1 = FactoryGirl.create(:environment, :organizations => [org], :locations => [loc2])
+-    env2 = FactoryGirl.create(:environment, :organizations => [org])
+-    env3 = FactoryGirl.create(:environment, :locations => [loc2])
+-    env4 = FactoryGirl.create(:environment, :locations => [loc4])
+-    env5 = FactoryGirl.create(:environment, :locations => [loc1])
+-    env6 = FactoryGirl.create(:environment, :locations => [loc3])
+-
+-    taxable_ids = Environment.taxable_ids([loc2, loc4], org, :subtree_ids)
+-    visible = [ env1 ]
+-    invisible = [ env2, env3, env4, env5, env6 ]
+-    visible.each { |env| assert_includes taxable_ids, env.id }
+-    invisible.each { |env| refute_includes taxable_ids, env.id }
+-
+-    taxable_ids = Environment.taxable_ids([], org, :subtree_ids)
+-    visible = [ env1, env2 ]
+-    invisible = [ env3, env4, env5, env6 ]
+-    visible.each { |env| assert_includes taxable_ids, env.id }
+-    invisible.each { |env| refute_includes taxable_ids, env.id }
+-
+-    taxable_ids = Environment.taxable_ids(loc2, [], :subtree_ids)
+-    visible = [ env1, env3, env5, env6 ]
+-    invisible = [ env2, env4 ]
+-    visible.each { |env| assert_includes taxable_ids, env.id }
+-    invisible.each { |env| refute_includes taxable_ids, env.id }
+-
+-    taxable_ids = Environment.taxable_ids([loc2, loc4], [], :subtree_ids)
+-    visible = [ env1, env3, env4, env5, env6 ]
+-    invisible = [ env2 ]
+-    visible.each { |env| assert_includes taxable_ids, env.id }
+-    invisible.each { |env| refute_includes taxable_ids, env.id }
++    test 'returns IDs for non-admin user of any context when no org/loc' do
++      assert @dummy.class.all.count > 1
++
++      as_user(:one) do
++        any_org = User.current.organizations
++        any_loc = User.current.locations
++
++        visible_dummies = any_org.map(&:"#{@dummy.class.table_name}").flatten.map(&:id) &
++          any_loc.map(&:"#{@dummy.class.table_name}").flatten.map(&:id)
++
++        # We need to call '.taxable_ids' using the Environment class because
++        # '.taxable_ids' will look for the 'taxable_taxonomies.taxable_type'
++        # table of the caller.
++        # Since TaxonomixDummy is defined in terms of the Environment table,
++        # the table will have Environment, not TaxonomixDummy as taxable_type
++        assert_equal visible_dummies, Environment.taxable_ids(nil, nil)
++        assert_equal visible_dummies, Environment.taxable_ids([], [])
++      end
++    end
++
++    test "can work with array of taxonomies" do
++      loc1 = FactoryGirl.create(:location)
++      loc2 = FactoryGirl.create(:location, :parent_id => loc1.id)
++      loc3 = FactoryGirl.create(:location, :parent_id => loc2.id)
++      loc4 = FactoryGirl.create(:location)
++      org = FactoryGirl.create(:organization)
++      env1 = FactoryGirl.create(:environment, :organizations => [org], :locations => [loc2])
++      env2 = FactoryGirl.create(:environment, :organizations => [org])
++      env3 = FactoryGirl.create(:environment, :locations => [loc2])
++      env4 = FactoryGirl.create(:environment, :locations => [loc4])
++      env5 = FactoryGirl.create(:environment, :locations => [loc1])
++      env6 = FactoryGirl.create(:environment, :locations => [loc3])
++      taxable_ids = Environment.taxable_ids([loc2, loc4], org, :subtree_ids)
++      visible = [ env1 ]
++      invisible = [ env2, env3, env4, env5, env6 ]
++      visible.each { |env| assert_includes taxable_ids, env.id }
++      invisible.each { |env| refute_includes taxable_ids, env.id }
++
++      taxable_ids = Environment.taxable_ids([], org, :subtree_ids)
++      visible = [ env1, env2 ]
++      invisible = [ env3, env4, env5, env6 ]
++      visible.each { |env| assert_includes taxable_ids, env.id }
++      invisible.each { |env| refute_includes taxable_ids, env.id }
++
++      taxable_ids = Environment.taxable_ids(loc2, [], :subtree_ids)
++      visible = [ env1, env3, env5, env6 ]
++      invisible = [ env2, env4 ]
++      visible.each { |env| assert_includes taxable_ids, env.id }
++      invisible.each { |env| refute_includes taxable_ids, env.id }
++
++      taxable_ids = Environment.taxable_ids([loc2, loc4], [], :subtree_ids)
++      visible = [ env1, env3, env4, env5, env6 ]
++      invisible = [ env2 ]
++      visible.each { |env| assert_includes taxable_ids, env.id }
++      invisible.each { |env| refute_includes taxable_ids, env.id }
++    end
+   end
+ 
+   test "validation does not prevent taxonomy association if user does not have permissions of already assigned taxonomies" do
+@@ -279,8 +300,47 @@ def setup
+     user = FactoryGirl.create(:user, :id => 25, :organizations => [org])
+     ugroup = FactoryGirl.create(:usergroup, :id=> 25)
+     FactoryGirl.create(:host, :owner => ugroup, :organization => org)
+-    used_organizations = user.used_organization_ids
+-    assert_empty used_organizations
+-    assert_equal used_organizations.count, 0
++    as_admin do
++      used_organizations = user.used_organization_ids
++      assert_empty used_organizations
++      assert_equal used_organizations.count, 0
++    end
++  end
++
++  context 'admin permissions' do
++    test "returns only visible objects when org/loc are selected" do
++      scoped_environments = Environment.
++        with_taxonomy_scope([taxonomies(:organization1)])
++      assert scoped_environments.include?(*taxonomies(:organization1).environments)
++      assert_not_equal Environment.unscoped.all, scoped_environments
++      assert_equal taxonomies(:organization1).environments, scoped_environments
++    end
++
++    test "returns nil (all objects) when there are no org/loc" do
++      assert_equal User.with_taxonomy_scope([],[]).sort, User.unscoped.all.sort
++    end
++  end
++
++  test 'current user ID and admin IDs are always visible' do
++    as_user(:one) do
++      scoped_users = User.with_taxonomy_scope([],[])
++      assert_include scoped_users, User.current
++      assert_include scoped_users, users(:admin)
++    end
++  end
++
++  test 'users can only see objects scoped to its current taxonomies' do
++    # Environment in organization 1 and location 1 cannot be seen by an user
++    # who is scoped to organization 1 and location 2
++    users(:one).organizations = [taxonomies(:organization1)]
++    users(:one).locations = [taxonomies(:location2)]
++    unreachable_env = FactoryGirl.create(
++      :environment,
++      :organizations => [taxonomies(:organization1)],
++      :locations => [taxonomies(:location1)])
++
++    as_user(:one) do
++      assert_not_include Environment.all, unreachable_env
++    end
+   end
+ end
+diff --git a/test/models/taxonomy_test.rb b/test/models/taxonomy_test.rb
+index 0be646f4663..3335786ea12 100644
+--- a/test/models/taxonomy_test.rb
++++ b/test/models/taxonomy_test.rb
+@@ -64,7 +64,7 @@ def setup
+ 
+   test 'for non admin user, nil is expanded to [] if user is not assigned to any org' do
+     # we have to run on specific taxonomy because my_* is defined only in Organization and Location
+-    user = FactoryGirl.create(:user)
++    user = FactoryGirl.create(:user, :organizations => [])
+     as_user(user) do
+       assert_equal [], Organization.expand(nil)
+       assert_equal [], Organization.expand([])
+diff --git a/test/models/user_test.rb b/test/models/user_test.rb
+index 1e3a5c21bcb..df3f13a17db 100644
+--- a/test/models/user_test.rb
++++ b/test/models/user_test.rb
+@@ -113,7 +113,7 @@ def setup
+       user = users(:internal)
+       last_login = user.last_login_on
+       assert_not_nil User.try_to_login(user.login, "changeme")
+-      assert_not_equal last_login, User.find(user.id).last_login_on
++      assert_not_equal last_login, User.unscoped.find(user.id).last_login_on
+     end
+ 
+     test "updating the last login time must not persist invalid attributes" do
+@@ -121,7 +121,7 @@ def setup
+       AuthSourceLdap.any_instance.expects(:authenticate).returns(:mail => 'foo#bar')
+       AuthSourceLdap.any_instance.stubs(:update_usergroups).returns(true)
+       assert_not_nil User.try_to_login(user.login, "changeme")
+-      reloaded_user = User.find(user.id)
++      reloaded_user = User.unscoped.find(user.id)
+       assert_not_equal user.last_login_on, reloaded_user.last_login_on
+       assert_equal user.mail, reloaded_user.mail
+     end
+@@ -209,7 +209,10 @@ def setup_user(operation)
+ 
+   test "user with create permissions should be able to create" do
+     setup_user "create"
+-    record = User.new :login => "dummy", :mail => "j@j.com", :auth_source_id => AuthSourceInternal.first.id
++    record = User.new :login => "dummy", :mail => "j@j.com",
++      :auth_source_id => AuthSourceInternal.first.id,
++      :organizations => User.current.organizations,
++      :locations => User.current.locations
+     record.password_hash = "asd"
+     assert record.save
+     assert record.valid?
+@@ -243,8 +246,11 @@ def setup_user(operation)
+   test "non-admin user can delegate roles he has assigned already" do
+     setup_user "create"
+     create_role          = Role.find_by_name 'create_users'
+-    record               = User.new :login    => "dummy", :mail => "j@j.com", :auth_source_id => AuthSourceInternal.first.id,
+-                                    :role_ids => [create_role.id.to_s]
++    record               = User.new(:login => "dummy", :mail => "j@j.com",
++      :auth_source_id => AuthSourceInternal.first.id,
++      :role_ids => [create_role.id.to_s],
++      :organizations => User.current.organizations,
++      :locations => User.current.locations)
+     record.password_hash = "asd"
+     assert record.valid?
+     assert record.save
+@@ -254,8 +260,11 @@ def setup_user(operation)
+   test "admin can set admin flag and set any role" do
+     as_admin do
+       extra_role           = Role.where(:name => "foobar").first_or_create
+-      record               = User.new :login    => "dummy", :mail => "j@j.com", :auth_source_id => AuthSourceInternal.first.id,
+-                                      :role_ids => [extra_role.id].map(&:to_s)
++      record               = User.new(:login => "dummy", :mail => "j@j.com",
++                                      :auth_source_id => AuthSourceInternal.first.id,
++                                      :role_ids => [extra_role.id.to_s],
++                                      :organizations => User.current.organizations,
++                                      :locations => User.current.locations)
+       record.password_hash = "asd"
+       record.admin         = true
+       assert record.save
+@@ -388,6 +397,8 @@ def setup_user_for_audits
+   test "user can save user if he does not change roles" do
+     setup_user "edit"
+     record = users(:two)
++    record.organizations = User.current.organizations
++    record.locations = User.current.locations
+     assert record.save
+   end
+ 
+@@ -596,14 +607,13 @@ def setup_user_for_audits
+   end
+ 
+   test "user can't set empty taxonomies set if he's assigned to some" do
+-    user = FactoryGirl.create(:user)
+     org1 = FactoryGirl.create(:organization)
+-    user.organizations << org1
++    user = FactoryGirl.create(:user, :organizations => [org1], :locations => [])
+ 
+-    as_user user do
++    as_user(user) do
+       # empty set
+-      new_user = FactoryGirl.build(:user)
+-      refute new_user.save
++      new_user = FactoryGirl.build(:user, :organizations => [], :locations => [])
++      refute new_user.valid?
+       assert_not_empty new_user.errors[:organization_ids]
+       assert_empty new_user.errors[:location_ids]
+     end
+@@ -773,8 +783,8 @@ def editing_self_helper
+   end
+ 
+   test 'default taxonomy inclusion validator' do
+-    users(:one).default_location = Location.first
+-    users(:one).default_organization = Organization.first
++    users(:one).default_location = taxonomies(:location2)
++    users(:one).default_organization = taxonomies(:organization2)
+ 
+     refute users(:one).valid?
+     assert users(:one).errors.messages.has_key? :default_location
+@@ -790,8 +800,8 @@ def editing_self_helper
+ 
+   test "return location and child ids for non-admin user" do
+     as_user :one do
++      # User 'one' contains location1 already
+       in_taxonomy :location1 do
+-        assert User.current.locations << Location.current
+         assert child = Location.create!(:name => 'child location', :parent_id => Location.current.id)
+         assert_equal [Location.current.id, child.id].sort, User.current.location_and_child_ids
+       end
+@@ -800,8 +810,8 @@ def editing_self_helper
+ 
+   test "return organization and child ids for non-admin user" do
+     as_user :one do
++      # User 'one' contains organization1 already
+       in_taxonomy :organization1 do
+-        assert User.current.organizations << Organization.current
+         assert child = Organization.create!(:name => 'child organization', :parent_id => Organization.current.id)
+         assert_equal [Organization.current.id, child.id].sort, User.current.organization_and_child_ids
+       end
+diff --git a/test/test_helper.rb b/test/test_helper.rb
+index 94b0f2ebc9e..2231dd95034 100644
+--- a/test/test_helper.rb
++++ b/test/test_helper.rb
+@@ -40,7 +40,12 @@ class ActionView::TestCase
+ 
+ class ActionController::TestCase
+   include ::BasicRestResponseTest
+-  setup :setup_set_script_name, :set_api_user, :turn_off_login, :disable_webpack
++  setup :setup_set_script_name, :set_api_user, :turn_off_login,
++    :disable_webpack, :set_admin
++
++  def set_admin
++    User.current = users(:admin)
++  end
+ 
+   def turn_off_login
+     SETTINGS[:require_ssl] = false
+diff --git a/test/unit/has_many_common_test.rb b/test/unit/has_many_common_test.rb
+index 421779f5aee..fd885c9aa77 100644
+--- a/test/unit/has_many_common_test.rb
++++ b/test/unit/has_many_common_test.rb
+@@ -74,6 +74,10 @@ class HasManyCommonTest < ActiveSupport::TestCase
+     host = FactoryGirl.build(:host)
+     orig_id = host.hostgroup_id
+     host.hostgroup_name = "Parent/inherited"
++    host.hostgroup.subnet.locations = [host.location]
++    host.hostgroup.subnet.organizations = [host.organization]
++    host.hostgroup.subnet6.locations = [host.location]
++    host.hostgroup.subnet6.organizations = [host.organization]
+     host.save!
+     new_id = host.hostgroup_id
+     refute_equal orig_id, new_id
+diff --git a/test/unit/puppet_class_importer_test.rb b/test/unit/puppet_class_importer_test.rb
+index b56a1134e5b..a6ffd4e26dc 100644
+--- a/test/unit/puppet_class_importer_test.rb
++++ b/test/unit/puppet_class_importer_test.rb
+@@ -212,7 +212,7 @@ def setup
+       get_an_instance.send(:update_classes_in_foreman, @envs.first.name,
+                            {@pc.name => {'obsolete' => [lks.first.key]}})
+       assert_equal [@envs.last], lks.first.environments
+-      assert_equal @envs, lks.last.environments
++      assert_equal @envs.to_a.sort, lks.last.environments.to_a.sort
+     end
+ 
+     test 'when overridden' do
+@@ -220,7 +220,7 @@ def setup
+       get_an_instance.send(:update_classes_in_foreman, @envs.first.name,
+                            {@pc.name => {'obsolete' => [lks.first.key]}})
+       assert_equal [@envs.last], lks.first.environments
+-      assert_equal @envs, lks.last.environments
++      assert_equal @envs.to_a.sort, lks.last.environments.sort
+     end
+ 
+     test 'deletes the key from all environments' do
+@@ -232,7 +232,7 @@ def setup
+                            {@pc.name => {'obsolete' => [lks.first.key]}})
+       refute PuppetclassLookupKey.find_by_id(lks.first.id)
+       refute LookupValue.find_by_id(lval.id)
+-      assert_equal @envs, lks.last.environments
++      assert_equal @envs.to_a.sort, lks.last.environments.to_a.sort
+     end
+   end
+ 
+diff --git a/test/unit/sso/basic_test.rb b/test/unit/sso/basic_test.rb
+index 3c7ebcdf271..c156bfc1d84 100644
+--- a/test/unit/sso/basic_test.rb
++++ b/test/unit/sso/basic_test.rb
+@@ -12,6 +12,7 @@ class BasicTest < ActiveSupport::TestCase
+   end
+ 
+   test 'authenticates if user.current is not set' do
++    User.current = nil
+     basic = SSO::Basic.new(get_basic_controller(true))
+     assert_equal 'testuser', basic.authenticated?
+   end
+diff --git a/test/unit/tasks/seeds_test.rb b/test/unit/tasks/seeds_test.rb
+index c2ae08f8095..45c09ae6b70 100644
+--- a/test/unit/tasks/seeds_test.rb
++++ b/test/unit/tasks/seeds_test.rb
+@@ -15,7 +15,8 @@ class SeedsTest < ActiveSupport::TestCase
+ 
+   def seed
+     # Authorisation is disabled usually when run from a rake db:* task
+-    User.current = FactoryGirl.build(:user, :admin => true)
++    User.current = FactoryGirl.build(:user, :admin => true,
++                                     :organizations => [], :locations => [])
+     load File.expand_path('../../../../db/seeds.rb', __FILE__)
+   end
+ 
+@@ -46,10 +47,10 @@ def seed
+ 
+   context 'populating an initial admin user' do
+     test 'with defaults' do
+-      assert_difference 'User.where(:login => "admin").count', 1 do
++      assert_difference 'User.unscoped.where(:login => "admin").count', 1 do
+         seed
+       end
+-      user = User.find_by_login('admin')
++      user = User.unscoped.find_by_login('admin')
+       assert user.password_hash.present?
+       assert user.password_salt.present?
+       assert user.admin?
+@@ -57,7 +58,7 @@ def seed
+     end
+ 
+     test 'with environment overrides' do
+-      assert_difference 'User.where(:login => "seed_test").count', 1 do
++      assert_difference 'User.unscoped.where(:login => "seed_test").count', 1 do
+         with_env('SEED_ADMIN_USER'       => 'seed_test',
+                  'SEED_ADMIN_PASSWORD'   => 'seed_secret',
+                  'SEED_ADMIN_FIRST_NAME' => 'Seed',
+@@ -66,7 +67,7 @@ def seed
+           seed
+         end
+       end
+-      user = User.find_by_login('seed_test')
++      user = User.unscoped.find_by_login('seed_test')
+       assert user.matching_password? 'seed_secret'
+       assert user.admin?
+       refute user.hidden?
+@@ -75,37 +76,37 @@ def seed
+   end
+ 
+   test 'populates partition tables' do
+-    count = Ptable.count
++    count = Ptable.unscoped.count
+     seed
+-    assert_not_equal count, Ptable.count
+-    refute Ptable.where(:os_family => nil).any?
++    assert_not_equal count, Ptable.unscoped.count
++    refute Ptable.unscoped.where(:os_family => nil).any?
+   end
+ 
+   test 'populates installation media' do
+-    count = Medium.count
++    count = Medium.unscoped.count
+     seed
+-    assert_not_equal count, Medium.count
+-    refute Medium.where(:os_family => nil).any?
++    assert_not_equal count, Medium.unscoped.count
++    refute Medium.unscoped.where(:os_family => nil).any?
+   end
+ 
+   test 'populates config templates' do
+-    count = ProvisioningTemplate.count
++    count = ProvisioningTemplate.unscoped.count
+     seed
+-    assert_not_equal count, ProvisioningTemplate.count
++    assert_not_equal count, ProvisioningTemplate.unscoped.count
+ 
+     Dir["#{Rails.root}/app/views/unattended/**/*.erb"].each do |tmpl|
+       if tmpl =~ /disklayout/
+-        assert Ptable.where(:template => File.read(tmpl)).any?, "No partition table containing #{tmpl}"
++        assert Ptable.unscoped.where(:template => File.read(tmpl)).any?, "No partition table containing #{tmpl}"
+       else
+-        assert ProvisioningTemplate.where(:template => File.read(tmpl)).any?, "No template containing #{tmpl}"
++        assert ProvisioningTemplate.unscoped.where(:template => File.read(tmpl)).any?, "No template containing #{tmpl}"
+       end
+     end
+   end
+ 
+   test 'populates bookmarks' do
+-    count = Bookmark.where(:public => true).count
++    count = Bookmark.unscoped.where(:public => true).count
+     seed
+-    assert_not_equal count, Bookmark.where(:public => true).count
++    assert_not_equal count, Bookmark.unscoped.where(:public => true).count
+   end
+ 
+   test 'is idempotent' do
+@@ -116,25 +117,26 @@ def seed
+ 
+   test "does update template that was not modified by user" do
+     seed
+-    ProvisioningTemplate.without_auditing { ProvisioningTemplate.find_by_name('Kickstart default').update_attributes(:template => 'test') }
++    ProvisioningTemplate.without_auditing { ProvisioningTemplate.unscoped.find_by_name('Kickstart default').update_attributes(:template => 'test') }
+     seed
+-    refute_equal ProvisioningTemplate.find_by_name('Kickstart default').template, 'test'
++    refute_equal ProvisioningTemplate.unscoped.find_by_name('Kickstart default').template, 'test'
+   end
+ 
+   test "doesn't add a template back that was deleted" do
+     seed
+-    assert_equal 1, ProvisioningTemplate.destroy_all(:name => 'Kickstart default').size
++    assert_equal 1, ProvisioningTemplate.unscoped.
++      destroy_all(:name => 'Kickstart default').size
+     seed
+-    refute ProvisioningTemplate.find_by_name('Kickstart default')
++    refute ProvisioningTemplate.unscoped.find_by_name('Kickstart default')
+   end
+ 
+   test "doesn't add a template back that was renamed" do
+     seed
+-    tmpl = ProvisioningTemplate.find_by_name('Kickstart default')
++    tmpl = ProvisioningTemplate.unscoped.find_by_name('Kickstart default')
+     tmpl.name = 'test'
+     tmpl.save!
+     seed
+-    refute ProvisioningTemplate.find_by_name('Kickstart default')
++    refute ProvisioningTemplate.unscoped.find_by_name('Kickstart default')
+   end
+ 
+   test "no audits are recorded" do
+@@ -147,7 +149,7 @@ def seed
+     with_env('SEED_ORGANIZATION' => 'seed_test') do
+       seed
+     end
+-    assert Organization.find_by_name('seed_test')
++    assert Organization.unscoped.find_by_name('seed_test')
+   end
+ 
+   test "don't seed organization when an org already exists" do
+@@ -155,7 +157,7 @@ def seed
+     with_env('SEED_ORGANIZATION' => 'seed_test') do
+       seed
+     end
+-    refute Organization.find_by_name('seed_test')
++    refute Organization.unscoped.find_by_name('seed_test')
+   end
+ 
+   test "seed location when environment SEED_LOCATION specified" do
+@@ -163,7 +165,7 @@ def seed
+     with_env('SEED_LOCATION' => 'seed_test') do
+       seed
+     end
+-    assert Location.find_by_name('seed_test')
++    assert Location.unscoped.find_by_name('seed_test')
+   end
+ 
+   test "don't seed location when a location already exists" do
+@@ -171,7 +173,7 @@ def seed
+     with_env('SEED_LOCATION' => 'seed_test') do
+       seed
+     end
+-    refute Location.find_by_name('seed_test')
++    refute Location.unscoped.find_by_name('seed_test')
+   end
+ 
+   test "all access permissions are created by permissions seed" do
+@@ -187,6 +189,6 @@ def seed
+   test "viewer role contains all view permissions" do
+     seed
+     view_permissions = Permission.all.select { |permission| permission.name.match(/view/) }
+-    assert_equal [], view_permissions - Role.find_by_name('Viewer').permissions
++    assert_equal [], view_permissions - Role.unscoped.find_by_name('Viewer').permissions
+   end
+ end

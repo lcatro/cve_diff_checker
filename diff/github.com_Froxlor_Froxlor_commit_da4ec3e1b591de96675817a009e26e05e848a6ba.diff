@@ -1,0 +1,79 @@
+From da4ec3e1b591de96675817a009e26e05e848a6ba Mon Sep 17 00:00:00 2001
+From: "Michael Kaufmann (d00p)" <d00p@froxlor.org>
+Date: Thu, 28 Jan 2016 08:27:15 +0100
+Subject: [PATCH] avoid rand() if possible as it is not generating
+ cryptographically secure values, thx to Hanno for putting some effort into
+ this
+
+Signed-off-by: Michael Kaufmann (d00p) <d00p@froxlor.org>
+---
+ index.php                                   |  4 +-
+ lib/functions/system/function.randomStr.php | 44 +++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 2 deletions(-)
+ create mode 100644 lib/functions/system/function.randomStr.php
+
+diff --git a/index.php b/index.php
+index 618227730..4747c0ce2 100644
+--- a/index.php
++++ b/index.php
+@@ -345,8 +345,8 @@
+ 				if ($user !== false) {
+ 					// build a activation code
+ 					$timestamp = time();
+-					$first = substr(md5($user['loginname'] . $timestamp . rand(0, $timestamp)), 0, 15);
+-					$third = substr(md5($user['email'] . $timestamp . rand(0, $timestamp)), -15);
++					$first = substr(md5($user['loginname'] . $timestamp . randomStr(16)), 0, 15);
++					$third = substr(md5($user['email'] . $timestamp . randomStr(16)), -15);
+ 					$activationcode = $first . $timestamp . $third . substr(md5($third . $timestamp), 0, 10);
+ 
+ 					// Drop all existing activation codes for this user
+diff --git a/lib/functions/system/function.randomStr.php b/lib/functions/system/function.randomStr.php
+new file mode 100644
+index 000000000..285ca27bd
+--- /dev/null
++++ b/lib/functions/system/function.randomStr.php
+@@ -0,0 +1,44 @@
++<?php
++
++/**
++ * This file is part of the Froxlor project.
++ * Copyright (c) 2010 the Froxlor Team (see authors).
++ *
++ * For the full copyright and license information, please view the COPYING
++ * file that was distributed with this source code. You can also view the
++ * COPYING file online at http://files.froxlor.org/misc/COPYING.txt
++ *
++ * @copyright  (c) the authors
++ * @author     Froxlor team <team@froxlor.org> (2016-)
++ * @license    GPLv2 http://files.froxlor.org/misc/COPYING.txt
++ * @package    Functions
++ *
++ */
++
++/**
++ * Function randomStr
++ *
++ * generate a pseudo-random string of bytes
++ *
++ * @param int $length            
++ *
++ * @return string
++ */
++function randomStr($length)
++{
++    if (version_compare(PHP_VERSION, '7.0.0') >= 0) {
++        return random_bytes($length);
++    } elseif (function_exists('openssl_random_pseudo_bytes')) {
++        return openssl_random_pseudo_bytes($length);
++    } else {
++        $pr_bits = '';
++        $fp = @fopen('/dev/urandom', 'rb');
++        if ($fp !== false) {
++            $pr_bits .= @fread($fp, $length);
++            @fclose($fp);
++        } else {
++            $pr_bits = substr(rand(time()).rand(time()), 0, $length);
++        }
++        return $pr_bits;
++    }
++}

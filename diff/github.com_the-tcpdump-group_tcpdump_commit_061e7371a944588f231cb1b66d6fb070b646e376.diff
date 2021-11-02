@@ -1,0 +1,69 @@
+From 061e7371a944588f231cb1b66d6fb070b646e376 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 23 Aug 2017 20:45:39 -0700
+Subject: [PATCH] CVE-2017-13689/IKEv1: Fix addr+subnet length check.
+
+An IPv6 address plus subnet mask is 32 bytes, not 20 bytes.
+16 bytes of IPv6 address, 16 bytes of subnet mask.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-isakmp.c                            |   4 ++--
+ tests/TESTLIST                            |   1 +
+ tests/ikev1_id_ipv6_addr_subnet-oobr.out  |   3 +++
+ tests/ikev1_id_ipv6_addr_subnet-oobr.pcap | Bin 0 -> 147 bytes
+ 4 files changed, 6 insertions(+), 2 deletions(-)
+ create mode 100644 tests/ikev1_id_ipv6_addr_subnet-oobr.out
+ create mode 100644 tests/ikev1_id_ipv6_addr_subnet-oobr.pcap
+
+diff --git a/print-isakmp.c b/print-isakmp.c
+index 013de1c28..fbc6c5420 100644
+--- a/print-isakmp.c
++++ b/print-isakmp.c
+@@ -1435,8 +1435,8 @@ ikev1_id_print(netdissect_options *ndo, u_char tpay _U_,
+ 		case IPSECDOI_ID_IPV6_ADDR_SUBNET:
+ 		    {
+ 			const u_char *mask;
+-			if (len < 20)
+-				ND_PRINT((ndo," len=%d [bad: < 20]", len));
++			if (len < 32)
++				ND_PRINT((ndo," len=%d [bad: < 32]", len));
+ 			else {
+ 				mask = (const u_char *)(data + sizeof(struct in6_addr));
+ 				/*XXX*/
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 7437ce763..0e7097210 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -577,6 +577,7 @@ cfm_sender_id-oobr	cfm_sender_id-oobr.pcap	cfm_sender_id-oobr.out	-v -c1
+ isis-extd-isreach-oobr	isis-extd-isreach-oobr.pcap	isis-extd-isreach-oobr.out -v -c4
+ olsr-oobr-1		olsr-oobr-1.pcap		olsr-oobr-1.out	-v
+ olsr-oobr-2		olsr-oobr-2.pcap		olsr-oobr-2.out	-v
++ikev1_id_ipv6_addr_subnet-oobr	ikev1_id_ipv6_addr_subnet-oobr.pcap	ikev1_id_ipv6_addr_subnet-oobr.out	-v
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/ikev1_id_ipv6_addr_subnet-oobr.out b/tests/ikev1_id_ipv6_addr_subnet-oobr.out
+new file mode 100644
+index 000000000..0662f0043
+--- /dev/null
++++ b/tests/ikev1_id_ipv6_addr_subnet-oobr.out
+@@ -0,0 +1,3 @@
++IP (tos 0x0, ttl 100, id 40207, offset 0, flags [+, DF, rsvd], proto UDP (17), length 32808, bad cksum 8e7f (->bc78)!)
++    16.0.128.20.500 > 12.251.0.45.0: isakmp 1.0 msgid 0d101010: phase 2/others ? #16[]:
++    (id: idtype=IPv6net protoid=16 port=4112 len=24 [bad: < 32]) [|#145] (len mismatch: isakmp 4278190080/ip 4856)
+diff --git a/tests/ikev1_id_ipv6_addr_subnet-oobr.pcap b/tests/ikev1_id_ipv6_addr_subnet-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b9cfebd2ec7761b078be3c2adad23773c996b352
+GIT binary patch
+literal 147
+zcmca|c+)~A1{Q_}WyN|1Ajk${Mj#H9j%2>Z#>4^Qn=$aPG4T9mIKs$q@W6uAb2%7X
+z85%U^@;_im5$vlMU}z8lO6oFxVPFsj>h)xh1?pfB2kEG16cAt)5D?%6;{QOCCNeN6
+Vuz~pv|G9vC22r2}5Q7&<Aprc|8ZrO?
+
+literal 0
+HcmV?d00001
+

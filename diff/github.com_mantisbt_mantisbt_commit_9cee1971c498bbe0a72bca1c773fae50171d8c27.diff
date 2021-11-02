@@ -1,0 +1,31 @@
+From 9cee1971c498bbe0a72bca1c773fae50171d8c27 Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Thu, 15 Aug 2019 10:53:18 +0200
+Subject: [PATCH] Fix XSS on timeline (CVE-2019-15074)
+
+Kamran Saifullah reported a stored cross-site scripting (XSS)
+vulnerability in Timeline, allowing execution of arbitrary code (if CSP
+settings permit it) after uploading an attachment with a crafted
+filename. The code is executed for any user having visibility to the
+issue, whenever My View Page is displayed.
+
+Prevent the attack by sanitizing the filename before display.
+
+Fixes #25995
+---
+ core/classes/IssueAttachmentTimelineEvent.class.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/classes/IssueAttachmentTimelineEvent.class.php b/core/classes/IssueAttachmentTimelineEvent.class.php
+index 8e0425df49..2a6123d87c 100644
+--- a/core/classes/IssueAttachmentTimelineEvent.class.php
++++ b/core/classes/IssueAttachmentTimelineEvent.class.php
+@@ -73,7 +73,7 @@ public function html() {
+ 			. sprintf( lang_get( $t_string ),
+ 				prepare_user_name( $this->user_id ),
+ 				$t_bug_link,
+-				$this->filename
++				string_html_specialchars( $this->filename )
+ 			)
+ 			. '</div>';
+ 		$t_html .= $this->html_end();

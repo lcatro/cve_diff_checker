@@ -1,0 +1,230 @@
+From 8939398b82006ba1fec4ed491339fc075f43fc7c Mon Sep 17 00:00:00 2001
+From: Jakub Filak <jfilak@redhat.com>
+Date: Mon, 20 Apr 2015 07:56:34 +0200
+Subject: [PATCH] make the dump directories owned by root by default
+
+It was discovered that the abrt event scripts create a user-readable
+copy of a sosreport file in abrt problem directories, and include
+excerpts of /var/log/messages selected by the user-controlled process
+name, leading to an information disclosure.
+
+This issue was discovered by Florian Weimer of Red Hat Product Security.
+
+Related: #1212868
+
+Signed-off-by: Jakub Filak <jfilak@redhat.com>
+---
+ src/daemon/abrt-server.c     | 34 ++++++++++++++++++++++++++++++++--
+ src/daemon/abrt.conf         |  5 +++++
+ src/hooks/abrt-hook-ccpp.c   | 10 +++++++---
+ src/include/libabrt.h        |  2 ++
+ src/lib/abrt_conf.c          |  8 ++++++++
+ src/lib/hooklib.c            |  7 ++++++-
+ src/plugins/abrt-dump-oops.c |  8 ++++++++
+ src/plugins/abrt-dump-xorg.c |  8 ++++++++
+ 8 files changed, 76 insertions(+), 6 deletions(-)
+
+diff --git a/src/daemon/abrt-server.c b/src/daemon/abrt-server.c
+index 307b41b27..5789075ca 100644
+--- a/src/daemon/abrt-server.c
++++ b/src/daemon/abrt-server.c
+@@ -15,6 +15,7 @@
+   with this program; if not, write to the Free Software Foundation, Inc.,
+   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
++#include "problem_api.h"
+ #include "libabrt.h"
+ 
+ /* Maximal length of backtrace. */
+@@ -153,7 +154,36 @@ static int run_post_create(const char *dirname)
+         error_msg("Bad problem directory name '%s', should start with: '%s'", dirname, g_settings_dump_location);
+         return 400; /* Bad Request */
+     }
+-    if (!dump_dir_accessible_by_uid(dirname, client_uid))
++    if (g_settings_privatereports)
++    {
++        struct stat statbuf;
++        if (lstat(dirname, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode))
++        {
++            error_msg("Path '%s' isn't directory", dirname);
++            return 404; /* Not Found */
++        }
++        /* Get ABRT's group gid */
++        struct group *gr = getgrnam("abrt");
++        if (!gr)
++        {
++            error_msg("Group 'abrt' does not exist");
++            return 500;
++        }
++        if (statbuf.st_uid != 0 || !(statbuf.st_gid == 0 || statbuf.st_gid == gr->gr_gid) || statbuf.st_mode & 07)
++        {
++            error_msg("Problem directory '%s' isn't owned by root:abrt or others are not restricted from access", dirname);
++            return 403;
++        }
++        struct dump_dir *dd = dd_opendir(dirname, DD_OPEN_READONLY);
++        const bool complete = dd && problem_dump_dir_is_complete(dd);
++        dd_close(dd);
++        if (complete)
++        {
++            error_msg("Problem directory '%s' has already been processed", dirname);
++            return 403;
++        }
++    }
++    else if (!dump_dir_accessible_by_uid(dirname, client_uid))
+     {
+         if (errno == ENOTDIR)
+         {
+@@ -377,7 +407,7 @@ static int create_problem_dir(GHashTable *problem_info, unsigned pid)
+     /* No need to check the path length, as all variables used are limited,
+      * and dd_create() fails if the path is too long.
+      */
+-    struct dump_dir *dd = dd_create(path, client_uid, DEFAULT_DUMP_DIR_MODE);
++    struct dump_dir *dd = dd_create(path, g_settings_privatereports ? 0 : client_uid, DEFAULT_DUMP_DIR_MODE);
+     if (!dd)
+     {
+         error_msg_and_die("Error creating problem directory '%s'", path);
+diff --git a/src/daemon/abrt.conf b/src/daemon/abrt.conf
+index 59d183186..6c0d6b06f 100644
+--- a/src/daemon/abrt.conf
++++ b/src/daemon/abrt.conf
+@@ -43,3 +43,8 @@ AutoreportingEnabled = no
+ #                session; otherwise No.
+ #
+ # ShortenedReporting = yes
++
++# Disable this if you want to regular users to own the problem data colleted by
++# abrt.
++#
++PrivateReports = yes
+diff --git a/src/hooks/abrt-hook-ccpp.c b/src/hooks/abrt-hook-ccpp.c
+index 00ae6214d..3a6d00252 100644
+--- a/src/hooks/abrt-hook-ccpp.c
++++ b/src/hooks/abrt-hook-ccpp.c
+@@ -682,6 +682,9 @@ int main(int argc, char** argv)
+         }
+     }
+ 
++    /* If PrivateReports is on, root owns all problem directories */
++    const uid_t dduid = g_settings_privatereports ? 0 : fsuid;
++
+     /* Open a fd to compat coredump, if requested and is possible */
+     if (setting_MakeCompatCore && ulimit_c != 0)
+         /* note: checks "user_pwd == NULL" inside; updates core_basename */
+@@ -773,18 +776,19 @@ int main(int argc, char** argv)
+         goto create_user_core;
+     }
+ 
+-    /* use fsuid instead of uid, so we don't expose any sensitive
+-     * information of suided app in /var/tmp/abrt
++    /* use dduid (either fsuid or 0) instead of uid, so we don't expose any
++     * sensitive information of suided app in /var/tmp/abrt
+      *
+      * dd_create_skeleton() creates a new directory and leaves ownership to
+      * the current user, hence, we have to call dd_reset_ownership() after the
+      * directory is populated.
+      */
+-    dd = dd_create_skeleton(path, fsuid, DEFAULT_DUMP_DIR_MODE, /*no flags*/0);
++    dd = dd_create_skeleton(path, dduid, DEFAULT_DUMP_DIR_MODE, /*no flags*/0);
+     if (dd)
+     {
+         char *rootdir = get_rootdir(pid);
+ 
++        /* This function uses fsuid only for its value. The function stores fsuid in a file name 'uid'*/
+         dd_create_basic_files(dd, fsuid, NULL);
+ 
+         char source_filename[sizeof("/proc/%lu/somewhat_long_name") + sizeof(long)*3];
+diff --git a/src/include/libabrt.h b/src/include/libabrt.h
+index 85a5a5c3a..0320c5b58 100644
+--- a/src/include/libabrt.h
++++ b/src/include/libabrt.h
+@@ -62,6 +62,8 @@ extern bool          g_settings_autoreporting;
+ extern char *        g_settings_autoreporting_event;
+ #define g_settings_shortenedreporting abrt_g_settings_shortenedreporting
+ extern bool          g_settings_shortenedreporting;
++#define g_settings_privatereports abrt_g_settings_privatereports
++extern bool          g_settings_privatereports;
+ 
+ 
+ #define load_abrt_conf abrt_load_abrt_conf
+diff --git a/src/lib/abrt_conf.c b/src/lib/abrt_conf.c
+index 5eb69e2bc..c6aba5813 100644
+--- a/src/lib/abrt_conf.c
++++ b/src/lib/abrt_conf.c
+@@ -27,6 +27,7 @@ bool          g_settings_delete_uploaded = 0;
+ bool          g_settings_autoreporting = 0;
+ char *        g_settings_autoreporting_event = NULL;
+ bool          g_settings_shortenedreporting = 0;
++bool          g_settings_privatereports = true;
+ 
+ void free_abrt_conf_data()
+ {
+@@ -102,6 +103,13 @@ static void ParseCommon(map_string_t *settings, const char *conf_filename)
+     else
+         g_settings_shortenedreporting = 0;
+ 
++    value = get_map_string_item_or_NULL(settings, "PrivateReports");
++    if (value)
++    {
++        g_settings_privatereports = string_to_bool(value);
++        remove_map_string_item(settings, "PrivateReports");
++    }
++
+     GHashTableIter iter;
+     const char *name;
+     /*char *value; - already declared */
+diff --git a/src/lib/hooklib.c b/src/lib/hooklib.c
+index 1d45cdd20..fb7750da8 100644
+--- a/src/lib/hooklib.c
++++ b/src/lib/hooklib.c
+@@ -410,7 +410,12 @@ char* problem_data_save(problem_data_t *pd)
+ {
+     load_abrt_conf();
+ 
+-    struct dump_dir *dd = create_dump_dir_from_problem_data(pd, g_settings_dump_location);
++    struct dump_dir *dd = NULL;
++
++    if (g_settings_privatereports)
++        dd = create_dump_dir_from_problem_data_ext(pd, g_settings_dump_location, 0);
++    else
++        dd = create_dump_dir_from_problem_data(pd, g_settings_dump_location);
+ 
+     char *problem_id = NULL;
+     if (dd)
+diff --git a/src/plugins/abrt-dump-oops.c b/src/plugins/abrt-dump-oops.c
+index 9f0dc8794..05cb72881 100644
+--- a/src/plugins/abrt-dump-oops.c
++++ b/src/plugins/abrt-dump-oops.c
+@@ -189,6 +189,14 @@ static unsigned create_oops_dump_dirs(GList *oops_list, unsigned oops_cnt)
+         mode = DEFAULT_DUMP_DIR_MODE;
+         my_euid = geteuid();
+     }
++    if (g_settings_privatereports)
++    {
++        if (world_readable_dump)
++            log("Not going to make dump directories world readable because PrivateReports is on");
++
++        mode = DEFAULT_DUMP_DIR_MODE;
++        my_euid = 0;
++    }
+ 
+     pid_t my_pid = getpid();
+     unsigned idx = 0;
+diff --git a/src/plugins/abrt-dump-xorg.c b/src/plugins/abrt-dump-xorg.c
+index 3500629ac..434dc7640 100644
+--- a/src/plugins/abrt-dump-xorg.c
++++ b/src/plugins/abrt-dump-xorg.c
+@@ -82,6 +82,14 @@ static void save_bt_to_dump_dir(const char *bt, const char *exe, const char *rea
+         mode = DEFAULT_DUMP_DIR_MODE;
+         my_euid = geteuid();
+     }
++    if (g_settings_privatereports)
++    {
++        if ((g_opts & OPT_x))
++            log("Not going to make dump directories world readable because PrivateReports is on");
++
++        mode = DEFAULT_DUMP_DIR_MODE;
++        my_euid = 0;
++    }
+ 
+     pid_t my_pid = getpid();
+ 

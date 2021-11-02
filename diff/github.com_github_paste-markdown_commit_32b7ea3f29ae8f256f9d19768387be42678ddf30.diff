@@ -1,0 +1,85 @@
+From 83a044b68b2621dc66d4d78a0d8a2f06a99cd658 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kristj=C3=A1n=20Oddsson?= <koddsson@gmail.com>
+Date: Wed, 4 Aug 2021 13:54:04 +0100
+Subject: [PATCH 1/3] Add a wait function in tests
+
+---
+ test/test.js | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/test/test.js b/test/test.js
+index df40a4f..6bb1c2b 100644
+--- a/test/test.js
++++ b/test/test.js
+@@ -97,3 +97,7 @@ function paste(textarea, data) {
+   })
+   textarea.dispatchEvent(event)
+ }
++
++function wait(ms) {
++  return new Promise(resolve => setTimeout(resolve, ms))
++}
+
+From d038b94e615e830215d2a4db7dca9c68e290c287 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kristj=C3=A1n=20Oddsson?= <koddsson@gmail.com>
+Date: Wed, 4 Aug 2021 13:55:39 +0100
+Subject: [PATCH 2/3] Add a test demonstrating the DOM XSS vulnerability
+
+---
+ test/test.js | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/test/test.js b/test/test.js
+index 6bb1c2b..640a300 100644
+--- a/test/test.js
++++ b/test/test.js
+@@ -38,6 +38,21 @@ describe('paste-markdown', function () {
+       assert.include(textarea.value, 'name | origin\n-- | --\nhubot | github\nbender | futurama')
+     })
+ 
++    it("doesn't execute JavaScript", async function () {
++      let alertCalled = false
++      window.secretFunction = function () {
++        alertCalled = true
++      }
++      const data = {
++        'text/html': `XSS<img/src/onerror=secretFunction()><table>`
++      }
++      paste(textarea, data)
++
++      await wait(100)
++
++      assert.isFalse(alertCalled, 'A XSS was possible as alert was called')
++    })
++
+     it('retains text around tables', async function () {
+       const data = {
+         'text/html': `
+
+From 4bb7b1a9c8bbd4bef26953e7e9088b5917b0c0c6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kristj=C3=A1n=20Oddsson?= <koddsson@gmail.com>
+Date: Wed, 4 Aug 2021 13:56:03 +0100
+Subject: [PATCH 3/3] Use DOMParser instead of innerHTML to parse HTML
+
+---
+ src/paste-markdown-table.ts | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/paste-markdown-table.ts b/src/paste-markdown-table.ts
+index ce8c320..e2784b7 100644
+--- a/src/paste-markdown-table.ts
++++ b/src/paste-markdown-table.ts
+@@ -87,9 +87,10 @@ function generateText(transfer: DataTransfer): string | undefined {
+   const html = transfer.getData('text/html')
+   if (!/<table/i.test(html)) return
+ 
+-  const el = document.createElement('div')
+-  el.innerHTML = html
+-  let table = el.querySelector('table')
++  const parser = new DOMParser()
++  const parsedDocument = parser.parseFromString(html, 'text/html')
++
++  let table = parsedDocument.querySelector('table')
+   table = !table || table.closest('[data-paste-markdown-skip]') ? null : table
+   if (!table) return
+ 

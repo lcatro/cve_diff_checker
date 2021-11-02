@@ -1,0 +1,28 @@
+From 5f90a52785672fc688c1f85e472e84b8a0d008d8 Mon Sep 17 00:00:00 2001
+From: Mentor Reka <reka.mentor@gmail.com>
+Date: Wed, 24 Oct 2018 11:47:23 +0200
+Subject: [PATCH] Bug fix - Issue #53
+
+Bug fix of a XSS issue on MailCleaner login (administration) interface. See issue #53
+The "message" parameter was only used for the logoutAction(). However, the parameter was not checked and not escaped.
+---
+ www/guis/admin/application/controllers/UserController.php | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/www/guis/admin/application/controllers/UserController.php b/www/guis/admin/application/controllers/UserController.php
+index d5d553f4..27912ca2 100644
+--- a/www/guis/admin/application/controllers/UserController.php
++++ b/www/guis/admin/application/controllers/UserController.php
+@@ -33,8 +33,10 @@ public function loginAction()
+ 
+         $request = $this->getRequest();
+         $form    = new Default_Form_Login();
+-        if ($this->getRequest()->getParam('message')) {
+-        	$form->addErrorMessage($this->getRequest()->getParam('message'));
++        
++        // Display only loggedOut message
++        if ($this->getRequest()->getParam('message') == "loggedOut") {
++        	$form->addErrorMessage(htmlspecialchars($this->getRequest()->getParam('message')));
+         }
+         
+         if ($this->getRequest()->isPost() && $form->isValid($request->getPost())) {

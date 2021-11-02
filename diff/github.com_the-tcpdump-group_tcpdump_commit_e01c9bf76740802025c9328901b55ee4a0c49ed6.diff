@@ -1,0 +1,156 @@
+From e01c9bf76740802025c9328901b55ee4a0c49ed6 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sat, 4 Nov 2017 16:06:33 +0100
+Subject: [PATCH] (for 4.9.3) CVE-2018-14880/OSPFv3: Fix a bounds check
+
+Need to test bounds check for the last field of the structure lsa6_hdr.
+No need to test other fields.
+
+Include Security working under the Mozilla SOS program had independently
+identified this vulnerability in 2018 by means of code audit.
+
+Wang Junjie of 360 ESG Codesafe Team had independently identified this
+vulnerability in 2018 by means of fuzzing and provided the packet capture
+file for the test.
+---
+ print-ospf6.c                       |   3 +-
+ tests/TESTLIST                      |   3 ++
+ tests/ospf6_print_lshdr-oobr.out    |  59 ++++++++++++++++++++++++++++
+ tests/ospf6_print_lshdr-oobr.pcapng | Bin 0 -> 5492 bytes
+ 4 files changed, 63 insertions(+), 2 deletions(-)
+ create mode 100644 tests/ospf6_print_lshdr-oobr.out
+ create mode 100644 tests/ospf6_print_lshdr-oobr.pcapng
+
+diff --git a/print-ospf6.c b/print-ospf6.c
+index a5ac30517..66ab2f75f 100644
+--- a/print-ospf6.c
++++ b/print-ospf6.c
+@@ -389,8 +389,7 @@ ospf6_print_lshdr(netdissect_options *ndo,
+ {
+ 	if ((const u_char *)(lshp + 1) > dataend)
+ 		goto trunc;
+-	ND_TCHECK(lshp->ls_type);
+-	ND_TCHECK(lshp->ls_seq);
++	ND_TCHECK(lshp->ls_length);	/* last field of struct lsa6_hdr */
+ 
+ 	ND_PRINT((ndo, "\n\t  Advertising Router %s, seq 0x%08x, age %us, length %u",
+                ipaddr_string(ndo, &lshp->ls_router),
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 6ea71af1b..a0bdabc39 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -596,6 +596,9 @@ icmp6_nodeinfo_oobr	icmp6_nodeinfo_oobr.pcap	icmp6_nodeinfo_oobr.out
+ rx_ubik-oobr		rx_ubik-oobr.pcap		rx_ubik-oobr.out -c1
+ babel_update_oobr	babel_update_oobr.pcap	babel_update_oobr.out	-c 52
+ 
++# bad packets from Junjie Wang
++ospf6_print_lshdr-oobr	ospf6_print_lshdr-oobr.pcapng	ospf6_print_lshdr-oobr.out	-vv -c15
++
+ # RTP tests
+ # fuzzed pcap
+ rtp-seg-fault-1  rtp-seg-fault-1.pcap  rtp-seg-fault-1.out  -v -T rtp
+diff --git a/tests/ospf6_print_lshdr-oobr.out b/tests/ospf6_print_lshdr-oobr.out
+new file mode 100644
+index 000000000..71adf6b65
+--- /dev/null
++++ b/tests/ospf6_print_lshdr-oobr.out
+@@ -0,0 +1,59 @@
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 36) fe80::1 > ff02::5: OSPFv3, Hello, length 36
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Neighbor List:
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 36) fe80::1 > ff02::5: OSPFv3, Hello, length 36
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Neighbor List:
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 36) fe80::1 > ff02::5: OSPFv3, Hello, length 36
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Neighbor List:
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 36) fe80::1 > ff02::5: OSPFv3, Hello, length 36
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Neighbor List:
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 36) fe80::2 > ff02::5: OSPFv3, Hello, length 36
++	Router-ID 2.2.2.2, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Neighbor List:
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 40) fe80::1 > ff02::5: OSPFv3, Hello, length 40
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router]
++	  Hello Timer 10s, Dead Timer 40s, Interface-ID 0.0.0.5, Priority 1
++	  Designated Router 1.1.1.1
++	  Neighbor List: [|ospf3]
++IP6 (class 0xe0, flowlabel 0x00100, hlim 1, next-header OSPF (89) payload length: 28) fe80::2 > fe80::1: OSPFv3, Database Description, length 28
++	Router-ID 2.2.2.2, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [Init, More, Master], MTU 1500, DD-Sequence 0x00001d46
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 28) fe80::1 > fe80::2: OSPFv3, Database Description, length 28
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [Init, More, Master], MTU 1500, DD-Sequence 0x0000242c
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 168) fe80::1 > fe80::2: OSPFv3, Database Description, length 168
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [More], MTU 1500, DD-Sequence 0x00001d46 [|ospf3]
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 148) fe80::2 > fe80::1: OSPFv3, Database Description, length 148
++	Router-ID 2.2.2.2, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [More, Master], MTU 1500, DD-Sequence 0x00001d47 [|ospf3]
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 28) fe80::1 > fe80::2: OSPFv3, Database Description, length 28
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [none], MTU 1500, DD-Sequence 0x00001d47
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 100) fe80::2 > fe80::1: OSPFv3, LS-Request, length 100
++	Router-ID 2.2.2.2, Area 0.0.0.1
++	  Advertising Router 1.1.1.1
++	    Router LSA (1), Area Local Scope, LSA-ID 0.0.0.0 [|ospf3]
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 88) fe80::1 > fe80::2: OSPFv3, LS-Request, length 88
++	Router-ID 1.1.1.1, Area 0.0.0.1
++	  Advertising Router 2.2.2.2
++	    Router LSA (1), Area Local Scope, LSA-ID 0.0.0.0 [|ospf3]
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 28) fe80::2 > fe80::1: OSPFv3, Database Description, length 28
++	Router-ID 2.2.2.2, Area 0.0.0.1
++	Options [V6, External, Router], DD Flags [Master], MTU 1500, DD-Sequence 0x00001d48
++IP6 (class 0xe0, hlim 1, next-header OSPF (89) payload length: 288) fe80::1 > fe80:0:ff:ffff:f000::2: OSPFv3, LS-Update, length 288
++	Router-ID 1.1.1.1, Area 0.0.0.1 [|ospf3]
+diff --git a/tests/ospf6_print_lshdr-oobr.pcapng b/tests/ospf6_print_lshdr-oobr.pcapng
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f96af64e440dd701a03b5f5ee3a399ef29869da
+GIT binary patch
+literal 5492
+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
+E0Td^WI{*Lx
+
+literal 0
+HcmV?d00001
+

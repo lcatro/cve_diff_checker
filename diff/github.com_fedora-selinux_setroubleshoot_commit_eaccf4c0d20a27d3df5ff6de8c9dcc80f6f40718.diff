@@ -1,0 +1,68 @@
+From eaccf4c0d20a27d3df5ff6de8c9dcc80f6f40718 Mon Sep 17 00:00:00 2001
+From: Petr Lautrbach <plautrba@redhat.com>
+Date: Tue, 21 Jun 2016 15:15:41 +0200
+Subject: [PATCH] plugins: Use subprocess.check_output() with a sequence of
+ program arguments
+
+All subprocess.get*output() should be replaced with either
+subprocess.Popen or subprocess.check_output now.
+
+String args were converted to sequences of program arguments.
+---
+ plugins/src/allow_execstack.py | 8 ++++----
+ plugins/src/findexecstack      | 6 +++---
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/plugins/src/allow_execstack.py b/plugins/src/allow_execstack.py
+index be37da8..0a121b8 100644
+--- a/plugins/src/allow_execstack.py
++++ b/plugins/src/allow_execstack.py
+@@ -23,19 +23,19 @@
+ from setroubleshoot.util import *
+ from setroubleshoot.Plugin import Plugin
+ 
+-import commands
++import subprocess
+ import sys
+ 
+ def is_execstack(path):
+     if path[0] != "/":
+         return False
+ 
+-    x = commands.getoutput("execstack -q %s" % path).split()
+-    return ( x[0]  == "X" )
++    x = subprocess.check_output(["execstack",  "-q", path], universal_newlines=True).split()
++    return ( x[0] == "X" )
+ 
+ def find_execstack(exe, pid):
+     execstacklist = []
+-    for path in commands.getoutput("ldd %s" % exe).split():
++    for path in subprocess.check_output(["ldd", exe], universal_newlines=True).split():
+         if is_execstack(path) and path not in execstacklist:
+                 execstacklist.append(path)
+     try:
+diff --git a/plugins/src/findexecstack b/plugins/src/findexecstack
+index 181cddc..f6d1cd5 100755
+--- a/plugins/src/findexecstack
++++ b/plugins/src/findexecstack
+@@ -1,17 +1,17 @@
+ #! /usr/bin/python
+-import commands
++import subprocess
+ import sys
+ 
+ def is_execstack(path):
+     if path[0] != "/":
+         return False
+ 
+-    x = commands.getoutput("execstack -q %s" %   path).split()
++    x = subprocess.check_output(["execstack",  "-q", path], universal_newlines=True).split()
+     return ( x[0]  == "X" )
+ 
+ def find_execstack(exe, pid):
+     execstacklist = []
+-    for path in commands.getoutput("ldd %s" %   sys.argv[1]).split():
++    for path in subprocess.check_output(["ldd", sys.argv[1]], universal_newlines=True).split():
+         if is_execstack(path) and path not in execstacklist:
+                 execstacklist.append(path)
+     try:

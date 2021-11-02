@@ -1,0 +1,68 @@
+From a7e5f58f402e6919ec444a57946bade7dfd6b184 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Feb 2017 13:40:19 -0800
+Subject: [PATCH] CVE-2017-13000/IEEE 802.15.4: Fix bug introduced by previous
+ fix.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We've already advanced the pointer past the PAN ID, if present; it now
+points to the address, so don't add 2 to it.
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-802_15_4.c         |   2 +-
+ tests/802_15_4-data.out  |   1 +
+ tests/802_15_4-data.pcap | Bin 0 -> 78 bytes
+ tests/TESTLIST           |   1 +
+ 4 files changed, 3 insertions(+), 1 deletion(-)
+ create mode 100644 tests/802_15_4-data.out
+ create mode 100644 tests/802_15_4-data.pcap
+
+diff --git a/print-802_15_4.c b/print-802_15_4.c
+index a43d0333c..a7817eb5a 100644
+--- a/print-802_15_4.c
++++ b/print-802_15_4.c
+@@ -141,7 +141,7 @@ ieee802_15_4_if_print(netdissect_options *ndo,
+ 			return hdrlen;
+ 		}
+ 		if (ndo->ndo_vflag)
+-			ND_PRINT((ndo,"%04x:%s ", panid, le64addr_string(ndo, p + 2)));
++			ND_PRINT((ndo,"%04x:%s ", panid, le64addr_string(ndo, p)));
+ 		p += 8;
+ 		caplen -= 8;
+ 		hdrlen += 8;
+diff --git a/tests/802_15_4-data.out b/tests/802_15_4-data.out
+new file mode 100644
+index 000000000..0e646751c
+--- /dev/null
++++ b/tests/802_15_4-data.out
+@@ -0,0 +1 @@
++IEEE 802.15.4 Data packet seq 01 ab4d:10:05:00:81:00:01:00:01 < [|802.15.4]
+diff --git a/tests/802_15_4-data.pcap b/tests/802_15_4-data.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a32784e2bc65303e567f19299cde46bce8fff87
+GIT binary patch
+literal 78
+zcmca|c+)~A1{MYeCI&Fz1(Jt>_-Tn}fIt%`gBp;n#=*d#_=eGUH6sHfLn8yL0FwZd
+a0~1h3o$&@1Ms<Pyj~S(Ja`G8uw*de=@DMHl
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 491af396e..be914a4a9 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -488,6 +488,7 @@ pimv2-oobr-3		pimv2-oobr-3.pcap		pimv2-oobr-3.out		-vvv -e
+ pimv2-oobr-4		pimv2-oobr-4.pcap		pimv2-oobr-4.out		-vvv -e
+ 802_15_4-oobr-1		802_15_4-oobr-1.pcap		802_15_4-oobr-1.out	-vvv -e
+ 802_15_4-oobr-2		802_15_4-oobr-2.pcap		802_15_4-oobr-2.out	-vvv -e
++802_15_4-data		802_15_4-data.pcap		802_15_4-data.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap

@@ -1,0 +1,81 @@
+From 0b1e0b3f7b44233f84e5c9f512f8c90d6bbbe33d Mon Sep 17 00:00:00 2001
+From: Hayaki Saito <saitoha@me.com>
+Date: Mon, 23 Dec 2019 13:20:08 +0000
+Subject: [PATCH] Introduce SIXEL_ALLOCATE_BYTES_MAX macro and limit allocation
+ size to 128MB(#74)
+
+---
+ include/sixel.h.in |  1 +
+ src/allocator.c    | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 30 insertions(+)
+
+diff --git a/include/sixel.h.in b/include/sixel.h.in
+index 5fc553f..792bb1b 100644
+--- a/include/sixel.h.in
++++ b/include/sixel.h.in
+@@ -39,6 +39,7 @@ typedef unsigned char sixel_index_t;
+ #define SIXEL_PALETTE_MIN            2
+ #define SIXEL_PALETTE_MAX            256
+ #define SIXEL_USE_DEPRECATED_SYMBOLS 1
++#define SIXEL_ALLOCATE_BYTES_MAX     10248UL * 1024UL * 128UL   /* up to 128M */
+ 
+ /* return value */
+ typedef int SIXELSTATUS;
+diff --git a/src/allocator.c b/src/allocator.c
+index bb0c009..5cee49c 100644
+--- a/src/allocator.c
++++ b/src/allocator.c
+@@ -152,6 +152,11 @@ sixel_allocator_malloc(
+             "sixel_allocator_malloc: called with n == 0");
+         return NULL;
+     }
++
++    if (n > SIXEL_ALLOCATE_BYTES_MAX) {
++        return NULL;
++    }
++
+     return allocator->fn_malloc(n);
+ }
+ 
+@@ -163,10 +168,24 @@ sixel_allocator_calloc(
+     size_t              /* in */ nelm,        /* number of elements */
+     size_t              /* in */ elsize)      /* size of element */
+ {
++    size_t n;
++
+     /* precondition */
+     assert(allocator);
+     assert(allocator->fn_calloc);
+ 
++    n = nelm * elsize;
++
++    if (n == 0) {
++        sixel_helper_set_additional_message(
++            "sixel_allocator_malloc: called with n == 0");
++        return NULL;
++    }
++
++    if (n > SIXEL_ALLOCATE_BYTES_MAX) {
++        return NULL;
++    }
++
+     return allocator->fn_calloc(nelm, elsize);
+ }
+ 
+@@ -182,6 +201,16 @@ sixel_allocator_realloc(
+     assert(allocator);
+     assert(allocator->fn_realloc);
+ 
++    if (n == 0) {
++        sixel_helper_set_additional_message(
++            "sixel_allocator_malloc: called with n == 0");
++        return NULL;
++    }
++
++    if (n > SIXEL_ALLOCATE_BYTES_MAX) {
++        return NULL;
++    }
++
+     return allocator->fn_realloc(p, n);
+ }
+ 

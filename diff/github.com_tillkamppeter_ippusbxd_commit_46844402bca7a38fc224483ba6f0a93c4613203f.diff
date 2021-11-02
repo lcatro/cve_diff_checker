@@ -1,0 +1,275 @@
+From 46844402bca7a38fc224483ba6f0a93c4613203f Mon Sep 17 00:00:00 2001
+From: Till Kamppeter <till.kamppeter@gmail.com>
+Date: Sun, 9 Aug 2015 20:14:19 -0300
+Subject: [PATCH] SECURITY FIX: Actually restrict the access to the printer to
+ localhost
+
+Before, any machine in any network connected by any of the interfaces (as
+listed by "ifconfig") could access to an IPP-over-USB printer on the assigned
+port, allowing users on remote machines to print and to access the web
+configuration interface of a IPP-over-USB printer in contrary to conventional
+USB printers which are only accessible locally.
+---
+ src/ippusbxd.c |  28 ++++++++++---
+ src/tcp.c      | 108 +++++++++++++++++++++++++++++++++++++++++++++----
+ src/tcp.h      |   4 +-
+ 3 files changed, 125 insertions(+), 15 deletions(-)
+
+diff --git a/src/ippusbxd.c b/src/ippusbxd.c
+index 9911d23..6e4fe54 100644
+--- a/src/ippusbxd.c
++++ b/src/ippusbxd.c
+@@ -171,9 +171,12 @@ static void start_daemon()
+ 
+ 	// Capture a socket
+ 	uint16_t desired_port = g_options.desired_port;
+-	struct tcp_sock_t *tcp_socket;
+-	while ((tcp_socket = tcp_open(desired_port)) == NULL &&
+-	       g_options.only_desired_port == 0) {
++	struct tcp_sock_t *tcp_socket = NULL, *tcp6_socket = NULL;
++	for (;;) {
++		tcp_socket = tcp_open(desired_port);
++		tcp6_socket = tcp6_open(desired_port);
++		if (tcp_socket || tcp6_socket || g_options.only_desired_port)
++			break;
+ 		// Search for a free port
+ 		desired_port ++;
+ 		// We failed with 0 as port number or we reached the max
+@@ -183,11 +186,16 @@ static void start_daemon()
+ 			// ports
+ 			// https://en.wikipedia.org/wiki/Ephemeral_port
+ 			desired_port = 49152;
++		NOTE("Access to desired port failed, trying alternative port %d", desired_port);
+ 	}
+-	if (tcp_socket == NULL)
++	if (tcp_socket == NULL && tcp6_socket == NULL)
+ 		goto cleanup_tcp;
+ 
+-	uint16_t real_port = tcp_port_number_get(tcp_socket);
++	uint16_t real_port;
++	if (tcp_socket)
++	  real_port = tcp_port_number_get(tcp_socket);
++	else
++	  real_port = tcp_port_number_get(tcp6_socket);
+ 	if (desired_port != 0 && g_options.only_desired_port == 1 &&
+ 	    desired_port != real_port) {
+ 		ERR("Received port number did not match requested port number."
+@@ -197,6 +205,9 @@ static void start_daemon()
+ 	printf("%u|", real_port);
+ 	fflush(stdout);
+ 
++	NOTE("Port: %d, IPv4 %savailable, IPv6 %savailable",
++	     real_port, tcp_socket ? "" : "not ", tcp6_socket ? "" : "not ");
++
+ 	// Lose connection to caller
+ 	uint16_t pid;
+ 	if (!g_options.nofork_mode && (pid = fork()) > 0) {
+@@ -216,7 +227,10 @@ static void start_daemon()
+ 		}
+ 
+ 		args->usb_sock = usb_sock;
+-		args->tcp = tcp_conn_accept(tcp_socket);
++
++		// For each request/response round we use the socket (IPv4 or
++		// IPv6) which receives data first
++		args->tcp = tcp_conn_select(tcp_socket, tcp6_socket);
+ 		if (args->tcp == NULL) {
+ 			ERR("Failed to open tcp connection");
+ 			goto cleanup_thread;
+@@ -243,6 +257,8 @@ static void start_daemon()
+ cleanup_tcp:
+ 	if (tcp_socket!= NULL)
+ 		tcp_close(tcp_socket);
++	if (tcp6_socket!= NULL)
++		tcp_close(tcp6_socket);
+ cleanup_usb:
+ 	if (usb_sock != NULL)
+ 		usb_close(usb_sock);
+diff --git a/src/tcp.c b/src/tcp.c
+index 31fc0f8..72689d3 100644
+--- a/src/tcp.c
++++ b/src/tcp.c
+@@ -17,6 +17,9 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <ctype.h>
++#include <sys/time.h>
++#include <sys/types.h>
++#include <unistd.h>
+ 
+ #include <fcntl.h>
+ #include <unistd.h>
+@@ -31,7 +34,58 @@ struct tcp_sock_t *tcp_open(uint16_t port)
+ {
+ 	struct tcp_sock_t *this = calloc(1, sizeof *this);
+ 	if (this == NULL) {
+-		ERR("callocing this failed");
++		ERR("IPv4: callocing this failed");
++		goto error;
++	}
++
++	// Open [S]ocket [D]escriptor
++	this->sd = -1;
++	this->sd = socket(AF_INET, SOCK_STREAM, 0);
++	if (this->sd < 0) {
++		ERR("IPv4 socket open failed");
++		goto error;
++	}
++
++	// Configure socket params
++	struct sockaddr_in addr;
++	memset(&addr, 0, sizeof addr);
++	addr.sin_family = AF_INET;
++	addr.sin_port = htons(port);
++	addr.sin_addr.s_addr = htonl(0x7F000001);
++
++	// Bind to localhost
++	if (bind(this->sd,
++	        (struct sockaddr *)&addr,
++	        sizeof addr) < 0) {
++		if (g_options.only_desired_port == 1)
++			ERR("IPv4 bind on port failed. "
++			    "Requested port may be taken or require root permissions.");
++		goto error;
++	}
++
++	// Let kernel over-accept max number of connections
++	if (listen(this->sd, HTTP_MAX_PENDING_CONNS) < 0) {
++		ERR("IPv4 listen failed on socket");
++		goto error;
++	}
++
++	return this;
++
++error:
++	if (this != NULL) {
++		if (this->sd != -1) {
++			close(this->sd);
++		}
++		free(this);
++	}
++	return NULL;
++}
++
++struct tcp_sock_t *tcp6_open(uint16_t port)
++{
++	struct tcp_sock_t *this = calloc(1, sizeof *this);
++	if (this == NULL) {
++		ERR("IPv6: callocing this failed");
+ 		goto error;
+ 	}
+ 
+@@ -39,7 +93,7 @@ struct tcp_sock_t *tcp_open(uint16_t port)
+ 	this->sd = -1;
+ 	this->sd = socket(AF_INET6, SOCK_STREAM, 0);
+ 	if (this->sd < 0) {
+-		ERR("sockect open failed");
++		ERR("Ipv6 socket open failed");
+ 		goto error;
+ 	}
+ 
+@@ -48,21 +102,21 @@ struct tcp_sock_t *tcp_open(uint16_t port)
+ 	memset(&addr, 0, sizeof addr);
+ 	addr.sin6_family = AF_INET6;
+ 	addr.sin6_port = htons(port);
+-	addr.sin6_addr = in6addr_any;
++	addr.sin6_addr = in6addr_loopback;
+ 
+ 	// Bind to localhost
+ 	if (bind(this->sd,
+ 	        (struct sockaddr *)&addr,
+ 	        sizeof addr) < 0) {
+ 		if (g_options.only_desired_port == 1)
+-			ERR("Bind on port failed. "
++			ERR("IPv6 bind on port failed. "
+ 			    "Requested port may be taken or require root permissions.");
+ 		goto error;
+ 	}
+ 
+ 	// Let kernel over-accept max number of connections
+ 	if (listen(this->sd, HTTP_MAX_PENDING_CONNS) < 0) {
+-		ERR("listen failed on socket");
++		ERR("IPv6 listen failed on socket");
+ 		goto error;
+ 	}
+ 
+@@ -179,20 +233,58 @@ void tcp_packet_send(struct tcp_conn_t *conn, struct http_packet_t *pkt)
+ }
+ 
+ 
+-struct tcp_conn_t *tcp_conn_accept(struct tcp_sock_t *sock)
++struct tcp_conn_t *tcp_conn_select(struct tcp_sock_t *sock,
++				   struct tcp_sock_t *sock6)
+ {
+ 	struct tcp_conn_t *conn = calloc(1, sizeof *conn);
+ 	if (conn == NULL) {
+ 		ERR("Calloc for connection struct failed");
+ 		goto error;
+ 	}
++	fd_set rfds;
++	struct timeval tv;
++	int retval = 0;
++	int nfds = 0;
++	while (retval == 0) {
++		FD_ZERO(&rfds);
++		if (sock) {
++			FD_SET(sock->sd, &rfds);
++			nfds = sock->sd;
++		}
++		if (sock6) {
++			FD_SET(sock6->sd, &rfds);
++			if (sock6->sd > nfds)
++				nfds = sock6->sd;
++		}
++		if (nfds == 0) {
++			ERR("No valid TCP socket supplied.");
++			goto error;
++		}
++		nfds += 1;
++		/* Wait up to five seconds. */
++		tv.tv_sec = 5;
++		tv.tv_usec = 0;
++		retval = select(nfds, &rfds, NULL, NULL, &tv);
++		if (retval == -1) {
++			ERR("Failed to open tcp connection");
++			goto error;
++		}
++	}
+ 
+-	conn->sd = accept(sock->sd, NULL, NULL);
++	if (sock && FD_ISSET(sock->sd, &rfds)) {
++		conn->sd = accept(sock->sd, NULL, NULL);
++		NOTE ("Using IPv4");
++	} else if (sock6 && FD_ISSET(sock6->sd, &rfds)) {
++		conn->sd = accept(sock6->sd, NULL, NULL);
++		NOTE ("Using IPv6");
++	} else {
++		ERR("select failed");
++		goto error;
++	}
+ 	if (conn->sd < 0) {
+ 		ERR("accept failed");
+ 		goto error;
+ 	}
+-
+ 	return conn;
+ 
+ error:
+diff --git a/src/tcp.h b/src/tcp.h
+index 1e72e29..77a4eeb 100644
+--- a/src/tcp.h
++++ b/src/tcp.h
+@@ -40,10 +40,12 @@ struct tcp_conn_t {
+ };
+ 
+ struct tcp_sock_t *tcp_open(uint16_t);
++struct tcp_sock_t *tcp6_open(uint16_t);
+ void tcp_close(struct tcp_sock_t *);
+ uint16_t tcp_port_number_get(struct tcp_sock_t *);
+ 
+-struct tcp_conn_t *tcp_conn_accept(struct tcp_sock_t *);
++struct tcp_conn_t *tcp_conn_select(struct tcp_sock_t *sock,
++				   struct tcp_sock_t *sock6);
+ void tcp_conn_close(struct tcp_conn_t *);
+ 
+ struct http_packet_t *tcp_packet_get(struct tcp_conn_t *,

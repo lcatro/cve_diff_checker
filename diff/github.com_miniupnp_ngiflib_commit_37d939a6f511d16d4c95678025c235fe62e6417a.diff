@@ -1,0 +1,124 @@
+From 37d939a6f511d16d4c95678025c235fe62e6417a Mon Sep 17 00:00:00 2001
+From: Thomas Bernard <miniupnp@free.fr>
+Date: Tue, 16 Apr 2019 02:05:15 +0200
+Subject: [PATCH] fix deinterlacing for small pictures
+
+fixes #12
+---
+ invalid_gif/issue_12.gif | Bin 0 -> 64 bytes
+ ngiflib.c                |  54 +++++++++++++++++++++------------------
+ 2 files changed, 29 insertions(+), 25 deletions(-)
+ create mode 100644 invalid_gif/issue_12.gif
+
+diff --git a/invalid_gif/issue_12.gif b/invalid_gif/issue_12.gif
+new file mode 100644
+index 0000000000000000000000000000000000000000..48e19c3b556838ff372375504b8abae3361e90f2
+GIT binary patch
+literal 64
+zcmZ?wbhEHbWMNQX_{7MNcIM3g|Nj{nfJFWO|7RFrK=CIFLj!{{gH8hj0}BfS6N3YD
+Mw}b)%qtHhS0MB|7x&QzG
+
+literal 0
+HcmV?d00001
+
+diff --git a/ngiflib.c b/ngiflib.c
+index 05321f1..1d29313 100644
+--- a/ngiflib.c
++++ b/ngiflib.c
+@@ -6,7 +6,7 @@
+ 
+ /* decodeur GIF en C portable (pas de pb big/little endian)
+  * Thomas BERNARD. janvier 2004.
+- * (c) 2004-2017 Thomas Bernard. All rights reserved
++ * (c) 2004-2019 Thomas Bernard. All rights reserved
+  */
+ 
+ /* Fonction de debug */
+@@ -135,29 +135,31 @@ static void WritePixel(struct ngiflib_img * i, struct ngiflib_decode_context * c
+ 			break;
+ 		case 1:	/* 1st pass : every eighth row starting from 0 */
+ 			context->curY += 8;
+-			if(context->curY >= p->height) {
+-				context->pass++;
+-				context->curY = i->posY + 4;
+-			}
+ 			break;
+ 		case 2:	/* 2nd pass : every eighth row starting from 4 */
+ 			context->curY += 8;
+-			if(context->curY >= p->height) {
+-				context->pass++;
+-				context->curY = i->posY + 2;
+-			}
+ 			break;
+ 		case 3:	/* 3rd pass : every fourth row starting from 2 */
+ 			context->curY += 4;
+-			if(context->curY >= p->height) {
+-				context->pass++;
+-				context->curY = i->posY + 1;
+-			}
+ 			break;
+ 		case 4:	/* 4th pass : every odd row */
+ 			context->curY += 2;
+ 			break;
+ 		}
++		while(context->pass > 0 && context->pass < 4 &&
++		      context->curY >= p->height) {
++			switch(++context->pass) {
++			case 2:	/* 2nd pass : every eighth row starting from 4 */
++				context->curY = i->posY + 4;
++				break;
++			case 3:	/* 3rd pass : every fourth row starting from 2 */
++				context->curY = i->posY + 2;
++				break;
++			case 4:	/* 4th pass : every odd row */
++				context->curY = i->posY + 1;
++				break;
++			}
++		}
+ #ifndef NGIFLIB_INDEXED_ONLY
+ 		if(p->mode & NGIFLIB_MODE_INDEXED) {
+ #endif /* NGIFLIB_INDEXED_ONLY */
+@@ -249,29 +251,31 @@ static void WritePixels(struct ngiflib_img * i, struct ngiflib_decode_context *
+ 				break;
+ 			case 1:	/* 1st pass : every eighth row starting from 0 */
+ 				context->curY += 8;
+-				if(context->curY >= p->height) {
+-					context->pass++;
+-					context->curY = i->posY + 4;
+-				}
+ 				break;
+ 			case 2:	/* 2nd pass : every eighth row starting from 4 */
+ 				context->curY += 8;
+-				if(context->curY >= p->height) {
+-					context->pass++;
+-					context->curY = i->posY + 2;
+-				}
+ 				break;
+ 			case 3:	/* 3rd pass : every fourth row starting from 2 */
+ 				context->curY += 4;
+-				if(context->curY >= p->height) {
+-					context->pass++;
+-					context->curY = i->posY + 1;
+-				}
+ 				break;
+ 			case 4:	/* 4th pass : every odd row */
+ 				context->curY += 2;
+ 				break;
+ 			}
++			while(context->pass > 0 && context->pass < 4 &&
++			      context->curY >= p->height) {
++				switch(++context->pass) {
++				case 2:	/* 2nd pass : every eighth row starting from 4 */
++					context->curY = i->posY + 4;
++					break;
++				case 3:	/* 3rd pass : every fourth row starting from 2 */
++					context->curY = i->posY + 2;
++					break;
++				case 4:	/* 4th pass : every odd row */
++					context->curY = i->posY + 1;
++					break;
++				}
++			}
+ #ifndef NGIFLIB_INDEXED_ONLY
+ 			if(p->mode & NGIFLIB_MODE_INDEXED) {
+ #endif /* NGIFLIB_INDEXED_ONLY */

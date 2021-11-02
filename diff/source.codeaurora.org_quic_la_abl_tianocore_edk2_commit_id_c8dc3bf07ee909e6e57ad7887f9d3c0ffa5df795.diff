@@ -1,0 +1,79 @@
+From c8dc3bf07ee909e6e57ad7887f9d3c0ffa5df795 Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Thu, 14 Sep 2017 20:30:59 +0800
+Subject: QcomModulePkg: Fix the buffer overread issue while flashing meta
+ image
+
+The size maybe is smaller than the image header size or is smaller than
+the image header size + total image header entry size, it will go out
+of bound of image end. And it's dangerous to access image buffer which
+it's not zero initialized, its content might leak.
+
+Change-Id: I401a43f00c7a1bcaa6174ffd36990dd6244899fd
+---
+ QcomModulePkg/Library/FastbootLib/FastbootCmds.c | 25 +++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+ mode change 100644 => 100755 QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+
+diff --git a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+old mode 100644
+new mode 100755
+index 751e451..5496ae7
+--- a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
++++ b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+@@ -850,6 +850,12 @@ HandleMetaImgFlash(
+ 	BOOLEAN PnameTerminated = FALSE;
+ 	UINT32 j;
+ 
++  if (Size < sizeof (meta_header_t)) {
++    DEBUG ((EFI_D_ERROR,
++        "Error: The size is smaller than the image header size\n"));
++    return EFI_INVALID_PARAMETER;
++  }
++
+ 	meta_header = (meta_header_t *) Image;
+ 	img_header_entry = (img_header_entry_t *) (Image + sizeof(meta_header_t));
+ 	images = meta_header->img_hdr_sz / sizeof(img_header_entry_t);
+@@ -858,6 +864,12 @@ HandleMetaImgFlash(
+ 		return EFI_INVALID_PARAMETER;
+ 	}
+ 
++  if (Size <= (sizeof (meta_header_t) + meta_header->img_hdr_sz)) {
++    DEBUG ((EFI_D_ERROR,
++        "Error: The size is smaller than image header size + entry size\n"));
++    return EFI_INVALID_PARAMETER;
++  }
++
+ 	if (CHECK_ADD64((UINT64)Image, Size)) {
+ 		DEBUG((EFI_D_ERROR, "Integer overflow detected in %d, %a\n", __LINE__, __FUNCTION__));
+ 		return EFI_BAD_BUFFER_SIZE;
+@@ -1388,7 +1400,9 @@ VOID CmdSetActive(CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
+ 
+ STATIC VOID AcceptData (IN UINT64 Size, IN  VOID  *Data)
+ {
+-	UINT64 RemainingBytes = mNumDataBytes - mBytesReceivedSoFar;
++  UINT64 RemainingBytes = mNumDataBytes - mBytesReceivedSoFar;
++  UINT32 PageSize = 0;
++  UINT32 RoundSize = 0;
+ 
+ 	/* Protocol doesn't say anything about sending extra data so just ignore it.*/
+ 	if (Size > RemainingBytes)
+@@ -1405,6 +1419,15 @@ STATIC VOID AcceptData (IN UINT64 Size, IN  VOID  *Data)
+ 	{
+ 		/* Download Finished */
+ 		DEBUG((EFI_D_INFO, "Download Finised\n"));
++    /* Zero initialized the surplus data buffer. It's risky to access the data
++     * buffer which it's not zero initialized, its content might leak
++     */
++    GetPageSize (&PageSize);
++    RoundSize = ROUND_TO_PAGE (mNumDataBytes, PageSize - 1);
++    if (RoundSize < MAX_DOWNLOAD_SIZE) {
++      gBS->SetMem ((VOID *)(Data + mNumDataBytes),
++                   RoundSize - mNumDataBytes, 0);
++    }
+ 		FastbootOkay("");
+ 		mState = ExpectCmdState;
+ 	}
+-- 
+cgit v1.1
+

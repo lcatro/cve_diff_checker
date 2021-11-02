@@ -1,0 +1,99 @@
+From 9a753215b0969a5d5b5bfe8c68585339fee96260 Mon Sep 17 00:00:00 2001
+From: mrbird <852252810@qq.com>
+Date: Mon, 5 Nov 2018 15:26:25 +0800
+Subject: [PATCH] =?UTF-8?q?=E6=8F=90=E5=8D=87=E6=96=87=E4=BB=B6=E4=B8=8B?=
+ =?UTF-8?q?=E8=BD=BD=E5=AE=89=E5=85=A8=E6=80=A7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../mrbird/common/controller/CommonController.java  | 11 ++++++++---
+ .../common/exception/FileDownloadException.java     | 13 +++++++++++++
+ .../common/handler/GlobalExceptionHandler.java      |  6 ++++++
+ 3 files changed, 27 insertions(+), 3 deletions(-)
+ create mode 100644 src/main/java/cc/mrbird/common/exception/FileDownloadException.java
+
+diff --git a/src/main/java/cc/mrbird/common/controller/CommonController.java b/src/main/java/cc/mrbird/common/controller/CommonController.java
+index c8a58efb..8f1a759f 100644
+--- a/src/main/java/cc/mrbird/common/controller/CommonController.java
++++ b/src/main/java/cc/mrbird/common/controller/CommonController.java
+@@ -1,5 +1,7 @@
+ package cc.mrbird.common.controller;
+ 
++import cc.mrbird.common.exception.FileDownloadException;
++import org.apache.commons.lang3.StringUtils;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import org.springframework.stereotype.Controller;
+@@ -16,10 +18,14 @@
+     private Logger log = LoggerFactory.getLogger(this.getClass());
+ 
+     @RequestMapping("common/download")
+-    public void fileDownload(String fileName, Boolean delete, HttpServletResponse response) throws IOException {
++    public void fileDownload(String fileName, Boolean delete, HttpServletResponse response) throws IOException, FileDownloadException {
++        if (StringUtils.isNotBlank(fileName) && !fileName.endsWith(".xlsx"))
++            throw new FileDownloadException("不支持该类型文件下载");
+         String realFileName = System.currentTimeMillis() + fileName.substring(fileName.indexOf('_') + 1);
+         String filePath = "file/" + fileName;
+         File file = new File(filePath);
++        if (!file.exists())
++            throw new FileDownloadException("文件未找到");
+         response.setHeader("Content-Disposition", "attachment;fileName=" + java.net.URLEncoder.encode(realFileName, "utf-8"));
+         response.setContentType("multipart/form-data");
+         response.setCharacterEncoding("utf-8");
+@@ -32,9 +38,8 @@ public void fileDownload(String fileName, Boolean delete, HttpServletResponse re
+         } catch (Exception e) {
+             log.error("文件下载失败", e);
+         } finally {
+-            if (delete && file.exists()) {
++            if (delete)
+                 Files.delete(Paths.get(filePath));
+-            }
+         }
+     }
+ }
+diff --git a/src/main/java/cc/mrbird/common/exception/FileDownloadException.java b/src/main/java/cc/mrbird/common/exception/FileDownloadException.java
+new file mode 100644
+index 00000000..f3a42264
+--- /dev/null
++++ b/src/main/java/cc/mrbird/common/exception/FileDownloadException.java
+@@ -0,0 +1,13 @@
++package cc.mrbird.common.exception;
++
++/**
++ * 文件下载异常
++ */
++public class FileDownloadException  extends Exception {
++
++    private static final long serialVersionUID = -3608667856397125671L;
++
++    public FileDownloadException(String message) {
++        super(message);
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/cc/mrbird/common/handler/GlobalExceptionHandler.java b/src/main/java/cc/mrbird/common/handler/GlobalExceptionHandler.java
+index 139080ba..a8eaf0f5 100644
+--- a/src/main/java/cc/mrbird/common/handler/GlobalExceptionHandler.java
++++ b/src/main/java/cc/mrbird/common/handler/GlobalExceptionHandler.java
+@@ -1,6 +1,7 @@
+ package cc.mrbird.common.handler;
+ 
+ import cc.mrbird.common.domain.ResponseBo;
++import cc.mrbird.common.exception.FileDownloadException;
+ import cc.mrbird.common.exception.LimitAccessException;
+ import org.apache.shiro.authz.AuthorizationException;
+ import org.apache.shiro.session.ExpiredSessionException;
+@@ -37,6 +38,11 @@ public ResponseBo handleLimitAccessException(LimitAccessException e) {
+         return ResponseBo.error(e.getMessage());
+     }
+ 
++    @ExceptionHandler(value = FileDownloadException.class)
++    public ResponseBo handleFileDownloadException(FileDownloadException e) {
++        return ResponseBo.error(e.getMessage());
++    }
++
+     private static boolean isAjaxRequest(HttpServletRequest request) {
+         return (request.getHeader("X-Requested-With") != null
+                 && "XMLHttpRequest".equals(request.getHeader("X-Requested-With")));

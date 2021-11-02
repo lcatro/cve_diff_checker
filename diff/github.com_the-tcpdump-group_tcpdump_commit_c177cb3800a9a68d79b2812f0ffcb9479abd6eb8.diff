@@ -1,0 +1,237 @@
+From c177cb3800a9a68d79b2812f0ffcb9479abd6eb8 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 19:30:48 -0700
+Subject: [PATCH] CVE-2017-13016/ES-IS: Fix printing of addresses in RD PDUs.
+
+Always print the SNPA, and flag it as such; only print it as a MAC
+address if it's 6 bytes long.
+
+Identify the NET as such.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add tests using the capture files supplied by the reporter(s), modified
+so the capture files won't be rejected as an invalid capture.
+---
+ addrtoname.h                |   3 ++-
+ print-isoclns.c             |  14 +++++++++++---
+ tests/TESTLIST              |   5 +++++
+ tests/esis_snpa_asan-2.out  |   4 ++++
+ tests/esis_snpa_asan-2.pcap | Bin 0 -> 62 bytes
+ tests/esis_snpa_asan-3.out  |   7 +++++++
+ tests/esis_snpa_asan-3.pcap | Bin 0 -> 100 bytes
+ tests/esis_snpa_asan-4.out  |  21 +++++++++++++++++++++
+ tests/esis_snpa_asan-4.pcap | Bin 0 -> 214 bytes
+ tests/esis_snpa_asan-5.out  |  10 ++++++++++
+ tests/esis_snpa_asan-5.pcap | Bin 0 -> 100 bytes
+ tests/esis_snpa_asan.out    |  12 ++++++++++++
+ tests/esis_snpa_asan.pcap   | Bin 0 -> 138 bytes
+ 13 files changed, 72 insertions(+), 4 deletions(-)
+ create mode 100644 tests/esis_snpa_asan-2.out
+ create mode 100644 tests/esis_snpa_asan-2.pcap
+ create mode 100644 tests/esis_snpa_asan-3.out
+ create mode 100644 tests/esis_snpa_asan-3.pcap
+ create mode 100644 tests/esis_snpa_asan-4.out
+ create mode 100644 tests/esis_snpa_asan-4.pcap
+ create mode 100644 tests/esis_snpa_asan-5.out
+ create mode 100644 tests/esis_snpa_asan-5.pcap
+ create mode 100644 tests/esis_snpa_asan.out
+ create mode 100644 tests/esis_snpa_asan.pcap
+
+diff --git a/addrtoname.h b/addrtoname.h
+index 72e5ef19d..fe8b6bbe5 100644
+--- a/addrtoname.h
++++ b/addrtoname.h
+@@ -33,7 +33,8 @@ enum {
+     LINKADDR_ETHER,
+     LINKADDR_FRELAY,
+     LINKADDR_IEEE1394,
+-    LINKADDR_ATM
++    LINKADDR_ATM,
++    LINKADDR_OTHER
+ };
+ 
+ #define BUFSIZE 128
+diff --git a/print-isoclns.c b/print-isoclns.c
+index 1f871603a..38c24d959 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -1217,10 +1217,18 @@ esis_print(netdissect_options *ndo,
+ 		pptr += netal;
+                 li -= netal;
+ 
+-		if (netal == 0)
+-			ND_PRINT((ndo, "\n\t  %s", etheraddr_string(ndo, snpa)));
++		if (snpal == 6)
++			ND_PRINT((ndo, "\n\t  SNPA (length: %u): %s",
++			       snpal,
++			       etheraddr_string(ndo, snpa)));
+ 		else
+-			ND_PRINT((ndo, "\n\t  %s", isonsap_string(ndo, neta, netal)));
++			ND_PRINT((ndo, "\n\t  SNPA (length: %u): %s",
++			       snpal,
++			       linkaddr_string(ndo, snpa, LINKADDR_OTHER, snpal)));
++		if (netal != 0)
++			ND_PRINT((ndo, "\n\t  NET (length: %u) %s",
++			       netal,
++			       isonsap_string(ndo, neta, netal)));
+ 		break;
+ 	}
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index a20e59898..a56c3c950 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -513,6 +513,11 @@ lldp_asan		lldp_asan.pcap			lldp_asan.out	-v
+ extract_read2_asan	extract_read2_asan.pcap		extract_read2_asan.out	-v
+ getname_2_read4_asan	getname_2_read4_asan.pcap	getname_2_read4_asan.out	-v
+ eap_extract_read2_asan	eap_extract_read2_asan.pcap	eap_extract_read2_asan.out	-v
++esis_snpa_asan		esis_snpa_asan.pcap		esis_snpa_asan.out	-v
++esis_snpa_asan-2	esis_snpa_asan-2.pcap		esis_snpa_asan-2.out	-v
++esis_snpa_asan-3	esis_snpa_asan-3.pcap		esis_snpa_asan-3.out	-v
++esis_snpa_asan-4	esis_snpa_asan-4.pcap		esis_snpa_asan-4.out	-v
++esis_snpa_asan-5	esis_snpa_asan-5.pcap		esis_snpa_asan-5.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/esis_snpa_asan-2.out b/tests/esis_snpa_asan-2.out
+new file mode 100644
+index 000000000..0e1dd7001
+--- /dev/null
++++ b/tests/esis_snpa_asan-2.out
+@@ -0,0 +1,4 @@
++UI 22! ES-IS, length 65565
++	redirect (6), v: 1, checksum: 0x70a1 (incorrect should be 0xf519), holding time: 22339s, length indicator: 17
++	  00.22
++	  SNPA (length: 0): <empty>, opt (0) too long
+diff --git a/tests/esis_snpa_asan-2.pcap b/tests/esis_snpa_asan-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c59fa76b6b96b115ba7cc82171715afca2ac86f
+GIT binary patch
+literal 62
+zcmca|c+)~A1{MYw5Cbx@L7eRz0t^fS3?RM|10w?i533SGlOSWLTDWroP=^v&8~_vn
+B2fY9Q
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/esis_snpa_asan-3.out b/tests/esis_snpa_asan-3.out
+new file mode 100644
+index 000000000..5e6a14d1d
+--- /dev/null
++++ b/tests/esis_snpa_asan-3.out
+@@ -0,0 +1,7 @@
++UI 22! ES-IS, length 65565
++	unknown type: 0 (0), v: 1, checksum: 0x00a1 (incorrect should be 0x859d), holding time: 0s, length indicator: 17
++	  0x0000:  0200 04ec ff00 0000
++UI 22! ES-IS, length 2650865693
++	redirect (6), v: 1, checksum: 0x0300 (incorrect should be 0xbce5), holding time: 21480s, length indicator: 17
++	  ec.ff00.00
++	  SNPA (length: 0): <empty>
+diff --git a/tests/esis_snpa_asan-3.pcap b/tests/esis_snpa_asan-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..812f54290f2055403e17e0fea0fba2c506cba1aa
+GIT binary patch
+literal 100
+zcmca|c+)~A1{MYw5Cbx@L7eS^0t^fS3?RM|10w?i533SGlOSU#NDidq&3_PUI|s6=
+Od2m&3!7rF$Y8U{m&klwF
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/esis_snpa_asan-4.out b/tests/esis_snpa_asan-4.out
+new file mode 100644
+index 000000000..249b248bf
+--- /dev/null
++++ b/tests/esis_snpa_asan-4.out
+@@ -0,0 +1,21 @@
++UI 22! ES-IS, length 65565
++	ESH (2), v: 1, checksum: 0x70a1 (incorrect should be 0xfb4e), holding time: 21315s, length indicator: 17
++	  Number of Source Addresses: 2
++	  NET (length: 0): isonsap_string: illegal length
++	  NET (length: 4): ec.ff00.00, bad opts/li
++UI 22! ES-IS, length 65565
++	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x44ec), holding time: 21315s, length indicator: 16
++	  02.0400
++	  SNPA (length: 0): <empty>
++	  Unknown Option #0, length 0, value: 
++UI 32! ES-IS, length 65565
++	ESH (2), v: 1, checksum: 0x70a1 (incorrect should be 0xfb4e), holding time: 21315s, length indicator: 17
++	  Number of Source Addresses: 2
++	  NET (length: 0): isonsap_string: illegal length
++	  NET (length: 4): ec.ff00.00, bad opts/li
++UI 22! ES-IS, length 4244701213
++	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x36fe), holding time: 21315s, length indicator: 17
++	  isonsap_string: illegal length
++	  SNPA (length: 0): <empty>
++	  NET (length: 4) 00.0000.00
++Q.922, invalid address
+diff --git a/tests/esis_snpa_asan-4.pcap b/tests/esis_snpa_asan-4.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..9cdfe03476c099fff9843087cebede31bb65ea05
+GIT binary patch
+literal 214
+zcmca|c+)~A1{MYw5Cbx@L7eRz0t^fS3?RM|10w?i533SGlOSWLQ?PRZNXMK1I8_NS
+zhPnY&nJ_a!%>|p4gKU-&4zrlxHvWa%2sVoW=Ef@^cR|gPW@G@mClPE*-2nlHx&!~C
+K1sIh6GXMaNP9T2(
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/esis_snpa_asan-5.out b/tests/esis_snpa_asan-5.out
+new file mode 100644
+index 000000000..bd8c30dd2
+--- /dev/null
++++ b/tests/esis_snpa_asan-5.out
+@@ -0,0 +1,10 @@
++UI 22! ES-IS, length 65565
++	ESH (2), v: 1, checksum: 0x70a1 (incorrect should be 0xfc4c), holding time: 21315s, length indicator: 17
++	  Number of Source Addresses: 3
++	  NET (length: 0): isonsap_string: illegal length
++	  NET (length: 4): ec.ff00.00
++	  NET (length: 0): isonsap_string: illegal length
++UI 22! ES-IS, length 65565
++	redirect (6), v: 1, checksum: 0x7034 (incorrect should be 0x3ff0), holding time: 21315s, length indicator: 17
++	  04
++	  SNPA (length: 4): 00:00:00:00, bad opts/li
+diff --git a/tests/esis_snpa_asan-5.pcap b/tests/esis_snpa_asan-5.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..98e34f1621a37b904b786018b0152046cb652e69
+GIT binary patch
+literal 100
+zcmca|c+)~A1{MYehW{^s1cMk5XM-5qIRqFO1i*YH21W)39#$oWCPBtfr(oxTh0F{r
+TZ~o&`<pxw`!pH(Lmw^EQd1?<O
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/esis_snpa_asan.out b/tests/esis_snpa_asan.out
+new file mode 100644
+index 000000000..82732ca06
+--- /dev/null
++++ b/tests/esis_snpa_asan.out
+@@ -0,0 +1,12 @@
++UI 22! ES-IS, length 65565
++	ESH (2), v: 1, checksum: 0x70a1 (incorrect should be 0xfb4e), holding time: 21315s, length indicator: 17
++	  Number of Source Addresses: 2
++	  NET (length: 0): isonsap_string: illegal length
++	  NET (length: 4): ec.ff00.00, bad opts/li
++UI 22! ES-IS, length 65565
++	redirect (6), v: 1, checksum: 0xffff (incorrect should be 0x6b16), holding time: 21253s, length indicator: 17
++	  00.04ec.0000
++	  SNPA (length: 0): <empty>, bad opts/li
++Q.922, hdr-len 2, DLCI 0, Flags [FECN], NLPID unknown (0x22), length 72482: 
++	0x0000:  0082 1000 5542 5343 70a1 0200 0400 0000  ....UBSCp.......
++	0x0010:  007e                                     .~
+diff --git a/tests/esis_snpa_asan.pcap b/tests/esis_snpa_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b573467cb17a30eebc8e9fdafe79f3dcded89a10
+GIT binary patch
+literal 138
+zcmca|c+)~A1{MYw5Cbx@L7eRz0t^fS3?RM|10w?i533SGlOSWLQ?PRZNXMK1_*A(C
+ev;P0j3RDGBgkqL7&@Ap3K(hoG;AVl;)Bym4A{5~O
+
+literal 0
+HcmV?d00001
+

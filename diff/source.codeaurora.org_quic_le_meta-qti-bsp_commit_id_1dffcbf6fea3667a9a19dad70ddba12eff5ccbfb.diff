@@ -1,0 +1,103 @@
+From 1dffcbf6fea3667a9a19dad70ddba12eff5ccbfb Mon Sep 17 00:00:00 2001
+From: Himal Ghimiray <himalg@codeaurora.org>
+Date: Mon, 16 Oct 2017 20:33:20 +0530
+Subject: Adding security features in user build.
+
+For apq8053 and apq8053-minimal:
+-Disabling root login.
+-Disabling mounting of debugfs.
+For apq8053-minimal:
+-Dropping read, write and execute permission for other users
+for files in /etc/init.d/.
+
+Change-Id: I3339a99eda97a1a5ddcb2519ea82442e0f631585
+---
+ conf/distro/msm-user.conf                                  | 7 ++++++-
+ recipes-products/images/apq8053/apq8053-base-image.inc     | 6 +++++-
+ recipes-products/images/apq8053/apq8053-minimal-image.inc  | 8 ++++++++
+ recipes-products/images/include/machine-recovery-image.inc | 7 ++++++-
+ 4 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/conf/distro/msm-user.conf b/conf/distro/msm-user.conf
+index 583ba4e..ef98d47 100644
+--- a/conf/distro/msm-user.conf
++++ b/conf/distro/msm-user.conf
+@@ -3,7 +3,7 @@
+ #@NAME: MSM-USER
+ #@DESCRIPTION: QTI Linux Distribution for MSM targets with production orientation (glibc based)
+ ################################################################################################
+-
++INHERIT += "extrausers"
+ require conf/distro/include/msm.inc
+ 
+ # DISTRO CONFIGURATION
+@@ -26,7 +26,12 @@ PERF_BUILD = "1"
+ # Build optimization to disable debugging features, mainly for production images.
+ USER_BUILD = "1"
+ 
++
+ # Retain existing directory structure for base product image.
+ # Append variants like '-perf', '-user', 'perf-minimal' etc to deploy dir.
+ DEPLOY_NAME ?= "${MACHINE}${@['-' + d.getVar('PRODUCT', True), ''][d.getVar('PRODUCT', True) == ('' or 'base')]}${@['-' + d.getVar('VARIANT', True), ''][d.getVar('VARIANT', True) == ('')]}"
+ DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/${DEPLOY_NAME}"
++
++EXTRA_USERS_PARAMS = "\
++ usermod -L -e 1 root; \
++"
+diff --git a/recipes-products/images/apq8053/apq8053-base-image.inc b/recipes-products/images/apq8053/apq8053-base-image.inc
+index af79e67..7472484 100755
+--- a/recipes-products/images/apq8053/apq8053-base-image.inc
++++ b/recipes-products/images/apq8053/apq8053-base-image.inc
+@@ -55,7 +55,11 @@ SELINUX_FILE_CONTEXTS = "${IMAGE_ROOTFS}/etc/selinux/mls/contexts/files/file_con
+ IMAGE_EXT4_SELINUX_OPTIONS = "${@base_contains('DISTRO_FEATURES','selinux',' -a / -S ${SELINUX_FILE_CONTEXTS} ','',d)}"
+ 
+ do_fsconfig() {
+-    chmod -R o-rwx ${IMAGE_ROOTFS}/etc/init.d/
++if [ "${DISTRO_NAME}" == "msm-user" ]; then
++sed -i '/mount -t debugfs/ d' ${IMAGE_ROOTFS}/etc/init.d/sysfs.sh
++fi
++ chmod -R o-rwx ${IMAGE_ROOTFS}/etc/init.d/
++
+ }
+ 
+ addtask fsconfig before do_makesystem after do_rootfs
+diff --git a/recipes-products/images/apq8053/apq8053-minimal-image.inc b/recipes-products/images/apq8053/apq8053-minimal-image.inc
+index 75d76fd..38017c5 100755
+--- a/recipes-products/images/apq8053/apq8053-minimal-image.inc
++++ b/recipes-products/images/apq8053/apq8053-minimal-image.inc
+@@ -53,6 +53,14 @@ SELINUX_FILE_CONTEXTS = "${IMAGE_ROOTFS}/etc/selinux/mls/contexts/files/file_con
+ 
+ IMAGE_EXT4_SELINUX_OPTIONS = "${@base_contains('DISTRO_FEATURES','selinux',' -a / -S ${SELINUX_FILE_CONTEXTS} ','',d)}"
+ 
++do_fsconfig() {
++if [ "${DISTRO_NAME}" == "msm-user" ]; then
++sed -i '/mount -t debugfs/ d' ${IMAGE_ROOTFS}/etc/init.d/sysfs.sh
++fi
++    chmod -R o-rwx ${IMAGE_ROOTFS}/etc/init.d/
++}
++
++addtask fsconfig before do_makesystem after do_rootfs
+ do_makesystem() {
+     make_ext4fs ${IMAGE_EXT4_EXTRA_OPTIONS} -s ${IMAGE_EXT4_SELINUX_OPTIONS} -l ${SYSTEM_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-sysfs.ext4 ${IMAGE_ROOTFS}
+     make_ext4fs  -l ${SYSTEMRW_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-systemrw.ext4
+diff --git a/recipes-products/images/include/machine-recovery-image.inc b/recipes-products/images/include/machine-recovery-image.inc
+index a3275a9..69dace1 100644
+--- a/recipes-products/images/include/machine-recovery-image.inc
++++ b/recipes-products/images/include/machine-recovery-image.inc
+@@ -48,7 +48,12 @@ SELINUX_FILE_CONTEXTS = "${IMAGE_ROOTFS}/etc/selinux/mls/contexts/files/file_con
+ 
+ do_fsconfig() {
+  if ${@bb.utils.contains('DISTRO_FEATURES','systemd','false','true',d)}; then
+-   chmod -R o-rwx ${IMAGE_ROOTFS}/etc/init.d/
++  if [ "${DISTRO_NAME}" == "msm-user" ]; then
++   if [ -e ${IMAGE_ROOTFS}/etc/init.d/sysfs.sh]; then
++    sed -i '/mount -t debugfs/ d' ${IMAGE_ROOTFS}/etc/init.d/sysfs.sh
++   fi
++  fi
++  chmod -R o-rwx ${IMAGE_ROOTFS}/etc/init.d/
+  fi
+ }
+ 
+-- 
+cgit v1.1
+

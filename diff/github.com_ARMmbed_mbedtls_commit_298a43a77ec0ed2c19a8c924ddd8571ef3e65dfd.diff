@@ -1,0 +1,624 @@
+From c80555d8359c736e01f9bd24ce37d4704f11950b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Manuel=20P=C3=A9gouri=C3=A9-Gonnard?=
+ <manuel.pegourie-gonnard@arm.com>
+Date: Thu, 20 Apr 2017 15:37:46 +0200
+Subject: [PATCH 1/8] Add public function generating private keys
+
+We need to separate the uses of the RNG for blinding and for key
+generation for the sake of an upcoming security fix in deterministic
+ECDSA.
+---
+ include/mbedtls/ecp.h | 16 ++++++++++++++++
+ library/ecp.c         | 34 +++++++++++++++++++++++-----------
+ 2 files changed, 39 insertions(+), 11 deletions(-)
+
+diff --git a/include/mbedtls/ecp.h b/include/mbedtls/ecp.h
+index 7b8ffff44e0..9c6db1952a4 100644
+--- a/include/mbedtls/ecp.h
++++ b/include/mbedtls/ecp.h
+@@ -595,6 +595,22 @@ int mbedtls_ecp_check_pubkey( const mbedtls_ecp_group *grp, const mbedtls_ecp_po
+  */
+ int mbedtls_ecp_check_privkey( const mbedtls_ecp_group *grp, const mbedtls_mpi *d );
+ 
++/**
++ * \brief           Generate a private key
++ *
++ * \param grp       ECP group
++ * \param d         Destination MPI (secret part)
++ * \param f_rng     RNG function
++ * \param p_rng     RNG parameter
++ *
++ * \return          0 if successful,
++ *                  or a MBEDTLS_ERR_ECP_XXX or MBEDTLS_MPI_XXX error code
++ */
++int mbedtls_ecp_gen_privkey( const mbedtls_ecp_group *grp,
++                     mbedtls_mpi *d,
++                     int (*f_rng)(void *, unsigned char *, size_t),
++                     void *p_rng );
++
+ /**
+  * \brief           Generate a keypair with configurable base point
+  *
+diff --git a/library/ecp.c b/library/ecp.c
+index 75233f8cefa..cb8e947dbed 100644
+--- a/library/ecp.c
++++ b/library/ecp.c
+@@ -1918,15 +1918,14 @@ int mbedtls_ecp_check_privkey( const mbedtls_ecp_group *grp, const mbedtls_mpi *
+ }
+ 
+ /*
+- * Generate a keypair with configurable base point
++ * Generate a private key
+  */
+-int mbedtls_ecp_gen_keypair_base( mbedtls_ecp_group *grp,
+-                     const mbedtls_ecp_point *G,
+-                     mbedtls_mpi *d, mbedtls_ecp_point *Q,
++int mbedtls_ecp_gen_privkey( const mbedtls_ecp_group *grp,
++                     mbedtls_mpi *d,
+                      int (*f_rng)(void *, unsigned char *, size_t),
+                      void *p_rng )
+ {
+-    int ret;
++    int ret = MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+     size_t n_size = ( grp->nbits + 7 ) / 8;
+ 
+ #if defined(ECP_MONTGOMERY)
+@@ -1951,8 +1950,8 @@ int mbedtls_ecp_gen_keypair_base( mbedtls_ecp_group *grp,
+         MBEDTLS_MPI_CHK( mbedtls_mpi_set_bit( d, 1, 0 ) );
+         MBEDTLS_MPI_CHK( mbedtls_mpi_set_bit( d, 2, 0 ) );
+     }
+-    else
+ #endif /* ECP_MONTGOMERY */
++
+ #if defined(ECP_SHORTWEIERSTRASS)
+     if( ecp_get_type( grp ) == ECP_TYPE_SHORT_WEIERSTRASS )
+     {
+@@ -1986,15 +1985,28 @@ int mbedtls_ecp_gen_keypair_base( mbedtls_ecp_group *grp,
+         while( mbedtls_mpi_cmp_int( d, 1 ) < 0 ||
+                mbedtls_mpi_cmp_mpi( d, &grp->N ) >= 0 );
+     }
+-    else
+ #endif /* ECP_SHORTWEIERSTRASS */
+-        return( MBEDTLS_ERR_ECP_BAD_INPUT_DATA );
+ 
+ cleanup:
+-    if( ret != 0 )
+-        return( ret );
++    return( ret );
++}
+ 
+-    return( mbedtls_ecp_mul( grp, Q, d, G, f_rng, p_rng ) );
++/*
++ * Generate a keypair with configurable base point
++ */
++int mbedtls_ecp_gen_keypair_base( mbedtls_ecp_group *grp,
++                     const mbedtls_ecp_point *G,
++                     mbedtls_mpi *d, mbedtls_ecp_point *Q,
++                     int (*f_rng)(void *, unsigned char *, size_t),
++                     void *p_rng )
++{
++    int ret;
++
++    MBEDTLS_MPI_CHK( mbedtls_ecp_gen_privkey( grp, d, f_rng, p_rng ) );
++    MBEDTLS_MPI_CHK( mbedtls_ecp_mul( grp, Q, d, G, f_rng, p_rng ) );
++
++cleanup:
++    return( ret );
+ }
+ 
+ /*
+
+From 2934c32da2198f6bfd1e10de6be9c00795d9b604 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Fri, 4 Jan 2019 14:32:30 +0000
+Subject: [PATCH 2/8] Add a safer deterministic ECDSA function
+
+`mbedtls_ecdsa_sign_det` reuses the internal HMAC-DRBG instance to
+implement blinding. The advantage of this is that the algorithm is
+deterministic too, not just the resulting signature. The drawback is
+that the blinding is always the same for the same key and message.
+This diminishes the efficiency of blinding and leaks information about
+the private key.
+
+A function that takes external randomness fixes this weakness.
+---
+ include/mbedtls/ecdsa.h | 67 +++++++++++++++++++++++++++--
+ library/ecdsa.c         | 93 ++++++++++++++++++++++++++++++++---------
+ 2 files changed, 138 insertions(+), 22 deletions(-)
+
+diff --git a/include/mbedtls/ecdsa.h b/include/mbedtls/ecdsa.h
+index ff6efbc3ff2..a213e91ec92 100644
+--- a/include/mbedtls/ecdsa.h
++++ b/include/mbedtls/ecdsa.h
+@@ -101,6 +101,20 @@ int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+  *                  Usage of the Digital Signature Algorithm (DSA) and Elliptic
+  *                  Curve Digital Signature Algorithm (ECDSA)</em>.
+  *
++ *
++ * \warning         Since the output of the internal RNG is always the same for
++ *                  the same key and message, this limits the efficiency of
++ *                  blinding and leaks information through side channels. For
++ *                  secure behavior use mbedtls_ecdsa_sign_det_ext() instead.
++ *
++ *                  (Optimally the blinding is a random value that is different
++ *                  on every execution. In this case the blinding is still
++ *                  random from the attackers perspective, but is the same on
++ *                  each execution. This means that this blinding does not
++ *                  prevent attackers from recovering secrets by combining
++ *                  several measurement traces, but may prevent some attacks
++ *                  that exploit relationships between secret data.)
++ *
+  * \param grp       The ECP group.
+  * \param r         The first output integer.
+  * \param s         The second output integer.
+@@ -121,9 +135,56 @@ int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+  *
+  * \see             ecp.h
+  */
+-int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+-                    const mbedtls_mpi *d, const unsigned char *buf, size_t blen,
+-                    mbedtls_md_type_t md_alg );
++int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                            mbedtls_mpi *s, const mbedtls_mpi *d,
++                            const unsigned char *buf, size_t blen,
++                            mbedtls_md_type_t md_alg );
++/**
++ * \brief           This function computes the ECDSA signature of a
++ *                  previously-hashed message, deterministic version.
++ *
++ *                  For more information, see <em>RFC-6979: Deterministic
++ *                  Usage of the Digital Signature Algorithm (DSA) and Elliptic
++ *                  Curve Digital Signature Algorithm (ECDSA)</em>.
++ *
++ * \note            If the bitlength of the message hash is larger than the
++ *                  bitlength of the group order, then the hash is truncated as
++ *                  defined in <em>Standards for Efficient Cryptography Group
++ *                  (SECG): SEC1 Elliptic Curve Cryptography</em>, section
++ *                  4.1.3, step 5.
++ *
++ * \see             ecp.h
++ *
++ * \param grp           The context for the elliptic curve to use.
++ *                      This must be initialized and have group parameters
++ *                      set, for example through mbedtls_ecp_group_load().
++ * \param r             The MPI context in which to store the first part
++ *                      the signature. This must be initialized.
++ * \param s             The MPI context in which to store the second part
++ *                      the signature. This must be initialized.
++ * \param d             The private signing key. This must be initialized
++ *                      and setup, for example through mbedtls_ecp_gen_privkey().
++ * \param buf           The hashed content to be signed. This must be a readable
++ *                      buffer of length \p blen Bytes. It may be \c NULL if
++ *                      \p blen is zero.
++ * \param blen          The length of \p buf in Bytes.
++ * \param md_alg        The hash algorithm used to hash the original data.
++ * \param f_rng_blind   The RNG function used for blinding. This must not be
++ *                      \c NULL.
++ * \param p_rng_blind   The RNG context to be passed to \p f_rng. This may be
++ *                      \c NULL if \p f_rng doesn't need a context parameter.
++ *
++ * \return          \c 0 on success.
++ * \return          An \c MBEDTLS_ERR_ECP_XXX or \c MBEDTLS_MPI_XXX
++ *                  error code on failure.
++ */
++int mbedtls_ecdsa_sign_det_ext( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                                mbedtls_mpi *s, const mbedtls_mpi *d,
++                                const unsigned char *buf, size_t blen,
++                                mbedtls_md_type_t md_alg,
++                                int (*f_rng_blind)(void *, unsigned char *,
++                                                   size_t),
++                                void *p_rng_blind );
+ #endif /* MBEDTLS_ECDSA_DETERMINISTIC */
+ 
+ /**
+diff --git a/library/ecdsa.c b/library/ecdsa.c
+index 17a88bdd29f..b3e51617940 100644
+--- a/library/ecdsa.c
++++ b/library/ecdsa.c
+@@ -70,9 +70,14 @@ static int derive_mpi( const mbedtls_ecp_group *grp, mbedtls_mpi *x,
+  * Compute ECDSA signature of a hashed message (SEC1 4.1.3)
+  * Obviously, compared to SEC1 4.1.3, we skip step 4 (hash message)
+  */
+-int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+-                const mbedtls_mpi *d, const unsigned char *buf, size_t blen,
+-                int (*f_rng)(void *, unsigned char *, size_t), void *p_rng )
++static int ecdsa_sign_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                                mbedtls_mpi *s, const mbedtls_mpi *d,
++                                const unsigned char *buf, size_t blen,
++                                int (*f_rng)(void *, unsigned char *, size_t),
++                                void *p_rng,
++                                int (*f_rng_blind)(void *, unsigned char *,
++                                                   size_t),
++                                void *p_rng_blind )
+ {
+     int ret, key_tries, sign_tries, blind_tries;
+     mbedtls_ecp_point R;
+@@ -99,7 +104,10 @@ int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+         key_tries = 0;
+         do
+         {
+-            MBEDTLS_MPI_CHK( mbedtls_ecp_gen_keypair( grp, &k, &R, f_rng, p_rng ) );
++            MBEDTLS_MPI_CHK( mbedtls_ecp_gen_privkey( grp, &k, f_rng, p_rng ) );
++
++            MBEDTLS_MPI_CHK( mbedtls_ecp_mul( grp, &R, &k, &grp->G,
++                                              f_rng_blind, p_rng_blind ) );
+             MBEDTLS_MPI_CHK( mbedtls_mpi_mod_mpi( r, &R.X, &grp->N ) );
+ 
+             if( key_tries++ > 10 )
+@@ -123,7 +131,8 @@ int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+         do
+         {
+             size_t n_size = ( grp->nbits + 7 ) / 8;
+-            MBEDTLS_MPI_CHK( mbedtls_mpi_fill_random( &t, n_size, f_rng, p_rng ) );
++            MBEDTLS_MPI_CHK( mbedtls_mpi_fill_random( &t, n_size, f_rng_blind,
++                                                      p_rng_blind ) );
+             MBEDTLS_MPI_CHK( mbedtls_mpi_shift_r( &t, 8 * n_size - grp->nbits ) );
+ 
+             /* See mbedtls_ecp_gen_keypair() */
+@@ -158,15 +167,27 @@ int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+ 
+     return( ret );
+ }
++
++int mbedtls_ecdsa_sign( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
++                        const mbedtls_mpi *d, const unsigned char *buf,
++                        size_t blen,
++                        int (*f_rng)(void *, unsigned char *, size_t),
++                        void *p_rng )
++{
++    /* Use the same RNG for both blinding and ephemeral key generation */
++    return( ecdsa_sign_internal( grp, r, s, d, buf, blen, f_rng, p_rng,
++                                 f_rng, p_rng ) );
++}
+ #endif /* MBEDTLS_ECDSA_SIGN_ALT */
+ 
+ #if defined(MBEDTLS_ECDSA_DETERMINISTIC)
+-/*
+- * Deterministic signature wrapper
+- */
+-int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi *s,
+-                    const mbedtls_mpi *d, const unsigned char *buf, size_t blen,
+-                    mbedtls_md_type_t md_alg )
++static int ecdsa_sign_det_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                                    mbedtls_mpi *s, const mbedtls_mpi *d,
++                                    const unsigned char *buf, size_t blen,
++                                    mbedtls_md_type_t md_alg,
++                                    int (*f_rng_blind)(void *, unsigned char *,
++                                                       size_t),
++                                    void *p_rng_blind )
+ {
+     int ret;
+     mbedtls_hmac_drbg_context rng_ctx;
+@@ -187,8 +208,20 @@ int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi
+     MBEDTLS_MPI_CHK( mbedtls_mpi_write_binary( &h, data + grp_len, grp_len ) );
+     mbedtls_hmac_drbg_seed_buf( &rng_ctx, md_info, data, 2 * grp_len );
+ 
+-    ret = mbedtls_ecdsa_sign( grp, r, s, d, buf, blen,
+-                      mbedtls_hmac_drbg_random, &rng_ctx );
++    if( f_rng_blind != NULL )
++        ret = ecdsa_sign_internal( grp, r, s, d, buf, blen,
++                                   mbedtls_hmac_drbg_random, &rng_ctx,
++                                   f_rng_blind, p_rng_blind );
++    else
++        /*
++         * Use the same RNG for both blinding and ephemeral key generation.
++         * Since the RNG output is always the same for the same key and message,
++         * this limits the efficiency of blinding and leaks information through
++         * side channels.
++         */
++        ret = ecdsa_sign_internal( grp, r, s, d, buf, blen,
++                                   mbedtls_hmac_drbg_random, &rng_ctx,
++                                   mbedtls_hmac_drbg_random, &rng_ctx );
+ 
+ cleanup:
+     mbedtls_hmac_drbg_free( &rng_ctx );
+@@ -196,6 +229,30 @@ int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r, mbedtls_mpi
+ 
+     return( ret );
+ }
++
++/*
++ * Deterministic signature wrappers
++ */
++int mbedtls_ecdsa_sign_det( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                            mbedtls_mpi *s, const mbedtls_mpi *d,
++                            const unsigned char *buf, size_t blen,
++                            mbedtls_md_type_t md_alg )
++{
++    return( ecdsa_sign_det_internal( grp, r, s, d, buf, blen, md_alg,
++                                     NULL, NULL ) );
++}
++
++int mbedtls_ecdsa_sign_det_ext( mbedtls_ecp_group *grp, mbedtls_mpi *r,
++                                mbedtls_mpi *s, const mbedtls_mpi *d,
++                                const unsigned char *buf, size_t blen,
++                                mbedtls_md_type_t md_alg,
++                                int (*f_rng_blind)(void *, unsigned char *,
++                                                   size_t),
++                                void *p_rng_blind )
++{
++    return( ecdsa_sign_det_internal( grp, r, s, d, buf, blen, md_alg,
++                                     f_rng_blind, p_rng_blind ) );
++}
+ #endif /* MBEDTLS_ECDSA_DETERMINISTIC */
+ 
+ #if !defined(MBEDTLS_ECDSA_VERIFY_ALT)
+@@ -326,17 +383,15 @@ int mbedtls_ecdsa_write_signature( mbedtls_ecdsa_context *ctx, mbedtls_md_type_t
+     mbedtls_mpi_init( &s );
+ 
+ #if defined(MBEDTLS_ECDSA_DETERMINISTIC)
+-    (void) f_rng;
+-    (void) p_rng;
+-
+-    MBEDTLS_MPI_CHK( mbedtls_ecdsa_sign_det( &ctx->grp, &r, &s, &ctx->d,
+-                             hash, hlen, md_alg ) );
++    MBEDTLS_MPI_CHK( ecdsa_sign_det_internal( &ctx->grp, &r, &s, &ctx->d,
++                                              hash, hlen, md_alg,
++                                              f_rng, p_rng ) );
+ #else
+     (void) md_alg;
+ 
+     MBEDTLS_MPI_CHK( mbedtls_ecdsa_sign( &ctx->grp, &r, &s, &ctx->d,
+                          hash, hlen, f_rng, p_rng ) );
+-#endif
++#endif /* MBEDTLS_ECDSA_DETERMINISTIC */
+ 
+     MBEDTLS_MPI_CHK( ecdsa_signature_to_asn1( &r, &s, sig, slen ) );
+ 
+
+From e552a826fda60ccbb7d85a5f8c806d974616c702 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Wed, 16 Jan 2019 14:32:03 +0000
+Subject: [PATCH 3/8] Test the new deterministic ECDSA function
+
+---
+ tests/suites/test_suite_ecdsa.function | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/tests/suites/test_suite_ecdsa.function b/tests/suites/test_suite_ecdsa.function
+index 9b1315fbe35..74fc49b3ab2 100644
+--- a/tests/suites/test_suite_ecdsa.function
++++ b/tests/suites/test_suite_ecdsa.function
+@@ -129,6 +129,16 @@ void ecdsa_det_test_vectors( int id, char *d_str, int md_alg,
+     TEST_ASSERT( mbedtls_mpi_cmp_mpi( &r, &r_check ) == 0 );
+     TEST_ASSERT( mbedtls_mpi_cmp_mpi( &s, &s_check ) == 0 );
+ 
++    mbedtls_mpi_free( &r ); mbedtls_mpi_free( &s );
++    mbedtls_mpi_init( &r ); mbedtls_mpi_init( &s );
++
++    TEST_ASSERT(
++                mbedtls_ecdsa_sign_det_ext( &grp, &r, &s, &d, hash, hlen,
++                                            md_alg, rnd_std_rand, NULL )
++                == 0 );
++
++    TEST_ASSERT( mbedtls_mpi_cmp_mpi( &r, &r_check ) == 0 );
++    TEST_ASSERT( mbedtls_mpi_cmp_mpi( &s, &s_check ) == 0 );
+ exit:
+     mbedtls_ecp_group_free( &grp );
+     mbedtls_mpi_free( &d ); mbedtls_mpi_free( &r ); mbedtls_mpi_free( &s );
+
+From ba66faf1678ac739bbed034e511b9782700a2f1e Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Mon, 7 Jan 2019 15:01:32 +0000
+Subject: [PATCH 4/8] Add warning for alternative ECDSA implementations
+
+Alternative implementations are often hardware accelerators and might
+not need an RNG for blinding. But if they do, then we make them misuse
+the RNG in the deterministic case.
+
+There are several way around this:
+- Exposing a lower level function for replacement. This would be the
+optimal solution, but litters the API and is not backward compatible.
+- Introducing a new compile time option for replacing the deterministic
+function. This would mostly cover the same code as
+MBEDTLS_ECDSA_DETERMINISTIC and would be yet another compile time flag.
+- Reusing the existing MBEDTLS_ECDSA_DETERMINISTIC macro. This changes
+the algorithm used by the PK layer from deterministic to randomised if
+the alternative implementation is present.
+
+This commit implements the third option. This is a temporary solution
+and should be fixed at the next device driver API change.
+---
+ include/mbedtls/config.h | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/include/mbedtls/config.h b/include/mbedtls/config.h
+index 50239e1ff58..0cc8351d371 100644
+--- a/include/mbedtls/config.h
++++ b/include/mbedtls/config.h
+@@ -333,6 +333,16 @@
+  *            dependencies on them, and considering stronger message digests
+  *            and ciphers instead.
+  *
++ * \warning   If both MBEDTLS_ECDSA_SIGN_ALT and MBEDTLS_ECDSA_DETERMINISTIC are
++ *            enabled, then the deterministic ECDH signature functions pass the
++ *            the static HMAC-DRBG as RNG to mbedtls_ecdsa_sign(). Therefore
++ *            alternative implementations should use the RNG only for generating
++ *            the ephemeral key and nothing else. If this is not possible, then
++ *            MBEDTLS_ECDSA_DETERMINISTIC should be disabled and an alternative
++ *            implementation should be provided for mbedtls_ecdsa_sign_det_ext()
++ *            (and for mbedtls_ecdsa_sign_det() too if backward compatibility is
++ *            desirable).
++ *
+  */
+ //#define MBEDTLS_MD2_PROCESS_ALT
+ //#define MBEDTLS_MD4_PROCESS_ALT
+
+From 7b774483bfa994f03115dec929a188b6eb8130c0 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Mon, 7 Jan 2019 17:27:56 +0000
+Subject: [PATCH 5/8] Correct deterministic ECDSA behavior
+
+We were still reusing the internal HMAC-DRBG of the deterministic ECDSA
+for blinding. This meant that with cryptographically low likelyhood the
+result was not the same signature as the one the deterministic ECDSA
+algorithm has to produce (however it is still a valid ECDSA signature).
+
+To correct this we seed a second HMAC-DRBG with the same seed to restore
+correct behavior. We also apply a label to avoid reusing the bits of the
+ephemeral key for a different purpose and reduce the chance that they
+leak.
+
+This workaround can't be implemented in the restartable case without
+penalising the case where external RNG is available or completely
+defeating the purpose of the restartable feature, therefore in this case
+the small chance of incorrect behavior remains.
+---
+ library/ecdsa.c | 34 +++++++++++++++++++++++++++++-----
+ 1 file changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/library/ecdsa.c b/library/ecdsa.c
+index b3e51617940..2059599a169 100644
+--- a/library/ecdsa.c
++++ b/library/ecdsa.c
+@@ -195,12 +195,16 @@ static int ecdsa_sign_det_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
+     size_t grp_len = ( grp->nbits + 7 ) / 8;
+     const mbedtls_md_info_t *md_info;
+     mbedtls_mpi h;
++    /* Variables for deterministic blinding fallback */
++    const char* blind_label = "BLINDING CONTEXT";
++    mbedtls_hmac_drbg_context rng_ctx_blind;
+ 
+     if( ( md_info = mbedtls_md_info_from_type( md_alg ) ) == NULL )
+         return( MBEDTLS_ERR_ECP_BAD_INPUT_DATA );
+ 
+     mbedtls_mpi_init( &h );
+     mbedtls_hmac_drbg_init( &rng_ctx );
++    mbedtls_hmac_drbg_init( &rng_ctx_blind );
+ 
+     /* Use private key and message hash (reduced) to initialize HMAC_DRBG */
+     MBEDTLS_MPI_CHK( mbedtls_mpi_write_binary( d, data, grp_len ) );
+@@ -213,18 +217,38 @@ static int ecdsa_sign_det_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
+                                    mbedtls_hmac_drbg_random, &rng_ctx,
+                                    f_rng_blind, p_rng_blind );
+     else
++    {
++        /*
++         * To avoid reusing rng_ctx and risking incorrect behavior we seed a
++         * second HMAC-DRBG with the same seed. We also apply a label to avoid
++         * reusing the bits of the ephemeral key for blinding and eliminate the
++         * risk that they leak this way.
++         */
++
++        mbedtls_hmac_drbg_seed_buf( &rng_ctx_blind, md_info,
++                                    data, 2 * grp_len );
++        ret = mbedtls_hmac_drbg_update_ret( &rng_ctx_blind,
++                                            (const unsigned char*) blind_label,
++                                            strlen( blind_label ) );
++        if( ret != 0 )
++            goto cleanup;
++
+         /*
+-         * Use the same RNG for both blinding and ephemeral key generation.
+-         * Since the RNG output is always the same for the same key and message,
+-         * this limits the efficiency of blinding and leaks information through
+-         * side channels.
++         * Since the output of the RNGs is always the same for the same key and
++         * message, this limits the efficiency of blinding and leaks information
++         * through side channels. After mbedtls_ecdsa_sign_det() is removed NULL
++         * won't be a valid value for f_rng_blind anymore. Therefore it should
++         * be checked by the caller and this branch and check can be removed.
+          */
+         ret = ecdsa_sign_internal( grp, r, s, d, buf, blen,
+                                    mbedtls_hmac_drbg_random, &rng_ctx,
+-                                   mbedtls_hmac_drbg_random, &rng_ctx );
++                                   mbedtls_hmac_drbg_random, &rng_ctx_blind );
++
++    }
+ 
+ cleanup:
+     mbedtls_hmac_drbg_free( &rng_ctx );
++    mbedtls_hmac_drbg_free( &rng_ctx_blind );
+     mbedtls_mpi_free( &h );
+ 
+     return( ret );
+
+From 660f4f8c5bc84558fb16089f639d65357dfb2625 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Wed, 16 Jan 2019 16:06:18 +0000
+Subject: [PATCH 6/8] Add ChangeLog entry
+
+---
+ ChangeLog | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index 005573d814c..6b73b6ef32e 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -2,6 +2,13 @@ mbed TLS ChangeLog (Sorted per branch, date)
+ 
+ = mbed TLS 2.7.x branch released xxxx-xx-xx
+ 
++Security
++   * The deterministic ECDSA calculation reused the scheme's HMAC-DRBG to
++     implement blinding. Because of this for the same key and message the same
++     blinding value was generated. This reduced the effectiveness of the
++     countermeasure and leaked information about the private key through side
++     channels. Reported by Jack Lloyd.
++
+ Bugfix
+    * Run the AD too long test only if MBEDTLS_CCM_ALT is not defined.
+      Raised as a comment in #1996.
+
+From a62744d4871fb0ca22cd906a8e1ba8cb7a8699f1 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Mon, 21 Jan 2019 10:45:48 +0000
+Subject: [PATCH 7/8] Add ChangeLog entries for new functions
+
+---
+ ChangeLog | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index 6b73b6ef32e..0f1bae7130c 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -13,6 +13,13 @@ Bugfix
+    * Run the AD too long test only if MBEDTLS_CCM_ALT is not defined.
+      Raised as a comment in #1996.
+ 
++API Changes
++   * The new function mbedtls_ecdsa_sign_det_ext() is similar to
++     mbedtls_ecdsa_sign_det() but allows passing an external RNG for the
++     purpose of blinding.
++   * The new function mbedtls_ecp_gen_privkey() allows to generate a private
++     key without generating the public part of the pair.
++
+ = mbed TLS 2.7.9 branch released 2018-12-21
+ 
+ Bugfix
+
+From 4bf65fb71f1b2f5e418e0a6da25f4ed454281f84 Mon Sep 17 00:00:00 2001
+From: Janos Follath <janos.follath@arm.com>
+Date: Mon, 21 Jan 2019 10:56:23 +0000
+Subject: [PATCH 8/8] Add clarifying comment about the backport
+
+---
+ library/ecdsa.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/library/ecdsa.c b/library/ecdsa.c
+index 2059599a169..aec29e5dc80 100644
+--- a/library/ecdsa.c
++++ b/library/ecdsa.c
+@@ -126,6 +126,11 @@ static int ecdsa_sign_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
+         /*
+          * Generate a random value to blind inv_mod in next step,
+          * avoiding a potential timing leak.
++         *
++         * This loop does the same job as mbedtls_ecp_gen_privkey() and it is
++         * replaced by a call to it in the mainline. This change is not
++         * necessary to backport the fix separating the blinding and ephemeral
++         * key generating RNGs, therefore the original code is kept.
+          */
+         blind_tries = 0;
+         do
+@@ -135,7 +140,6 @@ static int ecdsa_sign_internal( mbedtls_ecp_group *grp, mbedtls_mpi *r,
+                                                       p_rng_blind ) );
+             MBEDTLS_MPI_CHK( mbedtls_mpi_shift_r( &t, 8 * n_size - grp->nbits ) );
+ 
+-            /* See mbedtls_ecp_gen_keypair() */
+             if( ++blind_tries > 30 )
+                 return( MBEDTLS_ERR_ECP_RANDOM_FAILED );
+         }

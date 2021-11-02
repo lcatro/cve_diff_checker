@@ -1,0 +1,32 @@
+From a4d78362397fc3bced6ea80fbc7b5f4827aec55e Mon Sep 17 00:00:00 2001
+From: Brad Larsen <brad@bradfordlarsen.com>
+Date: Mon, 1 Apr 2019 10:36:05 -0400
+Subject: [PATCH] bpo-36495: Fix two out-of-bounds array reads (GH-12641)
+
+Research and fix by @bradlarsen.
+---
+ Python/ast.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Python/ast.c b/Python/ast.c
+index e9154fecff064..913e53ad7937d 100644
+--- a/Python/ast.c
++++ b/Python/ast.c
+@@ -1400,7 +1400,7 @@ handle_keywordonly_args(struct compiling *c, const node *n, int start,
+                     goto error;
+                 asdl_seq_SET(kwonlyargs, j++, arg);
+                 i += 1; /* the name */
+-                if (TYPE(CHILD(n, i)) == COMMA)
++                if (i < NCH(n) && TYPE(CHILD(n, i)) == COMMA)
+                     i += 1; /* the comma, if present */
+                 break;
+             case TYPE_COMMENT:
+@@ -1599,7 +1599,7 @@ ast_for_arguments(struct compiling *c, const node *n)
+                 if (!kwarg)
+                     return NULL;
+                 i += 2; /* the double star and the name */
+-                if (TYPE(CHILD(n, i)) == COMMA)
++                if (i < NCH(n) && TYPE(CHILD(n, i)) == COMMA)
+                     i += 1; /* the comma, if present */
+                 break;
+             case TYPE_COMMENT:

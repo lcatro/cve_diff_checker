@@ -1,0 +1,39 @@
+From 47cef07bb09779df15620799f3763d1b8d32307a Mon Sep 17 00:00:00 2001
+From: Milos Tomic <tmilos@gmail.com>
+Date: Mon, 5 Mar 2018 17:26:57 +0100
+Subject: [PATCH] Check for supported signature algorithms
+
+---
+ .../Model/XmlDSig/AbstractSignatureReader.php        | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/LightSaml/Model/XmlDSig/AbstractSignatureReader.php b/src/LightSaml/Model/XmlDSig/AbstractSignatureReader.php
+index e434d84..65985b1 100644
+--- a/src/LightSaml/Model/XmlDSig/AbstractSignatureReader.php
++++ b/src/LightSaml/Model/XmlDSig/AbstractSignatureReader.php
+@@ -62,7 +62,7 @@ public function validateMulti(array $credentialCandidates)
+                 $result = $this->validate($credential->getPublicKey());
+ 
+                 if ($result === false) {
+-                    return;
++                    return null;
+                 }
+ 
+                 return $credential;
+@@ -91,6 +91,16 @@ abstract public function getAlgorithm();
+     protected function castKeyIfNecessary(XMLSecurityKey $key)
+     {
+         $algorithm = $this->getAlgorithm();
++
++        if (!in_array($algorithm, [
++            XMLSecurityKey::RSA_SHA1,
++            XMLSecurityKey::RSA_SHA256,
++            XMLSecurityKey::RSA_SHA384,
++            XMLSecurityKey::RSA_SHA512,
++        ])) {
++            throw new LightSamlSecurityException(sprintf('Unsupported signing algorithm: "%s"', $algorithm));
++        }
++
+         if ($algorithm != $key->type) {
+             $key = KeyHelper::castKey($key, $algorithm);
+         }

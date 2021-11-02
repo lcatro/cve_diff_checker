@@ -1,0 +1,35 @@
+From bede0dc38e1785e732bf0a48ba6f81a4a908eba3 Mon Sep 17 00:00:00 2001
+From: nlf <quitlahok@gmail.com>
+Date: Thu, 28 Jan 2021 09:22:16 -0800
+Subject: [PATCH] fix: simplify the regular expression for shortcut matching
+
+PR-URL: https://github.com/npm/hosted-git-info/pull/76
+Credit: @nlf
+Close: #76
+Reviewed-by: @isaacs
+---
+ index.js | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/index.js b/index.js
+index 0b08be1..8b3eaba 100644
+--- a/index.js
++++ b/index.js
+@@ -41,7 +41,7 @@ function fromUrl (giturl, opts) {
+     isGitHubShorthand(giturl) ? 'github:' + giturl : giturl
+   )
+   var parsed = parseGitUrl(url)
+-  var shortcutMatch = url.match(new RegExp('^([^:]+):(?:(?:[^@:]+(?:[^@]+)?@)?([^/]*))[/](.+?)(?:[.]git)?($|#)'))
++  var shortcutMatch = url.match(/^([^:]+):(?:[^@]+@)?(?:([^/]*)\/)?([^#]+)/)
+   var matches = Object.keys(gitHosts).map(function (gitHostName) {
+     try {
+       var gitHostInfo = gitHosts[gitHostName]
+@@ -55,7 +55,7 @@ function fromUrl (giturl, opts) {
+       var defaultRepresentation = null
+       if (shortcutMatch && shortcutMatch[1] === gitHostName) {
+         user = shortcutMatch[2] && decodeURIComponent(shortcutMatch[2])
+-        project = decodeURIComponent(shortcutMatch[3])
++        project = decodeURIComponent(shortcutMatch[3].replace(/\.git$/, ''))
+         defaultRepresentation = 'shortcut'
+       } else {
+         if (parsed.host && parsed.host !== gitHostInfo.domain && parsed.host.replace(/^www[.]/, '') !== gitHostInfo.domain) return

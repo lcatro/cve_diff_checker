@@ -1,0 +1,38 @@
+From 26433d15b57978fcb7701b5f99efe8332ca8630b Mon Sep 17 00:00:00 2001
+From: Mark Lewis <mark@netalico.com>
+Date: Tue, 20 Oct 2020 17:19:07 -0400
+Subject: [PATCH] Merge pull request from GHSA-jrgf-vfw2-hj26
+
+---
+ app/code/core/Mage/Catalog/Model/Product/Attribute/Api.php    | 4 ++++
+ .../core/Mage/Catalog/Model/Resource/Product/Collection.php   | 2 +-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/app/code/core/Mage/Catalog/Model/Product/Attribute/Api.php b/app/code/core/Mage/Catalog/Model/Product/Attribute/Api.php
+index cf813a83cb..bfbddaad7f 100644
+--- a/app/code/core/Mage/Catalog/Model/Product/Attribute/Api.php
++++ b/app/code/core/Mage/Catalog/Model/Product/Attribute/Api.php
+@@ -236,6 +236,10 @@ public function remove($attribute)
+             $this->_fault('can_not_delete');
+         }
+ 
++        if (!$model->getIsUserDefined()) {
++            $this->_fault('can_not_delete');
++        }
++
+         try {
+             $model->delete();
+             return true;
+diff --git a/app/code/core/Mage/Catalog/Model/Resource/Product/Collection.php b/app/code/core/Mage/Catalog/Model/Resource/Product/Collection.php
+index 2e0aa1ffe7..02ccd87167 100644
+--- a/app/code/core/Mage/Catalog/Model/Resource/Product/Collection.php
++++ b/app/code/core/Mage/Catalog/Model/Resource/Product/Collection.php
+@@ -542,7 +542,7 @@ protected function _afterLoad()
+ 
+         foreach ($this as $product) {
+             if ($product->isRecurring() && $profile = $product->getRecurringProfile()) {
+-                $product->setRecurringProfile(unserialize($profile));
++                $product->setRecurringProfile(Mage::helper('core/unserializeArray')->unserialize($profile));
+             }
+         }
+ 

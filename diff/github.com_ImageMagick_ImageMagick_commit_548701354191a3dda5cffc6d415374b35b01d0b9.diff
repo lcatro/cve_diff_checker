@@ -1,0 +1,37 @@
+From 548701354191a3dda5cffc6d415374b35b01d0b9 Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Fri, 5 Aug 2016 16:35:07 -0400
+Subject: [PATCH] Prevent memory use after free
+
+---
+ ChangeLog    | 3 +++
+ coders/pwp.c | 2 --
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 0fd24b3753..c43c094e3d 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -2,6 +2,9 @@
+   * Evaluate lazy pixel cache morphology to prevent buffer overflow (bug report
+     from Ibrahim M. El-Sayed).
+   * Prevent buffer overflow (bug report from Max Thrane).
++  * Prevent memory use after free (reference
++    https://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=30245).
++
+ 
+ 2016-07-30  7.0.2-6 Cristy  <quetzlzacatenango@image...>
+   * Release ImageMagick version 7.0.2-6, GIT revision 18651:df24175:20160729.
+diff --git a/coders/pwp.c b/coders/pwp.c
+index 1aa033ee8e..03df516361 100644
+--- a/coders/pwp.c
++++ b/coders/pwp.c
+@@ -247,8 +247,6 @@ static Image *ReadPWPImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     (void) close(unique_file);
+   (void) RelinquishUniqueFileResource(read_info->filename);
+   read_info=DestroyImageInfo(read_info);
+-  (void) CloseBlob(pwp_image);
+-  pwp_image=DestroyImage(pwp_image);
+   if (EOFBlob(image) != MagickFalse)
+     {
+       char

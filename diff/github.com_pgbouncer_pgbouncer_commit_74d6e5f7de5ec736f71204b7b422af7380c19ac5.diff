@@ -1,0 +1,27 @@
+From 74d6e5f7de5ec736f71204b7b422af7380c19ac5 Mon Sep 17 00:00:00 2001
+From: Marko Kreen <markokr@gmail.com>
+Date: Wed, 8 Apr 2015 13:44:07 +0300
+Subject: [PATCH] Check if auth_user is set.
+
+Fixes a crash if password packet appears before startup packet (#42).
+---
+ src/client.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/client.c b/src/client.c
+index 056fb9692..7c4f1c76a 100644
+--- a/src/client.c
++++ b/src/client.c
+@@ -262,6 +262,12 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
+ 		}
+ 		break;
+ 	case 'p':		/* PasswordMessage */
++		/* too early */
++		if (!client->auth_user) {
++			disconnect_client(client, true, "client password pkt before startup packet");
++			return false;
++		}
++
+ 		/* haven't requested it */
+ 		if (cf_auth_type <= AUTH_TRUST) {
+ 			disconnect_client(client, true, "unrequested passwd pkt");

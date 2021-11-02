@@ -1,0 +1,38 @@
+From bd20bb02e75e2c0483832b52f2577253febfb690 Mon Sep 17 00:00:00 2001
+From: Kjetil Matheussen <k.s.matheussen@usit.uio.no>
+Date: Wed, 1 Apr 2015 16:06:48 +0200
+Subject: [PATCH] Fix memory overflow if the name of an environment is larger
+ than 500 characters. Bug found by Adam Sampson.
+
+---
+ das_watchdog.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/das_watchdog.c b/das_watchdog.c
+index c98bbea..8473fe8 100644
+--- a/das_watchdog.c
++++ b/das_watchdog.c
+@@ -306,7 +306,9 @@ static int checksoftirq(int force){
+ 
+ 
+ static char *get_pid_environ_val(pid_t pid,char *val){
+-  char temp[500];
++  int temp_size = 500;
++  char *temp = malloc(temp_size);
++  
+   int i=0;
+   int foundit=0;
+   FILE *fp;
+@@ -319,6 +321,12 @@ static char *get_pid_environ_val(pid_t pid,char *val){
+ 
+   
+   for(;;){
++    
++    if (i >= temp_size) {
++      temp_size *= 2;
++      temp = realloc(temp, temp_size);
++    }
++      
+     temp[i]=fgetc(fp);    
+ 
+     if(foundit==1 && (temp[i]==0 || temp[i]=='\0' || temp[i]==EOF)){

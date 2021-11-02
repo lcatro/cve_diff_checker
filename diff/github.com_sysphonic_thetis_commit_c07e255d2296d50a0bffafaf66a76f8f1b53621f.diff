@@ -1,0 +1,233 @@
+From c07e255d2296d50a0bffafaf66a76f8f1b53621f Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Tue, 14 Jul 2015 08:56:18 +0900
+Subject: [PATCH] Thetis ver.2.3.0: Reinforcement of security. Signed-off-by:
+ MORITA Shintaro <shin@sysphonic.com>
+
+---
+ app/controllers/login_controller.rb       |   3 +-
+ app/helpers/sql_helper.rb                 |   5 +-
+ app/models/address.rb                     |  14 +--
+ app/models/user.rb                        |   2 +-
+ app/views/frames/about.html.erb           |   2 +-
+ app/views/items/_ajax_item_basic.html.erb | 105 +++++++++++++---------
+ 6 files changed, 76 insertions(+), 55 deletions(-)
+
+diff --git a/app/controllers/login_controller.rb b/app/controllers/login_controller.rb
+index ecc72b6..3f67091 100644
+--- a/app/controllers/login_controller.rb
++++ b/app/controllers/login_controller.rb
+@@ -97,9 +97,8 @@ def send_password
+     Log.add_info(request, params.inspect)
+ 
+     mail_addr = params[:thetisBoxEdit]
+-    SqlHelper.validate_token([mail_addr])
+     begin
+-      users = User.where("email='#{mail_addr}'").to_a
++      users = User.where(email: mail_addr).to_a
+     rescue => evar
+     end
+ 
+diff --git a/app/helpers/sql_helper.rb b/app/helpers/sql_helper.rb
+index fa6ba82..872262f 100644
+--- a/app/helpers/sql_helper.rb
++++ b/app/helpers/sql_helper.rb
+@@ -30,12 +30,13 @@ def self.validate_token(tokens, extra_chars=nil)
+     else
+       extra_chars = Regexp.escape(extra_chars.join())
+     end
+-    regexp = Regexp.new("^[ ]*[a-zA-Z0-9_.@\\-#{extra_chars}]+[ ]*$")
++    regexp = Regexp.new("^[ ]*[a-zA-Z0-9_#{extra_chars}]+[ ]*$")
+ 
+     [tokens].flatten.each do |token|
+       next if token.blank?
+ 
+-      if token.to_s.match(regexp).nil?
++      if token.to_s.match(regexp).nil? \
++          and token.to_s.match(/^[ ]*\d+-\d+-\d+[ ]*$/).nil?
+         raise("[ERROR] SqlHelper.validate_token failed: #{token}")
+       end
+     end
+diff --git a/app/models/address.rb b/app/models/address.rb
+index 18c6b15..4ea9651 100644
+--- a/app/models/address.rb
++++ b/app/models/address.rb
+@@ -36,12 +36,12 @@ class Address < ActiveRecord::Base
+   #
+   def self.get_by_email(mail_addr, user, book=Address::BOOK_BOTH)
+ 
+-    SqlHelper.validate_token([mail_addr])
++    mail_quote = SqlHelper.quote(mail_addr)
+ 
+     email_con = []
+-    email_con.push("(email1='#{mail_addr}')")
+-    email_con.push("(email2='#{mail_addr}')")
+-    email_con.push("(email3='#{mail_addr}')")
++    email_con.push("(email1=#{mail_quote})")
++    email_con.push("(email2=#{mail_quote})")
++    email_con.push("(email3=#{mail_quote})")
+     con = []
+     con.push('('+email_con.join(' or ')+')')
+     con.push(AddressbookHelper.get_scope_condition_for(user, book))
+@@ -212,7 +212,11 @@ def self.parse_csv_row(row, book, idxs, user)
+     imp_id = (idxs[0].nil? or row[idxs[0]].nil?)?(nil):(row[idxs[0]].strip)
+     SqlHelper.validate_token([imp_id])
+     unless imp_id.blank?
+-      org_address = Address.find_by_id(imp_id)
++      begin
++        org_address = Address.find(imp_id)
++      rescue => evar
++        org_address = nil
++      end
+     end
+ 
+     if org_address.nil?
+diff --git a/app/models/user.rb b/app/models/user.rb
+index a7b6797..a958837 100644
+--- a/app/models/user.rb
++++ b/app/models/user.rb
+@@ -534,7 +534,7 @@ def self.get_from_name(user_name)
+     SqlHelper.validate_token([user_name])
+ 
+     begin
+-      user = User.where("name='#{user_name}'").first
++      user = User.where(name: user_name).first
+     rescue => evar
+       Log.add_error(nil, evar)
+     end
+diff --git a/app/views/frames/about.html.erb b/app/views/frames/about.html.erb
+index 441f29a..da48ba1 100644
+--- a/app/views/frames/about.html.erb
++++ b/app/views/frames/about.html.erb
+@@ -38,7 +38,7 @@
+             <table style="width:60%; margin:0px auto 0px 0px; border-spacing:0px;">
+               <tr>
+                 <td style="text-align:left;" nowrap>
+-                  Sysphonic <B>Thetis</B><sup>&reg;</sup>  <small style="text-align:right;">ver.2.2.0</small>&nbsp;
++                  Sysphonic <B>Thetis</B><sup>&reg;</sup>  <small style="text-align:right;">ver.2.3.0</small>&nbsp;
+                 </td>
+               </tr>
+             </table>
+diff --git a/app/views/items/_ajax_item_basic.html.erb b/app/views/items/_ajax_item_basic.html.erb
+index 9a8e376..896d113 100644
+--- a/app/views/items/_ajax_item_basic.html.erb
++++ b/app/views/items/_ajax_item_basic.html.erb
+@@ -22,50 +22,54 @@
+   <% when Item::XTYPE_RESEARCH %>
+       <%= Research.model_name.human %>
+   <% else   # XTYPE_INFO, XTYPE_PROJECT, XTYPE_ZEPTAIR_DIST, XTYPE_UNKNOWN %>
+-      <%= radio_button('item', 'xtype', Item::XTYPE_INFO, :onClick => 'dispZeptCmdOpt(false); modifiedBasic++') %><label for="item_xtype_<%= Item::XTYPE_INFO %>"> <%= t('item.type.normal') %></label><br/>
+-      <%= radio_button('item', 'xtype', Item::XTYPE_PROJECT, :onClick => 'dispZeptCmdOpt(false); modifiedBasic++') %><label for="item_xtype_<%= Item::XTYPE_PROJECT %>"> <img src="<%= THETIS_RELATIVE_URL_ROOT %>/images/folder/team_folder.gif" title="<%= t('item.project') %>" alt="<%= t('item.project') %>" /> <%= t('item.type.project') %></label><br/>
+-    <% if @login_user.admin?(User::AUTH_ZEPTAIR) %>
+-      <%= radio_button('item', 'xtype', Item::XTYPE_ZEPTAIR_DIST, :onClick => 'dispZeptCmdOpt(this.checked); modifiedBasic++') %><label for="item_xtype_<%= Item::XTYPE_ZEPTAIR_DIST %>"> <img src="<%= THETIS_RELATIVE_URL_ROOT %>/images/zeptair/zeptair_icon.png" title="<%= t('item.type.zeptair_dist') %>" alt="<%= t('item.type.zeptair_dist') %>" /> <%= t('item.type.zeptair_dist') %></label>
+-      &nbsp;<img class="img_btn" src="<%= THETIS_RELATIVE_URL_ROOT %>/images/info.gif" onclick="msg('<%= t('item.zeptair_dist_info') %>');">
+-
+-      <div id="div_zept_cmd" style="padding-left:20px; display:<%= (@item.xtype == Item::XTYPE_ZEPTAIR_DIST)?'block':'none' %>;">
+-        <div style="background-color:#FDFEFF; padding:2px 3px">
+-          <%
+-          zept_cmd = @item.zeptair_command
+-          checked = (!zept_cmd.nil? and zept_cmd.enabled)?'checked':''
+-          %>
+-          <input name="zeptair_command[enabled]" type="hidden" value="0" />
+-          <input type="checkbox" id="check_zept_cmd" name="zeptair_command[enabled]" value="1" onclick="dispZeptCmdEdit(this.checked); modifiedBasic++;" <%= checked %>><label for="check_zept_cmd"><%= t('item.zeptair_dist_cmd') %></label>
+-          <div id="div_zept_cmd_edit" style="padding-left:20px; display:<%= (checked=='checked')?'block':'none' %>;">
+-            <textarea id="zept_cmd" name="zeptair_command[commands]" rows="4" wrap="off" style="width:95%; background-color:black; color:white;" onChange="modifiedBasic++;"><%= (zept_cmd.nil?)?'':zept_cmd.commands %></textarea><br/>
+-            <% checked = (!zept_cmd.nil? and zept_cmd.confirm_exec)?'checked':'' %>
+-            <input name="zeptair_command[confirm_exec]" type="hidden" value="0" />
+-            <input type="checkbox" id="check_zept_cmd_with_confirm" name="zeptair_command[confirm_exec]" value="1" onclick="modifiedBasic++;" <%= checked %>><label for="check_zept_cmd_with_confirm"><%= t('item.zeptair_dist_cmd_with_confirm') %></label>
+-          </div>
+-        </div>
+-      </div>
+-
+-<script type="text/javascript">
+-dispZeptCmdOpt = function(sw)
+-{
+-  if (sw) {
+-    _z("div_zept_cmd").style.display = "block";
+-  } else {
+-    _z("div_zept_cmd").style.display = "none";
+-  }
+-}
+-
+-dispZeptCmdEdit = function(sw)
+-{
+-  if (sw) {
+-    _z("div_zept_cmd_edit").style.display = "block";
+-  } else {
+-    _z("div_zept_cmd_edit").style.display = "none";
+-  }
+-}
+-</script>
+-
+-    <% end %>
++      <%= radio_button('item', 'xtype', Item::XTYPE_INFO, :onClick => 'onItemXtypeClicked(this)') %><label for="item_xtype_<%= Item::XTYPE_INFO %>"> <%= t('item.type.normal') %></label><br/>
++      <%= radio_button('item', 'xtype', Item::XTYPE_PROJECT, :onClick => 'onItemXtypeClicked(this)') %><label for="item_xtype_<%= Item::XTYPE_PROJECT %>"> <img src="<%= THETIS_RELATIVE_URL_ROOT %>/images/folder/team_folder.gif" title="<%= t('item.project') %>" alt="<%= t('item.project') %>" /> <%= t('item.type.project') %></label><br/>
++    <%
++=begin
++#    if @login_user.admin?(User::AUTH_ZEPTAIR)
++    %>
++#      <%= radio_button('item', 'xtype', Item::XTYPE_ZEPTAIR_DIST, :onClick => 'onItemXtypeClicked(this)') %><label for="item_xtype_<%= Item::XTYPE_ZEPTAIR_DIST %>"> <img src="<%= THETIS_RELATIVE_URL_ROOT %>/images/zeptair/zeptair_icon.png" title="<%= t('item.type.zeptair_dist') %>" alt="<%= t('item.type.zeptair_dist') %>" /> <%= t('item.type.zeptair_dist') %></label>
++#      &nbsp;<img class="img_btn" src="<%= THETIS_RELATIVE_URL_ROOT %>/images/info.gif" onclick="msg('<%= t('item.zeptair_dist_info') %>');">
++#
++#      <div id="div_zept_cmd" style="padding-left:20px; display:<%= (@item.xtype == Item::XTYPE_ZEPTAIR_DIST)?'block':'none' %>;">
++#        <div style="background-color:#FDFEFF; padding:2px 3px">
++#          <%
++#          zept_cmd = @item.zeptair_command
++#          checked = (!zept_cmd.nil? and zept_cmd.enabled)?'checked':''
++#          %>
++#          <input name="zeptair_command[enabled]" type="hidden" value="0" />
++#          <input type="checkbox" id="check_zept_cmd" name="zeptair_command[enabled]" value="1" onclick="dispZeptCmdEdit(this.checked); modifiedBasic++;" <%= checked %>><label for="check_zept_cmd"><%= t('item.zeptair_dist_cmd') %></label>
++#          <div id="div_zept_cmd_edit" style="padding-left:20px; display:<%= (checked=='checked')?'block':'none' %>;">
++#            <textarea id="zept_cmd" name="zeptair_command[commands]" rows="4" wrap="off" style="width:95%; background-color:black; color:white;" onChange="modifiedBasic++;"><%= (zept_cmd.nil?)?'':zept_cmd.commands %></textarea><br/>
++#            <% checked = (!zept_cmd.nil? and zept_cmd.confirm_exec)?'checked':'' %>
++#            <input name="zeptair_command[confirm_exec]" type="hidden" value="0" />
++#            <input type="checkbox" id="check_zept_cmd_with_confirm" name="zeptair_command[confirm_exec]" value="1" onclick="modifiedBasic++;" <%= checked %>><label for="check_zept_cmd_with_confirm"><%= t('item.zeptair_dist_cmd_with_confirm') %></label>
++#          </div>
++#        </div>
++#      </div>
++#
++#<script type="text/javascript">
++#dispZeptCmdOpt = function(sw)
++#{
++#  var div_zept_cmd = _z("div_zept_cmd");
++#  if (div_zept_cmd) {
++#    div_zept_cmd.style.display = (sw)?"block":"none";
++#  }
++#}
++#
++#dispZeptCmdEdit = function(sw)
++#{
++#  var div_zept_cmd_edit = _z("div_zept_cmd_edit");
++#  if (div_zept_cmd_edit) {
++#    div_zept_cmd_edit.style.display = (sw)?"block":"none";
++#  }
++#}
++#</script>
++#
++    <%
++#    end
++=end
++    %>
+   <% end %>
+     </td>
+   </tr>
+@@ -271,6 +275,19 @@ dispZeptCmdEdit = function(sw)
+ document.getElementById("item_id").value = "<%= @item.id %>";
+ <% end %>
+ 
++onItemXtypeClicked = function(elem)
++{
++  modifiedBasic++;
++
++  if (typeof(dispZeptCmdOpt) == "function") {
++    if (elem.value == "<%= Item::XTYPE_ZEPTAIR_DIST %>") {
++      dispZeptCmdOpt(elem.checked);
++    } else {
++      dispZeptCmdOpt(false);
++    }
++  }
++}
++
+ function doSelectFolder(frm)
+ {
+   var thetisBoxProgress = prog("TOP-RIGHT");

@@ -1,0 +1,147 @@
+From 23594f036536468072198a57c59b6e9d63caf6ce Mon Sep 17 00:00:00 2001
+From: Toni Uhlig <matzeton@googlemail.com>
+Date: Wed, 17 Jun 2020 23:00:20 +0200
+Subject: [PATCH] Fixed stack overflow caused by missing length check
+
+Signed-off-by: Toni Uhlig <matzeton@googlemail.com>
+---
+ src/lib/protocols/tls.c               |  10 +++++++++-
+ tests/pcap/tls-rdn-extract.pcap       | Bin 0 -> 7325 bytes
+ tests/result/tls-rdn-extract.pcap.out |   7 +++++++
+ 3 files changed, 16 insertions(+), 1 deletion(-)
+ create mode 100644 tests/pcap/tls-rdn-extract.pcap
+ create mode 100644 tests/result/tls-rdn-extract.pcap.out
+
+diff --git a/src/lib/protocols/tls.c b/src/lib/protocols/tls.c
+index 816b23a50..c8a0e43b2 100644
+--- a/src/lib/protocols/tls.c
++++ b/src/lib/protocols/tls.c
+@@ -196,6 +196,14 @@ static int extractRDNSequence(struct ndpi_packet_struct *packet,
+   char *str;
+   u_int len, j;
+ 
++  if (*rdnSeqBuf_offset >= rdnSeqBuf_len) {
++#ifdef DEBUG_TLS
++    printf("[TLS] %s() [buffer capacity reached][%u]\n",
++           __FUNCTION__, rdnSeqBuf_len);
++#endif
++    return -1;
++  }
++
+   // packet is truncated... further inspection is not needed
+   if((offset+4+str_len) >= packet->payload_packet_len)
+     return(-1);
+@@ -235,7 +243,7 @@ static void processCertificateElements(struct ndpi_detection_module_struct *ndpi
+ 				       u_int16_t p_offset, u_int16_t certificate_len) {
+   struct ndpi_packet_struct *packet = &flow->packet;
+   u_int num_found = 0, i;
+-  char buffer[64] = { '\0' }, rdnSeqBuf[1024] = { '\0' };
++  char buffer[64] = { '\0' }, rdnSeqBuf[2048] = { '\0' };
+   u_int rdn_len = 0;
+ 
+ #ifdef DEBUG_TLS
+diff --git a/tests/pcap/tls-rdn-extract.pcap b/tests/pcap/tls-rdn-extract.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f93e145073725001118f2d4a1bb0f655a1872f7
+GIT binary patch
+literal 7325
+zcmd5>2UJtZ*MF&y08&El2vUM1lTa7=kg_N!V8H^2A|wF<q>zMWgFIJ|MMbb+K>@Kh
+z6v48BjYUy(#kH)3)wQqkSFm8qivRZ#5)+nH_nhyX@5?zkc{A_MoqO-x`Tb^YuCzAP
+zVj(>A`GbcrNJHq&^F#ZZ2EK;!&v5xi8w!J<ZM4ThP$6-{Ix+-duAW&Xo5RH%Wv3R|
+z_FO-hG0{B8t!5Sknc^_e97J6X@{4>t8$-1+j@x7fzLr@TpSJIK4&D3(w)^2szV4n>
+z2r`H0kT*nt$R{W#j8BkGkRc}I2T>qAGS>SOMs60;G=!jGNo+BL#uFnyG(Jayj3LPN
+zLu81E_+o~r(t)rTl@m`15QKgQJ3;7r@G=PUCVIr94xo-;j?Uqt4j_(fm}p?WCMZ<l
+z#5gPjjZrue-(4Iz*5v&Tn@eYS{j(QWavJq>GLxSCwR3W9vHk7SWAvPEJ+gNhKR@>o
+zv3!62<@VB@&qwzjp3a?3r=1y%xQN8WlAr@wVjzotXjnUdhy4s-z1=l9EC!1ubIsZh
+zLfQ~EQXl9MNz|h7qPKb&41oXvX(@vO42fh?g>%V@mm}F23sW3Rz++edGmTCXkINDX
+z#DWwF!x$K8yuz~tA|b;Jm}vBBi8ySYfX`-7fh!R=6_2AhL@8C+$8cELA`bE+%HfFY
+zgR>=R0ufh|4{Xi!7z_qrG8jHyOyC)hG(C|f7-#~RFo~f9NT@y{1v@o{VE~4q4K0e+
+z<bmmofC1V=rjS(AF?0bL?bD&)#*T?$*aB;`h0`^m(gZ0fToxxuC=}B&xj7sf>N@J5
+z{JjqKb2i8WBJVYz(vS>cs=YD?riuajRGL`AqKQ3tV!m9J2XI%sabmIgG&YNw!p-D}
+zX;k@S@@I)a#PQ(rC310lV5<-}L&XP4$t7HYvqHiSu`NlI!I20vlUN*DE|<?1<cfKM
+zWMl%l<VZkONIHH&QZ@5uL%$>~<cLz_$~8SsSM%5kSjeZP7$v1A<<V4GBOm4jhAV8c
+zLS|7WgNHa-?7<fBlDK@aTnf!cd8EmT2%wvhF|e#ST@o^MAiAc&SRtq<?^8MB2pkms
+zmQ-2_1KG{uv?L@O<v~{o*#Ikrknw;}Zf2fHta`1UBts3i1m=q2hRB+KR{yu?sN5Xd
+zH8kJQog?>mn8II`4eE&~x9)G+HEmW`B$lWxiso`9tG#gpF7ml4_FP_4Dw3K!L0-Nx
+zn}lfs{^#UG5ka{D<nv~$3{~bD#c@E3Fi9lgb3{WcQsywl?hDd#S4{v#F{Lh*mM&DS
+zyE4agji@x1r<f&Hf2r<kl30l34!W1nIIE{inm~diT&BEV2~fHYRN8>y9_*B%Y**6P
+z7m)vz9Qorkk-ynaiTteyeQ6@hXRuITJ`{}P;YD-b4%jHdU`idzDjq{UAOlDsU%P*F
+zPskctk@`%$BtDW6pZBR;nR;|{1jveTSbR3RK>>^zuFfqO0)&Gx`Vi7j#=;m3bY%X;
+zip7ho%zC>o{^WG&-Q}9Y>G3~rbhF+yDbBDWuIz+Y@zI4Itj4Q$Eu<1w(|Ysc(!ec!
+z^`)nCuafop(@SRO(VBM8`53lDcS+d(oW<3#mDs|d`xhph+uA&{`S*3sCyte}4W2Ys
+zoQidxadg`Ly+NO<I|5s5c-x|L_pOOsu`jY^iw|q(`LLYMgm~WW@fFK)S$~$*iQ{MG
+zO$)o3HP%f^zR4+14&M^7%{*>1d8z)qxn8bD**d+x87s{2A^S~hPS380*vbxezOL;z
+zcXjXfr^kf&Kko5EsXCTt@6D@u7#Zkt%xJ&E-A0O&V5{z`)FXwj8j_q79VV{t_|b)v
+znfDlr@I0mtCME)yI0NV+3u;5bU_Rlo00KH_OCOKNVe$LqYi%<Ek7ld3I}ssiEgV+$
+zgaI(F4wW{<!?<-wV>OJBj>byBL(>|p&Svo6NDNh@!Cmk-Q5O79Oa*_9px|%eCD`d(
+z=tyC^8VkWgkPrMN&Vkja2L8-2uqLs<U*HpXNE$)cLX91ifC>MdG*BNjxI$$T0$uPR
+zW<b|cMF{9f4IV(H)!|<e9yQd5zY6wferRGm{4LN9e+|)L4Iqbyz;D!84cJE4Kn<<o
+zuYxoWjgAUcHA08r6#NeuirO+5I@RX-2IPM&NB&q%<Ue^?iTs&kA;{w&a2GXdD7aN%
+z!7#ij-Z(eQ&;JJ}*QH{T%kn-R)*+x+4-4#2Byhwdpj>FI9diFxv|-AtChfMMTT|zG
+zjxk*5hk`FEVuwc%7)bkpR8}K>S0n8!icOP9g#L6oPs|c!Y9=0Cn88K+kwZNlc}b5_
+z9@IuKf#TdQe?U*}$b;(a?&{}8L&S@w4QT$~)*GzUi`a!)`0q^v(&I`T#bEH#1|Y2m
+zvy?pmTQqrKhTPoTe~!q%iiQM4sp%i=K@vCV-vw6!MiWU0CEzizuZb3(2>{Vm+0<Tm
+zu_S8GOYEZBYF+rlx%tw&GKqA;!c)%{X)oLH>mn8w!^UFB$Z1cdfQ(1Zu*k(oMKWs7
+z7<DQ~u89bhW1wFczm|buzSQ5Q|Iln;ap^9;EB?(Lv24Zk`g1!9Xere;P4iX+S~8#X
+z+dT~DJcxW?x#g|xwXFdLdi0VHXY1~g&ervBYr6TCIjL++;ia6hZB~uj8$_e?oZF9H
+zeeS?2E?-%E|I_s6BY(Hlp-l*LnU*_i)}*e&0Pi0urNpk(ic+g!N3wQefh`l)!@_Rc
+zSkL@n<@=2KNrc~s$2$tw{gpp{+T3xIyDQmioC|_F_hJlA-H7Y>@T2I~TpepK`1a|w
+z9R0PP=0-o5)P0=lZdMUg*7j)AoXRPcOE<m0{Hmue&SgHP?fddaL3Qk>fd1yscWDc9
+zslLZ%#nt8P(30KV;O+|%%@FRUAfziBxK=0OJbjQd0R(|T@d7T45x^1IddRicT9q>P
+z5qt?pgn-bX8!rIfjPICChNmY$Z@gZLCKGM`Kf9lQ?U47hI<Z{mf(4vd{&ZJgsq6L9
+zKI=cq&o*Dc8cZC1$d8<GF-terV{zv8!vUVG_u>r!Pg?Vzz3e~R(aLwa7Z4)6o_J`+
+z+x3ZkE`mI$d-cpif{PD=@x4bwTLg*D`iGYJ22-Y_S}liM{0>{TuI5=YyuBmZ#@Id<
+zZ$5`J%nz2<UtTt5Q`<2phH%8M>d<Vr1Lr2Mt7waHIT)-L^p3v%u{6RmK7IRytTTV|
+zq{m!(&R#oR;coE2$2&;7GfMbTxZd9Sz>z!I8{Bg{f4-2O)e|49^Io{<>&X8wQjYwP
+zCi0&tRwDld1_Ui8l<-n2z^?km-~D#QLuYkWo>M)v>mn(TvNxmkkGmIV7nH_yVLM;#
+zD>A&@GH_JH+(hvEn!FgHI4WubB64CxDo|>?FeL1MK2KtbknyT5kHHhLIBiH9NljHB
+z7G;+OKc1?JXD&IFwdux$Y~kA-R&Q1kkc+%h$QX;)wIxF_P&Skdg+jp^#N+AE+tI(N
+z=KG4<Z$^1uPsEI`%$o_M@<XZ}Ub-Gg*8u6N8fit1w5-VI+i8a<MsV2GTR|#bO7Q<0
+zS!s;2Q;t%j40QpJuLM7Y4|pI01Ss1G8-Q<N12t_Dq|`G2rO4>PQ=?d~A*@-3!@<a^
+zmYuqk&|_?vYsS(Fh@6*pv%hHEJ^S;c_qqJfrF*;EOT)K5h<oc#+%tdji#MF4)egh=
+zrX8ctxqU#l?@8P5?>O+xj?6$^UqgurDQ{|vv(eFOt0b43`*KLs^gBL3FPnDN&i+mT
+z41NpUl{UOIJ-%&y=Z2*^x)T>II3HiARf>x~-jbL(O`ovi-jvoYmnSDAM(O-ccsI!i
+z=OC!ctXxAqdD5`C#cHqY{`ABNcF@Lqn<rg<yPM=2yM^R%Nz~bJvh-F|7v<8F*eLfC
+zdp^Wic<(pa9>PBK?2O%({Ox*vS0)~R9sh~`<oM|Meh+2#x>utApxcDak-5?t;ezx0
+zgtU+kPuq1c;6Db=A%2cKS}hLW5L%{<tmvo~KRW-()A9MOSxp6m*wGW)thLQwchi%1
+z#=Nb)aQl8YY;BpEQ5(4}Ei32}XH>9xRmA-)S$EXJ6_>|8Vuy4b^tP6H4XbsPEvemR
+zhjE?sFl(i6Rafwgc?+J5bWB~jL3}4MD8Fv$DsVo=OuKnv(W}1<ETn(Ej_1GX+O#fv
+zZtL!vNza%EWA98@Rvwf7>rShgk75p&)NL%Oz3=wNfy{2p^Md%Dr|!M64Rh<cb}DrL
+zs6Bzse@QD7!apX*c~zX19jW~-gdnqcvw$gc^SWA`@(^#+9%%4kYhIu2{M(lPdGorc
+zS;RUI0b#0R>GB?kV2TttjR1_FtKb*BmP;~rFtcQ97C;9s<YbEe*ePN5p-83+L`f2^
+zfX{FNBTxd;q1ejb<R^1PQ$*QfiG7S9GaHo<k3<NGMPn$-WfaRnf@3oU$w`^^lLZ2a
+zyfO=b7sHF;$6zvjP@eKrHW^;=-%fZi_V0B9ELtbPB6R{}7qq;-;Id`h_2m|~8pv~J
+zZ;mb-wx+IX-o%{l1LKxdo9}zPuFV}TBDwB1G-5jUSv>7MoSN1~{P@~p?+r>#r_@Dz
+zYkn2JFPus9vD=m5{GZy;#tnu0B5+UPh(rRVt!823UFvJR#rOs7Hy1ZI&BQh5O{;xU
+z(3akF@RJQD?vPzfeB$YM<-E4}p)1Ul$ls2GAoM%9&X4=)VHAq|bO%l3zc5OU{O0Cs
+z=9WN^B<z{VPYv_h{k@EBce36-yfVJs(Y=_vin5ku+%pGbAARU_c<|n{#Td66r;7aw
+z4u)**ZTQ9GV`Jp>-tE^qqCX_g{CGr0>M~u#ewbBt^@V4pUn*^VvzZTJfq_rKg6=i(
+zGpzS)c}y~x|9%|(K$)+}HNlY?zFmi^3znr6I3_$ZDp;b`+i&syuvh5ZhNp{UOLpwM
+z^RZlSWS^|Qvg8Hv$NGpj0W`-q-<ysoH@xTAdT!Cw2x_}S{d_~`qJ6GmKNUasp-8We
+zA8Wbn7U{*MO1Fu|%(bNZFHby<Da&~Mfszog^!b#v`YvOm1B_mk8JUggElCeM&=jDX
+z8-}O19BbORCV(*NXz+JG*f;0nuZ3I)EP3*Hj&FoP<N0c*1jnu6eA)dg&mG)WJos2>
+zY2}}J@@@BxD^bT@7{1xGEX1jH0=MbcG~<#R)yuEjZM1sCV~=n<=oPwoMxS1{gt(yk
+z1*<D;+dThu2^r$+t+DuJiv^U<N1b;r{7fFErKHeYghItbP$&k>Krcr2_$gpA2p=H2
+z{ecLzjso8)aU6>=^-xj>x_u<*_Mr)Qe69%D5@<b)F5(CUVlGm|&!@3ccz{U6BT6Cp
+zpAt6uXn6;z=^z{|EkS2<#7m{1pf-PVF8IIM#mN5J0>V&J?C^mg0QlGV)%X-C$rZi#
+z2(yzjxhxNbr>KLhRIW!dmroC!97#w1hw-Dc*h2K4r*;Gx@&GW1-=tE=J^a;5+4pTL
+z(yvAJH&UXFoXyTP#P1><nYLL_FnuGtq3^+E?;aMX<Kak?s-9ooQQIom?h%0jKAA1%
+z>)EN5qo1X9nx3Qtyqr`s{kGFD-n+QVquq7=-#5M}{J?|qxB9PM8|}}Z(peYBFSS_}
+gadg%7?8A4BJa;F!9POBzb@jtD^j|~#FyyfQU%V&0#{d8T
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/result/tls-rdn-extract.pcap.out b/tests/result/tls-rdn-extract.pcap.out
+new file mode 100644
+index 000000000..9bfdef48b
+--- /dev/null
++++ b/tests/result/tls-rdn-extract.pcap.out
+@@ -0,0 +1,7 @@
++Microsoft	6	7205	1
++
++JA3 Host Stats: 
++		 IP Address                  	 # JA3C     
++
++
++	1	TCP 10.0.0.1:31337 <-> 213.199.149.251:443 [proto: 91.212/TLS.Microsoft][cat: Web/5][1 pkts/181 bytes <-> 5 pkts/7024 bytes][Goodput ratio: 70/96][< 1 sec][bytes ratio: -0.950 (Download)][IAT c2s/s2c min/avg/max/stddev: 0/0 0/0 0/0 0/0][Pkt Len c2s/s2c min/avg/max/stddev: 181/968 181/1405 181/1514 0/218][Risk: ** Obsolete TLS version (< 1.1) **** Weak TLS cipher **** TLS Expired Certificate **][TLSv1][Client: ads1.msads.net][ServerNames: *.vo.msecnd.net,*.officeapps.live.com,*.msads.net,*.ads2.msads.net,*.stc.s-msn.com,cdn.dc2files.*.livefilestore-int.com,cdn.*.livefilestore.com,*.marketplace.windowsmobile.com,*.marketplace.windowsmobile-int.com,*.marketplace.windowsmobile-perf.com,*.stj.s-msn.com,ajax.microsoft.com,*.microsoft-sbs-domains.com,*.live.net,*.msn.com,*.msn-int.com,*.f1ds.shared.live-int.com,*.f1ds.wlxrs-int.com,*.shared.live-int.com,*.shared.live.com,*.microsoft.com,*.live.com,*.live-int.com,*.wlxrs.com,*.wlxrs-int.com,*.st.s-msn.com,*.stb.s-msn.com,images.moxy.windowsphone-int.com,*.wlxrsu-int.com,images.partner.windowsphone-int.com,images.partner.windowsphone.com,*.jp.msn.com,*.c3scs.jp.msn.com,*.aspnetcdn.com,*.hotmail.com,*.partner-df.windowsphone-int.com,*.s-msn.com,*.live-int.net,*.windowsphone-int.com,*.windowsphone.com,*.partner-pc.windowsphone-int.com,*.manage.microsoft.com][JA3S: 18e962e106761869a61045bed0e81c2c (WEAK)][Issuer: CN=Microsoft Secure Server Authority][Subject: C=US, L=Redmond, O=Microsoft, OU=GFS, CN=*.officeapps.live.com, CN=*.msads.net, CN=*.ads2.msads.net, CN=*.stc.s-msn.com, CN=cdn.dc2files.*.livefilestore-int.com, CN=cdn.*.livefilestore.com, CN=*.marketplace.windowsmobile.com, CN=*.marketplace.windowsmobile-int.com, CN=*.marketplace.windowsmobile-perf.com, CN=*.stj.s-msn.com, CN=ajax.microsoft.com, CN=*.microsoft-sbs-domains.com, CN=*.live.net, CN=*.msn.com, CN=*.msn-int.com, CN=*.f1ds.shared.live-int.com, CN=*.f1ds.wlxrs-int.com, CN=*.shared.live-int.com, CN=*.shared.live.com, CN=*.microsoft.com, CN=*.live.com, CN=*.live-int.com, CN=*.wlxrs.com, CN=*.wlxrs-int.com, CN=*.st.s-msn.com, CN=*.stb.s-msn.com, CN=images.moxy.windowsphone-int.com, CN=*.wlxrsu-int.com, CN=images.partner.windowsphone-int.com, CN=images.partner.windowsphone.com, CN=*.jp.msn.com, CN=*.c3scs.jp.msn.com, CN=*.aspnetcdn.com, CN=*.hotmail.com, CN=*.partner-df.windowsphone-int.com, CN=*.s-msn.com, CN=*.live-int.net, CN=*.windowsphone-int.com, CN=*.windowsphone.com, CN=*.partner-pc.windowsphone-int.com, CN=*.manage.microsoft.com, CN=*.vo.msecnd.net][Certificate SHA-1: FF:BF:9A:69:8F:C8:44:FF:89:F2:61:49:A7:D1:9A:98:DE:32:84:3B][Validity: 2011-10-21 16:42:03 - 2013-10-20 16:42:03][Cipher: TLS_RSA_WITH_AES_128_CBC_SHA]

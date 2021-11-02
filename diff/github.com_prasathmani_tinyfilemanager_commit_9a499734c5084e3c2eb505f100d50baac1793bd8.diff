@@ -1,0 +1,115 @@
+From 9a499734c5084e3c2eb505f100d50baac1793bd8 Mon Sep 17 00:00:00 2001
+From: Prasath Mani <prasathmani@users.noreply.github.com>
+Date: Sat, 28 Dec 2019 19:23:47 +0530
+Subject: [PATCH] Merge pull request from GHSA-w72h-v37j-rrwr
+
+* Fix the RCE vuln via Upload from URL
+
+This commit attemps to fix the Remote Code Execution
+(authenticated) via Upload from URL. Some notes about
+the proposed solution:
+
+* A new function (fm_is_file_allowed) has been created to
+validate if the filename is allowed. This function gets the
+the filename as parameter and returns true if it validates
+as allowed. Otherwise returns false (the default).
+
+* It's better to have such validatation(s) in one place
+instead of spread all over the code. There are other places in
+the application where the filename is validated and they should
+all be refactored to call this function. Then we can focus
+all needed validations in one place only!
+
+NOTE: This refactoring was not done - the only goal was to fix
+this security vulnerability only.
+
+* The fm_is_file_allowed() function validates the filename
+based on its extension only. No other validatation(s) have been
+implemented in this commit.
+
+* File extensions are assumed to be case-insensitive.
+For example, php == PHP == Php == PhP, etc. This is consitent
+with some web servers. Without this, the user will have to populate
+the $allowed_extensions with all possible allowed combinations.
+
+* Although, there is one drawback to the current solution, which
+is that all files must have an extension to be uploaded. This is not
+consitent with modern filesystems. Maybe a better solution would be
+to automatically append an extension to the filename if no
+extension has been found (e.g., .html or .txt which are generally
+considered to be harmless). This must be decided by the
+application's maintainers.
+
+* Fix the RCE vulns via new/rename file
+
+Sanitize the arguments to stat using escapeshellarg()
+
+Co-authored-by: Jorge Morgado <jorge@morgado.ch>
+---
+ tinyfilemanager.php | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/tinyfilemanager.php b/tinyfilemanager.php
+index f1becd35..94246b86 100644
+--- a/tinyfilemanager.php
++++ b/tinyfilemanager.php
+@@ -9,7 +9,7 @@
+  */
+ 
+ //TFM version
+-define('VERSION', '2.3.8');
++define('VERSION', '2.3.9');
+ 
+ //Application Title
+ define('APP_TITLE', 'Tiny File Manager');
+@@ -480,6 +480,12 @@ function get_file_path () {
+         }
+ 
+         $err = false;
++        if(!fm_is_file_allowed($fileinfo->name)) {
++            $err = array("message" => "File extension is not allowed");
++            event_callback(array("fail" => $err));
++            exit();
++        }
++
+         if (!$url) {
+             $success = false;
+         } else if ($use_curl) {
+@@ -1920,6 +1926,27 @@ class="edit-file"><i class="fa fa-pencil-square-o"></i> <?php echo lng('Advanced
+ 
+ // Functions
+ 
++/**
++ * Check if the filename is allowed.
++ * @param string $filename
++ * @return bool
++ */
++function fm_is_file_allowed($filename)
++{
++    // By default, no file is allowed
++    $allowed = false;
++
++    if (FM_EXTENSION) {
++        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
++
++        if (in_array($ext, explode(',', strtolower(FM_EXTENSION)))) {
++            $allowed = true;
++        }
++    }
++
++    return $allowed;
++}
++
+ /**
+  * Delete  file or folder (recursively)
+  * @param string $path
+@@ -2215,7 +2242,8 @@ function fm_get_size($file)
+ 
+     // try a shell command
+     if ($exec_works) {
+-        $cmd = ($iswin) ? "for %F in (\"$file\") do @echo %~zF" : ($isdarwin ? "stat -f%z \"$file\"" : "stat -c%s \"$file\"");
++        $arg = escapeshellarg($file);
++        $cmd = ($iswin) ? "for %F in (\"$file\") do @echo %~zF" : ($isdarwin ? "stat -f%z $arg" : "stat -c%s $arg");
+         @exec($cmd, $output);
+         if (is_array($output) && ctype_digit($size = trim(implode("\n", $output)))) {
+             return $size;

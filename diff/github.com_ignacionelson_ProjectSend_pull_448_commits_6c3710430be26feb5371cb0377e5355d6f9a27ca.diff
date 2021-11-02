@@ -1,0 +1,139 @@
+From 6c3710430be26feb5371cb0377e5355d6f9a27ca Mon Sep 17 00:00:00 2001
+From: JackWhite20 <phil.westf@web.de>
+Date: Fri, 4 Aug 2017 20:12:39 +0200
+Subject: [PATCH] Fix CVE-2017-9783 and CVE-2017-9786 XSS vulnerabilities.
+
+---
+ header-unlogged.php             |  4 ++--
+ header.php                      |  4 ++--
+ includes/functions.php          | 14 +++++++-------
+ templates/gallery/template.php  |  2 +-
+ templates/pinboxes/template.php |  2 +-
+ 5 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/header-unlogged.php b/header-unlogged.php
+index 2c6ba3c7..e3653bbe 100644
+--- a/header-unlogged.php
++++ b/header-unlogged.php
+@@ -32,8 +32,8 @@
+ 	 */
+ 	$header_vars = array(
+ 						'html_lang'		=> SITE_LANG,
+-						'title'			=> $page_title . ' &raquo; ' . THIS_INSTALL_SET_TITLE,
+-						'header_title'	=> THIS_INSTALL_SET_TITLE,
++						'title'			=> $page_title . ' &raquo; ' . html_output(THIS_INSTALL_SET_TITLE),
++						'header_title'	=> html_output(THIS_INSTALL_SET_TITLE),
+ 					);
+ 
+ 	if ( !is_projectsend_installed() ) {
+diff --git a/header.php b/header.php
+index d9fef5c8..3ed703a8 100644
+--- a/header.php
++++ b/header.php
+@@ -58,7 +58,7 @@
+ 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+ 	<meta name="viewport" content="width=device-width, initial-scale=1">
+ 
+-	<title><?php echo html_output( $page_title . ' &raquo; ' . THIS_INSTALL_SET_TITLE ); ?></title>
++	<title><?php echo html_output( $page_title . ' &raquo; ' . htmlspecialchars(THIS_INSTALL_SET_TITLE, ENT_QUOTES, 'UTF-8') ); ?></title>
+ 	<?php meta_favicon(); ?>
+ 	<script type="text/javascript" src="<?php echo BASE_URI; ?>includes/js/jquery.1.12.4.min.js"></script>
+ 
+@@ -84,7 +84,7 @@
+ 			</ul>
+ 
+ 			<div class="navbar-header">
+-				<span class="navbar-brand"><a href="<?php echo SYSTEM_URI; ?>" target="_blank"><?php include('img/ps-icon.svg'); ?></a> <?php echo THIS_INSTALL_SET_TITLE; ?></span>
++				<span class="navbar-brand"><a href="<?php echo SYSTEM_URI; ?>" target="_blank"><?php include('img/ps-icon.svg'); ?></a> <?php echo html_output(THIS_INSTALL_SET_TITLE); ?></span>
+ 			</div>
+ 
+ 			<ul class="nav pull-right nav_account">
+diff --git a/includes/functions.php b/includes/functions.php
+index 480f8a86..f71fe99e 100644
+--- a/includes/functions.php
++++ b/includes/functions.php
+@@ -295,7 +295,7 @@ function get_client_by_id($client)
+ 	while ( $row = $statement->fetch() ) {
+ 		$information = array(
+ 							'id'				=> $row['id'],
+-							'name'				=> $row['name'],
++							'name'				=> html_output($row['name']),
+ 							'username'			=> $row['user'],
+ 							'address'			=> $row['address'],
+ 							'phone'				=> $row['phone'],
+@@ -334,7 +334,7 @@ function get_client_by_username($client)
+ 	while ( $row = $statement->fetch() ) {
+ 		$information = array(
+ 							'id'				=> $row['id'],
+-							'name'				=> $row['name'],
++							'name'				=> html_output($row['name']),
+ 							'username'			=> $row['user'],
+ 							'address'			=> $row['address'],
+ 							'phone'				=> $row['phone'],
+@@ -431,7 +431,7 @@ function get_user_by_username($user)
+ 			$information = array(
+ 								'id'				=> $row['id'],
+ 								'username'			=> $row['user'],
+-								'name'				=> $row['name'],
++								'name'				=> html_output($row['name']),
+ 								'email'				=> $row['email'],
+ 								'level'				=> $row['level'],
+ 								'active'			=> $row['active'],
+@@ -465,7 +465,7 @@ function get_user_by_id($id)
+ 		$information = array(
+ 							'id'				=> $row['id'],
+ 							'username'			=> $row['user'],
+-							'name'				=> $row['name'],
++							'name'				=> html_output($row['name']),
+ 							'email'				=> $row['email'],
+ 							'level'				=> $row['level'],
+ 							'max_file_size'		=> $row['max_file_size'],
+@@ -932,7 +932,7 @@ function generate_branding_layout()
+ 
+ 	$layout = '<div class="row">
+ 					<div class="col-xs-12 branding_unlogged">
+-						<img src="' . $branding_image . '" alt="' . THIS_INSTALL_SET_TITLE . '" />
++						<img src="' . $branding_image . '" alt="' . html_output(THIS_INSTALL_SET_TITLE) . '" />
+ 					</div>
+ 				</div>';
+ 
+@@ -1103,11 +1103,11 @@ function render_log_action($params)
+ 	$action = $params['action'];
+ 	$timestamp = $params['timestamp'];
+ 	$owner_id = $params['owner_id'];
+-	$owner_user = $params['owner_user'];
++	$owner_user = html_output($params['owner_user']);
+ 	$affected_file = $params['affected_file'];
+ 	$affected_file_name = $params['affected_file_name'];
+ 	$affected_account = $params['affected_account'];
+-	$affected_account_name = $params['affected_account_name'];
++	$affected_account_name = html_output($params['affected_account_name']);
+ 	
+ 	switch ($action) {
+ 		case 0:
+diff --git a/templates/gallery/template.php b/templates/gallery/template.php
+index bfc5776f..0707acd1 100644
+--- a/templates/gallery/template.php
++++ b/templates/gallery/template.php
+@@ -101,7 +101,7 @@
+ 		<header>
+ 			<?php if ($logo_file_info['exists'] === true) { ?>
+ 				<div id="logo">
+-					<img src="<?php echo TIMTHUMB_URL; ?>?src=<?php echo $logo_file_info['url']; ?>&amp;w=<?php echo LOGO_MAX_WIDTH; ?>" alt="<?php echo THIS_INSTALL_SET_TITLE; ?>" />
++					<img src="<?php echo TIMTHUMB_URL; ?>?src=<?php echo $logo_file_info['url']; ?>&amp;w=<?php echo LOGO_MAX_WIDTH; ?>" alt="<?php echo html_output(THIS_INSTALL_SET_TITLE); ?>" />
+ 				</div>
+ 			<?php } ?>
+ 		</header>
+diff --git a/templates/pinboxes/template.php b/templates/pinboxes/template.php
+index e8572237..af23131c 100644
+--- a/templates/pinboxes/template.php
++++ b/templates/pinboxes/template.php
+@@ -83,7 +83,7 @@ function close_menu() {
+ 		<div id="header">
+ 			<?php if ($logo_file_info['exists'] === true) { ?>
+ 				<div id="branding">
+-					<img src="<?php echo TIMTHUMB_URL; ?>?src=<?php echo $logo_file_info['url']; ?>&amp;w=300" alt="<?php echo THIS_INSTALL_SET_TITLE; ?>" />
++					<img src="<?php echo TIMTHUMB_URL; ?>?src=<?php echo $logo_file_info['url']; ?>&amp;w=300" alt="<?php echo html_output(THIS_INSTALL_SET_TITLE); ?>" />
+ 				</div>
+ 			<?php } ?>
+ 		</div>

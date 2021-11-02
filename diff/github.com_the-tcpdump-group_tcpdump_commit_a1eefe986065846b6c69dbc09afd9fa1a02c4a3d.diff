@@ -1,0 +1,65 @@
+From a1eefe986065846b6c69dbc09afd9fa1a02c4a3d Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Fri, 3 Feb 2017 13:14:51 +0000
+Subject: [PATCH] CVE-2017-13687/CHDLC: Improve bounds and length checks.
+
+Prevent a possible buffer overread in chdlc_print() and replace the
+custom check in chdlc_if_print() with a standard check in chdlc_print()
+so that the latter certainly does not over-read even when reached via
+juniper_chdlc_print(). Add length checks.
+---
+ print-chdlc.c | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/print-chdlc.c b/print-chdlc.c
+index 450d28684..ca96cc506 100644
+--- a/print-chdlc.c
++++ b/print-chdlc.c
+@@ -46,21 +46,18 @@ static const struct tok chdlc_cast_values[] = {
+ u_int
+ chdlc_if_print(netdissect_options *ndo, const struct pcap_pkthdr *h, register const u_char *p)
+ {
+-	register u_int length = h->len;
+-	register u_int caplen = h->caplen;
+-
+-	if (caplen < CHDLC_HDRLEN) {
+-		ND_PRINT((ndo, "[|chdlc]"));
+-		return (caplen);
+-	}
+-        return (chdlc_print(ndo, p,length));
++	return chdlc_print(ndo, p, h->len);
+ }
+ 
+ u_int
+ chdlc_print(netdissect_options *ndo, register const u_char *p, u_int length)
+ {
+ 	u_int proto;
++	const u_char *bp = p;
+ 
++	if (length < CHDLC_HDRLEN)
++		goto trunc;
++	ND_TCHECK2(*p, CHDLC_HDRLEN);
+ 	proto = EXTRACT_16BITS(&p[2]);
+ 	if (ndo->ndo_eflag) {
+                 ND_PRINT((ndo, "%s, ethertype %s (0x%04x), length %u: ",
+@@ -94,6 +91,9 @@ chdlc_print(netdissect_options *ndo, register const u_char *p, u_int length)
+ 		break;
+         case ETHERTYPE_ISO:
+                 /* is the fudge byte set ? lets verify by spotting ISO headers */
++                if (length < 2)
++                    goto trunc;
++                ND_TCHECK_16BITS(p);
+                 if (*(p+1) == 0x81 ||
+                     *(p+1) == 0x82 ||
+                     *(p+1) == 0x83)
+@@ -108,6 +108,10 @@ chdlc_print(netdissect_options *ndo, register const u_char *p, u_int length)
+ 	}
+ 
+ 	return (CHDLC_HDRLEN);
++
++trunc:
++	ND_PRINT((ndo, "[|chdlc]"));
++	return ndo->ndo_snapend - bp;
+ }
+ 
+ /*

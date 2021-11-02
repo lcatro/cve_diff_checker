@@ -1,0 +1,73 @@
+From 190ffdf6c8b1ec443be202c7d69e63a7e3da25e3 Mon Sep 17 00:00:00 2001
+From: Guilherme Ottoni <ottoni@fb.com>
+Date: Fri, 14 Dec 2018 08:42:02 -0800
+Subject: [PATCH] Fix a bug in number_format()
+
+Summary: In case of error while calling snprintf, return empty string instead of malformed string.
+
+Reviewed By: binliu19
+
+Differential Revision: D13379372
+
+fbshipit-source-id: 1e5611598464daccc674d5a96558c9f2aee08fc8
+---
+ hphp/runtime/base/zend-string.cpp             |  2 ++
+ hphp/test/slow/string/number_format_error.php | 19 +++++++++++++++++++
+ .../string/number_format_error.php.expect     |  2 ++
+ 3 files changed, 23 insertions(+)
+ create mode 100644 hphp/test/slow/string/number_format_error.php
+ create mode 100644 hphp/test/slow/string/number_format_error.php.expect
+
+diff --git a/hphp/runtime/base/zend-string.cpp b/hphp/runtime/base/zend-string.cpp
+index 072148f61c00..40267cffd6f7 100644
+--- a/hphp/runtime/base/zend-string.cpp
++++ b/hphp/runtime/base/zend-string.cpp
+@@ -1768,6 +1768,7 @@ String string_number_format(double d, int dec,
+   String tmpstr(63, ReserveString);
+   tmpbuf = tmpstr.mutableData();
+   tmplen = snprintf(tmpbuf, 64, "%.*F", dec, d);
++  if (tmplen < 0) return empty_string();
+   if (tmpbuf == nullptr || !isdigit((int)tmpbuf[0])) {
+     tmpstr.setSize(tmplen);
+     return tmpstr;
+@@ -1777,6 +1778,7 @@ String string_number_format(double d, int dec,
+     tmpstr = String(tmplen, ReserveString);
+     tmpbuf = tmpstr.mutableData();
+     tmplen = snprintf(tmpbuf, tmplen + 1, "%.*F", dec, d);
++    if (tmplen < 0) return empty_string();
+     if (tmpbuf == nullptr || !isdigit((int)tmpbuf[0])) {
+       tmpstr.setSize(tmplen);
+       return tmpstr;
+diff --git a/hphp/test/slow/string/number_format_error.php b/hphp/test/slow/string/number_format_error.php
+new file mode 100644
+index 000000000000..e5899967bc0d
+--- /dev/null
++++ b/hphp/test/slow/string/number_format_error.php
+@@ -0,0 +1,19 @@
++<?php
++  $READ_LENGTH = 0x1000; // choose leak size
++// construct fake iptc header for controlled read
++$iptc_hdr =
++  "\x1c\x01" . // magic
++  "\x00\x80" . // dataset, recnum
++  "\x00" .     // padding
++  pack("N", $READ_LENGTH);
++// spray a bit so it's near the broken string
++$holder = [];
++for($i = 0; $i < 100; $i++)
++  $holder[] = str_pad($iptc_hdr, 96);
++// trigger bug to create string with len=-1
++$badstr = number_format(0,0x7fffffff);
++var_dump($badstr);
++// leak memory :)
++$tmp = iptcparse($badstr);
++var_dump($tmp);
++?>
+diff --git a/hphp/test/slow/string/number_format_error.php.expect b/hphp/test/slow/string/number_format_error.php.expect
+new file mode 100644
+index 000000000000..4cbe7ce9a785
+--- /dev/null
++++ b/hphp/test/slow/string/number_format_error.php.expect
+@@ -0,0 +1,2 @@
++string(0) ""
++bool(false)

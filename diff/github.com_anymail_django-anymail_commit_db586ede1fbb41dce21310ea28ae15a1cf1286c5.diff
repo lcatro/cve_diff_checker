@@ -1,0 +1,66 @@
+From db586ede1fbb41dce21310ea28ae15a1cf1286c5 Mon Sep 17 00:00:00 2001
+From: medmunds <medmunds@gmail.com>
+Date: Fri, 2 Feb 2018 11:41:14 -0800
+Subject: [PATCH] Security: prevent timing attack on WEBHOOK_AUTHORIZATION
+ secret
+
+Anymail's webhook validation was vulnerable to a timing attack.
+An attacker could have used this to recover your WEBHOOK_AUTHORIZATION
+shared secret, potentially allowing them to post fabricated or malicious
+email tracking events to your app.
+
+There have not been any reports of attempted exploit in the wild. (The
+vulnerability was discovered through code review.) Attempts would be
+visible in http logs as a very large number of 400 responses on
+Anymail's webhook urls, or in Python error monitoring as a very large
+number of AnymailWebhookValidationFailure exceptions.
+
+If you are using Anymail's webhooks, you should upgrade to this release.
+In addition, you may want to rotate to a new WEBHOOK_AUTHORIZATION
+secret ([docs](http://anymail.readthedocs.io/en/stable/tips/securing_webhooks/#use-a-shared-authorization-secret)),
+particularly if your logs indicate attempted exploit.
+---
+ anymail/webhooks/base.py | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/anymail/webhooks/base.py b/anymail/webhooks/base.py
+index 2838031..2bfd36e 100644
+--- a/anymail/webhooks/base.py
++++ b/anymail/webhooks/base.py
+@@ -2,6 +2,7 @@
+ 
+ import six
+ from django.http import HttpResponse
++from django.utils.crypto import constant_time_compare
+ from django.utils.decorators import method_decorator
+ from django.views.decorators.csrf import csrf_exempt
+ from django.views.generic import View
+@@ -40,8 +41,13 @@ def __init__(self, **kwargs):
+     def validate_request(self, request):
+         """If configured for webhook basic auth, validate request has correct auth."""
+         if self.basic_auth:
+-            basic_auth = get_request_basic_auth(request)
+-            if basic_auth is None or basic_auth not in self.basic_auth:
++            request_auth = get_request_basic_auth(request)
++            # Use constant_time_compare to avoid timing attack on basic auth. (It's OK that any()
++            # can terminate early: we're not trying to protect how many auth strings are allowed,
++            # just the contents of each individual auth string.)
++            auth_ok = any(constant_time_compare(request_auth, allowed_auth)
++                          for allowed_auth in self.basic_auth)
++            if not auth_ok:
+                 # noinspection PyUnresolvedReferences
+                 raise AnymailWebhookValidationFailure(
+                     "Missing or invalid basic auth in Anymail %s webhook" % self.esp_name)
+@@ -77,8 +83,11 @@ def validate_request(self, request):
+         *All* definitions of this method in the class chain (including mixins)
+         will be called. There is no need to chain to the superclass.
+         (See self.run_validators and collect_all_methods.)
++
++        Security note: use django.utils.crypto.constant_time_compare for string
++        comparisons, to avoid exposing your validation to a timing attack.
+         """
+-        # if request.POST['signature'] != expected_signature:
++        # if not constant_time_compare(request.POST['signature'], expected_signature):
+         #     raise AnymailWebhookValidationFailure("...message...")
+         # (else just do nothing)
+         pass

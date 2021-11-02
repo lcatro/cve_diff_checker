@@ -1,0 +1,58 @@
+From f59d7ed8df2e0e957f7f247fe218032abdbe9a10 Mon Sep 17 00:00:00 2001
+From: Steven Bird <stevenbird1@gmail.com>
+Date: Tue, 20 Aug 2019 20:05:00 +0930
+Subject: [PATCH] CVE-2019-14751: Fixed security bug in downloader
+ (https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-14751)
+
+---
+ nltk/downloader.py | 36 +-----------------------------------
+ 1 file changed, 1 insertion(+), 35 deletions(-)
+
+diff --git a/nltk/downloader.py b/nltk/downloader.py
+index 8874e7c948..e6831f977f 100644
+--- a/nltk/downloader.py
++++ b/nltk/downloader.py
+@@ -2260,42 +2260,8 @@ def _unzip_iter(filename, root, verbose=True):
+         yield ErrorMessage(filename, e)
+         return
+ 
+-    # Get lists of directories & files
+-    namelist = zf.namelist()
+-    dirlist = set()
+-    for x in namelist:
+-        if x.endswith('/'):
+-            dirlist.add(x)
+-        else:
+-            dirlist.add(x.rsplit('/', 1)[0] + '/')
+-    filelist = [x for x in namelist if not x.endswith('/')]
+-
+-    # Create the target directory if it doesn't exist
+-    if not os.path.exists(root):
+-        os.mkdir(root)
+-
+-    # Create the directory structure
+-    for dirname in sorted(dirlist):
+-        pieces = dirname[:-1].split('/')
+-        for i in range(len(pieces)):
+-            dirpath = os.path.join(root, *pieces[: i + 1])
+-            if not os.path.exists(dirpath):
+-                os.mkdir(dirpath)
+-
+-    # Extract files.
+-    for i, filename in enumerate(filelist):
+-        filepath = os.path.join(root, *filename.split('/'))
+-
+-        try:
+-            with open(filepath, 'wb') as dstfile, zf.open(filename) as srcfile:
+-                shutil.copyfileobj(srcfile, dstfile)
+-        except Exception as e:
+-            yield ErrorMessage(filename, e)
+-            return
++    zf.extractall(root)
+ 
+-        if verbose and (i * 10 / len(filelist) > (i - 1) * 10 / len(filelist)):
+-            sys.stdout.write('.')
+-            sys.stdout.flush()
+     if verbose:
+         print()
+ 

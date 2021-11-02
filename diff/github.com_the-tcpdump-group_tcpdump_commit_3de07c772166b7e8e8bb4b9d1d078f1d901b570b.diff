@@ -1,0 +1,85 @@
+From 3de07c772166b7e8e8bb4b9d1d078f1d901b570b Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 13:28:05 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14463/VRRP: Add a missing bounds check
+
+In vrrp_print().
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-vrrp.c                    |   4 +++-
+ tests/TESTLIST                  |   1 +
+ tests/vrrp-vrrp_print-oobr.out  |   6 ++++++
+ tests/vrrp-vrrp_print-oobr.pcap | Bin 0 -> 3877 bytes
+ 4 files changed, 10 insertions(+), 1 deletion(-)
+ create mode 100644 tests/vrrp-vrrp_print-oobr.out
+ create mode 100644 tests/vrrp-vrrp_print-oobr.pcap
+
+diff --git a/print-vrrp.c b/print-vrrp.c
+index d8ba42650..d6114e57b 100644
+--- a/print-vrrp.c
++++ b/print-vrrp.c
+@@ -142,9 +142,11 @@ vrrp_print(netdissect_options *ndo,
+ 
+ 			vec[0].ptr = bp;
+ 			vec[0].len = len;
+-			if (in_cksum(vec, 1))
++			if (in_cksum(vec, 1)) {
++				ND_TCHECK_16BITS(&bp[6]);
+ 				ND_PRINT((ndo, ", (bad vrrp cksum %x)",
+ 					EXTRACT_16BITS(&bp[6])));
++			}
+ 		}
+ 
+ 		if (version == 3 && ND_TTEST2(bp[0], len)) {
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index db1f87d84..8cc638ddb 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -556,6 +556,7 @@ ldp-ldp_tlv_print-oobr ldp-ldp_tlv_print-oobr.pcap ldp-ldp_tlv_print-oobr.out -v
+ icmp-icmp_print-oobr-1 icmp-icmp_print-oobr-1.pcap icmp-icmp_print-oobr-1.out -v -c3
+ icmp-icmp_print-oobr-2 icmp-icmp_print-oobr-2.pcap icmp-icmp_print-oobr-2.out -v -c3
+ rsvp-rsvp_obj_print-oobr rsvp-rsvp_obj_print-oobr.pcap rsvp-rsvp_obj_print-oobr.out -v -c3
++vrrp-vrrp_print-oobr vrrp-vrrp_print-oobr.pcap vrrp-vrrp_print-oobr.out -v -c3
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/vrrp-vrrp_print-oobr.out b/tests/vrrp-vrrp_print-oobr.out
+new file mode 100644
+index 000000000..fd87db8ba
+--- /dev/null
++++ b/tests/vrrp-vrrp_print-oobr.out
+@@ -0,0 +1,6 @@
++IP (tos 0x7f,CE, ttl 254, id 40208, offset 0, flags [none], proto VRRP (112), length 34, options (unknown 69 [bad length 83]), bad cksum 8e15 (->bc96)!)
++    250.219.91.20 > 209.150.251.64: vrrp 250.219.91.20 > 209.150.251.64: VRRPv2, Advertisement, (ttl 254), vrid 2, prio 0, authtype simple, intvl 255s, length 6[|vrrp]
++IP (tos 0x7f,CE, ttl 254, id 40208, offset 0, flags [none], proto VRRP (112), length 40, options (unknown 69 [bad length 83]), bad cksum 8e15 (->b790)!)
++    250.219.91.20 > 209.150.251.64: vrrp 250.219.91.20 > 209.150.251.64: VRRPv2, Advertisement, (ttl 254), vrid 2, prio 0, authtype simple, intvl 255s, length 12, addrs:[|vrrp]
++IP (tos 0x7f,CE, ttl 254, id 40208, offset 0, flags [none], proto VRRP (112), length 40, options (unknown 69 [bad length 83]), bad cksum 8e15 (->bc90)!)
++    250.219.91.20 > 209.150.251.64: vrrp 250.219.91.20 > 209.150.251.64: VRRPv2, Advertisement, (ttl 254), vrid 2, prio 0, authtype simple, intvl 255s, length 12, addrs:[|vrrp]
+diff --git a/tests/vrrp-vrrp_print-oobr.pcap b/tests/vrrp-vrrp_print-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..a74bc502aa7922831cba8f4d1e042de2e0a17877
+GIT binary patch
+literal 3877
+zcmdTHJ#P~+^f?#xAfj!cL{*_8cNG#80UHbqC>;=D?$Qd_!UO{gBg!$9jZRf1gd&xN
+zjfH`!8@~XF2}DU%f}m216a^5Ja6H?w&*zU^0%5??<$XW<J-_(buU<TRoP#{jaUF_q
+z0^v>kMxQLq=i$ux3gU4L5N+4@!Q~pv)QbSWZZDU9yt#V#<?3GL()`{O6gv>+fDlw9
+z!2O|1^mmr~tEBuvkoY@k`hz2Bf4BnBOd8!K@bziJKGui+sx;~dJvRd$Awhif`2z7V
+z3p4}K#rpVD2-XN4!;LtO<C>a58L`JRh_eqCv2!!n;+3DH3ckT`Tua<#!cRrY&`2^W
+z66+!dRYsK(TZuL$+dzN$XfS|2Xekj=6nrZb%h`o7ArCn+E@%#$=xP(c9%I@m10KFh
+zo(mF5tM?p<A|We>1T`uU2Nd~(jza<2am_8uknq4~Q0se!rVxv?b9$P1ZCMzMwJ8)S
+z3{`@Fb3+?y>PjgiJ0Z8+E=F#}B~ho6b?)ifu&Z;1Oy4v7g$8F3#upJ6GzT%Gx<>T}
+zhKF;Kvm@q_97OslK<@M%A;%KS51KQ2ps6R`-}a25pP<=2P45{w*6i#(1M<1`*(<Ae
+z?!P?_a5}0kLgm8R-3VLGPVBcweBXcV``ZY7&-2Roc^-j@Q`De}24iRdw+aB0tV7Xe
+za6`5$r0^6iblX)Pw04DEZ5>qz_r#_S_|(j~DK!`7`(%!9Wg*#7hSk!CgeJ9;BR1|g
+ztvpa?it0tCa@k}F4rCl{tSbp+1|Ov;LMAj?Co{uUN?y0^Nq=tj6r=E?Oi?5;-1BlE
+z48IEG4`ArB(K@V4jq^KDJfLYjpfqHrO|!C)a~2-5R?_UHG&vY$-Mi9$t?MSqcY3FP
+zK`M;w8t}>FC%a2!@6|~bnYLNG$ev^(ylJ6+(8aR=J6uE;wAYNYd(Rrq<<7zu%FIhb
+z${<Wp?n^?VwoFLLXj+L_V8gy7q%S%+%Rj#)JQShy0eRw<{-a?DN-I}+Khst5WyESM
+r!XDOy7JGXdFSBd>WrnS8L;dG;eU+t8e8izVl(d52E7oGFD5&UfTQi>A
+
+literal 0
+HcmV?d00001
+

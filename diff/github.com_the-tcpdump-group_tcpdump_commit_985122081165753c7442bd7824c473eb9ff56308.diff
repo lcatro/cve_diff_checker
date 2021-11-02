@@ -1,0 +1,128 @@
+From 985122081165753c7442bd7824c473eb9ff56308 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Thu, 16 Mar 2017 12:02:20 -0700
+Subject: [PATCH] CVE-2017-13015/EAP: Add more bounds checks.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-eap.c                       |  18 ++++++++++++++----
+ tests/TESTLIST                    |   1 +
+ tests/eap_extract_read2_asan.out  |   2 ++
+ tests/eap_extract_read2_asan.pcap | Bin 0 -> 60 bytes
+ 4 files changed, 17 insertions(+), 4 deletions(-)
+ create mode 100644 tests/eap_extract_read2_asan.out
+ create mode 100644 tests/eap_extract_read2_asan.pcap
+
+diff --git a/print-eap.c b/print-eap.c
+index 125e1ee10..d76aea339 100644
+--- a/print-eap.c
++++ b/print-eap.c
+@@ -182,7 +182,9 @@ eap_print(netdissect_options *ndo,
+ 
+     switch (eap->type) {
+     case EAP_FRAME_TYPE_PACKET:
++        ND_TCHECK_8BITS(tptr);
+         type = *(tptr);
++        ND_TCHECK_16BITS(tptr+2);
+         len = EXTRACT_16BITS(tptr+2);
+         ND_PRINT((ndo, ", %s (%u), id %u, len %u",
+                tok2str(eap_code_values, "unknown", type),
+@@ -193,10 +195,11 @@ eap_print(netdissect_options *ndo,
+         ND_TCHECK2(*tptr, len);
+ 
+         if (type <= 2) { /* For EAP_REQUEST and EAP_RESPONSE only */
++            ND_TCHECK_8BITS(tptr+4);
+             subtype = *(tptr+4);
+             ND_PRINT((ndo, "\n\t\t Type %s (%u)",
+-                   tok2str(eap_type_values, "unknown", *(tptr+4)),
+-                   *(tptr + 4)));
++                   tok2str(eap_type_values, "unknown", subtype),
++                   subtype));
+ 
+             switch (subtype) {
+             case EAP_TYPE_IDENTITY:
+@@ -222,6 +225,7 @@ eap_print(netdissect_options *ndo,
+                  * type one octet per type
+                  */
+                 while (count < len) {
++                    ND_TCHECK_8BITS(tptr+count);
+                     ND_PRINT((ndo, " %s (%u),",
+                            tok2str(eap_type_values, "unknown", *(tptr+count)),
+                            *(tptr + count)));
+@@ -230,19 +234,23 @@ eap_print(netdissect_options *ndo,
+                 break;
+ 
+             case EAP_TYPE_TTLS:
+-                ND_PRINT((ndo, " TTLSv%u",
+-                       EAP_TTLS_VERSION(*(tptr + 5)))); /* fall through */
+             case EAP_TYPE_TLS:
++                ND_TCHECK_8BITS(tptr + 5);
++                if (subtype == EAP_TYPE_TTLS)
++                    ND_PRINT((ndo, " TTLSv%u",
++                           EAP_TTLS_VERSION(*(tptr + 5))));
+                 ND_PRINT((ndo, " flags [%s] 0x%02x,",
+                        bittok2str(eap_tls_flags_values, "none", *(tptr+5)),
+                        *(tptr + 5)));
+ 
+                 if (EAP_TLS_EXTRACT_BIT_L(*(tptr+5))) {
++                    ND_TCHECK_32BITS(tptr + 6);
+ 		    ND_PRINT((ndo, " len %u", EXTRACT_32BITS(tptr + 6)));
+                 }
+                 break;
+ 
+             case EAP_TYPE_FAST:
++                ND_TCHECK_8BITS(tptr + 5);
+                 ND_PRINT((ndo, " FASTv%u",
+                        EAP_TTLS_VERSION(*(tptr + 5))));
+                 ND_PRINT((ndo, " flags [%s] 0x%02x,",
+@@ -250,6 +258,7 @@ eap_print(netdissect_options *ndo,
+                        *(tptr + 5)));
+ 
+                 if (EAP_TLS_EXTRACT_BIT_L(*(tptr+5))) {
++                    ND_TCHECK_32BITS(tptr + 6);
+                     ND_PRINT((ndo, " len %u", EXTRACT_32BITS(tptr + 6)));
+                 }
+ 
+@@ -258,6 +267,7 @@ eap_print(netdissect_options *ndo,
+ 
+             case EAP_TYPE_AKA:
+             case EAP_TYPE_SIM:
++                ND_TCHECK_8BITS(tptr + 5);
+                 ND_PRINT((ndo, " subtype [%s] 0x%02x,",
+                        tok2str(eap_aka_subtype_values, "unknown", *(tptr+5)),
+                        *(tptr + 5)));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index b16737cf6..a20e59898 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -512,6 +512,7 @@ wb-oobr			wb-oobr.pcap			wb-oobr.out	-v
+ lldp_asan		lldp_asan.pcap			lldp_asan.out	-v
+ extract_read2_asan	extract_read2_asan.pcap		extract_read2_asan.out	-v
+ getname_2_read4_asan	getname_2_read4_asan.pcap	getname_2_read4_asan.out	-v
++eap_extract_read2_asan	eap_extract_read2_asan.pcap	eap_extract_read2_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/eap_extract_read2_asan.out b/tests/eap_extract_read2_asan.out
+new file mode 100644
+index 000000000..da96d4804
+--- /dev/null
++++ b/tests/eap_extract_read2_asan.out
+@@ -0,0 +1,2 @@
++EAP packet (0) v155, len 0
++	[|EAP]
+diff --git a/tests/eap_extract_read2_asan.pcap b/tests/eap_extract_read2_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..26e334eb473d620f343682777680075ba8a92cfe
+GIT binary patch
+literal 60
+zcmca|c+)~A1{MYe21X!eU=V?_c(+9azh&Tm0OA{lyT?0+_;@n#{Pvtyci>=0-)xXl
+F7663P4p{&I
+
+literal 0
+HcmV?d00001
+

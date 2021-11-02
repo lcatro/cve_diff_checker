@@ -1,0 +1,403 @@
+From 7db3386fcdb454e33a3ea30dcfb8e8960d4c3aa3 Mon Sep 17 00:00:00 2001
+From: Gabriel Kihlman <g.kihlman@yubico.com>
+Date: Tue, 4 Jun 2019 10:06:41 +0200
+Subject: [PATCH] Drop privileges by default when opening user-related files
+
+The module is typically executed as root and would sometimes
+open files or follow symlinks that could be controlled from the
+outside.
+
+Drop privileges to the target user before opening any files.
+
+Fixes CVE-2019-12209.
+
+Thanks to Matthias Gerstner of the SUSE Security Team for reporting
+the issue.
+---
+ Makefile.am  |   1 +
+ README       |  18 +++++++
+ configure.ac |   4 ++
+ drop_privs.c | 129 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ drop_privs.h |  64 +++++++++++++++++++++++++
+ pam-u2f.c    |  31 +++++++++----
+ 6 files changed, 238 insertions(+), 9 deletions(-)
+ create mode 100644 drop_privs.c
+ create mode 100644 drop_privs.h
+
+diff --git a/Makefile.am b/Makefile.am
+index c0d2d1e..d761939 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -13,6 +13,7 @@ lib_LTLIBRARIES = pam_u2f.la
+ 
+ pam_u2f_la_SOURCES = pam-u2f.c
+ pam_u2f_la_SOURCES += util.c util.h
++pam_u2f_la_SOURCES += drop_privs.h drop_privs.c
+ 
+ pam_u2f_la_LIBADD = -lpam
+ pam_u2f_la_LIBADD += $(LIBU2FHOST_LIBS) $(LIBU2FSERVER_LIBS)
+diff --git a/README b/README
+index a6247a3..04f9541 100644
+--- a/README
++++ b/README
+@@ -114,6 +114,8 @@ openasuser::
+ Setuid to the authenticating user when opening the authfile. Useful when the
+ user's home is stored on an NFS volume mounted with the root_squash option
+ (which maps root to nobody which will not be able to read the file).
++Note that after release 1.0.8 this is done by default when no global
++authfile or XDG_CONFIG_HOME environment variable has been set.
+ 
+ alwaysok::
+ Set to enable all authentication attempts to succeed (aka presentation mode).
+@@ -164,6 +166,11 @@ mappings will not be used and the opposite applies if user home directory
+ mappings are being used, the central authorization mappings file will not
+ be used.
+ 
++By default the mapping file inside a home directory will be opened as
++the target user, whereas the central file will be opened as `root`. If
++the `XDG_CONFIG_HOME` variable is set, privileges will not be dropped
++unless the `openasuser` configuration setting is set.
++
+ IMPORTANT: Using pam-u2f to secure the login to a computer while
+ storing the mapping file in an encrypted home directory, will result
+ in the impossibility of logging into the system. The partition is
+@@ -184,6 +191,10 @@ looks like:
+ 
+  auth sufficient pam_u2f.so authfile=/etc/u2f_mappings
+ 
++If you do not set the `openasuser` setting, the authfile will be opened
++and parsed as `root` so make sure it has the correct owner and
++permissions set.
++
+ IMPORTANT: On dynamics networks (e.g. where hostnames are set by DHCP),
+ users should not rely on the default origin and appid ("pam://$HOSTNAME")
+ but set those parameters explicitly to the same value.
+@@ -197,6 +208,13 @@ line:
+ 
+ This is much the same concept as the SSH authorized_keys file.
+ 
++In this case, pam-u2f will drop privileges and read the mapping file
++as that user. This happens regardless of the `openasuser` option being
++set.
++
++Note that if you set the XDG_CONFIG_HOME variable, privileges will not
++be dropped by default. Consider also setting `openasuser` in that case.
++
+ [[registration]]
+ Obtaining key-handles and public keys
+ -------------------------------------
+diff --git a/configure.ac b/configure.ac
+index 58fedcc..1ec2566 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -37,6 +37,8 @@ AC_CHECK_HEADERS([security/pam_modules.h security/_pam_macros.h security/pam_mod
+    #include <security/pam_appl.h>])
+ AC_CHECK_LIB([pam], [pam_start])
+ 
++AC_SEARCH_LIBS([pam_modutil_drop_priv], ["pam"], [AC_DEFINE([HAVE_PAM_MODUTIL_DROP_PRIV], [1])])
++
+ case "$host" in
+      *darwin*)  PAMDIR="/usr/lib/pam";;
+      *linux*)   PAMDIR="/lib/x86_64-linux-gnu/security";;
+@@ -71,6 +73,8 @@ AC_ARG_VAR([CWFLAGS], [Warning flags])
+ AX_CHECK_COMPILE_FLAG([-Wall], [CWFLAGS="-Wall"])
+ AX_CHECK_COMPILE_FLAG([-Wextra], [CWFLAGS="$CWFLAGS -Wextra"])
+ AX_CHECK_COMPILE_FLAG([-Wconversion], [CWFLAGS="$CWFLAGS -Wconversion"])
++# Because pam headers are doing sign-conversion, see PAM_MODUTIL_DEF_PRIVS in pam_modutil.h
++AX_CHECK_COMPILE_FLAG([-Wconversion], [CWFLAGS="$CWFLAGS -Wno-sign-conversion"])
+ AX_CHECK_COMPILE_FLAG([-Wpedantic], [CWFLAGS="$CWFLAGS -Wpedantic"])
+ AX_CHECK_COMPILE_FLAG([-Wformat=2], [CWFLAGS="$CWFLAGS -Wformat=2"])
+ AX_CHECK_COMPILE_FLAG([-Wstrict-prototypes], [CWFLAGS="$CWFLAGS -Wstrict-prototypes"])
+diff --git a/drop_privs.c b/drop_privs.c
+new file mode 100644
+index 0000000..7fe35c5
+--- /dev/null
++++ b/drop_privs.c
+@@ -0,0 +1,129 @@
++/* Written by Ricky Zhou <ricky@fedoraproject.org>
++ * Fredrik Thulin <fredrik@yubico.com> implemented pam_modutil_drop_priv
++ *
++ * Copyright (c) 2011-2014 Yubico AB
++ * Copyright (c) 2011 Ricky Zhou <ricky@fedoraproject.org>
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met:
++ *
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ *
++ *     * Redistributions in binary form must reproduce the above
++ *       copyright notice, this list of conditions and the following
++ *       disclaimer in the documentation and/or other materials provided
++ *       with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef HAVE_PAM_MODUTIL_DROP_PRIV
++
++#include <unistd.h>
++#include <pwd.h>
++#include <grp.h>
++#include <errno.h>
++#include <string.h>
++#include <stdlib.h>
++
++#include "drop_privs.h"
++#include "util.h"
++
++#ifdef HAVE_SECURITY_PAM_APPL_H
++#include <security/pam_appl.h>
++#endif
++#ifdef HAVE_SECURITY_PAM_MODULES_H
++#include <security/pam_modules.h>
++#endif
++
++
++int pam_modutil_drop_priv(pam_handle_t *pamh, struct _ykpam_privs *privs, struct passwd *pw) {
++    privs->saved_euid = geteuid();
++    privs->saved_egid = getegid();
++
++    if ((privs->saved_euid == pw->pw_uid) && (privs->saved_egid == pw->pw_gid)) {
++        D (privs->debug_file, "Privilges already dropped, pretend it is all right");
++        return 0;
++    }
++
++    privs->saved_groups_length = getgroups(0, NULL);
++    if (privs->saved_groups_length < 0) {
++        D (privs->debug_file, "getgroups: %s", strerror(errno));
++        return -1;
++    }
++
++    if (privs->saved_groups_length > SAVED_GROUPS_MAX_LEN) {
++        D (privs->debug_file, "too many groups, limiting.");
++        privs->saved_groups_length = SAVED_GROUPS_MAX_LEN;
++    }
++
++    if (privs->saved_groups_length > 0) {
++        if (getgroups(privs->saved_groups_length, privs->saved_groups) < 0) {
++            D (privs->debug_file, "getgroups: %s", strerror(errno));
++            goto free_out;
++        }
++    }
++
++    if (initgroups(pw->pw_name, pw->pw_gid) < 0) {
++        D (privs->debug_file, "initgroups: %s", strerror(errno));
++        goto free_out;
++    }
++
++    if (setegid(pw->pw_gid) < 0) {
++        D (privs->debug_file, "setegid: %s", strerror(errno));
++        goto free_out;
++    }
++
++    if (seteuid(pw->pw_uid) < 0) {
++        D (privs->debug_file, "seteuid: %s", strerror(errno));
++        goto free_out;
++    }
++
++    return 0;
++free_out:
++    return -1;
++}
++
++int pam_modutil_regain_priv(pam_handle_t *pamh, struct _ykpam_privs *privs) {
++    if ((privs->saved_euid == geteuid()) && (privs->saved_egid == getegid())) {
++        D (privs->debug_file, "Privilges already as requested, pretend it is all right");
++        return 0;
++    }
++
++    if (seteuid(privs->saved_euid) < 0) {
++        D (privs->debug_file, "seteuid: %s", strerror(errno));
++        return -1;
++    }
++
++    if (setegid(privs->saved_egid) < 0) {
++        D (privs->debug_file, "setegid: %s", strerror(errno));
++        return -1;
++    }
++
++    if (setgroups(privs->saved_groups_length, privs->saved_groups) < 0) {
++        D (privs->debug_file, "setgroups: %s", strerror(errno));
++        return -1;
++    }
++
++    return 0;
++}
++
++#else
++
++// drop_privs.c:124: warning: ISO C forbids an empty translation unit [-Wpedantic]
++typedef int make_iso_compilers_happy;
++
++#endif // HAVE_PAM_MODUTIL_DROP_PRIV
+diff --git a/drop_privs.h b/drop_privs.h
+new file mode 100644
+index 0000000..2d25a19
+--- /dev/null
++++ b/drop_privs.h
+@@ -0,0 +1,64 @@
++/* Copyright (c) 2011-2014 Yubico AB
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met:
++ *
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ *
++ *     * Redistributions in binary form must reproduce the above
++ *       copyright notice, this list of conditions and the following
++ *       disclaimer in the documentation and/or other materials provided
++ *       with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __PAM_U2F_DROP_PRIVS_H_INCLUDED__
++#define __PAM_U2F_DROP_PRIVS_H_INCLUDED__
++
++#ifdef HAVE_PAM_MODUTIL_DROP_PRIV
++#include <security/pam_modutil.h>
++#else
++
++#include <pwd.h>
++#include <stdio.h>
++
++#ifdef HAVE_SECURITY_PAM_APPL_H
++#include <security/pam_appl.h>
++#endif
++#ifdef HAVE_SECURITY_PAM_MODULES_H
++#include <security/pam_modules.h>
++#endif
++
++#define SAVED_GROUPS_MAX_LEN 64 /* as pam_modutil.. */
++
++struct _ykpam_privs {
++  uid_t saved_euid;
++  gid_t saved_egid;
++  gid_t *saved_groups;
++  int saved_groups_length;
++  FILE *debug_file;
++};
++
++#define PAM_MODUTIL_DEF_PRIVS(n) \
++  gid_t n##_saved_groups[SAVED_GROUPS_MAX_LEN]; \
++  struct _ykpam_privs n = {-1, -1, n##_saved_groups, SAVED_GROUPS_MAX_LEN, cfg->debug_file}
++
++int pam_modutil_drop_priv(pam_handle_t *, struct _ykpam_privs *, struct passwd *);
++int pam_modutil_regain_priv(pam_handle_t *, struct _ykpam_privs *);
++
++#endif
++#endif
+diff --git a/pam-u2f.c b/pam-u2f.c
+index 071d005..b01697c 100644
+--- a/pam-u2f.c
++++ b/pam-u2f.c
+@@ -20,6 +20,7 @@
+ #include <errno.h>
+ 
+ #include "util.h"
++#include "drop_privs.h"
+ 
+ /* If secure_getenv is not defined, define it here */
+ #ifndef HAVE_SECURE_GETENV
+@@ -148,11 +149,12 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+   int retval = PAM_IGNORE;
+   device_t *devices = NULL;
+   unsigned n_devices = 0;
+-  int openasuser;
++  int openasuser = 0;
+   int should_free_origin = 0;
+   int should_free_appid = 0;
+   int should_free_auth_file = 0;
+   int should_free_authpending_file = 0;
++  PAM_MODUTIL_DEF_PRIVS(privs);
+ 
+   parse_cfg(flags, argc, argv, cfg);
+ 
+@@ -235,6 +237,9 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+         goto done;
+       }
+ 
++      /* Opening a file in a users $HOME, need to drop privs for security */
++      openasuser = geteuid() == 0 ? 1 : 0;
++
+       snprintf(buf, authfile_dir_len,
+                "%s/.config%s", pw->pw_dir, DEFAULT_AUTHFILE);
+     } else {
+@@ -250,9 +255,14 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+ 
+       snprintf(buf, authfile_dir_len,
+                "%s%s", authfile_dir, DEFAULT_AUTHFILE);
++
++      if (!openasuser) {
++	DBG("WARNING: not dropping privileges when reading %s, please "
++	    "consider setting openasuser=1 in the module configuration", buf);
++      }
+     }
+ 
+-    DBG("Using default authentication file %s", buf);
++    DBG("Using authentication file %s", buf);
+ 
+     cfg->auth_file = buf; /* cfg takes ownership */
+     should_free_auth_file = 1;
+@@ -261,25 +271,28 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+     DBG("Using authentication file %s", cfg->auth_file);
+   }
+ 
+-  openasuser = geteuid() == 0 && cfg->openasuser;
++  if (!openasuser) {
++    openasuser = geteuid() == 0 && cfg->openasuser;
++  }
+   if (openasuser) {
+-    if (seteuid(pw_s.pw_uid)) {
+-      DBG("Unable to switch user to uid %i", pw_s.pw_uid);
++    DBG("Dropping privileges");
++    if (pam_modutil_drop_priv(pamh, &privs, pw)) {
++      DBG("Unable to switch user to uid %i", pw->pw_uid);
+       retval = PAM_IGNORE;
+       goto done;
+     }
+-    DBG("Switched to uid %i", pw_s.pw_uid);
++    DBG("Switched to uid %i", pw->pw_uid);
+   }
+   retval = get_devices_from_authfile(cfg->auth_file, user, cfg->max_devs,
+                                      cfg->debug, cfg->debug_file,
+                                      devices, &n_devices);
+   if (openasuser) {
+-    if (seteuid(0)) {
+-      DBG("Unable to switch back to uid 0");
++    if (pam_modutil_regain_priv(pamh, &privs)) {
++      DBG("could not restore privileges");
+       retval = PAM_IGNORE;
+       goto done;
+     }
+-    DBG("Switched back to uid 0");
++    DBG("Restored privileges");
+   }
+ 
+   if (retval != 1) {

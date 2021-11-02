@@ -1,0 +1,32 @@
+From f61fe5f6a0419ef4a88d46a128052f2e8352e85d Mon Sep 17 00:00:00 2001
+From: SmileTheory <SmileTheory@gmail.com>
+Date: Mon, 13 Mar 2017 20:28:37 -0700
+Subject: [PATCH] Don't open .pk3 files as OpenAL drivers.
+
+---
+ code/client/snd_openal.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/code/client/snd_openal.c b/code/client/snd_openal.c
+index 2a4fb0a24a..319ea371b8 100644
+--- a/code/client/snd_openal.c
++++ b/code/client/snd_openal.c
+@@ -2512,11 +2512,17 @@ qboolean S_AL_Init( soundInterface_t *si )
+ 	s_alRolloff = Cvar_Get( "s_alRolloff", "2", CVAR_CHEAT);
+ 	s_alGraceDistance = Cvar_Get("s_alGraceDistance", "512", CVAR_CHEAT);
+ 
+-	s_alDriver = Cvar_Get( "s_alDriver", ALDRIVER_DEFAULT, CVAR_ARCHIVE | CVAR_LATCH );
++	s_alDriver = Cvar_Get( "s_alDriver", ALDRIVER_DEFAULT, CVAR_ARCHIVE | CVAR_LATCH | CVAR_PROTECTED );
+ 
+ 	s_alInputDevice = Cvar_Get( "s_alInputDevice", "", CVAR_ARCHIVE | CVAR_LATCH );
+ 	s_alDevice = Cvar_Get("s_alDevice", "", CVAR_ARCHIVE | CVAR_LATCH);
+ 
++	if ( COM_CompareExtension( s_alDriver->string, ".pk3" ) )
++	{
++		Com_Printf( "Rejecting DLL named \"%s\"", s_alDriver->string );
++		return qfalse;
++	}
++
+ 	// Load QAL
+ 	if( !QAL_Init( s_alDriver->string ) )
+ 	{

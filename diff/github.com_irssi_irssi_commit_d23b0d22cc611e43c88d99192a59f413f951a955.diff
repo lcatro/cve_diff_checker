@@ -1,0 +1,54 @@
+From 5a67b983dc97caeb5df1139aabd0bc4f260a47d8 Mon Sep 17 00:00:00 2001
+From: ailin-nemui <ailin-nemui@users.noreply.github.com>
+Date: Mon, 17 Jun 2019 15:22:27 +0200
+Subject: [PATCH] copy sasl username and password values
+
+---
+ src/irc/core/irc-core.c              | 2 ++
+ src/irc/core/irc-servers-reconnect.c | 4 ++--
+ src/irc/core/irc-servers-setup.c     | 4 ++--
+ 3 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/irc/core/irc-core.c b/src/irc/core/irc-core.c
+index e65abe255..b5e80f2a0 100644
+--- a/src/irc/core/irc-core.c
++++ b/src/irc/core/irc-core.c
+@@ -75,6 +75,8 @@ static void destroy_server_connect(SERVER_CONNECT_REC *conn)
+ 
+ 	g_free_not_null(ircconn->usermode);
+ 	g_free_not_null(ircconn->alternate_nick);
++	g_free_not_null(ircconn->sasl_username);
++	g_free_not_null(ircconn->sasl_password);
+ }
+ 
+ void irc_core_init(void)
+diff --git a/src/irc/core/irc-servers-reconnect.c b/src/irc/core/irc-servers-reconnect.c
+index 3d2933f4e..cfe28a1a0 100644
+--- a/src/irc/core/irc-servers-reconnect.c
++++ b/src/irc/core/irc-servers-reconnect.c
+@@ -49,8 +49,8 @@ static void sig_server_connect_copy(SERVER_CONNECT_REC **dest,
+ 	rec->usermode = g_strdup(src->usermode);
+ 	rec->alternate_nick = g_strdup(src->alternate_nick);
+ 	rec->sasl_mechanism = src->sasl_mechanism;
+-	rec->sasl_username = src->sasl_username;
+-	rec->sasl_password = src->sasl_password;
++	rec->sasl_username = g_strdup(src->sasl_username);
++	rec->sasl_password = g_strdup(src->sasl_password);
+ 	*dest = (SERVER_CONNECT_REC *) rec;
+ }
+ 
+diff --git a/src/irc/core/irc-servers-setup.c b/src/irc/core/irc-servers-setup.c
+index 56e52edd0..5f1290a2f 100644
+--- a/src/irc/core/irc-servers-setup.c
++++ b/src/irc/core/irc-servers-setup.c
+@@ -101,8 +101,8 @@ static void sig_server_setup_fill_chatnet(IRC_SERVER_CONNECT_REC *conn,
+ 			conn->sasl_mechanism = SASL_MECHANISM_PLAIN;
+ 			if (ircnet->sasl_username != NULL && *ircnet->sasl_username &&
+ 			    ircnet->sasl_password != NULL && *ircnet->sasl_password) {
+-				conn->sasl_username = ircnet->sasl_username;
+-				conn->sasl_password = ircnet->sasl_password;
++				conn->sasl_username = g_strdup(ircnet->sasl_username);
++				conn->sasl_password = g_strdup(ircnet->sasl_password);
+ 			} else
+ 				g_warning("The fields sasl_username and sasl_password are either missing or empty");
+ 		}

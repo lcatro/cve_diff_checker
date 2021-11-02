@@ -1,0 +1,552 @@
+From 5d0d76e88ee2d3236d7e032589d6f1d4ec5f7b1e Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Wed, 16 Aug 2017 23:04:31 +0100
+Subject: [PATCH] CVE-2017-13055/IS-IS: fix an Extended IS Reachability sub-TLV
+
+In isis_print_is_reach_subtlv() one of the case blocks did not check that
+the sub-TLV "V" is actually present and could over-read the input buffer.
+Add a length check to fix that and remove a useless boundary check from
+a loop because the boundary is tested for the full length of "V" before
+the switch block.
+
+Update one of the prior test cases as it turns out it depended on this
+previously incorrect code path to make it to its own malformed structure
+further down the buffer, the bugfix has changed its output.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-isoclns.c                   |   3 +-
+ tests/TESTLIST                    |   1 +
+ tests/isis-extd-isreach-oobr.out  |  39 +++
+ tests/isis-extd-isreach-oobr.pcap | Bin 0 -> 469 bytes
+ tests/isis-seg-fault-1-v.out      | 423 +++++++++++-------------------
+ 5 files changed, 194 insertions(+), 272 deletions(-)
+ create mode 100644 tests/isis-extd-isreach-oobr.out
+ create mode 100644 tests/isis-extd-isreach-oobr.pcap
+
+diff --git a/print-isoclns.c b/print-isoclns.c
+index 06ad90641..0db8fc10a 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -1861,6 +1861,8 @@ isis_print_is_reach_subtlv(netdissect_options *ndo,
+             break;
+         case ISIS_SUBTLV_EXT_IS_REACH_BW_CONSTRAINTS: /* fall through */
+         case ISIS_SUBTLV_EXT_IS_REACH_BW_CONSTRAINTS_OLD:
++            if (subl == 0)
++                break;
+             ND_PRINT((ndo, "%sBandwidth Constraints Model ID: %s (%u)",
+                    ident,
+                    tok2str(diffserv_te_bc_values, "unknown", *tptr),
+@@ -1868,7 +1870,6 @@ isis_print_is_reach_subtlv(netdissect_options *ndo,
+             tptr++;
+             /* decode BCs until the subTLV ends */
+             for (te_class = 0; te_class < (subl-1)/4; te_class++) {
+-                ND_TCHECK2(*tptr, 4);
+                 bw.i = EXTRACT_32BITS(tptr);
+                 ND_PRINT((ndo, "%s  Bandwidth constraint CT%u: %.3f Mbps",
+                        ident,
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 874876924..5866b2858 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -574,6 +574,7 @@ rpki-rtr-oob		rpki-rtr-oob.pcap	rpki-rtr-oob.out	-v -c1
+ lldp_8023_mtu-oobr	lldp_8023_mtu-oobr.pcap	lldp_8023_mtu-oobr.out	-v -c1
+ bgp_vpn_rt-oobr	bgp_vpn_rt-oobr.pcap	bgp_vpn_rt-oobr.out	-v -c1
+ cfm_sender_id-oobr	cfm_sender_id-oobr.pcap	cfm_sender_id-oobr.out	-v -c1
++isis-extd-isreach-oobr	isis-extd-isreach-oobr.pcap	isis-extd-isreach-oobr.out -v -c4
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/isis-extd-isreach-oobr.out b/tests/isis-extd-isreach-oobr.out
+new file mode 100644
+index 000000000..7da29b66d
+--- /dev/null
++++ b/tests/isis-extd-isreach-oobr.out
+@@ -0,0 +1,39 @@
++OSI NLPID 0xfe unknown, length: 33554428
++	0x0000:  fe7f 4a01 0066 0002 00ff ffff f200 0000
++	0x0010:  00c6 0000 007f e6ff 00e6 6800 0000
++unknown CHDLC protocol (0xfafe)
++OSI NLPID 0xfe unknown, length: 33554428
++	0x0000:  fe7f 4a01 f165 0002 0000 0000 0000 0000
++	0x0010:  00c6 0000 007f e6ff 00e6 6800 0000
++IS-IS, length 33554427
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 3 (0)
++	  source-id: 3801.0101.0101,  holding time: 257s, Flags: [unknown circuit type 0x00]
++	  lan-id:    0101.0101.0100.00, Priority: 1, PDU length: 257
++	    Extended IS Reachability TLV #22, length: 12
++	      IS Neighbor: 0d0d.0d0d.0d0d.0d, Metric: 855309, sub-TLVs present (13)
++	        unknown subTLV #13, length: 13
++		    0x0000:  0d0d 0d0d 0d0d 0d0d 0d0d 0d0d 0d
++	      IS Neighbor: 0d0d.0d0d.0d0d.0d, Metric: 855309, sub-TLVs present (13)
++	        unknown subTLV #13, length: 13
++		    0x0000:  0d0d 0d0d 0d0d 0d64 0d0d 0d0d 0d
++	      IS Neighbor: 0d0d.0d0d.0d0d.0d, Metric: 855309, sub-TLVs present (13)
++	        unknown subTLV #13, length: 13
++		    0x0000:  0d0d 0d0d 0d0d 0d0d 0d0d 0d0d 0d
++	      IS Neighbor: 0d0d.0d0d.0d0d.0d, Metric: 855309, sub-TLVs present (13)
++	        unknown subTLV #13, length: 13
++		    0x0000:  1c0d 0d0d 0d0d 670d 0d0d 0d0d 0d
++	      IS Neighbor: 0d0d.0d00.0000.40, Metric: 13391955, sub-TLVs present (3)
++	        unknown subTLV #41, length: 16
++		    0x0000:  0022 0000 0000 0000 0000 0000 0000 0000
++	      IS Neighbor: 0000.0000.0a16.00, Metric: 2097279, no sub-TLVs present
++	      IS Neighbor: 0000.3604.1f01.16, Metric: 70400, no sub-TLVs present
++	      IS Neighbor: 0012.3a01.4996.01, Metric: 8838496, no sub-TLVs present
++	      IS Neighbor: 00c7.8787.8766.87, Metric: 0, sub-TLVs present (64)
++	        unknown subTLV #120, length: 22
++		    0x0000:  0101 0100 f0ff ffff ff01 0101 434c 4945
++		    0x0010:  4e54 0101 011f
++	        Link Local/Remote Identifier subTLV #4, length: 4, 0x04040404
++	        Link Local/Remote Identifier subTLV #4, length: 4, 0x04040404
++	        Link Local/Remote Identifier subTLV #4, length: 4, 0x0404000a
++	        Bandwidth Constraints subTLV #22, length: 0
++		 [|isis]
+diff --git a/tests/isis-extd-isreach-oobr.pcap b/tests/isis-extd-isreach-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c024ab4aebcd165ec9203068167cc545af1fe511
+GIT binary patch
+literal 469
+zcmca|c+)~A1{MY=sQ(XSWB{?lnTTL!IROSGhy)YUoqzxS)q62Aq%klt{Qv*|6G;3R
+z5Z6EZ&+rVaV;fM18eE48)16=c{xy50FbFs*f)xM%KYK2SM$&O6LLSAA7Z5u>rULDN
+z0dzacnMGwAK&}J=h^v~V85sl^fm{nlRKUO>#=}bzNFhbF3|MhGTno?z;84?qhXKfq
+zFu*0opukWM<e9O^Gm0?^16e{=jGogN+wLYXFdT1hZ%=CniaAt>0X@O+0T{&pfedFK
+fPglPXAVZ!74KN@Z$goG#bDAX3Bu3E&{&@@lw1HJI
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/isis-seg-fault-1-v.out b/tests/isis-seg-fault-1-v.out
+index a1b4cdb84..e1f3c2cdc 100644
+--- a/tests/isis-seg-fault-1-v.out
++++ b/tests/isis-seg-fault-1-v.out
+@@ -28,274 +28,155 @@ IS-IS, length 1497
+ 	        unknown subTLV #0, length: 0
+ 	        unknown subTLV #0, length: 0
+ 	        Bandwidth Constraints subTLV #22, length: 0
+-	        Bandwidth Constraints Model ID: Russian dolls (0)
+-	          Bandwidth constraint CT0: 0.000 Mbps
+-	          Bandwidth constraint CT1: 0.000 Mbps
+-	          Bandwidth constraint CT2: 0.000 Mbps
+-	          Bandwidth constraint CT3: 0.000 Mbps
+-	          Bandwidth constraint CT4: 0.000 Mbps
+-	          Bandwidth constraint CT5: 0.000 Mbps
+-	          Bandwidth constraint CT6: -0.000 Mbps
+-	          Bandwidth constraint CT7: 0.000 Mbps
+-	          Bandwidth constraint CT8: 0.000 Mbps
+-	          Bandwidth constraint CT9: 0.000 Mbps
+-	          Bandwidth constraint CT10: 0.000 Mbps
+-	          Bandwidth constraint CT11: 0.000 Mbps
+-	          Bandwidth constraint CT12: 0.000 Mbps
+-	          Bandwidth constraint CT13: 0.000 Mbps
+-	          Bandwidth constraint CT14: -1267650597027719304708096.000 Mbps
+-	          Bandwidth constraint CT15: 0.000 Mbps
+-	          Bandwidth constraint CT16: 0.000 Mbps
+-	          Bandwidth constraint CT17: 0.000 Mbps
+-	          Bandwidth constraint CT18: 0.000 Mbps
+-	          Bandwidth constraint CT19: 0.000 Mbps
+-	          Bandwidth constraint CT20: 0.000 Mbps
+-	          Bandwidth constraint CT21: 0.000 Mbps
+-	          Bandwidth constraint CT22: 0.000 Mbps
+-	          Bandwidth constraint CT23: 0.000 Mbps
+-	          Bandwidth constraint CT24: 0.000 Mbps
+-	          Bandwidth constraint CT25: 0.000 Mbps
+-	          Bandwidth constraint CT26: 0.000 Mbps
+-	          Bandwidth constraint CT27: 0.000 Mbps
+-	          Bandwidth constraint CT28: 0.000 Mbps
+-	          Bandwidth constraint CT29: 0.000 Mbps
+-	          Bandwidth constraint CT30: 0.000 Mbps
+-	          Bandwidth constraint CT31: 0.000 Mbps
+-	          Bandwidth constraint CT32: 0.000 Mbps
+-	          Bandwidth constraint CT33: 0.000 Mbps
+-	          Bandwidth constraint CT34: 0.000 Mbps
+-	          Bandwidth constraint CT35: 0.000 Mbps
+-	          Bandwidth constraint CT36: 0.000 Mbps
+-	          Bandwidth constraint CT37: 0.000 Mbps
+-	          Bandwidth constraint CT38: 16.777 Mbps
+-	          Bandwidth constraint CT39: 0.000 Mbps
+-	          Bandwidth constraint CT40: 0.000 Mbps
+-	          Bandwidth constraint CT41: 0.000 Mbps
+-	          Bandwidth constraint CT42: 0.000 Mbps
+-	          Bandwidth constraint CT43: 0.000 Mbps
+-	          Bandwidth constraint CT44: 0.000 Mbps
+-	          Bandwidth constraint CT45: 0.000 Mbps
+-	          Bandwidth constraint CT46: 0.000 Mbps
+-	          Bandwidth constraint CT47: 0.000 Mbps
+-	          Bandwidth constraint CT48: 0.000 Mbps
+-	          Bandwidth constraint CT49: 0.000 Mbps
+-	          Bandwidth constraint CT50: 0.000 Mbps
+-	          Bandwidth constraint CT51: 0.000 Mbps
+-	          Bandwidth constraint CT52: 0.000 Mbps
+-	          Bandwidth constraint CT53: 0.000 Mbps
+-	          Bandwidth constraint CT54: 0.000 Mbps
+-	          Bandwidth constraint CT55: 0.000 Mbps
+-	          Bandwidth constraint CT56: 0.000 Mbps
+-	          Bandwidth constraint CT57: 0.000 Mbps
+-	          Bandwidth constraint CT58: 0.000 Mbps
+-	          Bandwidth constraint CT59: 0.000 Mbps
+-	          Bandwidth constraint CT60: 0.000 Mbps
+-	          Bandwidth constraint CT61: 0.000 Mbps
+-	          Bandwidth constraint CT62: 0.000 Mbps
+-	          Bandwidth constraint CT63: 0.000 Mbps
+-	          Bandwidth constraint CT64: 0.000 Mbps
+-	          Bandwidth constraint CT65: 0.000 Mbps
+-	          Bandwidth constraint CT66: 0.000 Mbps
+-	          Bandwidth constraint CT67: 0.000 Mbps
+-	          Bandwidth constraint CT68: 0.000 Mbps
+-	          Bandwidth constraint CT69: 0.000 Mbps
+-	          Bandwidth constraint CT70: 0.000 Mbps
+-	          Bandwidth constraint CT71: 0.000 Mbps
+-	          Bandwidth constraint CT72: 0.000 Mbps
+-	          Bandwidth constraint CT73: 0.000 Mbps
+-	          Bandwidth constraint CT74: 0.000 Mbps
+-	          Bandwidth constraint CT75: 0.000 Mbps
+-	          Bandwidth constraint CT76: 0.000 Mbps
+-	          Bandwidth constraint CT77: 0.000 Mbps
+-	          Bandwidth constraint CT78: 0.000 Mbps
+-	          Bandwidth constraint CT79: 0.000 Mbps
+-	          Bandwidth constraint CT80: 0.000 Mbps
+-	          Bandwidth constraint CT81: 0.000 Mbps
+-	          Bandwidth constraint CT82: 0.000 Mbps
+-	          Bandwidth constraint CT83: 0.000 Mbps
+-	          Bandwidth constraint CT84: 0.000 Mbps
+-	          Bandwidth constraint CT85: 0.000 Mbps
+-	          Bandwidth constraint CT86: 0.000 Mbps
+-	          Bandwidth constraint CT87: 0.000 Mbps
+-	          Bandwidth constraint CT88: 0.000 Mbps
+-	          Bandwidth constraint CT89: 0.000 Mbps
+-	          Bandwidth constraint CT90: 0.000 Mbps
+-	          Bandwidth constraint CT91: 0.000 Mbps
+-	          Bandwidth constraint CT92: 0.000 Mbps
+-	          Bandwidth constraint CT93: 0.000 Mbps
+-	          Bandwidth constraint CT94: 0.000 Mbps
+-	          Bandwidth constraint CT95: 0.000 Mbps
+-	          Bandwidth constraint CT96: 0.000 Mbps
+-	          Bandwidth constraint CT97: 0.000 Mbps
+-	          Bandwidth constraint CT98: 0.000 Mbps
+-	          Bandwidth constraint CT99: 0.000 Mbps
+-	          Bandwidth constraint CT100: 0.000 Mbps
+-	          Bandwidth constraint CT101: 0.000 Mbps
+-	          Bandwidth constraint CT102: 0.000 Mbps
+-	          Bandwidth constraint CT103: 0.000 Mbps
+-	          Bandwidth constraint CT104: 0.000 Mbps
+-	          Bandwidth constraint CT105: 0.000 Mbps
+-	          Bandwidth constraint CT106: 0.000 Mbps
+-	          Bandwidth constraint CT107: 0.000 Mbps
+-	          Bandwidth constraint CT108: 0.000 Mbps
+-	          Bandwidth constraint CT109: 0.000 Mbps
+-	          Bandwidth constraint CT110: 334903128525925002608918921216.000 Mbps
+-	          Bandwidth constraint CT111: 0.000 Mbps
+-	          Bandwidth constraint CT112: 0.000 Mbps
+-	          Bandwidth constraint CT113: 0.000 Mbps
+-	          Bandwidth constraint CT114: 0.000 Mbps
+-	          Bandwidth constraint CT115: 0.000 Mbps
+-	          Bandwidth constraint CT116: 0.000 Mbps
+-	          Bandwidth constraint CT117: 0.000 Mbps
+-	          Bandwidth constraint CT118: 0.000 Mbps
+-	          Bandwidth constraint CT119: 0.000 Mbps
+-	          Bandwidth constraint CT120: 0.000 Mbps
+-	          Bandwidth constraint CT121: 0.000 Mbps
+-	          Bandwidth constraint CT122: 0.000 Mbps
+-	          Bandwidth constraint CT123: 0.000 Mbps
+-	          Bandwidth constraint CT124: 0.000 Mbps
+-	          Bandwidth constraint CT125: 0.000 Mbps
+-	          Bandwidth constraint CT126: 0.000 Mbps
+-	          Bandwidth constraint CT127: 0.000 Mbps
+-	          Bandwidth constraint CT128: 0.000 Mbps
+-	          Bandwidth constraint CT129: 0.000 Mbps
+-	          Bandwidth constraint CT130: 0.000 Mbps
+-	          Bandwidth constraint CT131: 0.000 Mbps
+-	          Bandwidth constraint CT132: 0.000 Mbps
+-	          Bandwidth constraint CT133: 0.000 Mbps
+-	          Bandwidth constraint CT134: 0.000 Mbps
+-	          Bandwidth constraint CT135: 0.000 Mbps
+-	          Bandwidth constraint CT136: 0.000 Mbps
+-	          Bandwidth constraint CT137: -4.194 Mbps
+-	          Bandwidth constraint CT138: 0.000 Mbps
+-	          Bandwidth constraint CT139: 0.000 Mbps
+-	          Bandwidth constraint CT140: 0.000 Mbps
+-	          Bandwidth constraint CT141: 0.000 Mbps
+-	          Bandwidth constraint CT142: 0.000 Mbps
+-	          Bandwidth constraint CT143: 0.000 Mbps
+-	          Bandwidth constraint CT144: 0.000 Mbps
+-	          Bandwidth constraint CT145: 0.000 Mbps
+-	          Bandwidth constraint CT146: 0.000 Mbps
+-	          Bandwidth constraint CT147: 0.000 Mbps
+-	          Bandwidth constraint CT148: 0.000 Mbps
+-	          Bandwidth constraint CT149: 0.000 Mbps
+-	          Bandwidth constraint CT150: 0.000 Mbps
+-	          Bandwidth constraint CT151: 0.000 Mbps
+-	          Bandwidth constraint CT152: 0.000 Mbps
+-	          Bandwidth constraint CT153: 0.000 Mbps
+-	          Bandwidth constraint CT154: 16.777 Mbps
+-	          Bandwidth constraint CT155: 0.000 Mbps
+-	          Bandwidth constraint CT156: 0.000 Mbps
+-	          Bandwidth constraint CT157: 0.000 Mbps
+-	          Bandwidth constraint CT158: 0.000 Mbps
+-	          Bandwidth constraint CT159: 0.000 Mbps
+-	          Bandwidth constraint CT160: 0.000 Mbps
+-	          Bandwidth constraint CT161: 0.000 Mbps
+-	          Bandwidth constraint CT162: 0.000 Mbps
+-	          Bandwidth constraint CT163: 0.000 Mbps
+-	          Bandwidth constraint CT164: 0.000 Mbps
+-	          Bandwidth constraint CT165: 0.000 Mbps
+-	          Bandwidth constraint CT166: 0.000 Mbps
+-	          Bandwidth constraint CT167: 0.000 Mbps
+-	          Bandwidth constraint CT168: 0.000 Mbps
+-	          Bandwidth constraint CT169: 0.000 Mbps
+-	          Bandwidth constraint CT170: 0.000 Mbps
+-	          Bandwidth constraint CT171: 0.000 Mbps
+-	          Bandwidth constraint CT172: 0.000 Mbps
+-	          Bandwidth constraint CT173: 0.000 Mbps
+-	          Bandwidth constraint CT174: 0.000 Mbps
+-	          Bandwidth constraint CT175: 0.000 Mbps
+-	          Bandwidth constraint CT176: 0.000 Mbps
+-	          Bandwidth constraint CT177: 0.000 Mbps
+-	          Bandwidth constraint CT178: 0.000 Mbps
+-	          Bandwidth constraint CT179: 1099511.625 Mbps
+-	          Bandwidth constraint CT180: 0.000 Mbps
+-	          Bandwidth constraint CT181: 0.000 Mbps
+-	          Bandwidth constraint CT182: 0.000 Mbps
+-	          Bandwidth constraint CT183: 0.000 Mbps
+-	          Bandwidth constraint CT184: 0.000 Mbps
+-	          Bandwidth constraint CT185: 0.000 Mbps
+-	          Bandwidth constraint CT186: 0.000 Mbps
+-	          Bandwidth constraint CT187: 0.000 Mbps
+-	          Bandwidth constraint CT188: 0.000 Mbps
+-	          Bandwidth constraint CT189: 0.000 Mbps
+-	          Bandwidth constraint CT190: 0.000 Mbps
+-	          Bandwidth constraint CT191: 0.000 Mbps
+-	          Bandwidth constraint CT192: 0.000 Mbps
+-	          Bandwidth constraint CT193: 0.000 Mbps
+-	          Bandwidth constraint CT194: 0.000 Mbps
+-	          Bandwidth constraint CT195: 0.000 Mbps
+-	          Bandwidth constraint CT196: 0.000 Mbps
+-	          Bandwidth constraint CT197: 0.000 Mbps
+-	          Bandwidth constraint CT198: 0.000 Mbps
+-	          Bandwidth constraint CT199: 0.000 Mbps
+-	          Bandwidth constraint CT200: 0.000 Mbps
+-	          Bandwidth constraint CT201: 0.000 Mbps
+-	          Bandwidth constraint CT202: 0.000 Mbps
+-	          Bandwidth constraint CT203: 0.000 Mbps
+-	          Bandwidth constraint CT204: 0.000 Mbps
+-	          Bandwidth constraint CT205: 0.000 Mbps
+-	          Bandwidth constraint CT206: 0.000 Mbps
+-	          Bandwidth constraint CT207: 0.000 Mbps
+-	          Bandwidth constraint CT208: 0.000 Mbps
+-	          Bandwidth constraint CT209: 0.000 Mbps
+-	          Bandwidth constraint CT210: 0.000 Mbps
+-	          Bandwidth constraint CT211: 0.000 Mbps
+-	          Bandwidth constraint CT212: 0.000 Mbps
+-	          Bandwidth constraint CT213: 0.000 Mbps
+-	          Bandwidth constraint CT214: 0.000 Mbps
+-	          Bandwidth constraint CT215: 0.000 Mbps
+-	          Bandwidth constraint CT216: 0.000 Mbps
+-	          Bandwidth constraint CT217: 0.000 Mbps
+-	          Bandwidth constraint CT218: 0.000 Mbps
+-	          Bandwidth constraint CT219: 0.000 Mbps
+-	          Bandwidth constraint CT220: 0.000 Mbps
+-	          Bandwidth constraint CT221: 0.000 Mbps
+-	          Bandwidth constraint CT222: 0.000 Mbps
+-	          Bandwidth constraint CT223: 0.000 Mbps
+-	          Bandwidth constraint CT224: 0.000 Mbps
+-	          Bandwidth constraint CT225: 0.000 Mbps
+-	          Bandwidth constraint CT226: 0.000 Mbps
+-	          Bandwidth constraint CT227: 0.000 Mbps
+-	          Bandwidth constraint CT228: 0.000 Mbps
+-	          Bandwidth constraint CT229: 0.000 Mbps
+-	          Bandwidth constraint CT230: -0.000 Mbps
+-	          Bandwidth constraint CT231: 0.000 Mbps
+-	          Bandwidth constraint CT232: 0.000 Mbps
+-	          Bandwidth constraint CT233: 0.000 Mbps
+-	          Bandwidth constraint CT234: 0.000 Mbps
+-	          Bandwidth constraint CT235: 0.000 Mbps
+-	          Bandwidth constraint CT236: 0.000 Mbps
+-	          Bandwidth constraint CT237: 0.000 Mbps
+-	          Bandwidth constraint CT238: 0.000 Mbps
+-	          Bandwidth constraint CT239: 0.000 Mbps
+-	          Bandwidth constraint CT240: 0.000 Mbps
+-	          Bandwidth constraint CT241: 0.000 Mbps
+-	          Bandwidth constraint CT242: 0.000 Mbps
+-	          Bandwidth constraint CT243: 0.000 Mbps
+-	          Bandwidth constraint CT244: 0.000 Mbps
+-	          Bandwidth constraint CT245: 0.000 Mbps
+-	          Bandwidth constraint CT246: 0.000 Mbps
+-	          Bandwidth constraint CT247: 0.000 Mbps
+-	          Bandwidth constraint CT248: 0.000 Mbps
+-	          Bandwidth constraint CT249: 0.000 Mbps
+-	          Bandwidth constraint CT250: 0.000 Mbps
+-	          Bandwidth constraint CT251: 0.000 Mbps
+-	          Bandwidth constraint CT252: 0.000 Mbps
+-	          Bandwidth constraint CT253: 0.000 Mbps
+-	          Bandwidth constraint CT254: 0.000 Mbps
+-	          Bandwidth constraint CT255: 0.000 Mbps
+-	          Bandwidth constraint CT256: 0.000 Mbps
+-	          Bandwidth constraint CT257: 0.000 Mbps
+-	          Bandwidth constraint CT258: 0.000 Mbps
+-	          Bandwidth constraint CT259: 0.000 Mbps
+-	          Bandwidth constraint CT260: 0.000 Mbps
+-	          Bandwidth constraint CT261: 0.000 Mbps
+-	          Bandwidth constraint CT262: 0.000 Mbps
+-	          Bandwidth constraint CT263: 0.000 Mbps
+-	          Bandwidth constraint CT264: 0.000 Mbps
+-	          Bandwidth constraint CT265: 0.000 Mbps
+-	          Bandwidth constraint CT266: 0.000 Mbps
+-	          Bandwidth constraint CT267: 0.000 Mbps
+-	          Bandwidth constraint CT268: 0.000 Mbps
+-		 [|isis]
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #64, length: 0
++	        unknown subTLV #0, length: 189
++		    0x0000:  0000 0000 0000 0000 0000 0000 0000 0000
++		    0x0010:  00c2 0000 0000 0000 0000 0000 0000 0000
++		    0x0020:  0000 0000 0000 0000 0000 0000 0020 0000
++		    0x0030:  00f0 0000 0000 0000 0000 0000 0000 0000
++		    0x0040:  0000 0000 0000 0000 0000 0000 5900 0000
++		    0x0050:  0000 0000 0000 0000 0000 0000 0000 0000
++		    0x0060:  0000 0000 0000 0000 0000 0000 0000 0000
++		    0x0070:  0000 0000 0000 0000 0000 0000 0000 0000
++		    0x0080:  0000 0000 0000 0000 0000 7d00 0008 ff00
++		    0x0090:  004a 0000 0000 0000 0000 0000 0000 0000
++		    0x00a0:  8000 0000 0000 0000 0000 0000 0000 0000
++		    0x00b0:  0000 0000 0000 0000 0000 0000 00
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 3400.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.2302.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0069.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0200.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0067.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, sub-TLVs present (37)
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 7800.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0065.00, sub-TLVs present (128)
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #66, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 8
++		    0x0000:  0000 0008 ff00 0000
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #121, length: 1
++		    0x0000:  00
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #50, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #0, length: 0
++	        unknown subTLV #132, length: 8
++		    0x0000:  0000 0000 0000 0000
++	        unknown subTLV #0, length: 0
++	      IS Neighbor: 8900.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 2500.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.2500.0000.c9, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0008.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: f700.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.004f.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 3d00.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0080.0002.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.007e.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	      IS Neighbor: 0000.0000.0000.00, no sub-TLVs present
++	    Padding TLV #8, length: 255
++	    Padding TLV #8, length: 255
++	    Padding TLV #8, length: 247
++	    unknown TLV #0, length: 0
++	    unknown TLV #0, length: 0
++	    unknown TLV #0, length: 0
++	    unknown TLV #0, length: 0
++	    Padding TLV #8, length: 155

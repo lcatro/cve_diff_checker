@@ -1,0 +1,145 @@
+From ac0ca050046f1538346f3975487062186195f4ca Mon Sep 17 00:00:00 2001
+From: Bert JW Regeer <bertjw@regeer.org>
+Date: Sun, 2 Feb 2020 15:09:09 -0800
+Subject: [PATCH 1/4] Remove catastrophic backtracking in regex
+
+This updates the regular expression so that there is no longer a chance
+for it to end up catastrophically backtracking and locking up the
+process.
+---
+ waitress/rfc7230.py | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/waitress/rfc7230.py b/waitress/rfc7230.py
+index 97a90a4..cd33c90 100644
+--- a/waitress/rfc7230.py
++++ b/waitress/rfc7230.py
+@@ -40,13 +40,13 @@
+ #                  field-vchar ]
+ 
+ FIELD_VCHAR = "[" + VCHAR + OBS_TEXT + "]"
+-FIELD_CONTENT = FIELD_VCHAR + "([ \t" + VCHAR + OBS_TEXT + "]+" + FIELD_VCHAR + "){,1}"
+-FIELD_VALUE = "(" + FIELD_CONTENT + "){0,}"
++# Field content is more greedy than the ABNF, in that it will match the whole value
++FIELD_CONTENT = FIELD_VCHAR + "+(?:[ \t]+" + FIELD_VCHAR + "+)*"
++# Which allows the field value here to just see if there is even a value in the first place
++FIELD_VALUE = "(?:" + FIELD_CONTENT + ")?"
+ 
+ HEADER_FIELD = re.compile(
+     tobytes(
+         "^(?P<name>" + TOKEN + "):" + OWS + "(?P<value>" + FIELD_VALUE + ")" + OWS + "$"
+     )
+ )
+-
+-OWS_STRIP = re.compile(OWS + "(?P<value>.*?)" + OWS)
+
+From 2fe8e54695ed038dadbb90e03140a1ab395d6629 Mon Sep 17 00:00:00 2001
+From: Bert JW Regeer <bertjw@regeer.org>
+Date: Sun, 2 Feb 2020 15:10:35 -0800
+Subject: [PATCH 2/4] Add header parsing tests with short headers
+
+While fixing the catastrophic backtracking a gap in tests led to a
+potentially bad regex being considered that would have caused issues
+with short header values.
+
+This now adds a test to make sure we don't regress.
+---
+ waitress/tests/test_parser.py | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/waitress/tests/test_parser.py b/waitress/tests/test_parser.py
+index 71703e2..b425131 100644
+--- a/waitress/tests/test_parser.py
++++ b/waitress/tests/test_parser.py
+@@ -433,6 +433,17 @@ def test_parse_header_multiple_values_extra_space(self):
+         self.assertIn("FOO", self.parser.headers)
+         self.assertEqual(self.parser.headers["FOO"], "abrowser/0.001 (C O M M E N T)")
+ 
++    def test_parse_header_short_values(self):
++        from waitress.parser import ParsingError
++
++        data = b"GET /foobar HTTP/1.1\r\none: 1\r\ntwo: 22\r\n"
++        self.parser.parse_header(data)
++
++        self.assertIn("ONE", self.parser.headers)
++        self.assertIn("TWO", self.parser.headers)
++        self.assertEqual(self.parser.headers["ONE"], "1")
++        self.assertEqual(self.parser.headers["TWO"], "22")
++
+ 
+ class Test_split_uri(unittest.TestCase):
+     def _callFUT(self, uri):
+
+From f87abb7320d9acfa2c321481b70974363966bfe5 Mon Sep 17 00:00:00 2001
+From: Bert JW Regeer <bertjw@regeer.org>
+Date: Sun, 2 Feb 2020 15:12:06 -0800
+Subject: [PATCH 3/4] Add bad header that caused catastrophic backtracking
+
+This lets us validate that we won't accidentally cause the same issue
+down the line if we mess with the regular expressions
+---
+ waitress/tests/test_parser.py | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/waitress/tests/test_parser.py b/waitress/tests/test_parser.py
+index b425131..19422a4 100644
+--- a/waitress/tests/test_parser.py
++++ b/waitress/tests/test_parser.py
+@@ -433,6 +433,17 @@ def test_parse_header_multiple_values_extra_space(self):
+         self.assertIn("FOO", self.parser.headers)
+         self.assertEqual(self.parser.headers["FOO"], "abrowser/0.001 (C O M M E N T)")
+ 
++    def test_parse_header_invalid_backtrack_bad(self):
++        from waitress.parser import ParsingError
++
++        data = b"GET /foobar HTTP/1.1\r\nfoo: bar\r\nfoo: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\x10\r\n"
++        try:
++            self.parser.parse_header(data)
++        except ParsingError as e:
++            self.assertIn("Invalid header", e.args[0])
++        else:  # pragma: nocover
++            self.assertTrue(False)
++
+     def test_parse_header_short_values(self):
+         from waitress.parser import ParsingError
+ 
+
+From 51b9bd429a97ac1cadfe4e37938ff7fac84ee642 Mon Sep 17 00:00:00 2001
+From: Bert JW Regeer <bertjw@regeer.org>
+Date: Sun, 2 Feb 2020 15:12:38 -0800
+Subject: [PATCH 4/4] Remove accidental backslash
+
+Noticed this while looking at other tests.
+---
+ waitress/tests/test_parser.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/waitress/tests/test_parser.py b/waitress/tests/test_parser.py
+index 19422a4..91837c7 100644
+--- a/waitress/tests/test_parser.py
++++ b/waitress/tests/test_parser.py
+@@ -55,6 +55,7 @@ def test_received_bad_host_header(self):
+ 
+     def test_received_bad_transfer_encoding(self):
+         from waitress.utilities import ServerNotImplemented
++
+         data = (
+             b"GET /foobar HTTP/1.1\r\n"
+             b"Transfer-Encoding: foo\r\n"
+@@ -211,7 +212,6 @@ def test_parse_header_11_te_chunked(self):
+         self.parser.parse_header(data)
+         self.assertEqual(self.parser.body_rcv.__class__.__name__, "ChunkedReceiver")
+ 
+-
+     def test_parse_header_transfer_encoding_invalid(self):
+         from waitress.parser import TransferEncodingNotImplemented
+ 
+@@ -377,7 +377,7 @@ def test_parse_header_invalid_folding_spacing(self):
+     def test_parse_header_invalid_chars(self):
+         from waitress.parser import ParsingError
+ 
+-        data = b"GET /foobar HTTP/1.1\r\nfoo: bar\r\n\foo: \x0bbaz\r\n"
++        data = b"GET /foobar HTTP/1.1\r\nfoo: bar\r\nfoo: \x0bbaz\r\n"
+         try:
+             self.parser.parse_header(data)
+         except ParsingError as e:

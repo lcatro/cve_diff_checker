@@ -1,0 +1,32 @@
+From d67a9ca6fd06ca65d23e313bdbad1ef4dd3aa0df Mon Sep 17 00:00:00 2001
+From: Gregor Jasny <gjasny@googlemail.com>
+Date: Tue, 6 Jun 2017 17:49:32 +0200
+Subject: [PATCH] ares: Prevent buffer overlow in ares_parse_a_reply
+ (CVE-2017-9454)
+
+This buffer overflow is in the embedded copy of ares that will be
+used unless the external alternative c-ares is used by specifying
+the configure argument --with-c-ares.
+
+It has been found with LibFuzzer from the LLVM project.
+---
+ rutil/dns/ares/ares_parse_a_reply.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/rutil/dns/ares/ares_parse_a_reply.c b/rutil/dns/ares/ares_parse_a_reply.c
+index 2733fe4424..100f3848d7 100644
+--- a/rutil/dns/ares/ares_parse_a_reply.c
++++ b/rutil/dns/ares/ares_parse_a_reply.c
+@@ -103,6 +103,12 @@ int ares_parse_a_reply(const unsigned char *abuf, int alen,
+       rr_class = DNS_RR_CLASS(aptr);
+       rr_len = DNS_RR_LEN(aptr);
+       aptr += RRFIXEDSZ;
++      if (aptr + rr_len > abuf + alen)
++	{
++	  free(rr_name);
++	  status = ARES_EBADRESP;
++	  break;
++	}
+ 
+       if (rr_class == C_IN && rr_type == T_A
+ 	  && rr_len == sizeof(struct in_addr)

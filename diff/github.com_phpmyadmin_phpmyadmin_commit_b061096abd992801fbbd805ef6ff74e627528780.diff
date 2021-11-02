@@ -1,0 +1,72 @@
+From b061096abd992801fbbd805ef6ff74e627528780 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 23 May 2016 09:07:50 +0200
+Subject: [PATCH] Avoid not neeedded urlencode/urldecode steps in multi submits
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ libraries/DisplayResults.php   | 2 +-
+ libraries/mult_submits.lib.php | 4 ++--
+ tbl_row_action.php             | 4 ++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/libraries/DisplayResults.php b/libraries/DisplayResults.php
+index a3d72884801..5dc8c3c8778 100644
+--- a/libraries/DisplayResults.php
++++ b/libraries/DisplayResults.php
+@@ -2788,7 +2788,7 @@ private function _getTableBody(
+                 $whereClauseMap[$row_no][$this->__get('table')] = $where_clause;
+                 $this->__set('whereClauseMap', $whereClauseMap);
+ 
+-                $where_clause_html = urlencode($where_clause);
++                $where_clause_html = htmlspecialchars($where_clause);
+ 
+                 // 1.2.1 Modify link(s) - update row case
+                 if ($displayParts['edit_lnk'] == self::UPDATE_ROW) {
+diff --git a/libraries/mult_submits.lib.php b/libraries/mult_submits.lib.php
+index 5a07a8b3053..2a199a4f7d1 100644
+--- a/libraries/mult_submits.lib.php
++++ b/libraries/mult_submits.lib.php
+@@ -44,7 +44,7 @@ function PMA_getUrlParams(
+         if ($what == 'row_delete') {
+             $_url_params['selected'][] = 'DELETE FROM '
+                 . PMA\libraries\Util::backquote($table)
+-                . ' WHERE ' . urldecode($sval) . ' LIMIT 1;';
++                . ' WHERE ' . $sval . ' LIMIT 1;';
+         } else {
+             $_url_params['selected'][] = $sval;
+         }
+@@ -495,7 +495,7 @@ function PMA_getQueryFromSelected($what, $table, $selected, $views)
+                 // (it's not binlog friendly).
+                 // We don't need the clause because the calling panel permits
+                 // this feature only when there is a unique index.
+-                . ' WHERE ' . urldecode(htmlspecialchars($sval))
++                . ' WHERE ' . htmlspecialchars($sval)
+                 . ';<br />';
+             break;
+         case 'drop_db':
+diff --git a/tbl_row_action.php b/tbl_row_action.php
+index 0780351bf12..6deca0ef347 100644
+--- a/tbl_row_action.php
++++ b/tbl_row_action.php
+@@ -86,7 +86,7 @@
+             && is_array($_REQUEST['rows_to_delete'])
+         ) {
+             foreach ($_REQUEST['rows_to_delete'] as $i => $i_where_clause) {
+-                $where_clause[] = urldecode($i_where_clause);
++                $where_clause[] = $i_where_clause;
+             }
+         }
+         $active_page = 'tbl_change.php';
+@@ -106,7 +106,7 @@
+             && is_array($_REQUEST['rows_to_delete'])
+         ) {
+             foreach ($_REQUEST['rows_to_delete'] as $i => $i_where_clause) {
+-                $where_clause[] = urldecode($i_where_clause);
++                $where_clause[] = $i_where_clause;
+             }
+         }
+         $active_page = 'tbl_export.php';

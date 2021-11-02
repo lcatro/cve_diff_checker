@@ -1,0 +1,71 @@
+From 2d669862df7cd17f539129049f6fb70d17174125 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 22 Mar 2017 14:55:12 -0700
+Subject: [PATCH] CVE-2017-13031/Check for the presence of the entire IPv6
+ fragment header.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+
+Clean up some whitespace in tests/TESTLIST while we're at it.
+---
+ print-frag6.c            |   2 +-
+ tests/TESTLIST           |   7 ++++---
+ tests/ip6_frag_asan.out  |   1 +
+ tests/ip6_frag_asan.pcap | Bin 0 -> 100 bytes
+ 4 files changed, 6 insertions(+), 4 deletions(-)
+ create mode 100644 tests/ip6_frag_asan.out
+ create mode 100644 tests/ip6_frag_asan.pcap
+
+diff --git a/print-frag6.c b/print-frag6.c
+index 03836adbb..fbcabc5b0 100644
+--- a/print-frag6.c
++++ b/print-frag6.c
+@@ -41,7 +41,7 @@ frag6_print(netdissect_options *ndo, register const u_char *bp, register const u
+ 	dp = (const struct ip6_frag *)bp;
+ 	ip6 = (const struct ip6_hdr *)bp2;
+ 
+-	ND_TCHECK(dp->ip6f_offlg);
++	ND_TCHECK(*dp);
+ 
+ 	if (ndo->ndo_vflag) {
+ 		ND_PRINT((ndo, "frag (0x%08x:%d|%ld)",
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index bc1af3663..8e88e93ea 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -536,9 +536,10 @@ isis_stlv_asan-4	isis_stlv_asan-4.pcap		isis_stlv_asan-4.out	-v
+ lldp_mgmt_addr_tlv_asan	lldp_mgmt_addr_tlv_asan.pcap	lldp_mgmt_addr_tlv_asan.out	-v
+ bootp_asan		bootp_asan.pcap			bootp_asan.out		-v
+ ppp_ccp_config_deflate_option_asan	ppp_ccp_config_deflate_option_asan.pcap	ppp_ccp_config_deflate_option_asan.out	-v
+-pim_header_asan		pim_header_asan.pcap		pim_header_asan.out		-v
+-pim_header_asan-2	pim_header_asan-2.pcap		pim_header_asan-2.out		-v
+-pim_header_asan-3	pim_header_asan-3.pcap		pim_header_asan-3.out		-v
++pim_header_asan		pim_header_asan.pcap		pim_header_asan.out	-v
++pim_header_asan-2	pim_header_asan-2.pcap		pim_header_asan-2.out	-v
++pim_header_asan-3	pim_header_asan-3.pcap		pim_header_asan-3.out	-v
++ip6_frag_asan		ip6_frag_asan.pcap		ip6_frag_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/ip6_frag_asan.out b/tests/ip6_frag_asan.out
+new file mode 100644
+index 000000000..2daba4254
+--- /dev/null
++++ b/tests/ip6_frag_asan.out
+@@ -0,0 +1 @@
++IP6 (class 0x51, flowlabel 0xb2100, hlim 16, next-header Fragment (44) payload length: 27136) 452:22:19:0:41a:e4ff:10ff:484d > 2243:80:1400:100:19:ffff:ffff:fffb: [|frag]
+diff --git a/tests/ip6_frag_asan.pcap b/tests/ip6_frag_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..a99a22d126e946eebc1183d8b57fda650fe7abf6
+GIT binary patch
+literal 100
+zcmca|c+)~A1{Q{G5ljymfWQWb8G$&W;Qvc8W+pJdgrR}qz`6emfXWy&J^z=s-A$EN
+qWXNLB5nu^oP-2i|U|^AY@?YS;hp&<|LxTuNzvO=q_|5$vWEucjlpQ4i
+
+literal 0
+HcmV?d00001
+

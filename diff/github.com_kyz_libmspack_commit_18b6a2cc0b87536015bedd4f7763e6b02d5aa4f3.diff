@@ -1,0 +1,41 @@
+From 18b6a2cc0b87536015bedd4f7763e6b02d5aa4f3 Mon Sep 17 00:00:00 2001
+From: Stuart Caie <kyzer@4u.net>
+Date: Sun, 18 Jan 2015 14:20:35 +0000
+Subject: [PATCH] Prevent a 1-byte underread of the input buffer if an
+ odd-sized data block comes just before an uncompressed block header
+
+---
+ libmspack/trunk/ChangeLog     | 8 ++++++++
+ libmspack/trunk/mspack/lzxd.c | 3 +--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/libmspack/trunk/ChangeLog b/libmspack/trunk/ChangeLog
+index dbd13dc..5374ac8 100644
+--- a/libmspack/trunk/ChangeLog
++++ b/libmspack/trunk/ChangeLog
+@@ -1,3 +1,11 @@
++2015-01-18  Stuart Caie <kyzer@4u.net>
++
++	* lzxd_decompress(): the byte-alignment code for reading uncompressed
++	block headers presumed it could wind i_ptr back 2 bytes, but this
++	hasn't been true since READ_BYTES was allowed to read bytes straddling
++	two blocks, leaving just 1 byte in the read buffer. Thanks to Jakub
++	Wilk for finding the issue and providing a sample file.
++
+ 2015-01-17  Stuart Caie <kyzer@4u.net>
+ 
+ 	* GET_UTF8_CHAR(): Remove 5/6-byte encoding support and check decoded
+diff --git a/libmspack/trunk/mspack/lzxd.c b/libmspack/trunk/mspack/lzxd.c
+index 79c7812..2281e7b 100644
+--- a/libmspack/trunk/mspack/lzxd.c
++++ b/libmspack/trunk/mspack/lzxd.c
+@@ -506,8 +506,7 @@ int lzxd_decompress(struct lzxd_stream *lzx, off_t out_bytes) {
+ 	  lzx->intel_started = 1;
+ 
+ 	  /* read 1-16 (not 0-15) bits to align to bytes */
+-	  ENSURE_BITS(16);
+-	  if (bits_left > 16) i_ptr -= 2;
++	  if (bits_left == 0) ENSURE_BITS(16);
+ 	  bits_left = 0; bit_buffer = 0;
+ 
+ 	  /* read 12 bytes of stored R0 / R1 / R2 values */

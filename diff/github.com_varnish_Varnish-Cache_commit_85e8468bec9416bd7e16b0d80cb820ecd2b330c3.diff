@@ -1,0 +1,155 @@
+From 85e8468bec9416bd7e16b0d80cb820ecd2b330c3 Mon Sep 17 00:00:00 2001
+From: Martin Blix Grydeland <martin@varnish-software.com>
+Date: Thu, 12 Mar 2015 15:41:51 +0100
+Subject: [PATCH] Do not consider a CR by itself as a valid line terminator
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Varnish (prior to version 4.0) was not following the standard with
+regard to line separator.
+
+Spotted and analyzed by: Régis Leroy [regilero] regis.leroy@makina-corpus.com
+---
+ bin/varnishd/cache_http.c        |  6 +++---
+ bin/varnishtest/tests/b00040.vtc | 24 ++++++++++++++++++++++++
+ bin/varnishtest/vtc_http.c       | 16 ++++++++--------
+ include/vct.h                    |  3 ++-
+ 4 files changed, 37 insertions(+), 12 deletions(-)
+ create mode 100644 bin/varnishtest/tests/b00040.vtc
+
+diff --git a/bin/varnishd/cache_http.c b/bin/varnishd/cache_http.c
+index 605975b401..5ab7bc0928 100644
+--- a/bin/varnishd/cache_http.c
++++ b/bin/varnishd/cache_http.c
+@@ -502,7 +502,7 @@ http_dissect_hdrs(struct worker *w, struct http *hp, int fd, char *p,
+ 		/* Find end of next header */
+ 		q = r = p;
+ 		while (r < t.e) {
+-			if (!vct_iscrlf(*r)) {
++			if (!vct_iscrlf(r)) {
+ 				r++;
+ 				continue;
+ 			}
+@@ -611,8 +611,8 @@ http_splitline(struct worker *w, int fd, struct http *hp,
+ 
+ 	/* Third field is optional and cannot contain CTL */
+ 	q = p;
+-	if (!vct_iscrlf(*p)) {
+-		for (; !vct_iscrlf(*p); p++)
++	if (!vct_iscrlf(p)) {
++		for (; !vct_iscrlf(p); p++)
+ 			if (!vct_issep(*p) && vct_isctl(*p))
+ 				return (400);
+ 	}
+diff --git a/bin/varnishtest/tests/b00040.vtc b/bin/varnishtest/tests/b00040.vtc
+new file mode 100644
+index 0000000000..3492570eff
+--- /dev/null
++++ b/bin/varnishtest/tests/b00040.vtc
+@@ -0,0 +1,24 @@
++varnishtest "Do not consider CR as a valid line separator"
++
++server s1 {
++	rxreq
++	txresp
++} -start
++
++varnish v1 -vcl+backend {
++	sub vcl_deliver {
++		if (req.http.foo) {
++			set resp.http.Foo = req.http.foo;
++		}
++		if (req.http.bar) {
++			set resp.http.Bar = req.http.bar;
++		}
++	}
++} -start
++
++client c1 {
++	send "GET / HTTP/1.1\r\nFoo: foo\rBar: bar\r\n\r\n"
++	rxresp
++	expect resp.http.foo == "foo\rBar: bar"
++	expect resp.http.bar == "<undef>"
++} -run
+diff --git a/bin/varnishtest/vtc_http.c b/bin/varnishtest/vtc_http.c
+index 5a947f165c..dd2c804fb5 100644
+--- a/bin/varnishtest/vtc_http.c
++++ b/bin/varnishtest/vtc_http.c
+@@ -283,17 +283,17 @@ http_splitheader(struct http *hp, int req)
+ 	hh[n++] = p;
+ 	while (!vct_islws(*p))
+ 		p++;
+-	assert(!vct_iscrlf(*p));
++	assert(!vct_iscrlf(p));
+ 	*p++ = '\0';
+ 
+ 	/* URL/STATUS */
+ 	while (vct_issp(*p))		/* XXX: H space only */
+ 		p++;
+-	assert(!vct_iscrlf(*p));
++	assert(!vct_iscrlf(p));
+ 	hh[n++] = p;
+ 	while (!vct_islws(*p))
+ 		p++;
+-	if (vct_iscrlf(*p)) {
++	if (vct_iscrlf(p)) {
+ 		hh[n++] = NULL;
+ 		q = p;
+ 		p += vct_skipcrlf(p);
+@@ -304,7 +304,7 @@ http_splitheader(struct http *hp, int req)
+ 		while (vct_issp(*p))		/* XXX: H space only */
+ 			p++;
+ 		hh[n++] = p;
+-		while (!vct_iscrlf(*p))
++		while (!vct_iscrlf(p))
+ 			p++;
+ 		q = p;
+ 		p += vct_skipcrlf(p);
+@@ -314,10 +314,10 @@ http_splitheader(struct http *hp, int req)
+ 
+ 	while (*p != '\0') {
+ 		assert(n < MAX_HDR);
+-		if (vct_iscrlf(*p))
++		if (vct_iscrlf(p))
+ 			break;
+ 		hh[n++] = p++;
+-		while (*p != '\0' && !vct_iscrlf(*p))
++		while (*p != '\0' && !vct_iscrlf(p))
+ 			p++;
+ 		q = p;
+ 		p += vct_skipcrlf(p);
+@@ -408,11 +408,11 @@ http_rxchunk(struct http *hp)
+ 	}
+ 	l = hp->prxbuf;
+ 	(void)http_rxchar(hp, 2, 0);
+-	if(!vct_iscrlf(hp->rxbuf[l]))
++	if(!vct_iscrlf(&hp->rxbuf[l]))
+ 		vtc_log(hp->vl, hp->fatal,
+ 		    "Wrong chunk tail[0] = %02x",
+ 		    hp->rxbuf[l] & 0xff);
+-	if(!vct_iscrlf(hp->rxbuf[l + 1]))
++	if(!vct_iscrlf(&hp->rxbuf[l + 1]))
+ 		vtc_log(hp->vl, hp->fatal,
+ 		    "Wrong chunk tail[1] = %02x",
+ 		    hp->rxbuf[l + 1] & 0xff);
+diff --git a/include/vct.h b/include/vct.h
+index fb4c2afa9c..8884755a81 100644
+--- a/include/vct.h
++++ b/include/vct.h
+@@ -54,7 +54,6 @@ vct_is(unsigned char x, uint16_t y)
+ 
+ #define vct_issp(x) vct_is(x, VCT_SP)
+ #define vct_ishex(x) vct_is(x, VCT_HEX)
+-#define vct_iscrlf(x) vct_is(x, VCT_CRLF)
+ #define vct_islws(x) vct_is(x, VCT_LWS)
+ #define vct_isctl(x) vct_is(x, VCT_CTL)
+ #define vct_isdigit(x) vct_is(x, VCT_DIGIT)
+@@ -64,5 +63,7 @@ vct_is(unsigned char x, uint16_t y)
+ #define vct_isxmlnamestart(x) vct_is(x, VCT_XMLNAMESTART)
+ #define vct_isxmlname(x) vct_is(x, VCT_XMLNAMESTART | VCT_XMLNAME)
+ 
++#define vct_iscrlf(p) (((p)[0] == '\r' && (p)[1] == '\n') || (p)[0] == '\n')
++
+ /* NB: VCT always operate in ASCII, don't replace 0x0d with \r etc. */
+ #define vct_skipcrlf(p) (p[0] == 0x0d && p[1] == 0x0a ? 2 : 1)

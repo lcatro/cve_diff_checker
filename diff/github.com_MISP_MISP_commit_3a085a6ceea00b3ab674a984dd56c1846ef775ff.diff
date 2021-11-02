@@ -1,0 +1,39 @@
+From 3a085a6ceea00b3ab674a984dd56c1846ef775ff Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Tue, 7 May 2019 08:58:36 +0200
+Subject: [PATCH] fix: [security] Fix persistent xss via discussion links via
+ javascript:// links
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- low impact as it requires user interaction to trigger
+
+- as reported by João Lucas Melo Brasio from Elytron Security S.A. (https://elytronsecurity.com)
+---
+ app/View/Helper/CommandHelper.php | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/app/View/Helper/CommandHelper.php b/app/View/Helper/CommandHelper.php
+index 8cc94c687f..49c8287740 100644
+--- a/app/View/Helper/CommandHelper.php
++++ b/app/View/Helper/CommandHelper.php
+@@ -68,10 +68,14 @@ private function __handleLinks(&$string, $trigger) {
+                             $replacement = '%MALFORMED URL%';
+                         } else {
+                             if (filter_var(str_replace('$1', $data, $this->__replacement[$trigger]['url']), FILTER_VALIDATE_URL)) {
+-                                $replacement = $this->Html->link(
+-                                    str_replace('$1', $data, $this->__replacement[$trigger]['text']),
+-                                    str_replace('$1', $data, $this->__replacement[$trigger]['url'])
+-                                );
++                                if (substr($data, 0, 7) === 'http://' || substr($data, 0, 8) === 'https://') {
++                                    $replacement = $this->Html->link(
++                                        str_replace('$1', $data, $this->__replacement[$trigger]['text']),
++                                        str_replace('$1', $data, $this->__replacement[$trigger]['url'])
++                                    );
++                                } else {
++                                    $replacement = '%MALFORMED URL%';
++                                }
+                             } else {
+                                 $replacement = '%MALFORMED URL%';
+                             }

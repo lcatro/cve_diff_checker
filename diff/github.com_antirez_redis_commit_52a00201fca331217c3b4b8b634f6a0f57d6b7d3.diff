@@ -1,0 +1,69 @@
+From 52a00201fca331217c3b4b8b634f6a0f57d6b7d3 Mon Sep 17 00:00:00 2001
+From: antirez <antirez@gmail.com>
+Date: Mon, 14 May 2018 17:45:40 +0200
+Subject: [PATCH] Security: fix Lua cmsgpack library stack overflow.
+
+During an auditing effort, the Apple Vulnerability Research team discovered
+a critical Redis security issue affecting the Lua scripting part of Redis.
+
+-- Description of the problem
+
+Several years ago I merged a pull request including many small changes at
+the Lua MsgPack library (that originally I authored myself). The Pull
+Request entered Redis in commit 90b6337c1, in 2014.
+Unfortunately one of the changes included a variadic Lua function that
+lacked the check for the available Lua C stack. As a result, calling the
+"pack" MsgPack library function with a large number of arguments, results
+into pushing into the Lua C stack a number of new values proportional to
+the number of arguments the function was called with. The pushed values,
+moreover, are controlled by untrusted user input.
+
+This in turn causes stack smashing which we believe to be exploitable,
+while not very deterministic, but it is likely that an exploit could be
+created targeting specific versions of Redis executables. However at its
+minimum the issue results in a DoS, crashing the Redis server.
+
+-- Versions affected
+
+Versions greater or equal to Redis 2.8.18 are affected.
+
+-- Reproducing
+
+Reproduce with this (based on the original reproduction script by
+Apple security team):
+
+https://gist.github.com/antirez/82445fcbea6d9b19f97014cc6cc79f8a
+
+-- Verification of the fix
+
+The fix was tested in the following way:
+
+1) I checked that the problem is no longer observable running the trigger.
+2) The Lua code was analyzed to understand the stack semantics, and that
+actually enough stack is allocated in all the cases of mp_pack() calls.
+3) The mp_pack() function was modified in order to show exactly what items
+in the stack were being set, to make sure that there is no silent overflow
+even after the fix.
+
+-- Credits
+
+Thank you to the Apple team and to the other persons that helped me
+checking the patch and coordinating this communication.
+---
+ deps/lua/src/lua_cmsgpack.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/deps/lua/src/lua_cmsgpack.c b/deps/lua/src/lua_cmsgpack.c
+index 90a388f3f3f5..ba75ed455968 100644
+--- a/deps/lua/src/lua_cmsgpack.c
++++ b/deps/lua/src/lua_cmsgpack.c
+@@ -515,6 +515,9 @@ int mp_pack(lua_State *L) {
+     if (nargs == 0)
+         return luaL_argerror(L, 0, "MessagePack pack needs input.");
+ 
++    if (!lua_checkstack(L, nargs))
++        return luaL_argerror(L, 0, "Too many arguments for MessagePack pack.");
++
+     buf = mp_buf_new(L);
+     for(i = 1; i <= nargs; i++) {
+         /* Copy argument i to top of stack for _encode processing;

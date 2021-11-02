@@ -1,0 +1,66 @@
+From 26a6799b9ca80508c05cac7a9a3bef922991520b Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 19:49:28 -0700
+Subject: [PATCH] CVE-2017-13018/PGM: Add a missing bounds check.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-pgm.c              |   4 ++++
+ tests/TESTLIST           |   1 +
+ tests/pgm_opts_asan.out  |   2 ++
+ tests/pgm_opts_asan.pcap | Bin 0 -> 135 bytes
+ 4 files changed, 7 insertions(+)
+ create mode 100644 tests/pgm_opts_asan.out
+ create mode 100644 tests/pgm_opts_asan.pcap
+
+diff --git a/print-pgm.c b/print-pgm.c
+index 6d5c01ce1..9bd6eac53 100644
+--- a/print-pgm.c
++++ b/print-pgm.c
+@@ -457,6 +457,10 @@ pgm_print(netdissect_options *ndo,
+ 		    ND_PRINT((ndo, "[Total option length leaves no room for final option]"));
+ 		    return;
+ 		}
++		if (!ND_TTEST2(*bp, 2)) {
++		    ND_PRINT((ndo, " [|OPT]"));
++		    return;
++		}
+ 		opt_type = *bp++;
+ 		opt_len = *bp++;
+ 		if (opt_len < PGM_MIN_OPT_LEN) {
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 3f5726601..68617bf44 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -519,6 +519,7 @@ esis_snpa_asan-3	esis_snpa_asan-3.pcap		esis_snpa_asan-3.out	-v
+ esis_snpa_asan-4	esis_snpa_asan-4.pcap		esis_snpa_asan-4.out	-v
+ esis_snpa_asan-5	esis_snpa_asan-5.pcap		esis_snpa_asan-5.out	-v
+ dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
++pgm_opts_asan		pgm_opts_asan.pcap		pgm_opts_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/pgm_opts_asan.out b/tests/pgm_opts_asan.out
+new file mode 100644
+index 000000000..cc0607a45
+--- /dev/null
++++ b/tests/pgm_opts_asan.out
+@@ -0,0 +1,2 @@
++IP (tos 0x41,ECT(1), id 0, offset 0, flags [none], proto PGM (113), length 32639, options (unknown 89 [bad length 232]), bad cksum 5959 (->9eb9)!)
++    128.121.89.107 > 89.89.16.63: 128.121.89.107.4 > 89.89.16.63.225: PGM, length 0 0x3414eb1f0022 UNKNOWN type 0x1f OPTS LEN 225 OPT_1F [13]  OPT_06 [26]  PATH_NLA [4] [|OPT]
+diff --git a/tests/pgm_opts_asan.pcap b/tests/pgm_opts_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..f65d06a0d191da44e2a98a522e2ad41db019058f
+GIT binary patch
+literal 135
+zcmca|c+)~A1{MY&U<48IFor-uFf%WsGKl}bp3!OTN?y;IareI*STK7I2ZOs~eLYAu
+zLt$iOLuF)kWTb$7<O}E3SDBtL01bO6&#S-RMC7$RgAzy)51W(#g8;+-P$!1lGPgh?
+W5&suCFfhDfU|7h+!@?lP$N&HUC?Wg+
+
+literal 0
+HcmV?d00001
+

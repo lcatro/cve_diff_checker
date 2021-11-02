@@ -1,0 +1,26 @@
+From 1e5479084bc9852854feb1ba9bf68b52cd127e02 Mon Sep 17 00:00:00 2001
+From: Tor Andersson <tor.andersson@artifex.com>
+Date: Thu, 4 Apr 2019 12:03:02 +0200
+Subject: [PATCH] Bug 700947: Add missing ENDTRY opcode in try/catch/finally
+ byte code.
+
+In one of the code branches in handling exceptions in the catch block
+we forgot to call the ENDTRY opcode to pop the inner hidden try.
+This leads to an unbalanced exception stack which can cause a crash
+due to us jumping to a stack frame that has already been exited.
+---
+ jscompile.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/jscompile.c b/jscompile.c
+index b37776b..a0b276a 100644
+--- a/jscompile.c
++++ b/jscompile.c
+@@ -1023,6 +1023,7 @@ static void ctrycatchfinally(JF, js_Ast *trystm, js_Ast *catchvar, js_Ast *catch
+ 		emitstring(J, F, OP_CATCH, catchvar->string);
+ 		cstm(J, F, catchstm);
+ 		emit(J, F, OP_ENDCATCH);
++		emit(J, F, OP_ENDTRY);
+ 		L3 = emitjump(J, F, OP_JUMP); /* skip past the try block to the finally block */
+ 	}
+ 	label(J, F, L1);

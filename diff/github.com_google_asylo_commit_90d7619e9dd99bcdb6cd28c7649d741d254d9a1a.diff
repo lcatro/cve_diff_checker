@@ -1,0 +1,33 @@
+From 90d7619e9dd99bcdb6cd28c7649d741d254d9a1a Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Thu, 3 Jun 2021 11:02:29 -0700
+Subject: [PATCH] Add sysno check in MessageReader
+
+The sysno in MessageReader is interpreted from the Message header passed
+from the host. A malicious Message header may provide a modified sysno
+to bypass the validation, and overwrites enclave memory. This change
+adds a check for sysno to make sure it matches the expected value.
+
+This issue was reported by Qinkun Bao, Zhaofeng Chen, Mingshen Sun, and
+Kang Li from Baidu Security.
+
+PiperOrigin-RevId: 377328054
+Change-Id: I3ff6f60694d3390f66da89d139cf7cc7b49abaea
+---
+ asylo/platform/system_call/system_call.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/asylo/platform/system_call/system_call.cc b/asylo/platform/system_call/system_call.cc
+index 586263299..2b6ab69ed 100644
+--- a/asylo/platform/system_call/system_call.cc
++++ b/asylo/platform/system_call/system_call.cc
+@@ -115,6 +115,9 @@ extern "C" int64_t enc_untrusted_syscall(int sysno, ...) {
+   // Copy outputs back into pointer parameters.
+   auto response_reader =
+       asylo::system_call::MessageReader({response_buffer, response_size});
++  if (response_reader.sysno() != sysno) {
++    error_handler("system_call.cc: Unexpected sysno in response");
++  }
+   const asylo::primitives::PrimitiveStatus response_status =
+       response_reader.Validate();
+   if (!response_status.ok()) {

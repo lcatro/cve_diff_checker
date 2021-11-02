@@ -1,0 +1,99 @@
+From 877b66b398518d9501513e0860c9f3a8acc70892 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Mon, 6 Mar 2017 20:12:33 -0800
+Subject: [PATCH] CVE-2017-13010/BEEP: Do bounds checking when comparing
+ strings.
+
+This fixes a buffer over-read discovered by Brian 'geeknik' Carpenter.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-beep.c         |  26 +++++++++++++++++---------
+ tests/TESTLIST       |   1 +
+ tests/beep-oobr.out  |   2 ++
+ tests/beep-oobr.pcap | Bin 0 -> 218 bytes
+ 4 files changed, 20 insertions(+), 9 deletions(-)
+ create mode 100644 tests/beep-oobr.out
+ create mode 100644 tests/beep-oobr.pcap
+
+diff --git a/print-beep.c b/print-beep.c
+index ed502b96c..64a162d74 100644
+--- a/print-beep.c
++++ b/print-beep.c
+@@ -28,9 +28,17 @@
+  */
+ 
+ static int
+-l_strnstart(const char *tstr1, u_int tl1, const char *str2, u_int l2)
++l_strnstart(netdissect_options *ndo, const char *tstr1, u_int tl1,
++    const char *str2, u_int l2)
+ {
+-
++	if (!ND_TTEST2(*str2, tl1)) {
++		/*
++		 * We don't have tl1 bytes worth of captured data
++		 * for the string, so we can't check for this
++		 * string.
++		 */
++		return 0;
++	}
+ 	if (tl1 > l2)
+ 		return 0;
+ 
+@@ -41,19 +49,19 @@ void
+ beep_print(netdissect_options *ndo, const u_char *bp, u_int length)
+ {
+ 
+-	if (l_strnstart("MSG", 4, (const char *)bp, length)) /* A REQuest */
++	if (l_strnstart(ndo, "MSG", 4, (const char *)bp, length)) /* A REQuest */
+ 		ND_PRINT((ndo, " BEEP MSG"));
+-	else if (l_strnstart("RPY ", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "RPY ", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP RPY"));
+-	else if (l_strnstart("ERR ", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "ERR ", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP ERR"));
+-	else if (l_strnstart("ANS ", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "ANS ", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP ANS"));
+-	else if (l_strnstart("NUL ", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "NUL ", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP NUL"));
+-	else if (l_strnstart("SEQ ", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "SEQ ", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP SEQ"));
+-	else if (l_strnstart("END", 4, (const char *)bp, length))
++	else if (l_strnstart(ndo, "END", 4, (const char *)bp, length))
+ 		ND_PRINT((ndo, " BEEP END"));
+ 	else
+ 		ND_PRINT((ndo, " BEEP (payload or undecoded)"));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5dad008ef..080a00fbd 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -440,6 +440,7 @@ decnet-shorthdr-oobr	decnet-shorthdr-oobr.pcap	decnet-shorthdr-oobr.out
+ isakmp-3948-oobr-2	isakmp-3948-oobr-2.pcap		isakmp-3948-oobr-2.out
+ ieee802.11_rates_oobr	ieee802.11_rates_oobr.pcap	ieee802.11_rates_oobr.out
+ ipv6-mobility-header-oobr	ipv6-mobility-header-oobr.pcap	ipv6-mobility-header-oobr.out
++beep-oobr		beep-oobr.pcap			beep-oobr.out
+ 
+ # bad packets from Kamil Frankowicz
+ snmp-heapoverflow-1	snmp-heapoverflow-1.pcap	snmp-heapoverflow-1.out
+diff --git a/tests/beep-oobr.out b/tests/beep-oobr.out
+new file mode 100644
+index 000000000..ba46f2899
+--- /dev/null
++++ b/tests/beep-oobr.out
+@@ -0,0 +1,2 @@
++unknown ip 3
++IP6 3030:3030:3030:3030:3030:3030:3030:3030.10288 > 3030:3030:3030:3030:3030:3030:3030:3030.12336: Flags [.U], seq 808464432:808476740, ack 808464432, win 12336, urg 12336, options [eol], length 12308 BEEP (payload or undecoded)
+diff --git a/tests/beep-oobr.pcap b/tests/beep-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea3853b452ad71442b60efd7c158f5dee708a00c
+GIT binary patch
+literal 218
+ycmca|c+)~A1{MYbC~#n4V0g*^=Nbe8`7k+}&@c;fz^1biv_k_)MLm>_)r9~o2q|#@
+
+literal 0
+HcmV?d00001
+

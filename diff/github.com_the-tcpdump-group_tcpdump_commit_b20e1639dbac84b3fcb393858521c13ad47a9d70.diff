@@ -1,0 +1,667 @@
+From b20e1639dbac84b3fcb393858521c13ad47a9d70 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 22 Mar 2017 10:59:47 -0700
+Subject: [PATCH] CVE-2017-13026/IS-IS: Clean up processing of subTLVs.
+
+Add bounds checks, do a common check to make sure we captured the entire
+subTLV, add checks to make sure the subTLV fits within the TLV.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add tests using the capture files supplied by the reporter(s), modified
+so the capture files won't be rejected as an invalid capture.
+
+Update existing tests for changes to IS-IS dissector.
+---
+ print-isoclns.c                  |  52 ++++++++++----
+ tests/TESTLIST                   |   4 ++
+ tests/isis-extd-ipreach-oobr.out |  17 +----
+ tests/isis-seg-fault-2-v.out     | 120 ++-----------------------------
+ tests/isis_stlv_asan-2.out       |  22 ++++++
+ tests/isis_stlv_asan-2.pcap      | Bin 0 -> 323 bytes
+ tests/isis_stlv_asan-3.out       |  23 ++++++
+ tests/isis_stlv_asan-3.pcap      | Bin 0 -> 323 bytes
+ tests/isis_stlv_asan-4.out       |  28 ++++++++
+ tests/isis_stlv_asan-4.pcap      | Bin 0 -> 323 bytes
+ tests/isis_stlv_asan.out         |  25 +++++++
+ tests/isis_stlv_asan.pcap        | Bin 0 -> 323 bytes
+ tests/kday6.out                  | 100 +-------------------------
+ 13 files changed, 145 insertions(+), 246 deletions(-)
+ create mode 100644 tests/isis_stlv_asan-2.out
+ create mode 100644 tests/isis_stlv_asan-2.pcap
+ create mode 100644 tests/isis_stlv_asan-3.out
+ create mode 100644 tests/isis_stlv_asan-3.pcap
+ create mode 100644 tests/isis_stlv_asan-4.out
+ create mode 100644 tests/isis_stlv_asan-4.pcap
+ create mode 100644 tests/isis_stlv_asan.out
+ create mode 100644 tests/isis_stlv_asan.pcap
+
+diff --git a/print-isoclns.c b/print-isoclns.c
+index 38c24d959..eb22759be 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -1403,6 +1403,7 @@ isis_print_mt_port_cap_subtlv(netdissect_options *ndo,
+ 
+   while (len > 2)
+   {
++    ND_TCHECK2(*tptr, 2);
+     stlv_type = *(tptr++);
+     stlv_len  = *(tptr++);
+ 
+@@ -1415,11 +1416,18 @@ isis_print_mt_port_cap_subtlv(netdissect_options *ndo,
+     /*len -= TLV_TYPE_LEN_OFFSET;*/
+     len = len -2;
+ 
++    /* Make sure the subTLV fits within the space left */
++    if (len < stlv_len)
++      goto trunc;
++    /* Make sure the entire subTLV is in the captured data */
++    ND_TCHECK2(*(tptr), stlv_len);
++
+     switch (stlv_type)
+     {
+       case ISIS_SUBTLV_SPB_MCID:
+       {
+-        ND_TCHECK2(*(tptr), ISIS_SUBTLV_SPB_MCID_MIN_LEN);
++      	if (stlv_len < ISIS_SUBTLV_SPB_MCID_MIN_LEN)
++      	  goto trunc;
+ 
+         subtlv_spb_mcid = (const struct isis_subtlv_spb_mcid *)tptr;
+ 
+@@ -1434,15 +1442,17 @@ isis_print_mt_port_cap_subtlv(netdissect_options *ndo,
+ 
+           /*tptr += SPB_MCID_MIN_LEN;
+             len -= SPB_MCID_MIN_LEN; */
+-        tptr = tptr + sizeof(struct isis_subtlv_spb_mcid);
+-        len = len - sizeof(struct isis_subtlv_spb_mcid);
++        tptr = tptr + ISIS_SUBTLV_SPB_MCID_MIN_LEN;
++        len = len - ISIS_SUBTLV_SPB_MCID_MIN_LEN;
++        stlv_len = stlv_len - ISIS_SUBTLV_SPB_MCID_MIN_LEN;
+ 
+         break;
+       }
+ 
+       case ISIS_SUBTLV_SPB_DIGEST:
+       {
+-        ND_TCHECK2(*(tptr), ISIS_SUBTLV_SPB_DIGEST_MIN_LEN);
++        if (stlv_len < ISIS_SUBTLV_SPB_DIGEST_MIN_LEN)
++          goto trunc;
+ 
+         ND_PRINT((ndo, "\n\t        RES: %d V: %d A: %d D: %d",
+                         (*(tptr) >> 5), (((*tptr)>> 4) & 0x01),
+@@ -1461,18 +1471,15 @@ isis_print_mt_port_cap_subtlv(netdissect_options *ndo,
+         }
+ 
+         len = len - ISIS_SUBTLV_SPB_DIGEST_MIN_LEN;
++        stlv_len = stlv_len - ISIS_SUBTLV_SPB_DIGEST_MIN_LEN;
+ 
+         break;
+       }
+ 
+       case ISIS_SUBTLV_SPB_BVID:
+       {
+-        ND_TCHECK2(*(tptr), stlv_len);
+-
+-        while (len >= ISIS_SUBTLV_SPB_BVID_MIN_LEN)
++        while (stlv_len >= ISIS_SUBTLV_SPB_BVID_MIN_LEN)
+         {
+-          ND_TCHECK2(*(tptr), ISIS_SUBTLV_SPB_BVID_MIN_LEN);
+-
+           ND_PRINT((ndo, "\n\t           ECT: %08x",
+                       EXTRACT_32BITS(tptr)));
+ 
+@@ -1485,14 +1492,17 @@ isis_print_mt_port_cap_subtlv(netdissect_options *ndo,
+ 
+           tptr = tptr + 2;
+           len = len - ISIS_SUBTLV_SPB_BVID_MIN_LEN;
++          stlv_len = stlv_len - ISIS_SUBTLV_SPB_BVID_MIN_LEN;
+         }
+ 
+         break;
+       }
+ 
+       default:
+-          break;
++        break;
+     }
++    tptr += stlv_len;
++    len -= stlv_len;
+   }
+ 
+   return 0;
+@@ -1511,6 +1521,7 @@ isis_print_mt_capability_subtlv(netdissect_options *ndo,
+ 
+   while (len > 2)
+   {
++    ND_TCHECK2(*tptr, 2);
+     stlv_type = *(tptr++);
+     stlv_len  = *(tptr++);
+ 
+@@ -1522,11 +1533,17 @@ isis_print_mt_capability_subtlv(netdissect_options *ndo,
+ 
+     len = len - 2;
+ 
++    /* Make sure the subTLV fits within the space left */
++    if (len < stlv_len)
++      goto trunc;
++    /* Make sure the entire subTLV is in the captured data */
++    ND_TCHECK2(*(tptr), stlv_len);
++
+     switch (stlv_type)
+     {
+       case ISIS_SUBTLV_SPB_INSTANCE:
+-
+-          ND_TCHECK2(*tptr, ISIS_SUBTLV_SPB_INSTANCE_MIN_LEN);
++          if (stlv_len < ISIS_SUBTLV_SPB_INSTANCE_MIN_LEN)
++            goto trunc;
+ 
+           ND_PRINT((ndo, "\n\t        CIST Root-ID: %08x", EXTRACT_32BITS(tptr)));
+           tptr = tptr+4;
+@@ -1548,10 +1565,12 @@ isis_print_mt_capability_subtlv(netdissect_options *ndo,
+           tmp = *(tptr++);
+ 
+           len = len - ISIS_SUBTLV_SPB_INSTANCE_MIN_LEN;
++          stlv_len = stlv_len - ISIS_SUBTLV_SPB_INSTANCE_MIN_LEN;
+ 
+           while (tmp)
+           {
+-            ND_TCHECK2(*tptr, ISIS_SUBTLV_SPB_INSTANCE_VLAN_TUPLE_LEN);
++            if (stlv_len < ISIS_SUBTLV_SPB_INSTANCE_VLAN_TUPLE_LEN)
++              goto trunc;
+ 
+             ND_PRINT((ndo, "\n\t         U:%d, M:%d, A:%d, RES:%d",
+                       *(tptr) >> 7, (*(tptr) >> 6) & 0x01,
+@@ -1569,14 +1588,15 @@ isis_print_mt_capability_subtlv(netdissect_options *ndo,
+ 
+             tptr = tptr + 3;
+             len = len - ISIS_SUBTLV_SPB_INSTANCE_VLAN_TUPLE_LEN;
++            stlv_len = stlv_len - ISIS_SUBTLV_SPB_INSTANCE_VLAN_TUPLE_LEN;
+             tmp--;
+           }
+ 
+           break;
+ 
+       case ISIS_SUBTLV_SPBM_SI:
+-
+-          ND_TCHECK2(*tptr, 8);
++          if (stlv_len < 8)
++            goto trunc;
+ 
+           ND_PRINT((ndo, "\n\t        BMAC: %08x", EXTRACT_32BITS(tptr)));
+           tptr = tptr+4;
+@@ -1608,6 +1628,8 @@ isis_print_mt_capability_subtlv(netdissect_options *ndo,
+       default:
+         break;
+     }
++    tptr += stlv_len;
++    len -= stlv_len;
+   }
+   return 0;
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 4c7ab50e2..9181bdf0d 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -528,6 +528,10 @@ mobility_opt_asan	mobility_opt_asan.pcap		mobility_opt_asan.out	-v
+ mobility_opt_asan_2	mobility_opt_asan_2.pcap	mobility_opt_asan_2.out	-v
+ mobility_opt_asan_3	mobility_opt_asan_3.pcap	mobility_opt_asan_3.out	-v
+ mobility_opt_asan_4	mobility_opt_asan_4.pcap	mobility_opt_asan_4.out	-v
++isis_stlv_asan		isis_stlv_asan.pcap		isis_stlv_asan.out	-v
++isis_stlv_asan-2	isis_stlv_asan-2.pcap		isis_stlv_asan-2.out	-v
++isis_stlv_asan-3	isis_stlv_asan-3.pcap		isis_stlv_asan-3.out	-v
++isis_stlv_asan-4	isis_stlv_asan-4.pcap		isis_stlv_asan-4.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/isis-extd-ipreach-oobr.out b/tests/isis-extd-ipreach-oobr.out
+index 40555fab9..a8a1fe6f2 100644
+--- a/tests/isis-extd-ipreach-oobr.out
++++ b/tests/isis-extd-ipreach-oobr.out
+@@ -24,22 +24,7 @@
+ 	         AUX-MCID: ID: 69, Name: EIEEEIEEEIEEEIEEEIEEEIEEEIEEEIEE
+ 	              Lvl: 17737, Digest: 45 45 45 49 45 45 45 49 45 45 45 49 45 45 45 49  [|isis]
+ 	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
+-	       unknown subTLV #69, length: 73
+-	       unknown subTLV #69, length: 69
++		 [|isis]
+ 	      0x0000:  0000 0466 0049 4545 4549 4545 4549 4545
+ 	      0x0010:  4549 4545 4549 4545 4549 4545 4549 4545
+ 	      0x0020:  4549 4545 4549 4545 4549 4545 4549 4545
+diff --git a/tests/isis-seg-fault-2-v.out b/tests/isis-seg-fault-2-v.out
+index 329a4854a..bbbb55fe3 100644
+--- a/tests/isis-seg-fault-2-v.out
++++ b/tests/isis-seg-fault-2-v.out
+@@ -5,129 +5,17 @@ IS-IS, length 1497
+ 	    Multi-Topology Capability TLV #144, length: 1
+ 	      O: 1, RES: 4, MTID(s): 3073
+ 	      unknown subTLV #4, length: 3
+-	      unknown subTLV #73, length: 0
+-	      unknown subTLV #10, length: 132
+-	      unknown subTLV #4, length: 10
+-	      unknown subTLV #0, length: 10
+-	      unknown subTLV #0, length: 55
+-	      SPBM Service Identifier and Unicast Address subTLV #3, length: 0
+-	        BMAC: 00000606c201, RES: 2, VID: 2456
+-	      unknown subTLV #204, length: 83
++	      unknown subTLV #132, length: 4
++	      unknown subTLV #55, length: 3
++	      unknown subTLV #6, length: 6
+ 	      unknown subTLV #8, length: 191
+ 	      unknown subTLV #0, length: 0
+ 	      unknown subTLV #0, length: 0
+ 	      unknown subTLV #0, length: 0
+ 	      unknown subTLV #0, length: 0
+ 	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #82, length: 0
+-	      unknown subTLV #0, length: 86
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 37
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 108
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #48, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #172, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #76, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 90
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 90
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 107
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+ 	      unknown subTLV #0, length: 37
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #2, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 92
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #113, length: 90
+-	      unknown subTLV #0, length: 230
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #79, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #234, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #64, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #37, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #2, length: 0
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #0, length: 0
++		 [|isis]
+ 	    Area address(es) TLV #1, length: 4
+ 	      Area address (length: 3): 49.000a
+ 	    IPv4 Interface address(es) TLV #132, length: 4
+diff --git a/tests/isis_stlv_asan-2.out b/tests/isis_stlv_asan-2.out
+new file mode 100644
+index 000000000..a2c0b173d
+--- /dev/null
++++ b/tests/isis_stlv_asan-2.out
+@@ -0,0 +1,22 @@
++UI 22! IS-IS, length 469869187
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 224 (224)
++	  source-id: fed0.f90f.58af,  holding time: 34047s, Flags: [unknown circuit type 0x00]
++	  lan-id:    0100.0088.a201.1c, Priority: 65, PDU length: 4096
++	    unknown TLV #0, length: 12
++		0x0000:  0722 0583 1b01 0010 0505 0505
++	    Area address(es) TLV #1, length: 157
++	    IS Reachability TLV #2, length: 2
++	      bogus virtual flag 0x02
++	    IS Reachability TLV #2, length: 2
++	      bogus virtual flag 0x02
++	    IS Reachability TLV #2, length: 2
++	      bogus virtual flag 0x90
++	    Multi-Topology Capability TLV #144, length: 144
++	      O: 1, RES: 1, MTID(s): 144
++	      unknown subTLV #144, length: 2
++	      unknown subTLV #2, length: 0
++	      unknown subTLV #16, length: 1
++	      unknown subTLV #224, length: 0
++	      unknown subTLV #59, length: 0
++	      unknown subTLV #5, length: 166
++		 [|isis] [|isis]
+diff --git a/tests/isis_stlv_asan-2.pcap b/tests/isis_stlv_asan-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c45050465d4fdd82c5324cfabedf2696746a6907
+GIT binary patch
+literal 323
+zcmca|c+)~A1{MZ}hW`!>Kp@S?z>p23fAUAHZ}~3(=65V&lwsguS7K-e$_g;feZcVV
+z0!-c!s2(QI3YKRD0<anehDi$+Ffa&r%>4hq<^LrHOr;=Y#{ZDj{jcB3!0=X{A>xMu
+z&=FuD2_!{8Kn#c(SSJOCIt4oycsjW<GO&t(RWJj!F#P||z`)P^f`NBiL@+ahAQK$?
+zXX<47%ETnjB*CNr7lbh;Kmd~x6BEQ|)(ou67A!ae1-H(eJ#&VY(b?JA*xFej1xSN|
+KHi(27!2kd?7g2uz
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/isis_stlv_asan-3.out b/tests/isis_stlv_asan-3.out
+new file mode 100644
+index 000000000..294322931
+--- /dev/null
++++ b/tests/isis_stlv_asan-3.out
+@@ -0,0 +1,23 @@
++UI 22! IS-IS, length 469869187
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 224 (224)
++	  source-id: fed0.f90f.58af,  holding time: 34047s, Flags: [unknown circuit type 0x00]
++	  lan-id:    0100.0088.a201.1c, Priority: 65, PDU length: 4096
++	    unknown TLV #0, length: 12
++		0x0000:  0722 0583 1b01 0010 019d e000
++	    unknown TLV #254, length: 0
++	    Prefix Neighbors TLV #5, length: 146
++	      Metric Block, Default Metric: 32, Internal
++		  Expense Metric: 0, Internal
++		  Error Metric: 0, Internal
++		Address: 88.99ff.ffff.7fb5.0000/76
++		Address: isonsap_string: illegal length/948
++		Address: 95/8
++		Address: 02/8
++		Address: 02/8
++		Address: 02/8
++		Address: 90/8
++	    Multi-Topology Capability TLV #144, length: 144
++	      O: 1, RES: 1, MTID(s): 0
++	      unknown subTLV #107, length: 0
++	      unknown subTLV #0, length: 208
++		 [|isis] [|isis]
+diff --git a/tests/isis_stlv_asan-3.pcap b/tests/isis_stlv_asan-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5fa12e125ffa24daa044d7af8697ab1564b39e2
+GIT binary patch
+literal 323
+zcmca|c+)~A1{MZ}hW`!>Kp@S?z>p23fAUAHZ}~3(=65V&lwsguS7K-e$_g;feZcVV
+z0!-c!s2(QIijZeuowQ&91A}nK%>V!Y*KcKDcq`8k@dIe?lX_vcPe2+1fRcY06kt3Y
+ziontcML@0y2#A46Fd-o!!NA1C^oEJ?Kahd|2_^-m-%LzXq1*`&0P@=fUV);NmX`^P
+o0t^m}41TU5x{iK+{-J)(t}Ze_9WVeifDy?6urQh_>%pb~0ODClxBvhE
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/isis_stlv_asan-4.out b/tests/isis_stlv_asan-4.out
+new file mode 100644
+index 000000000..eb88a70c8
+--- /dev/null
++++ b/tests/isis_stlv_asan-4.out
+@@ -0,0 +1,28 @@
++UI 22! Pad! IS-IS, length 1644274306
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 224 (224)
++	  source-id: fe02.0000.d0f9,  holding time: 3928s, Flags: [unknown circuit type 0x00]
++	  lan-id:    1000.4101.0000.88, Priority: 127, PDU length: 44959
++	    unknown TLV #162, length: 1
++		0x0000:  e2
++	    IS Reachability TLV #2, length: 12
++	      bogus virtual flag 0x07
++	      IS Neighbor: 0100.1001.9de0.00, Default Metric: 34, Internal
++		  Delay Metric: 5, Internal
++		  Error Metric: 27, Internal
++	    Authentication TLV #10, length: 1
++	      unknown Authentication type 0x05: 
++	    unknown TLV #146, length: 32
++		0x0000:  2020 2020 2020 2020 2020 2020 2020 2020
++		0x0010:  2020 2020 2020 2020 2020 2220 2020 2020
++	    unknown TLV #32, length: 32
++		0x0000:  2000 0001 0020 2020 2020 2020 207f 0020
++		0x0010:  2020 2020 2020 2020 2020 2e20 2020 20c9
++	    unknown TLV #32, length: 32
++		0x0000:  2020 2010 0020 2020 2020 0b20 2020 2020
++		0x0010:  2020 2020 2020 8181 7281 8181 8181 8181
++	    Multi-Topology-Aware Port Capability TLV #143, length: 129
++	       RES: 8, MTID(s): 385
++	       unknown subTLV #129, length: 68
++	       unknown subTLV #32, length: 32
++	       unknown subTLV #129, length: 129
++		 [|isis] [|isis]
+diff --git a/tests/isis_stlv_asan-4.pcap b/tests/isis_stlv_asan-4.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..9ecc50cde0a59387c8e10e7670f6128399ed8382
+GIT binary patch
+literal 323
+zcmca|c+)~A1{MZ}1_m&YW@KQ<2C{zgN33soDZl{YcPwH|l40OsS7K-eas?RYK4AFA
+z#K3R?q-Oqq0R~5innz4PC9H5IT#T%f6mSD2m=ps8BLj?G4`%^I^gyB~L4<+;1DN6l
+zlMte@v8WLO`azTnl!Hd)A@S?~|Nr0U?BnVf6ddXV6bG6^$co0sG$aEW8yS&#pzs2D
+F832q9R;2&{
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/isis_stlv_asan.out b/tests/isis_stlv_asan.out
+new file mode 100644
+index 000000000..c19cf7050
+--- /dev/null
++++ b/tests/isis_stlv_asan.out
+@@ -0,0 +1,25 @@
++UI 22! IS-IS, length 469869187
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 224 (224)
++	  source-id: fed0.f90f.58af,  holding time: 34047s, Flags: [unknown circuit type 0x00]
++	  lan-id:    0105.0088.a201.00, Priority: 65, PDU length: 4096
++	    IS Reachability TLV #2, length: 12
++	      bogus virtual flag 0x07
++	      IS Neighbor: 0100.1001.9de0.00, Default Metric: 34, Internal
++		  Delay Metric: 5, Internal
++		  Error Metric: 27, Internal
++	    unknown TLV #254, length: 3
++		0x0000:  05f5 20
++	    unknown TLV #32, length: 32
++		0x0000:  2020 2020 2020 2020 2020 202d 2020 2020
++		0x0010:  2020 2020 2020 2020 2020 03e8 2020 2020
++	    unknown TLV #32, length: 32
++		0x0000:  2020 2020 2020 2020 2020 207f 0020 2020
++		0x0010:  2026 2020 2020 2020 2020 2020 2020 8f8f
++	    Multi-Topology-Aware Port Capability TLV #143, length: 143
++	       RES: 8, MTID(s): 3983
++	       unknown subTLV #143, length: 143
++		 [|isis]
++	    Multi-Topology-Aware Port Capability TLV #143, length: 143
++	       RES: 8, MTID(s): 3983
++	       unknown subTLV #143, length: 143
++		 [|isis] [|isis]
+diff --git a/tests/isis_stlv_asan.pcap b/tests/isis_stlv_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..4960726385cd41856400af016370522e2cd40666
+GIT binary patch
+literal 323
+zcmca|c+)~A1{MZ}hW`!>Kp@S?z>p23fAUAHZ}~3(=65V&lwsguS7K-e$_g;feZcVV
+z0!-eKk(B``&%gwfXGO>}vwl@T0lFwW1?Cs1d?2r$0VJdbB4D5&7hwL3OJ)GX0d1vy
+A(*OVf
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/kday6.out b/tests/kday6.out
+index 8c4929363..0c11b5da9 100644
+--- a/tests/kday6.out
++++ b/tests/kday6.out
+@@ -5,105 +5,7 @@ FRF.16 Frag, seq 693, Flags [Begin], UI e8! IS-IS, length 301989913
+ 	    Multi-Topology Capability TLV #144, length: 137
+ 	      O: 0, RES: 4, MTID(s): 3945
+ 	      unknown subTLV #8, length: 233
+-	      unknown subTLV #18, length: 0
+-	      unknown subTLV #37, length: 144
+-	      unknown subTLV #137, length: 79
+-	      unknown subTLV #105, length: 8
+-	      unknown subTLV #0, length: 69
+-	      unknown subTLV #0, length: 0
+-	      unknown subTLV #52, length: 144
+-	      unknown subTLV #64, length: 64
+-	      SPB Instance subTLV #1, length: 64
+-	        CIST Root-ID: 06a516cc 09370acc, Path Cost: ffffff7f, Prio: 48090
+-	        RES: 1031, V: 1, SPSource-ID: 324444, No of Trees: 5
+-	         U:0, M:0, A:0, RES:22, ECT: 144a2d80, BVID: 256, SPVID: 1040
+-	         U:0, M:1, A:1, RES:14, ECT: 55000001, BVID: 16, SPVID: 2058
+-	         U:1, M:0, A:0, RES:12, ECT: f3ac2b26, BVID: 2499, SPVID: 185
+-	         U:1, M:0, A:1, RES:5, ECT: 68735440, BVID: 1216, SPVID: 3072
+-	         U:1, M:1, A:1, RES:23, ECT: 020000f7, BVID: 32, SPVID: 0
+-	      unknown subTLV #132, length: 181
+-	      unknown subTLV #156, length: 190
+-	      unknown subTLV #255, length: 255
+-	      unknown subTLV #255, length: 255
+-	      unknown subTLV #0, length: 64
+-	      unknown subTLV #6, length: 62
+-	      unknown subTLV #136, length: 204
+-	      unknown subTLV #9, length: 16
+-	      unknown subTLV #4, length: 16
+-	      unknown subTLV #5, length: 148
+-	      unknown subTLV #0, length: 0
+-	      SPB Instance subTLV #1, length: 1
+-	        CIST Root-ID: 080a26a6 318b8cf3, Path Cost: a5d38ec4, Prio: 31240
+-	        RES: 1864, V: 1, SPSource-ID: 133120, No of Trees: 45
+-	         U:0, M:0, A:0, RES:0, ECT: cc09370a, BVID: 3496, SPVID: 1
+-	         U:1, M:0, A:1, RES:27, ECT: 16274ce2, BVID: 3423, SPVID: 860
+-	         U:1, M:1, A:0, RES:10, ECT: 80100410, BVID: 89, SPVID: 1093
+-	         U:0, M:0, A:0, RES:16, ECT: 04106e55, BVID: 0, SPVID: 1
+-	         U:0, M:0, A:0, RES:1, ECT: 080a8cf3, BVID: 2754, SPVID: 2854
+-	         U:1, M:0, A:0, RES:28, ECT: 0e2d0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:27, ECT: 01001201, BVID: 2104, SPVID: 899
+-	         U:1, M:0, A:0, RES:3, ECT: 83838383, BVID: 2104, SPVID: 899
+-	         U:0, M:1, A:0, RES:15, ECT: 00600641, BVID: 2300, SPVID: 3081
+-	         U:0, M:0, A:0, RES:0, ECT: 2590894f, BVID: 1680, SPVID: 2281
+-	         U:0, M:0, A:0, RES:18, ECT: 0025e489, BVID: 1264, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3711
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0c0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e640e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e80ff, BVID: 3760, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e000003, BVID: 3720, SPVID: 14
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 560e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3675
+-	         U:1, M:0, A:0, RES:0, ECT: acaa4016, BVID: 380, SPVID: 494
+-	         U:1, M:1, A:0, RES:14, ECT: 1560b70f, BVID: 2993, SPVID: 1575
+-	         U:0, M:1, A:0, RES:12, ECT: e2d5f35c, BVID: 3240, SPVID: 16
+-	         U:0, M:0, A:0, RES:4, ECT: 10059445, BVID: 256, SPVID: 1040
+-	         U:0, M:1, A:1, RES:14, ECT: 55000001, BVID: 16, SPVID: 2058
+-	         U:1, M:0, A:0, RES:12, ECT: f3ac2b26, BVID: 2499, SPVID: 2745
+-	         U:1, M:0, A:1, RES:5, ECT: 68735440, BVID: 1216, SPVID: 3072
+-	         U:1, M:1, A:1, RES:23, ECT: 020000f7, BVID: 32, SPVID: 0
+-	         U:1, M:0, A:0, RES:4, ECT: b59cbe8c, BVID: 4095, SPVID: 4095
+-	         U:0, M:0, A:0, RES:0, ECT: 40ff3e88, BVID: 3264, SPVID: 2320
+-	         U:0, M:0, A:0, RES:4, ECT: 10059400, BVID: 0, SPVID: 257
+-	         U:0, M:0, A:0, RES:8, ECT: 0a269c31, BVID: 2232, SPVID: 3315
+-	         U:1, M:0, A:1, RES:12, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:0, ECT: 040e0e0e, BVID: 224, SPVID: 3598
+-	         U:1, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0b0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 224, SPVID: 3598
+-	         U:0, M:0, A:0, RES:14, ECT: 0e0e0e0e, BVID: 3, SPVID: 3616
++		 [|isis]
+ 	    unknown TLV #213, length: 243
+ 		0x0000:  5cca 8010 0410 0594 4510 0410 6e55 0000
+ 		0x0010:  0101 080a 8cf3 ac2b 269c 0e2d 0e0e 0e0e

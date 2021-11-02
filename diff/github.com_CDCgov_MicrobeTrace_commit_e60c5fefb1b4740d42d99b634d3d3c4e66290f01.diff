@@ -1,0 +1,500 @@
+From e60c5fefb1b4740d42d99b634d3d3c4e66290f01 Mon Sep 17 00:00:00 2001
+From: Tony Boyles <Anthony@Boyles.cc>
+Date: Thu, 29 Mar 2018 14:06:58 -0400
+Subject: [PATCH] Filtered for XSS attacks properly
+
+---
+ components/files.html |  34 ++++++-------
+ index.html            |  11 ++--
+ index.js              |   7 +--
+ package.json          |   7 +--
+ scripts/common.js     |   7 ---
+ yarn.lock             | 115 ++++++------------------------------------
+ 6 files changed, 45 insertions(+), 136 deletions(-)
+
+diff --git a/components/files.html b/components/files.html
+index 505fdc32..af728b97 100644
+--- a/components/files.html
++++ b/components/files.html
+@@ -114,7 +114,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+     header: true,
+     preview: 1,
+     complete: function(output){
+-      var headers = output.meta.fields.map(app.striptags);
++      var headers = output.meta.fields.map(filterXSS);
+       var options = '<option>None</option>' + headers.map(h => `<option value="${h}">${app.titleize(h)}</option>`).join('\n');
+       $(`<div class='col-4 '${isFasta?' style="display: none;"':''} data-file='${file.name}'>
+           <label for="file-${file.name}-field-1">${isNode?'ID':'Source'}</label>
+@@ -189,7 +189,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+   var reader = new FileReader();
+   reader.onloadend = function(e){
+     if (e.target.readyState == FileReader.DONE){
+-      $('#reference').val(app.striptags(app.parseFASTA(e.target.result)[0].seq));
++      $('#reference').val(filterXSS(app.parseFASTA(e.target.result)[0].seq));
+     }
+   };
+   reader.readAsText(file);
+@@ -254,8 +254,8 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+         var n = 0;
+         var seqs = app.parseFASTA(e.target.result);
+         seqs.forEach(node => {
+-          node.id = app.striptags(node.id);
+-          node.seq = app.striptags(node.seq);
++          node.id = filterXSS(node.id);
++          node.seq = filterXSS(node.seq);
+           node['origin'] = [filename];
+           n += app.addNode(node);
+         });
+@@ -276,7 +276,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+         complete: results => {
+           results.data.forEach(link => {
+             Object.keys(link).forEach(function(key){
+-              link[key] = app.striptags(link[key]);
++              link[key] = filterXSS(link[key]);
+             });
+             l += app.addLink(Object.assign({
+               source: '' + link[file.field1],
+@@ -288,7 +288,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+           });
+           message(` - Parsed ${l} New, ${results.data.length} Total Links from Link CSV.`);
+           results.meta.fields.map(key => {
+-            key = app.striptags(key);
++            key = filterXSS(key);
+             if(!session.data.linkFields.includes(key)){
+               session.data.linkFields.push(key);
+             }
+@@ -317,14 +317,14 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+         complete: results => {
+           var n = 0;
+           results.data.forEach(node => {
+-            node = JSON.parse(app.striptags(JSON.stringify(node)));
++            node = JSON.parse(filterXSS(JSON.stringify(node)));
+             node.id = '' + node[file.field1];
+             if(file.field2 !== 'None') node.seq = node[file.field2];
+             node['origin'] = [filename];
+             n += app.addNode(node);
+           });
+           results.meta.fields.forEach(key => {
+-            key = app.striptags(key);
++            key = filterXSS(key);
+             if(!session.data.nodeFields.includes(key)){
+               session.data.nodeFields.push(key);
+             }
+@@ -348,7 +348,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+           var nn = 0, nl = 0;
+           results.data.forEach((row, i) => {
+             if(i == 0){
+-              nodeIDs = row.map(app.striptags);
++              nodeIDs = row.map(filterXSS);
+               nodeIDs.forEach((cell, k) => {
+                 if(k > 0){
+                   nn += app.addNode({
+@@ -404,7 +404,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+         $('#loadingInformationModal').modal('hide');
+         setTimeout(session.network.fit, 1500);
+       }
+-      drawthresholdHistogram();
++      session.updateThresholdHistogram();
+     }
+   };
+ 
+@@ -450,14 +450,15 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+           $('#loadingInformationModal').modal('hide');
+         }, 1500);
+       }
+-      drawthresholdHistogram();
++      session.updateThresholdHistogram();
+     };
+   };
+ 
+-  function drawthresholdHistogram(){
++  session.updateThresholdHistogram = function(){
+     var width = 280,
+         height = 48,
+         svg = d3.select("svg#link-threshold-sparkline")
++          .html(null)
+           .attr('width', width)
+           .attr('height', height);
+ 
+@@ -490,14 +491,9 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+         .attr("width", 6)
+         .attr("height", function(d) { return height - y(d.length); });
+ 
+-    svg.append("g")
+-        .attr("class", "axis axis--x")
+-        .attr("transform", "translate(0," + height + ")")
+-        .call(d3.axisBottom(x));
+-
+     function updateThreshold(){
+       var x = d3.mouse(svg.node())[0],
+-      range = max - min;
++          range = max - min;
+       session.state.linkThreshold = x / width * range + min;
+       $('#default-link-threshold').val(session.state.linkThreshold);
+     }
+@@ -529,7 +525,7 @@ <h5 id="alignerControlsModalTitle" class="modal-title">Alignment Configuration</
+           .on('mouseup', null);
+       });
+     });
+-  }
++  };
+ });
+ 
+ </script>
+diff --git a/index.html b/index.html
+index d53dab86..a0937eff 100644
+--- a/index.html
++++ b/index.html
+@@ -350,17 +350,18 @@ <h3>MicrobeTrace</h3>
+   <script type="text/javascript" src="node_modules/jquery/dist/jquery.min.js"></script>
+   <script type="text/javascript" src="node_modules/popper.js/dist/umd/popper.min.js"></script>
+   <script type="text/javascript" src="node_modules/bootstrap/dist/js/bootstrap.min.js"></script>
+-  <script type="text/javascript" src="vendor/bootstrap-filestyle.min.js"></script>
+   <script type="text/javascript" src="node_modules/golden-layout/dist/goldenlayout.min.js"></script>
+-  <script type="text/javascript" src="node_modules/html2canvas/dist/html2canvas.min.js"></script>
+   <script type="text/javascript" src="node_modules/papaparse/papaparse.min.js"></script>
++  <script type="text/javascript" src="node_modules/xss/dist/xss.min.js"></script>
++  <script type="text/javascript" src="node_modules/d3/dist/d3.min.js"></script>
++  <script type="text/javascript" src="node_modules/plotly.js/dist/plotly.min.js"></script>
+   <script type="text/javascript" src="node_modules/alertifyjs/build/alertify.min.js"></script>
+-  <script type="text/javascript" src="node_modules/screenfull/dist/screenfull.js"></script>
+   <script type="text/javascript" src="vendor/FileSaver.min.js"></script>
++  <script type="text/javascript" src="node_modules/html2canvas/dist/html2canvas.min.js"></script>
++  <script type="text/javascript" src="node_modules/screenfull/dist/screenfull.js"></script>
+   <script type="text/javascript" src="node_modules/clipboard/dist/clipboard.min.js"></script>
++  <script type="text/javascript" src="vendor/bootstrap-filestyle.min.js"></script>
+   <script type="text/javascript" src="node_modules/chosen-js/chosen.jquery.min.js"></script>
+-  <script type="text/javascript" src="node_modules/d3/dist/d3.min.js"></script>
+-  <script type="text/javascript" src="node_modules/plotly.js/dist/plotly.min.js"></script>
+   <script type="text/javascript" src="scripts/common.js"></script>
+   <script type="text/javascript">
+   $(function(){
+diff --git a/index.js b/index.js
+index 8d1719df..e624457e 100755
+--- a/index.js
++++ b/index.js
+@@ -1,6 +1,7 @@
+-const express = require('express')
+-const PORT = process.env.PORT || 5000
++#!/usr/bin/env node
++
++const express = require('express');
+ 
+ express()
+   .use(express.static(__dirname))
+-  .listen(PORT, () => console.log(`Listening on ${ PORT }`))
++  .listen(process.env.PORT || 5000);
+diff --git a/package.json b/package.json
+index 1ce14bf6..bb6160d1 100644
+--- a/package.json
++++ b/package.json
+@@ -10,12 +10,11 @@
+     "yarn": "1.5.1"
+   },
+   "scripts": {
+-    "appcache": "./appcache.sh",
++    "appcache": "sh appcache.sh",
+     "start": "node index.js",
+     "build": "yarn start && nativifier http://localhost:8080"
+   },
+   "devDependencies": {
+-    "express": "^4.16.3",
+     "nativefier": "^7.5.4",
+     "yarn": "^1.5.0"
+   },
+@@ -35,6 +34,7 @@
+     "datatables.net-scroller-bs4": "^1.4.4",
+     "datatables.net-select": "^1.2.5",
+     "datatables.net-select-bs4": "^1.2.5",
++    "express": "^4.16.3",
+     "golden-layout": "^1.5.9",
+     "html2canvas": "^1.0.0-alpha.10",
+     "jquery": "^3.3.1",
+@@ -47,6 +47,7 @@
+     "screenfull": "^3.3.2",
+     "tn93": "^0.1.1",
+     "vis": "^4.21.0",
+-    "vue": "^2.5.16"
++    "vue": "^2.5.16",
++    "xss": "^0.3.7"
+   }
+ }
+diff --git a/scripts/common.js b/scripts/common.js
+index 37d17e94..4bb6e1a6 100644
+--- a/scripts/common.js
++++ b/scripts/common.js
+@@ -115,13 +115,6 @@ app.parseNewick = function(a){
+   return r;
+ };
+ 
+-app.striptags = function(inp){
+-  return ('' + inp)
+-    .replace(/<[^>]+?>.*?<\/[^>]+?>/g, '') //Closed Tags
+-    .replace(/<[^>]+?\/\s*>/g, '') //Self-Closing Tags
+-    .replace(/<[^>]+?>/g, ''); //Unclosed Tags
+-};
+-
+ app.titleize = function(title){
+   var small = title.toLowerCase().replace(/_/g, ' ');
+   if(small === 'id') return 'ID';
+diff --git a/yarn.lock b/yarn.lock
+index 622c90b4..cd12c167 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -292,16 +292,16 @@ assert-plus@1.0.0, assert-plus@^1.0.0:
+   version "1.0.0"
+   resolved "https://registry.yarnpkg.com/assert-plus/-/assert-plus-1.0.0.tgz#f12e0f3c5d77b0b1cdd9146942e4e96c1e4dd525"
+ 
+-async@^1.5.2, async@~1.5:
+-  version "1.5.2"
+-  resolved "https://registry.yarnpkg.com/async/-/async-1.5.2.tgz#ec6a61ae56480c0c3cb241c95618e20892f9672a"
+-
+ async@^2.6.0:
+   version "2.6.0"
+   resolved "https://registry.yarnpkg.com/async/-/async-2.6.0.tgz#61a29abb6fcc026fea77e56d1c6ec53a795951f4"
+   dependencies:
+     lodash "^4.14.0"
+ 
++async@~1.5:
++  version "1.5.2"
++  resolved "https://registry.yarnpkg.com/async/-/async-1.5.2.tgz#ec6a61ae56480c0c3cb241c95618e20892f9672a"
++
+ asynckit@^0.4.0:
+   version "0.4.0"
+   resolved "https://registry.yarnpkg.com/asynckit/-/asynckit-0.4.0.tgz#c79ed97f7f34cb8f2ba1bc9790bcc366474b4b79"
+@@ -860,10 +860,6 @@ colormap@^2.1.0:
+   dependencies:
+     lerp "^1.0.3"
+ 
+-colors@1.0.3:
+-  version "1.0.3"
+-  resolved "https://registry.yarnpkg.com/colors/-/colors-1.0.3.tgz#0433f44d809680fdeb60ed260f1b0c262e82a40b"
+-
+ colors@~0.6.0-1:
+   version "0.6.2"
+   resolved "https://registry.yarnpkg.com/colors/-/colors-0.6.2.tgz#2423fe6678ac0c5dae8852e5d0e5be08c997abcc"
+@@ -963,10 +959,6 @@ core-util-is@1.0.2, core-util-is@~1.0.0:
+   version "1.0.2"
+   resolved "https://registry.yarnpkg.com/core-util-is/-/core-util-is-1.0.2.tgz#b5fd54220aa2bc5ab57aab7140c940754503c1a7"
+ 
+-corser@~2.0.0:
+-  version "2.0.1"
+-  resolved "https://registry.yarnpkg.com/corser/-/corser-2.0.1.tgz#8eda252ecaab5840dcd975ceb90d9370c819ff87"
+-
+ country-regex@^1.1.0:
+   version "1.1.0"
+   resolved "https://registry.yarnpkg.com/country-regex/-/country-regex-1.1.0.tgz#51c333dcdf12927b7e5eeb9c10ac8112a6120896"
+@@ -1000,6 +992,10 @@ csscolorparser@~1.0.2:
+   version "1.0.3"
+   resolved "https://registry.yarnpkg.com/csscolorparser/-/csscolorparser-1.0.3.tgz#b34f391eea4da8f3e98231e2ccd8df9c041f171b"
+ 
++cssfilter@0.0.10:
++  version "0.0.10"
++  resolved "https://registry.yarnpkg.com/cssfilter/-/cssfilter-0.0.10.tgz#c6d2672632a2e5c83e013e6864a42ce8defd20ae"
++
+ cssom@0.3.x, "cssom@>= 0.3.0 < 0.4.0":
+   version "0.3.2"
+   resolved "https://registry.yarnpkg.com/cssom/-/cssom-0.3.2.tgz#b8036170c79f07a90ff2f16e22284027a243848b"
+@@ -1535,15 +1531,6 @@ ecc-jsbn@~0.1.1:
+   dependencies:
+     jsbn "~0.1.0"
+ 
+-ecstatic@^3.0.0:
+-  version "3.2.0"
+-  resolved "https://registry.yarnpkg.com/ecstatic/-/ecstatic-3.2.0.tgz#1b1aee1ca7c6b99cfb5cf6c9b26b481b90c4409f"
+-  dependencies:
+-    he "^1.1.1"
+-    mime "^1.4.1"
+-    minimist "^1.1.0"
+-    url-join "^2.0.2"
+-
+ edges-to-adjacency-list@^1.0.0:
+   version "1.0.0"
+   resolved "https://registry.yarnpkg.com/edges-to-adjacency-list/-/edges-to-adjacency-list-1.0.0.tgz#c146d2e084addfba74a51293c6e0199a49f757f1"
+@@ -1748,10 +1735,6 @@ etag@~1.8.1:
+   version "1.8.1"
+   resolved "https://registry.yarnpkg.com/etag/-/etag-1.8.1.tgz#41ae2eeb65efa62268aebfea83ac7d79299b0887"
+ 
+-eventemitter3@1.x.x:
+-  version "1.2.0"
+-  resolved "https://registry.yarnpkg.com/eventemitter3/-/eventemitter3-1.2.0.tgz#1c86991d816ad1e504750e73874224ecf3bec508"
+-
+ events@^1.0.2:
+   version "1.1.1"
+   resolved "https://registry.yarnpkg.com/events/-/events-1.1.1.tgz#9ebdb7635ad099c70dcc4c2a1f5004288e8bd924"
+@@ -2590,10 +2573,6 @@ hawk@~6.0.2:
+     hoek "4.x.x"
+     sntp "2.x.x"
+ 
+-he@^1.1.1:
+-  version "1.1.1"
+-  resolved "https://registry.yarnpkg.com/he/-/he-1.1.1.tgz#93410fd21b009735151f8868c2f271f3427e23fd"
+-
+ hoek@4.x.x:
+   version "4.2.1"
+   resolved "https://registry.yarnpkg.com/hoek/-/hoek-4.2.1.tgz#9634502aa12c445dd5a7c5734b572bb8738aacbb"
+@@ -2642,26 +2621,6 @@ http-errors@1.6.2, http-errors@~1.6.2:
+     setprototypeof "1.0.3"
+     statuses ">= 1.3.1 < 2"
+ 
+-http-proxy@^1.8.1:
+-  version "1.16.2"
+-  resolved "https://registry.yarnpkg.com/http-proxy/-/http-proxy-1.16.2.tgz#06dff292952bf64dbe8471fa9df73066d4f37742"
+-  dependencies:
+-    eventemitter3 "1.x.x"
+-    requires-port "1.x.x"
+-
+-http-server@^0.11.1:
+-  version "0.11.1"
+-  resolved "https://registry.yarnpkg.com/http-server/-/http-server-0.11.1.tgz#2302a56a6ffef7f9abea0147d838a5e9b6b6a79b"
+-  dependencies:
+-    colors "1.0.3"
+-    corser "~2.0.0"
+-    ecstatic "^3.0.0"
+-    http-proxy "^1.8.1"
+-    opener "~1.4.0"
+-    optimist "0.6.x"
+-    portfinder "^1.0.13"
+-    union "~0.4.3"
+-
+ http-signature@~1.2.0:
+   version "1.2.0"
+   resolved "https://registry.yarnpkg.com/http-signature/-/http-signature-1.2.0.tgz#9aecd925114772f3d95b65a60abb8f7c18fbace1"
+@@ -3159,10 +3118,6 @@ mime@1.4.1:
+   version "1.4.1"
+   resolved "https://registry.yarnpkg.com/mime/-/mime-1.4.1.tgz#121f9ebc49e3766f311a76e1fa1c8003c4b03aa6"
+ 
+-mime@^1.4.1:
+-  version "1.6.0"
+-  resolved "https://registry.yarnpkg.com/mime/-/mime-1.6.0.tgz#32cd9e5c64553bd58d19a568af452acff04981b1"
+-
+ min-document@^2.19.0:
+   version "2.19.0"
+   resolved "https://registry.yarnpkg.com/min-document/-/min-document-2.19.0.tgz#7bd282e3f5842ed295bb748cdd9f1ffa2c824685"
+@@ -3187,17 +3142,13 @@ minimist@1.2.0, minimist@^1.1.0, minimist@^1.1.1, minimist@^1.1.3, minimist@^1.2
+   version "1.2.0"
+   resolved "https://registry.yarnpkg.com/minimist/-/minimist-1.2.0.tgz#a35008b20f41383eec1fb914f4cd5df79a264284"
+ 
+-minimist@~0.0.1:
+-  version "0.0.10"
+-  resolved "https://registry.yarnpkg.com/minimist/-/minimist-0.0.10.tgz#de3f98543dbf96082be48ad1a0c7cda836301dcf"
+-
+ mkdirp@0.5.0:
+   version "0.5.0"
+   resolved "https://registry.yarnpkg.com/mkdirp/-/mkdirp-0.5.0.tgz#1d73076a6df986cd9344e15e71fcc05a4c9abf12"
+   dependencies:
+     minimist "0.0.8"
+ 
+-mkdirp@0.5.x, mkdirp@^0.5.0:
++mkdirp@^0.5.0:
+   version "0.5.1"
+   resolved "https://registry.yarnpkg.com/mkdirp/-/mkdirp-0.5.1.tgz#30057438eac6cf7f8c4767f38648d6697d75c903"
+   dependencies:
+@@ -3624,21 +3575,10 @@ open-iconic@^1.1.1:
+   version "1.1.1"
+   resolved "https://registry.yarnpkg.com/open-iconic/-/open-iconic-1.1.1.tgz#9dcfc8c7cd3c61cdb4a236b1a347894c97adc0c6"
+ 
+-opener@~1.4.0:
+-  version "1.4.3"
+-  resolved "https://registry.yarnpkg.com/opener/-/opener-1.4.3.tgz#5c6da2c5d7e5831e8ffa3964950f8d6674ac90b8"
+-
+ optical-properties@^1.0.0:
+   version "1.0.0"
+   resolved "https://registry.yarnpkg.com/optical-properties/-/optical-properties-1.0.0.tgz#c3a694bbab7cc4587070886c47f43c8c3a6cceae"
+ 
+-optimist@0.6.x:
+-  version "0.6.1"
+-  resolved "https://registry.yarnpkg.com/optimist/-/optimist-0.6.1.tgz#da3ea74686fa21a19a111c326e90eb15a0196686"
+-  dependencies:
+-    minimist "~0.0.1"
+-    wordwrap "~0.0.2"
+-
+ optionator@^0.8.1:
+   version "0.8.2"
+   resolved "https://registry.yarnpkg.com/optionator/-/optionator-0.8.2.tgz#364c5e409d3f4d6301d6c0b4c05bba50180aeb64"
+@@ -3951,14 +3891,6 @@ popper.js@^1.12.9:
+   version "1.14.1"
+   resolved "https://registry.yarnpkg.com/popper.js/-/popper.js-1.14.1.tgz#b8815e5cda6f62fc2042e47618649f75866e6753"
+ 
+-portfinder@^1.0.13:
+-  version "1.0.13"
+-  resolved "https://registry.yarnpkg.com/portfinder/-/portfinder-1.0.13.tgz#bb32ecd87c27104ae6ee44b5a3ccbf0ebb1aede9"
+-  dependencies:
+-    async "^1.5.2"
+-    debug "^2.2.0"
+-    mkdirp "0.5.x"
+-
+ prelude-ls@~1.1.2:
+   version "1.1.2"
+   resolved "https://registry.yarnpkg.com/prelude-ls/-/prelude-ls-1.1.2.tgz#21932a549f5e52ffd9a827f570e04be62a97da54"
+@@ -4024,10 +3956,6 @@ qs@6.5.1, qs@~6.5.1:
+   version "6.5.1"
+   resolved "https://registry.yarnpkg.com/qs/-/qs-6.5.1.tgz#349cdf6eef89ec45c12d7d5eb3fc0c870343a6d8"
+ 
+-qs@~2.3.3:
+-  version "2.3.3"
+-  resolved "https://registry.yarnpkg.com/qs/-/qs-2.3.3.tgz#e9e85adbe75da0bbe4c8e0476a086290f863b404"
+-
+ quat-slerp@^1.0.0:
+   version "1.0.1"
+   resolved "https://registry.yarnpkg.com/quat-slerp/-/quat-slerp-1.0.1.tgz#2baa15ce3a6bbdc3241d972eb17283139ed69f29"
+@@ -4279,10 +4207,6 @@ request@^2.45.0, request@^2.55.0, request@^2.72.0, request@^2.79.0:
+     tunnel-agent "^0.6.0"
+     uuid "^3.1.0"
+ 
+-requires-port@1.x.x:
+-  version "1.0.0"
+-  resolved "https://registry.yarnpkg.com/requires-port/-/requires-port-1.0.0.tgz#925d2601d39ac485e091cf0da5c6e694dc3dcaff"
+-
+ resolve-protobuf-schema@^2.0.0:
+   version "2.0.0"
+   resolved "https://registry.yarnpkg.com/resolve-protobuf-schema/-/resolve-protobuf-schema-2.0.0.tgz#e67b062a67f02d11bd6886e70efda788407e0fb4"
+@@ -5189,12 +5113,6 @@ union-find@~0.0.3:
+   version "0.0.4"
+   resolved "https://registry.yarnpkg.com/union-find/-/union-find-0.0.4.tgz#b854b3301619bdad144b0014c78f96eac0d2f0f6"
+ 
+-union@~0.4.3:
+-  version "0.4.6"
+-  resolved "https://registry.yarnpkg.com/union/-/union-0.4.6.tgz#198fbdaeba254e788b0efcb630bc11f24a2959e0"
+-  dependencies:
+-    qs "~2.3.3"
+-
+ uniq@^1.0.0, uniq@^1.0.1:
+   version "1.0.1"
+   resolved "https://registry.yarnpkg.com/uniq/-/uniq-1.0.1.tgz#b31c5ae8254844a3a8281541ce2b04b865a734ff"
+@@ -5211,10 +5129,6 @@ update-diff@^1.0.2, update-diff@^1.1.0:
+   version "1.1.0"
+   resolved "https://registry.yarnpkg.com/update-diff/-/update-diff-1.1.0.tgz#f510182d81ee819fb82c3a6b22b62bbdeda7808f"
+ 
+-url-join@^2.0.2:
+-  version "2.0.5"
+-  resolved "https://registry.yarnpkg.com/url-join/-/url-join-2.0.5.tgz#5af22f18c052a000a48d7b82c5e9c2e2feeda728"
+-
+ utf8-byte-length@^1.0.1:
+   version "1.0.4"
+   resolved "https://registry.yarnpkg.com/utf8-byte-length/-/utf8-byte-length-1.0.4.tgz#f45f150c4c66eee968186505ab93fcbb8ad6bf61"
+@@ -5336,10 +5250,6 @@ wordwrap@0.0.2:
+   version "0.0.2"
+   resolved "https://registry.yarnpkg.com/wordwrap/-/wordwrap-0.0.2.tgz#b79669bb42ecb409f83d583cad52ca17eaa1643f"
+ 
+-wordwrap@~0.0.2:
+-  version "0.0.3"
+-  resolved "https://registry.yarnpkg.com/wordwrap/-/wordwrap-0.0.3.tgz#a3d5da6cd5c0bc0008d37234bbaf1bed63059107"
+-
+ wordwrap@~1.0.0:
+   version "1.0.0"
+   resolved "https://registry.yarnpkg.com/wordwrap/-/wordwrap-1.0.0.tgz#27584810891456a4171c8d0226441ade90cbcaeb"
+@@ -5381,6 +5291,13 @@ xmldom@0.1.x:
+   version "0.1.27"
+   resolved "https://registry.yarnpkg.com/xmldom/-/xmldom-0.1.27.tgz#d501f97b3bdb403af8ef9ecc20573187aadac0e9"
+ 
++xss@^0.3.7:
++  version "0.3.7"
++  resolved "https://registry.yarnpkg.com/xss/-/xss-0.3.7.tgz#1df6dc85c0240b455b5e5f0428bdeccd739ab4ee"
++  dependencies:
++    commander "^2.9.0"
++    cssfilter "0.0.10"
++
+ "xtend@>=4.0.0 <4.1.0-0", xtend@^4.0.0, xtend@~4.0.1:
+   version "4.0.1"
+   resolved "https://registry.yarnpkg.com/xtend/-/xtend-4.0.1.tgz#a5c6d532be656e23db820efb943a1f04998d63af"

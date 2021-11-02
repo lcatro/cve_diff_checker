@@ -1,0 +1,23 @@
+From 4e97fdb86d0a0141ec9a052c6e691fcd07bb45c8 Mon Sep 17 00:00:00 2001
+From: "Hongli Lai (Phusion)" <hongli@phusion.nl>
+Date: Tue, 29 May 2018 15:33:50 +0200
+Subject: [PATCH] ExecHelperMain: fix privilege lowering code
+
+---
+ src/agent/ExecHelper/ExecHelperMain.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/agent/ExecHelper/ExecHelperMain.cpp b/src/agent/ExecHelper/ExecHelperMain.cpp
+index 1e5ae58e2..1700a5203 100644
+--- a/src/agent/ExecHelper/ExecHelperMain.cpp
++++ b/src/agent/ExecHelper/ExecHelperMain.cpp
+@@ -201,6 +201,9 @@ switchGroup(uid_t uid, const struct passwd *userInfo, gid_t gid) {
+ 			if (ngroups <= NGROUPS_MAX) {
+ 				setgroupsCalled = true;
+ 				gidset.reset(new gid_t[ngroups]);
++				for (int i = 0; i < ngroups; i++) {
++					gidset[i] = groups[i];
++				}
+ 				if (setgroups(ngroups, gidset.get()) == -1) {
+ 					int e = errno;
+ 					fprintf(stderr, "ERROR: setgroups(%d, ...) failed: %s (errno=%d)\n",

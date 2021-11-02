@@ -1,0 +1,95 @@
+From 8cb935cd3b2321c46aa6b7ed8454d95c75a7fca0 Mon Sep 17 00:00:00 2001
+From: Marc Horowitz <mhorowitz@fb.com>
+Date: Fri, 25 Sep 2020 20:52:54 -0700
+Subject: [PATCH] Handle set where internalSetter and Proxy are both true
+
+Summary:
+If putComputed is called on a proxy whose target's prototype
+is an array with a propname of 'length', then internalSetter will be
+true, and the receiver will be a proxy.  In that case, proxy needs to
+win; the behavior may assert or be UB otherwise.
+
+Reviewed By: tmikov
+
+Differential Revision: D23916279
+
+fbshipit-source-id: c760356d48a02ece565fb4bc1acdafd7ccad7c68
+---
+ lib/VM/JSObject.cpp  | 35 ++++++++++++++++++++---------------
+ test/hermes/proxy.js |  9 +++++++++
+ 2 files changed, 29 insertions(+), 15 deletions(-)
+
+diff --git a/lib/VM/JSObject.cpp b/lib/VM/JSObject.cpp
+index 1a55dc69e..b06dbad15 100644
+--- a/lib/VM/JSObject.cpp
++++ b/lib/VM/JSObject.cpp
+@@ -1699,6 +1699,24 @@ CallResult<bool> JSObject::putComputedWithReceiver_RJS(
+     if (LLVM_UNLIKELY(
+             desc.flags.internalSetter || receiverHandle->isHostObject() ||
+             receiverHandle->isProxyObject())) {
++      // If putComputed is called on a proxy whose target's prototype
++      // is an array with a propname of 'length', then internalSetter
++      // will be true, and the receiver will be a proxy.  In that case,
++      // proxy wins.
++      if (receiverHandle->isProxyObject()) {
++        if (*descDefinedRes) {
++          dpf.setValue = 1;
++        } else {
++          dpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
++        }
++        return JSProxy::defineOwnProperty(
++            receiverHandle,
++            runtime,
++            nameValPrimitiveHandle,
++            dpf,
++            valueHandle,
++            opFlags);
++      }
+       SymbolID id{};
+       LAZY_TO_IDENTIFIER(runtime, nameValPrimitiveHandle, id);
+       if (desc.flags.internalSetter) {
+@@ -1709,23 +1727,10 @@ CallResult<bool> JSObject::putComputedWithReceiver_RJS(
+             desc.castToNamedPropertyDescriptorRef(),
+             valueHandle,
+             opFlags);
+-      } else if (receiverHandle->isHostObject()) {
+-        return vmcast<HostObject>(receiverHandle.get())->set(id, *valueHandle);
+       }
+       assert(
+-          receiverHandle->isProxyObject() && "descriptor flags are impossible");
+-      if (*descDefinedRes) {
+-        dpf.setValue = 1;
+-      } else {
+-        dpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+-      }
+-      return JSProxy::defineOwnProperty(
+-          receiverHandle,
+-          runtime,
+-          nameValPrimitiveHandle,
+-          dpf,
+-          valueHandle,
+-          opFlags);
++          receiverHandle->isHostObject() && "descriptor flags are impossible");
++      return vmcast<HostObject>(receiverHandle.get())->set(id, *valueHandle);
+     }
+   }
+ 
+diff --git a/test/hermes/proxy.js b/test/hermes/proxy.js
+index 1f82cdffa..bc8102f3e 100644
+--- a/test/hermes/proxy.js
++++ b/test/hermes/proxy.js
+@@ -2125,5 +2125,14 @@ checkDeep({...f})(_ => ({a:1, b:2}))
+ // uses fast array access (this will trip an assert otherwise)
+ new Proxy([], {}).unshift(0);
+ 
++// If putComputed is called on a proxy whose target's prototype is an
++// array with a propname of 'length', then internalSetter will be
++// true, and the receiver will be a proxy.  In that case, proxy needs
++// to win; the behavior may assert or be UB otherwise.
++var p = new Proxy(Object.create([]), {});
++// using String() forces putComputed
++p[String('length')] = 0x123;
++p[0xABC] = 1111;
++
+ print('done');
+ // CHECK-LABEL: done

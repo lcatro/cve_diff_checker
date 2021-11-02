@@ -1,0 +1,172 @@
+From 6d1c73b5858fefc6161c7d686345f0dc887ea799 Mon Sep 17 00:00:00 2001
+From: Dan Vatca <dan.vatca@gmail.com>
+Date: Thu, 20 Oct 2016 22:43:14 +0300
+Subject: [PATCH] 7483 SMB flush on pipe triggers NULL pointer dereference in
+ module smbsrv Reviewed by: Gordon Ross <gwr@nexenta.com> Reviewed by: Matt
+ Barden <matt.barden@nexenta.com> Reviewed by: Evan Layton
+ <evan.layton@nexenta.com> Reviewed by: Dan McDonald <danmcd@omniti.com>
+ Approved by: Gordon Ross <gwr@nexenta.com>
+
+---
+ usr/src/uts/common/fs/smbsrv/smb2_flush.c | 10 ++-------
+ usr/src/uts/common/fs/smbsrv/smb_flush.c  | 25 ++++-------------------
+ usr/src/uts/common/fs/smbsrv/smb_ofile.c  | 22 ++++++++++++++++++++
+ usr/src/uts/common/smbsrv/smb_kproto.h    |  2 ++
+ 4 files changed, 30 insertions(+), 29 deletions(-)
+
+diff --git a/usr/src/uts/common/fs/smbsrv/smb2_flush.c b/usr/src/uts/common/fs/smbsrv/smb2_flush.c
+index ecdf2fdcb87..82263d59366 100644
+--- a/usr/src/uts/common/fs/smbsrv/smb2_flush.c
++++ b/usr/src/uts/common/fs/smbsrv/smb2_flush.c
+@@ -11,6 +11,7 @@
+ 
+ /*
+  * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
++ * Copyright 2016 Syneto S.R.L. All rights reserved.
+  */
+ 
+ /*
+@@ -23,7 +24,6 @@
+ smb_sdrc_t
+ smb2_flush(smb_request_t *sr)
+ {
+-	smb_ofile_t *of = NULL;
+ 	uint16_t StructSize;
+ 	uint16_t reserved1;
+ 	uint32_t reserved2;
+@@ -51,14 +51,8 @@ smb2_flush(smb_request_t *sr)
+ 		smb2sr_put_error(sr, status);
+ 		return (SDRC_SUCCESS);
+ 	}
+-	of = sr->fid_ofile;
+ 
+-	/*
+-	 * XXX - todo:
+-	 * Flush named pipe should drain writes.
+-	 */
+-	if ((of->f_node->flags & NODE_FLAGS_WRITE_THROUGH) == 0)
+-		(void) smb_fsop_commit(sr, of->f_cr, of->f_node);
++	smb_ofile_flush(sr, sr->fid_ofile);
+ 
+ 	/*
+ 	 * SMB2 Flush reply
+diff --git a/usr/src/uts/common/fs/smbsrv/smb_flush.c b/usr/src/uts/common/fs/smbsrv/smb_flush.c
+index 5de347b6b55..1d210c3d899 100644
+--- a/usr/src/uts/common/fs/smbsrv/smb_flush.c
++++ b/usr/src/uts/common/fs/smbsrv/smb_flush.c
+@@ -21,6 +21,8 @@
+ /*
+  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
+  * Use is subject to license terms.
++ *
++ * Copyright 2016 Syneto S.R.L. All rights reserved.
+  */
+ 
+ /*
+@@ -40,8 +42,6 @@
+ #include <smbsrv/smb_fsops.h>
+ 
+ 
+-static void smb_flush_file(struct smb_request *sr, struct smb_ofile *ofile);
+-
+ /*
+  * smb_com_flush
+  *
+@@ -90,15 +90,14 @@ smb_com_flush(smb_request_t *sr)
+ 			    ERRDOS, ERRbadfid);
+ 			return (SDRC_ERROR);
+ 		}
+-
+-		smb_flush_file(sr, sr->fid_ofile);
++		smb_ofile_flush(sr, sr->fid_ofile);
+ 	} else {
+ 		flist = &sr->tid_tree->t_ofile_list;
+ 		smb_llist_enter(flist, RW_READER);
+ 		file = smb_llist_head(flist);
+ 		while (file) {
+ 			mutex_enter(&file->f_mutex);
+-			smb_flush_file(sr, file);
++			smb_ofile_flush(sr, file);
+ 			mutex_exit(&file->f_mutex);
+ 			file = smb_llist_next(flist, file);
+ 		}
+@@ -108,19 +107,3 @@ smb_com_flush(smb_request_t *sr)
+ 	rc = smbsr_encode_empty_result(sr);
+ 	return ((rc == 0) ? SDRC_SUCCESS : SDRC_ERROR);
+ }
+-
+-
+-/*
+- * smb_flush_file
+- *
+- * If writes on this file are not synchronous, flush it using the NFSv3
+- * commit interface.
+- */
+-static void
+-smb_flush_file(struct smb_request *sr, struct smb_ofile *ofile)
+-{
+-	sr->user_cr = smb_ofile_getcred(ofile);
+-
+-	if ((ofile->f_node->flags & NODE_FLAGS_WRITE_THROUGH) == 0)
+-		(void) smb_fsop_commit(sr, sr->user_cr, ofile->f_node);
+-}
+diff --git a/usr/src/uts/common/fs/smbsrv/smb_ofile.c b/usr/src/uts/common/fs/smbsrv/smb_ofile.c
+index 34ef5dc5261..582091d1dd6 100644
+--- a/usr/src/uts/common/fs/smbsrv/smb_ofile.c
++++ b/usr/src/uts/common/fs/smbsrv/smb_ofile.c
+@@ -21,6 +21,7 @@
+ /*
+  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
++ * Copyright 2016 Syneto S.R.L. All rights reserved.
+  */
+ 
+ /*
+@@ -836,6 +837,27 @@ smb_ofile_seek(
+ 	return (rc);
+ }
+ 
++/*
++ * smb_ofile_flush
++ *
++ * If writes on this file are not synchronous, flush it using the NFSv3
++ * commit interface.
++ *
++ * XXX - todo: Flush named pipe should drain writes.
++ */
++void
++smb_ofile_flush(struct smb_request *sr, struct smb_ofile *of)
++{
++	switch (of->f_ftype) {
++	case SMB_FTYPE_DISK:
++		if ((of->f_node->flags & NODE_FLAGS_WRITE_THROUGH) == 0)
++			(void) smb_fsop_commit(sr, of->f_cr, of->f_node);
++		break;
++	default:
++		break;
++	}
++}
++
+ /*
+  * smb_ofile_is_open
+  */
+diff --git a/usr/src/uts/common/smbsrv/smb_kproto.h b/usr/src/uts/common/smbsrv/smb_kproto.h
+index f394773c0ab..2dd8787aebf 100644
+--- a/usr/src/uts/common/smbsrv/smb_kproto.h
++++ b/usr/src/uts/common/smbsrv/smb_kproto.h
+@@ -22,6 +22,7 @@
+ /*
+  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
++ * Copyright 2016 Syneto S.R.L.  All rights reserved.
+  */
+ 
+ /*
+@@ -673,6 +674,7 @@ void smb_ofile_close(smb_ofile_t *, int32_t);
+ void smb_ofile_delete(void *);
+ uint32_t smb_ofile_access(smb_ofile_t *, cred_t *, uint32_t);
+ int smb_ofile_seek(smb_ofile_t *, ushort_t, int32_t, uint32_t *);
++void smb_ofile_flush(smb_request_t *, smb_ofile_t *);
+ boolean_t smb_ofile_hold(smb_ofile_t *);
+ void smb_ofile_release(smb_ofile_t *);
+ void smb_ofile_request_complete(smb_ofile_t *);

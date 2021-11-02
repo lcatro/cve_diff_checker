@@ -1,0 +1,89 @@
+From f68f4238e83b45b2164e4ed05df14af0f06eaf40 Mon Sep 17 00:00:00 2001
+From: Zach Wasserman <zach@fleetdm.com>
+Date: Wed, 3 Feb 2021 08:47:43 -0800
+Subject: [PATCH] Merge pull request from GHSA-xwh8-9p3f-3x45
+
+- Fix the specific case that caused panic.
+- Add panic handler around entire live query results handler. This will
+  prevent similar issues from causing crashes in the future.
+
+Note that other endpoints already have panic handling but this one is
+special due to the use of websockets.
+---
+ server/service/endpoint_campaigns.go | 15 ++++++++++-----
+ server/service/service_campaigns.go  | 17 ++++++++++++-----
+ 2 files changed, 22 insertions(+), 10 deletions(-)
+
+diff --git a/server/service/endpoint_campaigns.go b/server/service/endpoint_campaigns.go
+index 2a6bfc7fcd..2c376c7956 100644
+--- a/server/service/endpoint_campaigns.go
++++ b/server/service/endpoint_campaigns.go
+@@ -5,12 +5,12 @@ import (
+ 	"encoding/json"
+ 	"net/http"
+ 
+-	"github.com/go-kit/kit/endpoint"
+-	kitlog "github.com/go-kit/kit/log"
+-	"github.com/igm/sockjs-go/v3/sockjs"
+ 	"github.com/fleetdm/fleet/server/contexts/viewer"
+ 	"github.com/fleetdm/fleet/server/kolide"
+ 	"github.com/fleetdm/fleet/server/websocket"
++	"github.com/go-kit/kit/endpoint"
++	kitlog "github.com/go-kit/kit/log"
++	"github.com/igm/sockjs-go/v3/sockjs"
+ )
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -79,9 +79,14 @@ func makeStreamDistributedQueryCampaignResultsHandler(svc kolide.Service, jwtKey
+ 	opt.Websocket = true
+ 	opt.RawWebsocket = true
+ 	return sockjs.NewHandler("/api/v1/kolide/results", opt, func(session sockjs.Session) {
+-		defer session.Close(0, "none")
+-
+ 		conn := &websocket.Conn{Session: session}
++		defer func() {
++			if p := recover(); p != nil {
++				logger.Log("err", p, "msg", "panic in result handler")
++				conn.WriteJSONError("panic in result handler")
++			}
++			session.Close(0, "none")
++		}()
+ 
+ 		// Receive the auth bearer token
+ 		token, err := conn.ReadAuthToken()
+diff --git a/server/service/service_campaigns.go b/server/service/service_campaigns.go
+index 45d2b82938..89a5ad4244 100644
+--- a/server/service/service_campaigns.go
++++ b/server/service/service_campaigns.go
+@@ -163,11 +163,18 @@ func (svc service) StreamCampaignResults(ctx context.Context, conn *websocket.Co
+ 	lastTotals := targetTotals{}
+ 
+ 	// to improve performance of the frontend rendering the results table, we
+-	// add the "host_hostname" field to every row.
+-	mapHostnameRows := func(hostname string, rows []map[string]string) {
+-		for _, row := range rows {
+-			row["host_hostname"] = hostname
++	// add the "host_hostname" field to every row and clean null rows.
++	mapHostnameRows := func(res *kolide.DistributedQueryResult) {
++		filteredRows := []map[string]string{}
++		for _, row := range res.Rows {
++			if row == nil {
++				continue
++			}
++			row["host_hostname"] = res.Host.HostName
++			filteredRows = append(filteredRows, row)
+ 		}
++
++		res.Rows = filteredRows
+ 	}
+ 
+ 	hostIDs, labelIDs, err := svc.ds.DistributedQueryCampaignTargetIDs(campaign.ID)
+@@ -230,7 +237,7 @@ func (svc service) StreamCampaignResults(ctx context.Context, conn *websocket.Co
+ 			// Receive a result and push it over the websocket
+ 			switch res := res.(type) {
+ 			case kolide.DistributedQueryResult:
+-				mapHostnameRows(res.Host.HostName, res.Rows)
++				mapHostnameRows(&res)
+ 				err = conn.WriteJSONMessage("result", res)
+ 				if errors.Cause(err) == sockjs.ErrSessionNotOpen {
+ 					// return and stop sending the query if the session was closed

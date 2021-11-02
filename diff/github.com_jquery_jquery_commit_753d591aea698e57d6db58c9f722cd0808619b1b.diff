@@ -1,0 +1,46 @@
+From 753d591aea698e57d6db58c9f722cd0808619b1b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Micha=C5=82=20Go=C5=82=C4=99biowski-Owczarek?=
+ <m.goleb@gmail.com>
+Date: Mon, 25 Mar 2019 17:57:30 +0100
+Subject: [PATCH] Core: Prevent Object.prototype pollution for $.extend( true,
+ ... )
+
+Closes gh-4333
+---
+ src/core.js       | 3 ++-
+ test/unit/core.js | 7 +++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/core.js b/src/core.js
+index d9c7e98826..3ef92d48fc 100644
+--- a/src/core.js
++++ b/src/core.js
+@@ -158,8 +158,9 @@ jQuery.extend = jQuery.fn.extend = function() {
+ 			for ( name in options ) {
+ 				copy = options[ name ];
+ 
++				// Prevent Object.prototype pollution
+ 				// Prevent never-ending loop
+-				if ( target === copy ) {
++				if ( name === "__proto__" || target === copy ) {
+ 					continue;
+ 				}
+ 
+diff --git a/test/unit/core.js b/test/unit/core.js
+index 8205aa2425..28f40ab56a 100644
+--- a/test/unit/core.js
++++ b/test/unit/core.js
+@@ -1062,6 +1062,13 @@ QUnit.test( "jQuery.extend(true,{},{a:[], o:{}}); deep copy with array, followed
+ 	assert.ok( !Array.isArray( result.object ), "result.object wasn't paved with an empty array" );
+ } );
+ 
++QUnit.test( "jQuery.extend( true, ... ) Object.prototype pollution", function( assert ) {
++	assert.expect( 1 );
++
++	jQuery.extend( true, {}, JSON.parse( "{\"__proto__\": {\"devMode\": true}}" ) );
++	assert.ok( !( "devMode" in {} ), "Object.prototype not polluted" );
++} );
++
+ QUnit.test( "jQuery.each(Object,Function)", function( assert ) {
+ 	assert.expect( 23 );
+ 

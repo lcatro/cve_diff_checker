@@ -1,0 +1,30 @@
+From b2eff67e45b90ca26a62e971e8f0d5d0d70f23e6 Mon Sep 17 00:00:00 2001
+From: Tim Buckingham <mr@timbuckingham.com>
+Date: Fri, 6 Apr 2018 10:43:18 -0400
+Subject: [PATCH] Fixing XSS injection via user profile editing -- thanks
+ zhzzhz: https://github.com/bigtreecms/BigTree-CMS/issues/332
+
+---
+ core/inc/bigtree/admin.php | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/core/inc/bigtree/admin.php b/core/inc/bigtree/admin.php
+index ecddc0d79..7e39b1a35 100755
+--- a/core/inc/bigtree/admin.php
++++ b/core/inc/bigtree/admin.php
+@@ -8419,12 +8419,9 @@ function updatePendingChange($id,$changes,$mtm_changes = array(),$tags_changes =
+ 		function updateProfile($data) {
+ 			global $bigtree;
+ 
+-			foreach ($data as $key => $val) {
+-				if (substr($key,0,1) != "_" && !is_array($val)) {
+-					$$key = sqlescape($val);
+-				}
+-			}
+-
++			$name = sqlescape(htmlspecialchars($data["name"]));
++			$company = sqlescape(htmlspecialchars($data["company"]));
++			$daily_digest = $data["daily_digest"] ? "on" : "";
+ 			$id = sqlescape($this->ID);
+ 
+ 			if ($data["password"]) {

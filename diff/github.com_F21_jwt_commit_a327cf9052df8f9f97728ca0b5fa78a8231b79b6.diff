@@ -1,0 +1,81 @@
+From a327cf9052df8f9f97728ca0b5fa78a8231b79b6 Mon Sep 17 00:00:00 2001
+From: F21 <francis.chuang@gmail.com>
+Date: Fri, 1 May 2015 22:04:57 +1000
+Subject: [PATCH] Fixed security issue: JVN#06120222
+
+---
+ JWT/JWT.php | 11 ++++++-----
+ README.md   | 12 +++++++++++-
+ 2 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/JWT/JWT.php b/JWT/JWT.php
+index 8de71ec..d692e8d 100644
+--- a/JWT/JWT.php
++++ b/JWT/JWT.php
+@@ -25,7 +25,7 @@ public static function encode($payload, $key, $algo = 'HS256')
+         return implode('.', $segments);
+     }
+ 
+-    public static function decode($jwt, $key = null, $verify = true)
++    public static function decode($jwt, $key = null, $algo = null)
+     {
+         $tks = explode('.', $jwt);
+ 
+@@ -45,12 +45,13 @@ public static function decode($jwt, $key = null, $verify = true)
+ 
+         $sig = JWT::urlsafeB64Decode($cryptob64);
+ 
+-        if ($verify) {
++        if (isset($key)) {
++
+             if (empty($header->alg)) {
+                 throw new DomainException('Empty algorithm');
+             }
+ 
+-            if (!JWT::verifySignature($sig, "$headb64.$payloadb64", $key, $header->alg)) {
++            if (!JWT::verifySignature($sig, "$headb64.$payloadb64", $key, $algo)) {
+                 throw new UnexpectedValueException('Signature verification failed');
+             }
+         }
+@@ -58,7 +59,7 @@ public static function decode($jwt, $key = null, $verify = true)
+         return $payload;
+     }
+ 
+-    private static function verifySignature($signature, $input, $key, $algo = 'HS256')
++    private static function verifySignature($signature, $input, $key, $algo)
+     {
+         switch ($algo) {
+             case'HS256':
+@@ -80,7 +81,7 @@ private static function verifySignature($signature, $input, $key, $algo = 'HS256
+         }
+     }
+ 
+-    private static function sign($input, $key, $algo = 'HS256')
++    private static function sign($input, $key, $algo)
+     {
+         switch ($algo) {
+ 
+diff --git a/README.md b/README.md
+index 4f9c956..6c446c1 100644
+--- a/README.md
++++ b/README.md
+@@ -1,8 +1,18 @@
+ JWT
+ ===
+-
+ A PHP library for encoding and decoding JSON Web Tokens.
+ 
++**Important security notice**
++
++Thanks to Toshiharu Sugiyama!
++
++Please upgrade to 2.0 as soon as possible as previous versions are susceptible to verification bypass attacks if the same public key is used for signing when using asymmetric and symmetric algorithms.
++
++This is a release breaks backwards compatibility because you now need to pass in the decoding algorithm when decoding in order to verify the JWT.
++
++For more information see: JVN#06120222 at jpcert.or.jp
++
++
+ Supported Algorithms
+ --------------------
+ 

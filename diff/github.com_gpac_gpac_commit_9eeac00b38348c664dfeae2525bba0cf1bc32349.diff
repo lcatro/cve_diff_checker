@@ -1,0 +1,37 @@
+From 9eeac00b38348c664dfeae2525bba0cf1bc32349 Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@gpac.io>
+Date: Tue, 1 Sep 2020 16:46:07 +0200
+Subject: [PATCH] fixed #1565
+
+---
+ applications/mp4box/main.c | 2 +-
+ src/filters/write_nhml.c   | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/applications/mp4box/main.c b/applications/mp4box/main.c
+index f221a46b7c..d715ed4bda 100644
+--- a/applications/mp4box/main.c
++++ b/applications/mp4box/main.c
+@@ -5595,7 +5595,7 @@ int mp4boxMain(int argc, char **argv)
+ 	if (dump_iod) {
+ 		GF_InitialObjectDescriptor *iod = (GF_InitialObjectDescriptor *)gf_isom_get_root_od(file);
+ 		if (!iod) {
+-			fprintf(stderr, "File %s has no IOD", inName);
++			fprintf(stderr, "File %s has no IOD\n", inName);
+ 		} else {
+ 			char szName[GF_MAX_PATH+10];
+ 			FILE *iodf;
+diff --git a/src/filters/write_nhml.c b/src/filters/write_nhml.c
+index 3828bbf0cd..6ea26cf716 100644
+--- a/src/filters/write_nhml.c
++++ b/src/filters/write_nhml.c
+@@ -398,7 +398,8 @@ static void nhmldump_send_header(GF_NHMLDumpCtx *ctx)
+ 		sprintf(nhml, "sampleRate=\"%d\" numChannels=\"%d\" ", ctx->sr, ctx->chan);
+ 		gf_bs_write_data(ctx->bs_w, nhml, (u32) strlen(nhml));
+ 		p = gf_filter_pid_get_property(ctx->ipid, GF_PROP_PID_AUDIO_FORMAT);
+-		sprintf(nhml, "bitsPerSample=\"%d\" ", gf_audio_fmt_bit_depth(p->value.uint));
++		if (p)
++			sprintf(nhml, "bitsPerSample=\"%d\" ", gf_audio_fmt_bit_depth(p->value.uint));
+ 		gf_bs_write_data(ctx->bs_w, nhml, (u32) strlen(nhml));
+ 	}
+ 

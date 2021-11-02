@@ -1,0 +1,184 @@
+From 003c62d28ae438aa8943cb31535563397f838a2c Mon Sep 17 00:00:00 2001
+From: Khaled Hosny <khaledhosny@eglug.org>
+Date: Sat, 15 Nov 2014 04:29:36 +0200
+Subject: [PATCH] [ots] Fix (potential) use-after-free bugs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Make sure we don’t try to access the table after deleting it. Not all
+the changed files are affected, but I changed them all for the sake of
+consistency.
+---
+ src/gasp.cc | 4 ++--
+ src/gdef.cc | 2 +-
+ src/gpos.cc | 2 +-
+ src/gsub.cc | 2 +-
+ src/hdmx.cc | 4 ++--
+ src/kern.cc | 2 +-
+ src/ltsh.cc | 4 ++--
+ src/math.cc | 2 +-
+ src/vdmx.cc | 4 ++--
+ src/vorg.cc | 4 ++--
+ 10 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/src/gasp.cc b/src/gasp.cc
+index 91e19e4f..1e2327f1 100644
+--- a/src/gasp.cc
++++ b/src/gasp.cc
+@@ -11,10 +11,10 @@
+ 
+ #define DROP_THIS_TABLE(...) \
+   do { \
+-    delete file->gasp; \
+-    file->gasp = 0; \
+     OTS_FAILURE_MSG_(file, TABLE_NAME ": " __VA_ARGS__); \
+     OTS_FAILURE_MSG("Table discarded"); \
++    delete file->gasp; \
++    file->gasp = 0; \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/gdef.cc b/src/gdef.cc
+index 523d3848..4553d58f 100644
+--- a/src/gdef.cc
++++ b/src/gdef.cc
+@@ -231,9 +231,9 @@ bool ParseMarkGlyphSetsDefTable(ots::OpenTypeFile *file, const uint8_t *data,
+ 
+ #define DROP_THIS_TABLE(msg_) \
+   do { \
++    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+     file->gdef->data = 0; \
+     file->gdef->length = 0; \
+-    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/gpos.cc b/src/gpos.cc
+index 314cf292..a2b96872 100644
+--- a/src/gpos.cc
++++ b/src/gpos.cc
+@@ -677,9 +677,9 @@ bool ParseExtensionPositioning(const ots::OpenTypeFile *file,
+ 
+ #define DROP_THIS_TABLE(msg_) \
+   do { \
++    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+     file->gpos->data = 0; \
+     file->gpos->length = 0; \
+-    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/gsub.cc b/src/gsub.cc
+index 4ff4214e..af311446 100644
+--- a/src/gsub.cc
++++ b/src/gsub.cc
+@@ -530,9 +530,9 @@ bool ParseReverseChainingContextSingleSubstitution(
+ 
+ #define DROP_THIS_TABLE(msg_) \
+   do { \
++    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+     file->gsub->data = 0; \
+     file->gsub->length = 0; \
+-    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/hdmx.cc b/src/hdmx.cc
+index 0e377249..098802b7 100644
+--- a/src/hdmx.cc
++++ b/src/hdmx.cc
+@@ -13,10 +13,10 @@
+ 
+ #define DROP_THIS_TABLE(...) \
+   do { \
+-    delete file->hdmx; \
+-    file->hdmx = 0; \
+     OTS_FAILURE_MSG_(file, TABLE_NAME ": " __VA_ARGS__); \
+     OTS_FAILURE_MSG("Table discarded"); \
++    delete file->hdmx; \
++    file->hdmx = 0; \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/kern.cc b/src/kern.cc
+index a8c2a759..744c057d 100644
+--- a/src/kern.cc
++++ b/src/kern.cc
+@@ -11,9 +11,9 @@
+ 
+ #define DROP_THIS_TABLE(msg_) \
+   do { \
++    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+     delete file->kern; \
+     file->kern = 0; \
+-    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/ltsh.cc b/src/ltsh.cc
+index 9532b4b3..418c1598 100644
+--- a/src/ltsh.cc
++++ b/src/ltsh.cc
+@@ -13,10 +13,10 @@
+ 
+ #define DROP_THIS_TABLE(...) \
+   do { \
+-    delete file->ltsh; \
+-    file->ltsh = 0; \
+     OTS_FAILURE_MSG_(file, TABLE_NAME ": " __VA_ARGS__); \
+     OTS_FAILURE_MSG("Table discarded"); \
++    delete file->ltsh; \
++    file->ltsh = 0; \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/math.cc b/src/math.cc
+index 97aa3136..9124a88c 100644
+--- a/src/math.cc
++++ b/src/math.cc
+@@ -518,9 +518,9 @@ bool ParseMathVariantsTable(const ots::OpenTypeFile *file,
+ 
+ #define DROP_THIS_TABLE(msg_) \
+   do { \
++    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+     file->math->data = 0; \
+     file->math->length = 0; \
+-    OTS_FAILURE_MSG(msg_ ", table discarded"); \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/vdmx.cc b/src/vdmx.cc
+index e737a8b1..4853d631 100644
+--- a/src/vdmx.cc
++++ b/src/vdmx.cc
+@@ -11,10 +11,10 @@
+ 
+ #define DROP_THIS_TABLE(...) \
+   do { \
+-    delete file->vdmx; \
+-    file->vdmx = 0; \
+     OTS_FAILURE_MSG_(file, TABLE_NAME ": " __VA_ARGS__); \
+     OTS_FAILURE_MSG("Table discarded"); \
++    delete file->vdmx; \
++    file->vdmx = 0; \
+   } while (0)
+ 
+ namespace ots {
+diff --git a/src/vorg.cc b/src/vorg.cc
+index d3ce72ab..26620675 100644
+--- a/src/vorg.cc
++++ b/src/vorg.cc
+@@ -13,10 +13,10 @@
+ 
+ #define DROP_THIS_TABLE(...) \
+   do { \
+-    delete file->vorg; \
+-    file->vorg = 0; \
+     OTS_FAILURE_MSG_(file, TABLE_NAME ": " __VA_ARGS__); \
+     OTS_FAILURE_MSG("Table discarded"); \
++    delete file->vorg; \
++    file->vorg = 0; \
+   } while (0)
+ 
+ namespace ots {

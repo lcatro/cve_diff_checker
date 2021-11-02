@@ -1,0 +1,26 @@
+From a06f9efca373e25328b1c53639a48decd0854570 Mon Sep 17 00:00:00 2001
+From: Sean Timothy Noonan <stnoonan@obsolescence.net>
+Date: Fri, 26 Feb 2021 10:31:41 +0000
+Subject: [PATCH] Check basic auth result against != NGX_OK rather than ==
+ NGX_DECLINED
+
+This corrects the error handling case when ngx_http_auth_spnego_basic is called with a bad configuration or bad username. These cases return NGX_ERROR, which allowed basic auth to proceed.
+
+Thanks to Prakapovich Pavel aka Flyguy.by for pointing this out.
+---
+ ngx_http_auth_spnego_module.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ngx_http_auth_spnego_module.c b/ngx_http_auth_spnego_module.c
+index 97c0b44..25683f2 100644
+--- a/ngx_http_auth_spnego_module.c
++++ b/ngx_http_auth_spnego_module.c
+@@ -1043,7 +1043,7 @@ ngx_http_auth_spnego_handler(
+             /* If basic auth is enabled and basic creds are supplied
+              * attempt basic auth.  If we attempt basic auth, we do
+              * not fall through to real SPNEGO */
+-            if (NGX_DECLINED == ngx_http_auth_spnego_basic(r, ctx, alcf)) {
++            if (NGX_OK != ngx_http_auth_spnego_basic(r, ctx, alcf)) {
+                 spnego_debug0("Basic auth failed");
+                 if (NGX_ERROR == ngx_http_auth_spnego_headers_basic_only(r, ctx, alcf)) {
+                     spnego_debug0("Error setting headers");

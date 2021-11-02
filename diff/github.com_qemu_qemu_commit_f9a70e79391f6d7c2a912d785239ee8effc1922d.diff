@@ -1,0 +1,50 @@
+From f9a70e79391f6d7c2a912d785239ee8effc1922d Mon Sep 17 00:00:00 2001
+From: Peter Lieven <pl@kamp.de>
+Date: Mon, 30 Jun 2014 10:07:54 +0200
+Subject: [PATCH] ui/vnc: limit client_cut_text msg payload size
+
+currently a malicious client could define a payload
+size of 2^32 - 1 bytes and send up to that size of
+data to the vnc server. The server would allocated
+that amount of memory which could easily create an
+out of memory condition.
+
+This patch limits the payload size to 1MB max.
+
+Please note that client_cut_text messages are currently
+silently ignored.
+
+Signed-off-by: Peter Lieven <pl@kamp.de>
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+---
+ ui/vnc.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/ui/vnc.c b/ui/vnc.c
+index 14a86c36ce66..19ce988f5509 100644
+--- a/ui/vnc.c
++++ b/ui/vnc.c
+@@ -2165,13 +2165,20 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
+         pointer_event(vs, read_u8(data, 1), read_u16(data, 2), read_u16(data, 4));
+         break;
+     case VNC_MSG_CLIENT_CUT_TEXT:
+-        if (len == 1)
++        if (len == 1) {
+             return 8;
+-
++        }
+         if (len == 8) {
+             uint32_t dlen = read_u32(data, 4);
+-            if (dlen > 0)
++            if (dlen > (1 << 20)) {
++                error_report("vnc: client_cut_text msg payload has %u bytes"
++                             " which exceeds our limit of 1MB.", dlen);
++                vnc_client_error(vs);
++                break;
++            }
++            if (dlen > 0) {
+                 return 8 + dlen;
++            }
+         }
+ 
+         client_cut_text(vs, read_u32(data, 4), data + 8);

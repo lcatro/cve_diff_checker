@@ -1,0 +1,114 @@
+From 9c79320059f92d8aa4fbd6cc4fa8f9d5d6ba9941 Mon Sep 17 00:00:00 2001
+From: Kenneth Myhra <kennethmyhra@gmail.com>
+Date: Fri, 7 May 2021 14:40:15 +0200
+Subject: [PATCH] refactor: Add constants for HTTP Header field names
+
+Added constants for HTTP Header field names
+
+Set Content-Disposition header to attachment for Binary requests
+---
+ src/Spark.Engine/Core/HttpHeaderName.cs           | 15 +++++++++++++++
+ .../Extensions/HttpRequestFhirExtensions.cs       | 12 ++++++++----
+ .../Formatters/NetCore/BinaryOutputFormatter.cs   |  1 +
+ .../Handlers/NetCore/FormatTypeHandler.cs         |  8 ++++----
+ 4 files changed, 28 insertions(+), 8 deletions(-)
+ create mode 100644 src/Spark.Engine/Core/HttpHeaderName.cs
+
+diff --git a/src/Spark.Engine/Core/HttpHeaderName.cs b/src/Spark.Engine/Core/HttpHeaderName.cs
+new file mode 100644
+index 00000000..2b9330e0
+--- /dev/null
++++ b/src/Spark.Engine/Core/HttpHeaderName.cs
+@@ -0,0 +1,15 @@
++﻿namespace Spark.Engine.Core
++{
++    internal static class HttpHeaderName
++    {
++        public const string ACCEPT = "Accept";
++        public const string CONTENT_DISPOSITION = "Content-Disposition";
++        public const string CONTENT_LOCATION = "Content-Location";
++        public const string CONTENT_TYPE = "Content-Type";
++        public const string ETAG = "ETag";
++        public const string LOCATION = "Location";
++        public const string LAST_MODIFIED = "Last-Modified";
++
++        public const string X_CONTENT_TYPE = "X-Content-Type";
++    }
++}
+diff --git a/src/Spark.Engine/Extensions/HttpRequestFhirExtensions.cs b/src/Spark.Engine/Extensions/HttpRequestFhirExtensions.cs
+index ef5e371c..7d8d9a7a 100644
+--- a/src/Spark.Engine/Extensions/HttpRequestFhirExtensions.cs
++++ b/src/Spark.Engine/Extensions/HttpRequestFhirExtensions.cs
+@@ -158,17 +158,17 @@ internal static void AcquireHeaders(this HttpResponse response, FhirResponse fhi
+         {
+             if (fhirResponse.Key != null)
+             {
+-                response.Headers.Add("ETag", ETag.Create(fhirResponse.Key.VersionId)?.ToString());
++                response.Headers.Add(HttpHeaderName.ETAG, ETag.Create(fhirResponse.Key.VersionId)?.ToString());
+ 
+                 Uri location = fhirResponse.Key.ToUri();
+-                response.Headers.Add("Location", location.OriginalString);
++                response.Headers.Add(HttpHeaderName.LOCATION, location.OriginalString);
+ 
+                 if (response.Body != null)
+                 {
+-                    response.Headers.Add("Content-Location", location.OriginalString);
++                    response.Headers.Add(HttpHeaderName.CONTENT_LOCATION, location.OriginalString);
+                     if (fhirResponse.Resource != null && fhirResponse.Resource.Meta != null)
+                     {
+-                        response.Headers.Add("Last-Modified", fhirResponse.Resource.Meta.LastUpdated.Value.ToString("R"));
++                        response.Headers.Add(HttpHeaderName.LAST_MODIFIED, fhirResponse.Resource.Meta.LastUpdated.Value.ToString("R"));
+                     }
+                 }
+             }
+@@ -192,6 +192,10 @@ internal static void AcquireHeaders(this HttpResponseMessage response, FhirRespo
+                     {
+                         response.Content.Headers.LastModified = fhirResponse.Resource.Meta.LastUpdated;
+                     }
++                    if(fhirResponse.Resource is Binary)
++                    {
++                        response.Content.Headers.Add(HttpHeaderName.CONTENT_DISPOSITION, "attachment");
++                    }
+                 }
+             }
+         }
+diff --git a/src/Spark.Engine/Formatters/NetCore/BinaryOutputFormatter.cs b/src/Spark.Engine/Formatters/NetCore/BinaryOutputFormatter.cs
+index f825d151..f770a38b 100644
+--- a/src/Spark.Engine/Formatters/NetCore/BinaryOutputFormatter.cs
++++ b/src/Spark.Engine/Formatters/NetCore/BinaryOutputFormatter.cs
+@@ -37,6 +37,7 @@ public override async Task WriteResponseBodyAsync(OutputFormatterWriteContext co
+                 }
+                 if (binary == null) return;
+ 
++                context.HttpContext.Response.Headers.Add(HttpHeaderName.CONTENT_DISPOSITION, "attachment");
+                 context.HttpContext.Response.ContentType = binary.ContentType;
+ 
+                 Stream stream = new MemoryStream(binary.Data);
+diff --git a/src/Spark.Engine/Handlers/NetCore/FormatTypeHandler.cs b/src/Spark.Engine/Handlers/NetCore/FormatTypeHandler.cs
+index cadce94c..248a2c76 100644
+--- a/src/Spark.Engine/Handlers/NetCore/FormatTypeHandler.cs
++++ b/src/Spark.Engine/Handlers/NetCore/FormatTypeHandler.cs
+@@ -25,11 +25,11 @@ public async Task InvokeAsync(HttpContext context)
+                 ResourceFormat accepted = ContentType.GetResourceFormatFromFormatParam(format);
+                 if (accepted != ResourceFormat.Unknown)
+                 {
+-                    if (context.Request.Headers.ContainsKey("Accept")) context.Request.Headers.Remove("Accept");
++                    if (context.Request.Headers.ContainsKey(HttpHeaderName.ACCEPT)) context.Request.Headers.Remove(HttpHeaderName.ACCEPT);
+                     if (accepted == ResourceFormat.Json)
+-                        context.Request.Headers.Add("Accept", new StringValues(ContentType.JSON_CONTENT_HEADER));
++                        context.Request.Headers.Add(HttpHeaderName.ACCEPT, new StringValues(ContentType.JSON_CONTENT_HEADER));
+                     else
+-                        context.Request.Headers.Add("Accept", new StringValues(ContentType.XML_CONTENT_HEADER));
++                        context.Request.Headers.Add(HttpHeaderName.ACCEPT, new StringValues(ContentType.XML_CONTENT_HEADER));
+                 }
+             }
+ 
+@@ -38,7 +38,7 @@ public async Task InvokeAsync(HttpContext context)
+                 if (!HttpRequestExtensions.IsContentTypeHeaderFhirMediaType(context.Request.ContentType))
+                 {
+                     string contentType = context.Request.ContentType;
+-                    context.Request.Headers.Add("X-Content-Type", contentType);
++                    context.Request.Headers.Add(HttpHeaderName.X_CONTENT_TYPE, contentType);
+                     context.Request.ContentType = FhirMediaType.OctetStreamMimeType;
+                 }
+             }

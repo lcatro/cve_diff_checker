@@ -1,0 +1,71 @@
+From 85d3e70dff35a99ef53f4b561114acfa9e5c47e1 Mon Sep 17 00:00:00 2001
+From: Oliver Hader <oliver@typo3.org>
+Date: Tue, 28 Jul 2020 10:18:55 +0200
+Subject: [PATCH] [SECURITY] Avoid ambiguous HMAC results
+
+Cryptographic hashes being calculated from and for query
+parameters must only be used for a specific use-case or
+scope in order to avoid resulting hashes being ambiguous.
+
+Resolves: #91689
+Releases: master, 10.4, 9.5
+Change-Id: I59ca16fe71e27195b98a822607aab564425d248d
+Security-Bulletin: TYPO3-CORE-SA-2020-008
+Security-References: CVE-2020-15098
+Reviewed-on: https://review.typo3.org/c/Packages/TYPO3.CMS/+/65125
+Tested-by: Oliver Hader <oliver.hader@typo3.org>
+Reviewed-by: Oliver Hader <oliver.hader@typo3.org>
+---
+ .../backend/Classes/Controller/LinkBrowserController.php      | 4 ++--
+ typo3/sysext/backend/Classes/Form/FieldControl/EditPopup.php  | 2 +-
+ typo3/sysext/backend/Classes/Form/FieldControl/LinkPopup.php  | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/typo3/sysext/backend/Classes/Controller/LinkBrowserController.php b/typo3/sysext/backend/Classes/Controller/LinkBrowserController.php
+index 619bfcbab5d..94fc5417b02 100644
+--- a/typo3/sysext/backend/Classes/Controller/LinkBrowserController.php
++++ b/typo3/sysext/backend/Classes/Controller/LinkBrowserController.php
+@@ -119,7 +119,7 @@ protected function areFieldChangeFunctionsValid($handleFlexformSections = false)
+                 }
+                 unset($value);
+             }
+-            $result = hash_equals(GeneralUtility::hmac(serialize($fieldChangeFunctions)), $this->parameters['fieldChangeFuncHash']);
++            $result = hash_equals(GeneralUtility::hmac(serialize($fieldChangeFunctions), 'backend-link-browser'), $this->parameters['fieldChangeFuncHash']);
+         }
+         return $result;
+     }
+@@ -135,7 +135,7 @@ protected function getBodyTagAttributes()
+         $parameters = parent::getBodyTagAttributes();
+ 
+         $formEngineParameters['fieldChangeFunc'] = $this->parameters['fieldChangeFunc'];
+-        $formEngineParameters['fieldChangeFuncHash'] = GeneralUtility::hmac(serialize($this->parameters['fieldChangeFunc']));
++        $formEngineParameters['fieldChangeFuncHash'] = GeneralUtility::hmac(serialize($this->parameters['fieldChangeFunc']), 'backend-link-browser');
+ 
+         $parameters['data-add-on-params'] .= HttpUtility::buildQueryString(['P' => $formEngineParameters], '&');
+ 
+diff --git a/typo3/sysext/backend/Classes/Form/FieldControl/EditPopup.php b/typo3/sysext/backend/Classes/Form/FieldControl/EditPopup.php
+index 31e2a133935..849b47b4d3d 100644
+--- a/typo3/sysext/backend/Classes/Form/FieldControl/EditPopup.php
++++ b/typo3/sysext/backend/Classes/Form/FieldControl/EditPopup.php
+@@ -78,7 +78,7 @@ public function render()
+                 'flexFormDataStructurePath' => $flexFormDataStructurePath,
+                 'hmac' => GeneralUtility::hmac('editform' . $itemName, 'wizard_js'),
+                 'fieldChangeFunc' => $parameterArray['fieldChangeFunc'],
+-                'fieldChangeFuncHash' => GeneralUtility::hmac(serialize($parameterArray['fieldChangeFunc'])),
++                'fieldChangeFuncHash' => GeneralUtility::hmac(serialize($parameterArray['fieldChangeFunc']), 'backend-link-browser'),
+             ],
+         ];
+         $uriBuilder = GeneralUtility::makeInstance(UriBuilder::class);
+diff --git a/typo3/sysext/backend/Classes/Form/FieldControl/LinkPopup.php b/typo3/sysext/backend/Classes/Form/FieldControl/LinkPopup.php
+index 932185bf2f9..c04ba0aa73f 100644
+--- a/typo3/sysext/backend/Classes/Form/FieldControl/LinkPopup.php
++++ b/typo3/sysext/backend/Classes/Form/FieldControl/LinkPopup.php
+@@ -63,7 +63,7 @@ public function render(): array
+                 'itemName' => $itemName,
+                 'hmac' => GeneralUtility::hmac('editform' . $itemName, 'wizard_js'),
+                 'fieldChangeFunc' => $parameterArray['fieldChangeFunc'],
+-                'fieldChangeFuncHash' => GeneralUtility::hmac(serialize($parameterArray['fieldChangeFunc'])),
++                'fieldChangeFuncHash' => GeneralUtility::hmac(serialize($parameterArray['fieldChangeFunc']), 'backend-link-browser'),
+             ],
+         ];
+         /** @var \TYPO3\CMS\Backend\Routing\UriBuilder $uriBuilder */

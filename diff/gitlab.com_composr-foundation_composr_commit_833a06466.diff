@@ -1,0 +1,422 @@
+From 833a064661503d932dcd26f1e637d877d5e83f53 Mon Sep 17 00:00:00 2001
+From: Chris Graham <chris@ocproducts.com>
+Date: Thu, 1 Apr 2021 21:31:31 -0500
+Subject: [PATCH] Security fix for MANTIS-4633 (XSS in an XML script)
+
+---
+ data_custom/get_member_tooltip.php            |  5 ++++-
+ sources/ajax.php                              | 19 +++++++++++++------
+ sources/comcode_tools.php                     |  1 +
+ sources/commandr.php                          |  6 ++++--
+ sources/database_search.php                   |  1 +
+ sources/feedback2.php                         |  3 ++-
+ .../ajax_tree/choose_filedump_file.php        |  2 +-
+ .../systems/ajax_tree/choose_gallery.php      |  2 +-
+ .../hooks/systems/ajax_tree/choose_image.php  |  2 +-
+ .../hooks/systems/ajax_tree/choose_video.php  |  2 +-
+ sources/realtime_rain.php                     |  1 +
+ sources/rss2.php                              |  2 ++
+ sources/sitemap_ajax.php                      |  8 ++++++--
+ sources/static_cache.php                      |  5 +++--
+ sources/xml.php                               | 11 +++++++++++
+ sources_custom/activities_submission.php      |  6 +++++-
+ .../COMMANDR_COMMANDRCHAT_NOTIFICATION.tpl    |  2 +-
+ 17 files changed, 58 insertions(+), 20 deletions(-)
+
+diff --git a/data_custom/get_member_tooltip.php b/data_custom/get_member_tooltip.php
+index 47174dbbf..fc31d2af8 100644
+--- a/data_custom/get_member_tooltip.php
++++ b/data_custom/get_member_tooltip.php
+@@ -43,11 +43,14 @@ require_code('cns_members2');
+ 
+ $member_id = $GLOBALS['FORUM_DRIVER']->get_member_from_username(get_param_string('member', ''));
+ 
++require_code('xml');
++
+ header('Content-Type: text/xml');
++header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ echo '<' . '?xml version="1.0" encoding="' . get_charset() . '"?' . '>';
+ echo '<request><result>';
+ echo '<![CDATA[';
+ $box = render_member_box($member_id, false, null, null, true, null, false);
+-$box->evaluate_echo();    // '' will be returned if member ID is invalid.
++echo escape_cdata($box->evaluate());    // '' will be returned if member ID is invalid.
+ echo ']]>';
+ echo '</result></request>';
+diff --git a/sources/ajax.php b/sources/ajax.php
+index 3af551633..c16024806 100755
+--- a/sources/ajax.php
++++ b/sources/ajax.php
+@@ -60,6 +60,7 @@ function crossdomain_script()
+     require_code('xml');
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     echo '<' . '?xml version="1.0"?' . '>
+ <!DOCTYPE cross-domain-policy SYSTEM "http://www.macromedia.com/xml/dtds/cross-domain-policy.dtd">
+@@ -141,7 +142,10 @@ function namelike_script()
+ 
+     safe_ini_set('ocproducts.xss_detect', '0');
+ 
++    require_code('xml');
++
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+     echo '<?xml version="1.0" encoding="' . get_charset() . '"?' . '>';
+     echo '<request><result>';
+ 
+@@ -178,7 +182,7 @@ function namelike_script()
+         }
+ 
+         foreach ($names as $name) {
+-            echo '<option value="' . escape_html($name) . '" displayname="" />';
++            echo '<option value="' . xmlentities($name) . '" displayname="" />';
+         }
+     } elseif ($special == 'search') {
+         if (addon_installed('search')) {
+@@ -189,7 +193,7 @@ function namelike_script()
+         }
+ 
+         foreach ($names as $name) {
+-            echo '<option value="' . escape_html($name) . '" displayname="" />';
++            echo '<option value="' . xmlentities($name) . '" displayname="" />';
+         }
+     } else {
+         if ((strlen($id) == 0) && (addon_installed('chat'))) {
+@@ -203,7 +207,7 @@ function namelike_script()
+             }
+ 
+             foreach ($names as $name) {
+-                echo '<option value="' . escape_html($name) . '" displayname="" />';
++                echo '<option value="' . xmlentities($name) . '" displayname="" />';
+             }
+         } else {
+             $names = array();
+@@ -214,7 +218,7 @@ function namelike_script()
+                 $names = collapse_1d_complexity('author', $rows);
+ 
+                 foreach ($names as $name) {
+-                    echo '<option value="' . escape_html($name) . '" displayname="" />';
++                    echo '<option value="' . xmlentities($name) . '" displayname="" />';
+                 }
+             } else {
+                 if ((!addon_installed('authors')) || ($special != 'author') || ($GLOBALS['FORUM_DRIVER']->get_members() < 5000)) {
+@@ -231,7 +235,7 @@ function namelike_script()
+                 }
+ 
+                 foreach ($names as $member_id => $name) {
+-                    echo '<option value="' . escape_html($name) . '" displayname="' . escape_html($GLOBALS['FORUM_DRIVER']->get_username($member_id, true)) . '" />';
++                    echo '<option value="' . xmlentities($name) . '" displayname="' . xmlentities($GLOBALS['FORUM_DRIVER']->get_username($member_id, true)) . '" />';
+                 }
+             }
+         }
+@@ -325,7 +329,8 @@ function retrieve_autosave()
+ {
+     prepare_for_known_ajax_response();
+ 
+-    header('Content-type: text/xml; charset=' . get_charset());
++    header('Content-Type: text/xml; charset=' . get_charset());
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     $member_id = get_member();
+     $stem = either_param_string('stem');
+@@ -333,6 +338,7 @@ function retrieve_autosave()
+     require_code('xml');
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+     echo '<?xml version="1.0" encoding="' . get_charset() . '"?' . '>';
+     echo '<request><result>' . "\n";
+ 
+@@ -484,6 +490,7 @@ function ajax_tree_script()
+ 
+     require_code('xml');
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+     $hook = filter_naughty_harsh(get_param_string('hook'));
+     require_code('hooks/systems/ajax_tree/' . $hook, true);
+     $object = object_factory('Hook_' . $hook, true);
+diff --git a/sources/comcode_tools.php b/sources/comcode_tools.php
+index ef575b1ba..ab7b2e93d 100644
+--- a/sources/comcode_tools.php
++++ b/sources/comcode_tools.php
+@@ -185,6 +185,7 @@ function comcode_convert_script()
+         }
+ 
+         header('Content-Type: text/xml');
++        header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+         echo '<?xml version="1.0" encoding="' . get_charset() . '"?' . '>';
+         echo '<request><result>';
+         echo xmlentities($out);
+diff --git a/sources/commandr.php b/sources/commandr.php
+index fd6df428d..6544313d9 100644
+--- a/sources/commandr.php
++++ b/sources/commandr.php
+@@ -141,7 +141,8 @@ function commandr_script()
+                 }
+ 
+                 @header('HTTP/1.0 200 Ok');
+-                @header('Content-type: text/xml; charset=' . get_charset());
++                @header('Content-Type: text/xml; charset=' . get_charset());
++                header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+                 $output = '<' . '?xml version="1.0" encoding="' . get_charset() . '" ?' . '>
+                     <response>
+                         <result>
+@@ -278,6 +279,7 @@ class Virtual_shell
+         }
+ 
+         header('Content-Type: text/xml');
++        header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+         header('HTTP/1.0 200 Ok');
+ 
+         if (is_object($this->output[STREAM_STDCOMMAND])) {
+@@ -1431,7 +1433,7 @@ function get_queued_messages($xml = true)
+             if (is_object($object_values[2])) {
+                 $object_values[2] = $object_values[2]->evaluate();
+             }
+-            $output .= '<notification section="' . escape_html($object_values[0]) . '" type="' . escape_html($object_values[1]) . '">' . $object_values[2] . '</notification>';
++            $output .= '<notification section="' . xmlentities($object_values[0]) . '" type="' . xmlentities($object_values[1]) . '">' . $object_values[2] . '</notification>';
+         } else {
+             $output->attach(do_template('COMMANDR_NOTIFICATION', array('_GUID' => '0254d84dfbb2ce7b7410bdc0c2989833', 'SECTION' => $object_values[0], 'TYPE' => $object_values[1], 'NOTIFICATION_CONTENT' => $object_values[2])));
+         }
+diff --git a/sources/database_search.php b/sources/database_search.php
+index 62b3315cc..dcde6fd9e 100644
+--- a/sources/database_search.php
++++ b/sources/database_search.php
+@@ -835,6 +835,7 @@ function opensearch_script()
+         default:
+             //header('Content-Type: application/opensearchdescription+xml');
+             header('Content-Type: text/xml');
++            header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+             $tpl = do_template('OPENSEARCH', array('_GUID' => '1fe46743805ade5958dcba0d58c4b0f2', 'DESCRIPTION' => get_option('description')), null, false, null, '.xml', 'xml');
+             $tpl->evaluate_echo();
+             break;
+diff --git a/sources/feedback2.php b/sources/feedback2.php
+index 8fd4954c3..691ba2c18 100644
+--- a/sources/feedback2.php
++++ b/sources/feedback2.php
+@@ -92,7 +92,8 @@ function trackback_script()
+ 
+     require_lang('trackbacks');
+ 
+-    header('Content-type: text/xml');
++    header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     $feedback_type = get_param_string('page');
+     $id = get_param_integer('id');
+diff --git a/sources/hooks/systems/ajax_tree/choose_filedump_file.php b/sources/hooks/systems/ajax_tree/choose_filedump_file.php
+index 1181b1d5e..0b95421ad 100755
+--- a/sources/hooks/systems/ajax_tree/choose_filedump_file.php
++++ b/sources/hooks/systems/ajax_tree/choose_filedump_file.php
+@@ -101,7 +101,7 @@ class Hook_choose_filedump_file
+                         $cat .= '/';
+                         $cat .= $_cat;
+                     }
+-                    $out .= '<expand>' . $cat . '</expand>';
++                    $out .= '<expand>' . xmlentities($cat) . '</expand>';
+                 }
+             }
+         }
+diff --git a/sources/hooks/systems/ajax_tree/choose_gallery.php b/sources/hooks/systems/ajax_tree/choose_gallery.php
+index 4d5b0497c..d4dc90bb4 100755
+--- a/sources/hooks/systems/ajax_tree/choose_gallery.php
++++ b/sources/hooks/systems/ajax_tree/choose_gallery.php
+@@ -114,7 +114,7 @@ class Hook_choose_gallery
+         if ((!is_null($default)) && ($default != '')) {
+             $cat = $default;
+             while ((!is_null($cat)) && ($cat != '')) {
+-                $out .= '<expand>' . $cat . '</expand>';
++                $out .= '<expand>' . xmlentities($cat) . '</expand>';
+                 $cat = $GLOBALS['SITE_DB']->query_select_value_if_there('galleries', 'parent_id', array('name' => $cat));
+             }
+         }
+diff --git a/sources/hooks/systems/ajax_tree/choose_image.php b/sources/hooks/systems/ajax_tree/choose_image.php
+index 793e81431..5d579af25 100755
+--- a/sources/hooks/systems/ajax_tree/choose_image.php
++++ b/sources/hooks/systems/ajax_tree/choose_image.php
+@@ -87,7 +87,7 @@ class Hook_choose_image
+         if ((!is_null($default)) && ($default != '')) {
+             $cat = $GLOBALS['SITE_DB']->query_select_value_if_there('images', 'cat', array('id' => intval($default)));
+             while ((!is_null($cat)) && ($cat != '')) {
+-                $out .= '<expand>' . $cat . '</expand>';
++                $out .= '<expand>' . xmlentities($cat) . '</expand>';
+                 $cat = $GLOBALS['SITE_DB']->query_select_value_if_there('galleries', 'parent_id', array('name' => $cat));
+             }
+         }
+diff --git a/sources/hooks/systems/ajax_tree/choose_video.php b/sources/hooks/systems/ajax_tree/choose_video.php
+index 4e271d192..394670569 100755
+--- a/sources/hooks/systems/ajax_tree/choose_video.php
++++ b/sources/hooks/systems/ajax_tree/choose_video.php
+@@ -82,7 +82,7 @@ class Hook_choose_video
+         if ((!is_null($default)) && ($default != '')) {
+             $cat = $GLOBALS['SITE_DB']->query_select_value_if_there('videos', 'cat', array('id' => intval($default)));
+             while ((!is_null($cat)) && ($cat != '')) {
+-                $out .= '<expand>' . $cat . '</expand>';
++                $out .= '<expand>' . xmlentities($cat) . '</expand>';
+                 $cat = $GLOBALS['SITE_DB']->query_select_value_if_there('galleries', 'parent_id', array('name' => $cat));
+             }
+         }
+diff --git a/sources/realtime_rain.php b/sources/realtime_rain.php
+index 73b26b228..1c210f615 100644
+--- a/sources/realtime_rain.php
++++ b/sources/realtime_rain.php
+@@ -32,6 +32,7 @@ function realtime_rain_script()
+     safe_ini_set('ocproducts.xss_detect', '0');
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+     echo '<?xml version="1.0" encoding="' . get_charset() . '"?' . '>';
+     echo '<request><result>';
+     require_code('realtime_rain');
+diff --git a/sources/rss2.php b/sources/rss2.php
+index dcc13ce4c..d1987ee2b 100755
+--- a/sources/rss2.php
++++ b/sources/rss2.php
+@@ -162,6 +162,7 @@ function rss_backend_script()
+ 
+     if ($mode == 'opml') {
+         header('Content-Type: text/xml');
++        header("Content-Security-Policy: default-src 'self'; style-src 'self' data: 'unsafe-inline'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+         $_feeds = find_all_hooks('systems', 'rss');
+         $feeds = array();
+@@ -222,6 +223,7 @@ function rss_backend_script()
+ 
+     // Firefox (and probably other browsers, but I didn't test) doesn't want to display Atom feeds inline if they're sent as text/xml+atom, even if the Content-Disposition is sent to inline :(
+     header('Content-Type: text/xml'); // application/rss+xml ?
++    header("Content-Security-Policy: default-src 'self'; style-src 'self' data: 'unsafe-inline'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     if (cms_srv('REQUEST_METHOD') == 'HEAD') {
+         return;
+diff --git a/sources/sitemap_ajax.php b/sources/sitemap_ajax.php
+index f08f6fb0a..fc08b9d71 100644
+--- a/sources/sitemap_ajax.php
++++ b/sources/sitemap_ajax.php
+@@ -61,6 +61,8 @@ function sitemap_script()
+  */
+ function sitemap_script_loading()
+ {
++    require_code('xml');
++
+     // Usergroups we have
+     $admin_groups = $GLOBALS['FORUM_DRIVER']->get_super_admin_groups();
+     $groups = $GLOBALS['FORUM_DRIVER']->get_usergroup_list(false, true);
+@@ -68,6 +70,8 @@ function sitemap_script_loading()
+     $default = get_param_string('default', null, true);
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
++
+     $permissions_needed = (get_param_integer('get_perms', 0) == 1); // Whether we are limiting our tree to permission-supporting
+     safe_ini_set('ocproducts.xss_detect', '0');
+ 
+@@ -127,8 +131,8 @@ function sitemap_script_loading()
+                 $buildup .= ':';
+             }
+             $buildup .= $part;
+-            echo "\n" . '<expand>' . $buildup . '</expand>';
+-            echo "\n" . '<expand>' . $buildup . ':</expand>';
++            echo "\n" . '<expand>' . xmlentities($buildup) . '</expand>';
++            echo "\n" . '<expand>' . xmlentities($buildup) . ':</expand>';
+         }
+     }
+ 
+diff --git a/sources/static_cache.php b/sources/static_cache.php
+index 8264c678b..3112fe26f 100644
+--- a/sources/static_cache.php
++++ b/sources/static_cache.php
+@@ -236,9 +236,10 @@ function static_cache($mode)
+     // Is cached
+     if (is_file($fast_cache_path)) {
+         if (($file_extension == '.htm') || ($file_extension == '.htm.gz')) {
+-            header('Content-type: text/html');
++            header('Content-Type: text/html');
+         } else {
+-            header('Content-type: text/xml');
++            header('Content-Type: text/xml');
++            header("Content-Security-Policy: default-src 'self'; style-src 'self' data: 'unsafe-inline'"); // Don't allow special execution via a vector of namespace-injected HTML
+         }
+ 
+         $expires = intval(60.0 * 60.0 * floatval($SITE_INFO['fast_spider_cache']));
+diff --git a/sources/xml.php b/sources/xml.php
+index 2be4901de..ecd1688f4 100644
+--- a/sources/xml.php
++++ b/sources/xml.php
+@@ -88,6 +88,17 @@ function xmlentities($string, $charset = null)
+     return $ret;
+ }
+ 
++/**
++ * Escape an XML CDATA section.
++ *
++ * @param  string $string Input string
++ * @return string Escaped version of input string
++ */
++function escape_cdata($string)
++{
++    return str_replace(']]>', ']]]]><![CDATA[>', $string);
++}
++
+ /**
+  * Convert HTML entities to plain characters for XML conformance.
+  *
+diff --git a/sources_custom/activities_submission.php b/sources_custom/activities_submission.php
+index ee598320c..8563a2ae8 100644
+--- a/sources_custom/activities_submission.php
++++ b/sources_custom/activities_submission.php
+@@ -113,6 +113,7 @@ function activities_ajax_submit_handler()
+     prepare_for_known_ajax_response();
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     $response = '<' . '?xml version="1.0" encoding="' . get_charset() . '" ?' . '>';
+     $response .= '<response><content>';
+@@ -183,6 +184,7 @@ function activities_ajax_update_list_handler()
+     require_lang('activities');
+     require_code('activities');
+     require_code('addons');
++    require_code('xml');
+ 
+     $proceed_selection = true; //There are some cases in which even glancing at the database is a waste of precious time.
+ 
+@@ -199,6 +201,7 @@ function activities_ajax_update_list_handler()
+     prepare_for_known_ajax_response();
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     $response = '<' . '?xml version="1.0" encoding="' . get_charset() . '" ?' . '>';
+ 
+@@ -242,7 +245,7 @@ function activities_ajax_update_list_handler()
+                 // tag so that the JavaScript knows what it's received
+                 $list_items .= '<listitem id="' . strval($row['id']) . '"><![CDATA[' . base64_encode($list_item->evaluate()) . ']]></listitem>';
+             }
+-            $response .= '<response><success>1</success><feedlen>' . strval($max) . '</feedlen><content>' . $list_items . '</content><supp>' . escape_html($where_clause) . '</supp></response>';
++            $response .= '<response><success>1</success><feedlen>' . strval($max) . '</feedlen><content>' . $list_items . '</content><supp>' . xmlentities($where_clause) . '</supp></response>';
+         } else {
+             $response .= '<response><success>2</success><content>NU - Nothing new.</content></response>';
+         }
+@@ -272,6 +275,7 @@ function activities_ajax_removal_handler()
+     prepare_for_known_ajax_response();
+ 
+     header('Content-Type: text/xml');
++    header("Content-Security-Policy: default-src 'none'"); // Don't allow special execution via a vector of namespace-injected HTML
+ 
+     $response = '<' . '?xml version="1.0" encoding="' . get_charset() . '" ?' . '>';
+     $response .= '<response>';
+diff --git a/themes/default/templates/COMMANDR_COMMANDRCHAT_NOTIFICATION.tpl b/themes/default/templates/COMMANDR_COMMANDRCHAT_NOTIFICATION.tpl
+index 41322b592..c834df27b 100755
+--- a/themes/default/templates/COMMANDR_COMMANDRCHAT_NOTIFICATION.tpl
++++ b/themes/default/templates/COMMANDR_COMMANDRCHAT_NOTIFICATION.tpl
+@@ -1,4 +1,4 @@
+-<p class="lonely_label">{!NEW_COMMANDRCHAT_MESSAGES,{MESSAGE_COUNT}}</p>
++<p class="lonely_label">{!NEW_COMMANDRCHAT_MESSAGES,{MESSAGE_COUNT*}}</p>
+ <ul>
+ 	{+START,LOOP,MESSAGES}<li>{_loop_var*}: {_loop_key}</li>{+END}
+ </ul>
+-- 
+GitLab
+

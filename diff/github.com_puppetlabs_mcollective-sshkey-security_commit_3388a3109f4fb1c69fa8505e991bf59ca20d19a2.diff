@@ -1,0 +1,108 @@
+From 3388a3109f4fb1c69fa8505e991bf59ca20d19a2 Mon Sep 17 00:00:00 2001
+From: Michael Smith <michael.smith@puppet.com>
+Date: Wed, 28 Jun 2017 15:12:00 -0700
+Subject: [PATCH] (MCOP-600) Prevent public key overwriting attack via identity
+
+When using two-way automatic public key distribution, each end writes
+the others `identity` as a public key file locally. No validation was
+done on the `identity`, so it could trigger directory traversal and
+allow the attacker to overwrite an unexpected file (like a trusted
+public key certificate). Prevent this by verifying identity does not
+result in traversing outside the intended distribution directory.
+---
+ security/sshkey.rb           | 13 ++++++++++---
+ spec/security/sshkey_spec.rb | 26 +++++++++++++++++++-------
+ 2 files changed, 29 insertions(+), 10 deletions(-)
+
+diff --git a/security/sshkey.rb b/security/sshkey.rb
+index eb3f0d0..7cf024d 100644
+--- a/security/sshkey.rb
++++ b/security/sshkey.rb
+@@ -142,7 +142,14 @@ def write_key_to_disk(key, identity)
+         end
+ 
+         if File.directory?(publickey_dir)
+-          if File.exists?(old_keyfile = File.join(publickey_dir, "#{identity}_pub.pem"))
++          # Reject identity if it would result in directory traversal.
++          old_keyfile = File.join(File.expand_path(publickey_dir), "#{identity}_pub.pem")
++          unless File.expand_path(old_keyfile) == old_keyfile
++            Log.warn("Identity returned by server would result in directory traversal. Not writing key to disk.")
++            return
++          end
++
++          if File.exists?(old_keyfile)
+             old_key = File.read(old_keyfile).chomp
+ 
+             unless old_key == key
+@@ -150,12 +157,12 @@ def write_key_to_disk(key, identity)
+                 Log.warn("Public key sent from '%s' does not match the stored key. Not overwriting." % identity)
+               else
+                 Log.warn("Public key sent from '%s' does not match the stored key. Overwriting." % identity)
+-                File.open(File.join(publickey_dir, "#{identity}_pub.pem"), 'w') { |f| f.puts key }
++                File.open(old_keyfile, 'w') { |f| f.puts key }
+               end
+             end
+           else
+             Log.debug("Discovered a new public key for '%s'. Writing to '%s'" % [identity, publickey_dir])
+-            File.open(File.join(publickey_dir, "#{identity}_pub.pem"), 'w') { |f| f.puts key }
++            File.open(old_keyfile, 'w') { |f| f.puts key }
+           end
+         else
+           raise("Cannot write public key to '%s'. Directory does not exist." % publickey_dir)
+diff --git a/spec/security/sshkey_spec.rb b/spec/security/sshkey_spec.rb
+index f6a6ec7..09e8030 100644
+--- a/spec/security/sshkey_spec.rb
++++ b/spec/security/sshkey_spec.rb
+@@ -280,13 +280,23 @@ class Verifier; end
+           }.to raise_error
+         end
+ 
++        it 'should fail if identity would result in directory traversal' do
++          @plugin.stubs(:lookup_config_option).with('learn_public_keys').returns('1')
++          @plugin.stubs(:lookup_config_option).with('publickey_dir').returns('ssh/pkd')
++          File.stubs(:directory?).with('ssh/pkd').returns(true)
++          Log.expects(:warn)
++          File.expects(:open).never
++          @plugin.send(:write_key_to_disk, 'ssh-rsa abcd', '../test')
++        end
++
+         it 'should write the public key to disk if its the first time its been seen' do
+           @plugin.stubs(:lookup_config_option).with('learn_public_keys').returns('1')
+           @plugin.stubs(:lookup_config_option).with('publickey_dir').returns('ssh/pkd')
+           File.stubs(:directory?).with('ssh/pkd').returns(true)
+-          File.stubs(:exists?).with('ssh/pkd/rspec_pub.pem').returns(false)
++          full_path = File.join(File.expand_path('ssh/pkd'), 'rspec_pub.pem')
++          File.stubs(:exists?).with(full_path).returns(false)
+           file = mock
+-          File.expects(:open).with('ssh/pkd/rspec_pub.pem', 'w').yields(file)
++          File.expects(:open).with(full_path, 'w').yields(file)
+           file.expects(:puts).with('ssh-rsa abcd')
+           @plugin.send(:write_key_to_disk, 'ssh-rsa abcd', 'rspec')
+         end
+@@ -296,8 +306,9 @@ class Verifier; end
+           @plugin.stubs(:lookup_config_option).with('publickey_dir').returns('ssh/pkd')
+           @plugin.stubs(:lookup_config_option).with('overwrite_stored_keys', 'n').returns('n')
+           File.stubs(:directory?).with('ssh/pkd').returns(true)
+-          File.stubs(:exists?).with('ssh/pkd/rspec_pub.pem').returns(true)
+-          File.stubs(:read).with('ssh/pkd/rspec_pub.pem').returns('ssh-rsa dcba')
++          full_path = File.join(File.expand_path('ssh/pkd'), 'rspec_pub.pem')
++          File.stubs(:exists?).with(full_path).returns(true)
++          File.stubs(:read).with(full_path).returns('ssh-rsa dcba')
+           Log.expects(:warn)
+           File.expects(:open).never
+           @plugin.send(:write_key_to_disk, 'ssh-rsa abcd', 'rspec')
+@@ -308,10 +319,11 @@ class Verifier; end
+           @plugin.stubs(:lookup_config_option).with('publickey_dir').returns('ssh/pkd')
+           @plugin.stubs(:lookup_config_option).with('overwrite_stored_keys', 'n').returns('1')
+           File.stubs(:directory?).with('ssh/pkd').returns(true)
+-          File.stubs(:exists?).with('ssh/pkd/rspec_pub.pem').returns(true)
+-          File.stubs(:read).with('ssh/pkd/rspec_pub.pem').returns('ssh-rsa dcba')
++          full_path = File.join(File.expand_path('ssh/pkd'), 'rspec_pub.pem')
++          File.stubs(:exists?).with(full_path).returns(true)
++          File.stubs(:read).with(full_path).returns('ssh-rsa dcba')
+           file = mock
+-          File.expects(:open).with('ssh/pkd/rspec_pub.pem', 'w').yields(file)
++          File.expects(:open).with(full_path, 'w').yields(file)
+           file.expects(:puts).with('ssh-rsa abcd')
+           Log.expects(:warn)
+           @plugin.send(:write_key_to_disk, 'ssh-rsa abcd', 'rspec')

@@ -1,0 +1,78 @@
+From e5b4b0824d6b648525b4bf63d9fa37e5beeae441 Mon Sep 17 00:00:00 2001
+From: "Daniel Knoppel (Phusion)" <daniel@phusion.nl>
+Date: Wed, 9 Nov 2016 12:07:35 +0100
+Subject: [PATCH] Fix writing a tmp file with a predictable name in
+ passenger-install-nginx-module.
+
+With access to the system, a user could plant a symlink in /tmp that
+resulted in a chosen-file overwrite attempt whenever
+passenger-install-nginx-module was run, using the access rights of
+the executing user, potentially even with chosen content.
+---
+ CHANGELOG                          |  1 +
+ bin/passenger-install-nginx-module | 28 +++++++++++++++-------------
+ 2 files changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index f6396fd05..d6eaf2e9b 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -16,6 +16,7 @@ Next version (not yet released)
+  * Fixes an issue where passenger-config couldn't restart an app if the TMPDIR variable was set to /tmp
+  * `passenger-install-apache-module` now suggests the correct apache package on Ubuntu Xenial. Closes GH-1884.
+  * [Standalone] The TempDirToucher will now spend most of its time with reduced privileges, except when it's actively touching files. This allows it to be killed when Passenger is quit in most circumstances. Closes GH-1678.
++ * Fixes a file overwrite vulnerability caused by a predictable temporary file being written by `passenger-install-nginx-module`. Thanks to Jeremy Evans for reporting this.
+  * [Standalone] Fixes starting Passenger as a non-extant user. Closes GH-1849.
+  * Improved look of the error pages for failing to spawn an application (development & production mode), and Error ID is now also shown in production mode.
+  * [Standalone] Enable ipv6 support by default in builtin nginx. Closes GH-1873.
+diff --git a/bin/passenger-install-nginx-module b/bin/passenger-install-nginx-module
+index 73bc9aafe..da66ac20b 100755
+--- a/bin/passenger-install-nginx-module
++++ b/bin/passenger-install-nginx-module
+@@ -38,11 +38,11 @@ PhusionPassenger.locate_directories
+ require 'digest/sha2'
+ require 'optparse'
+ require 'fileutils'
++require 'tmpdir'
+ PhusionPassenger.require_passenger_lib 'platform_info/ruby'
+ PhusionPassenger.require_passenger_lib 'platform_info/openssl'
+ PhusionPassenger.require_passenger_lib 'abstract_installer'
+ PhusionPassenger.require_passenger_lib 'utils/terminal_choice_menu'
+-PhusionPassenger.require_passenger_lib 'utils/tmpio'
+ PhusionPassenger.require_passenger_lib 'utils/shellwords'
+ 
+ DOWNLOAD_OPTION = {
+@@ -566,19 +566,21 @@ private
+ 
+   def pcre_is_installed?
+     if @pcre_is_installed.nil?
+-      @pcre_is_installed = begin
+-        File.open('/tmp/passenger-check.c', 'w') do |f|
+-          f.puts("#include <pcre.h>")
+-        end
+-        Dir.chdir('/tmp') do
+-          # Nginx checks for PCRE in multiple places...
+-          system("(gcc -I/usr/local/include -I/usr/include/pcre " <<
+-            "-I/usr/pkg/include -I/opt/local/include " <<
+-            "-c passenger-check.c) >/dev/null 2>/dev/null")
++      Dir.mktmpdir do |safe_tmpdir|
++        @pcre_is_installed = begin
++          File.open("#{safe_tmpdir}/passenger-check.c", 'w') do |f|
++            f.puts("#include <pcre.h>")
++          end
++          Dir.chdir("#{safe_tmpdir}") do
++            # Nginx checks for PCRE in multiple places...
++            system("(gcc -I/usr/local/include -I/usr/include/pcre " <<
++              "-I/usr/pkg/include -I/opt/local/include " <<
++              "-c passenger-check.c) >/dev/null 2>/dev/null")
++          end
++        ensure
++          File.unlink("#{safe_tmpdir}/passenger-check.c") rescue nil
++          File.unlink("#{safe_tmpdir}/passenger-check.o") rescue nil
+         end
+-      ensure
+-        File.unlink('/tmp/passenger-check.c') rescue nil
+-        File.unlink('/tmp/passenger-check.o') rescue nil
+       end
+     end
+     return @pcre_is_installed

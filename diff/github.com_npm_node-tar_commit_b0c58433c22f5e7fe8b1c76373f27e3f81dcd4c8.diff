@@ -1,0 +1,131 @@
+From b0c58433c22f5e7fe8b1c76373f27e3f81dcd4c8 Mon Sep 17 00:00:00 2001
+From: isaacs <i@izs.me>
+Date: Mon, 30 Apr 2018 11:32:28 -0700
+Subject: [PATCH] unpack: only reuse file fs entries if nlink = 1
+
+This matches behavior in bsdtar to prevent overwriting a hardlink with
+contents from a File archive entry.
+---
+ lib/unpack.js  | 16 +++++++++++--
+ test/unpack.js | 63 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 77 insertions(+), 2 deletions(-)
+
+diff --git a/lib/unpack.js b/lib/unpack.js
+index 3e1c527..1c16d5d 100644
+--- a/lib/unpack.js
++++ b/lib/unpack.js
+@@ -12,6 +12,7 @@ const wc = require('./winchars.js')
+ 
+ const ONENTRY = Symbol('onEntry')
+ const CHECKFS = Symbol('checkFs')
++const ISREUSABLE = Symbol('isReusable')
+ const MAKEFS = Symbol('makeFs')
+ const FILE = Symbol('file')
+ const DIRECTORY = Symbol('directory')
+@@ -351,6 +352,17 @@ class Unpack extends Parser {
+     entry.resume()
+   }
+ 
++  // Check if we can reuse an existing filesystem entry safely and
++  // overwrite it, rather than unlinking and recreating
++  // Windows doesn't report a useful nlink, so we just never reuse entries
++  [ISREUSABLE] (entry, st) {
++    return entry.type === 'File' &&
++      !this.unlink &&
++      st.isFile() &&
++      st.nlink <= 1 &&
++      process.platform !== 'win32'
++  }
++
+   // check if a thing is there, and if so, try to clobber it
+   [CHECKFS] (entry) {
+     this[PEND]()
+@@ -360,7 +372,7 @@ class Unpack extends Parser {
+       fs.lstat(entry.absolute, (er, st) => {
+         if (st && (this.keep || this.newer && st.mtime > entry.mtime))
+           this[SKIP](entry)
+-        else if (er || (entry.type === 'File' && !this.unlink && st.isFile()))
++        else if (er || this[ISREUSABLE](entry, st))
+           this[MAKEFS](null, entry)
+         else if (st.isDirectory()) {
+           if (entry.type === 'Directory') {
+@@ -422,7 +434,7 @@ class UnpackSync extends Unpack {
+       const st = fs.lstatSync(entry.absolute)
+       if (this.keep || this.newer && st.mtime > entry.mtime)
+         return this[SKIP](entry)
+-      else if (entry.type === 'File' && !this.unlink && st.isFile())
++      else if (this[ISREUSABLE](entry, st))
+         return this[MAKEFS](null, entry)
+       else {
+         try {
+diff --git a/test/unpack.js b/test/unpack.js
+index c7bf791..20ca79a 100644
+--- a/test/unpack.js
++++ b/test/unpack.js
+@@ -2286,3 +2286,66 @@ t.test('onentry option is preserved', t => {
+ 
+   t.end()
+ })
++
++t.test('do not reuse hardlinks, only nlink=1 files', t => {
++  const basedir = path.resolve(unpackdir, 'hardlink-reuse')
++  mkdirp.sync(basedir)
++  t.teardown(() => rimraf.sync(basedir))
++
++  const now = new Date('2018-04-30T18:30:39.025Z')
++
++  const data = makeTar([
++    {
++      path: 'overwriteme',
++      type: 'File',
++      size: 4,
++      mode: 0o644,
++      mtime: now
++    },
++    'foo\n',
++    {
++      path: 'link',
++      linkpath: 'overwriteme',
++      type: 'Link',
++      mode: 0o644,
++      mtime: now
++    },
++    {
++      path: 'link',
++      type: 'File',
++      size: 4,
++      mode: 0o644,
++      mtime: now
++    },
++    'bar\n',
++    '',
++    ''
++  ])
++
++  const checks = {
++    'link': 'bar\n',
++    'overwriteme': 'foo\n'
++  }
++
++  const check = t => {
++    for (let f in checks) {
++      t.equal(fs.readFileSync(basedir + '/' + f, 'utf8'), checks[f], f)
++      t.equal(fs.statSync(basedir + '/' + f).nlink, 1, f)
++    }
++    t.end()
++  }
++
++  t.test('async', t => {
++    const u = new Unpack({ cwd: basedir })
++    u.on('close', () => check(t))
++    u.end(data)
++  })
++
++  t.test('sync', t => {
++    const u = new UnpackSync({ cwd: basedir })
++    u.end(data)
++    check(t)
++  })
++
++  t.end()
++})

@@ -1,0 +1,1068 @@
+From e2a781b38efb8686d2bd850c2f2372b5c670bc45 Mon Sep 17 00:00:00 2001
+From: Softing <softing.romania@softing.com>
+Date: Mon, 13 Mar 2017 16:26:16 +0200
+Subject: [PATCH] Closes #108. SHA1 security policy removed from default
+ configurations.
+
+---
+ .../Opc.Ua.ComServerWrapper.Config.xml        | 27 ++++++++++--------
+ .../Controls/Endpoints/ConfiguredServerDlg.cs |  1 +
+ .../Client/Opc.Ua.SampleClient.Config.xml     | 28 ++-----------------
+ .../Client/Opc.Ua.SampleClient.Endpoints.xml  | 10 +++----
+ .../Samples/HistoryClient/Helpers.cs          |  6 ++--
+ .../Publisher/Opc.Ua.Publisher.Endpoints.xml  |  8 +++---
+ .../Server/Opc.Ua.SampleServer.Config.xml     | 23 ++-------------
+ .../Opc.Ua.ServerTestTool.Endpoints.xml       |  4 +--
+ .../Server/Opc.Ua.StackTestServer.Config.xml  | 16 ++---------
+ ...uickstarts.AlarmConditionServer.Config.xml | 18 ++----------
+ .../Quickstarts.BoilerServer.Config.xml       | 18 ++----------
+ .../Quickstarts.ComDaServerWrapper.Config.xml | 16 +++++------
+ .../DSATS/Server/DsatsDemoServer.Config.xml   |  9 ++++--
+ .../Quickstarts.DataAccessServer.Config.xml   | 18 ++----------
+ .../Quickstarts.DataTypesServer.Config.xml    | 18 ++----------
+ .../Server/Quickstarts.EmptyServer.Config.xml | 18 ++----------
+ ...ckstarts.HistoricalAccessServer.Config.xml | 18 ++----------
+ ...ckstarts.HistoricalEventsServer.Config.xml | 18 ++----------
+ .../Quickstarts.MethodsServer.Config.xml      | 18 ++----------
+ .../Quickstarts.PerfTestServer.Config.xml     | 18 ++----------
+ .../Quickstarts.ReferenceServer.Config.xml    | 15 ++++++----
+ .../Quickstarts.SimpleEventsServer.Config.xml | 18 ++----------
+ .../Server - Final/TutorialServer.Config.xml  | 18 ++----------
+ .../TutorialServer.Config.xml                 | 18 ++----------
+ .../Tutorial/Server/TutorialServer.Config.xml | 18 ++----------
+ ...starts.UserAuthenticationServer.Config.xml | 20 ++-----------
+ .../Server/Quickstarts.ViewsServer.Config.xml | 18 ++----------
+ 27 files changed, 108 insertions(+), 327 deletions(-)
+
+diff --git a/ComIOP/Wrapper/ServerWrapper/Opc.Ua.ComServerWrapper.Config.xml b/ComIOP/Wrapper/ServerWrapper/Opc.Ua.ComServerWrapper.Config.xml
+index f3f8d55..23a7b6d 100644
+--- a/ComIOP/Wrapper/ServerWrapper/Opc.Ua.ComServerWrapper.Config.xml
++++ b/ComIOP/Wrapper/ServerWrapper/Opc.Ua.ComServerWrapper.Config.xml
+@@ -18,18 +18,18 @@
+       <SubjectName>UA COM Server Wrapper</SubjectName>
+     </ApplicationCertificate>
+ 
+-    <!-- Where the trust list is stored (UA Applications) -->
+-    <TrustedPeerCertificates>
+-      <StoreType>Windows</StoreType>
+-      <StorePath>LocalMachine\UA Applications</StorePath>
+-    </TrustedPeerCertificates>
+-
+     <!-- Where the issuer certificate are stored (certificate authorities) -->
+     <TrustedIssuerCertificates>
+       <StoreType>Directory</StoreType>
+       <StorePath>%CommonApplicationData%\OPC Foundation\CertificateStores\UA Certificate Authorities</StorePath>
+     </TrustedIssuerCertificates>
+ 
++    <!-- Where the trust list is stored (UA Applications) -->
++    <TrustedPeerCertificates>
++      <StoreType>Windows</StoreType>
++      <StorePath>LocalMachine\UA Applications</StorePath>
++    </TrustedPeerCertificates>
++
+     <!-- The directory used to store invalid certficates for later review by the administrator. -->
+     <RejectedCertificateStore>
+       <StoreType>Directory</StoreType>
+@@ -55,16 +55,21 @@
+       <ua:String>http://localhost:48401/UA/ComServerWrapper</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
++      <ServerSecurityPolicy>
++        <SecurityMode>Sign_2</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>1</SecurityLevel>
++      </ServerSecurityPolicy>
++      <ServerSecurityPolicy>
++        <SecurityMode>SignAndEncrypt_3</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
++      </ServerSecurityPolicy>
+     </SecurityPolicies>
+     <MinRequestThreadCount>5</MinRequestThreadCount>
+     <MaxRequestThreadCount>100</MaxRequestThreadCount>
+diff --git a/SampleApplications/SampleLibraries/Controls/Endpoints/ConfiguredServerDlg.cs b/SampleApplications/SampleLibraries/Controls/Endpoints/ConfiguredServerDlg.cs
+index 5cc023c..3adc5a2 100644
+--- a/SampleApplications/SampleLibraries/Controls/Endpoints/ConfiguredServerDlg.cs
++++ b/SampleApplications/SampleLibraries/Controls/Endpoints/ConfiguredServerDlg.cs
+@@ -901,6 +901,7 @@ private void InitializeSecurityPolicies(EndpointDescriptionCollection endpoints)
+                 SecurityPolicyCB.Items.Add(SecurityPolicies.GetDisplayName(SecurityPolicies.None));
+                 SecurityPolicyCB.Items.Add(SecurityPolicies.GetDisplayName(SecurityPolicies.Basic128Rsa15));
+                 SecurityPolicyCB.Items.Add(SecurityPolicies.GetDisplayName(SecurityPolicies.Basic256));
++                SecurityPolicyCB.Items.Add(SecurityPolicies.GetDisplayName(SecurityPolicies.Basic256Sha256));
+             }
+ 
+             // find all unique security policies.    
+diff --git a/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Config.xml b/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Config.xml
+index 2c1eee8..9cc085f 100644
+--- a/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Config.xml
++++ b/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Config.xml
+@@ -211,45 +211,21 @@
+          
+          The first policy in the list is assigned to base address. -->
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+-        <SecurityLevel>5</SecurityLevel>
+-      </ServerSecurityPolicy>      
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
+-      </ServerSecurityPolicy>      
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+--->
+-
+     </SecurityPolicies>
+ 
+     <MinRequestThreadCount>5</MinRequestThreadCount>
+diff --git a/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Endpoints.xml b/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Endpoints.xml
+index 00608b9..1402bcf 100644
+--- a/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Endpoints.xml
++++ b/SampleApplications/Samples/Client/Opc.Ua.SampleClient.Endpoints.xml
+@@ -74,7 +74,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:62541/UA/ReferenceServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+@@ -105,7 +105,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:62547/Quickstarts/DataAccessServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+@@ -136,7 +136,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:62544/Quickstarts/AlarmConditionServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+@@ -167,7 +167,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:62550/Quickstarts/HistoricalAccessServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+@@ -198,7 +198,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:62553/Quickstarts/HistoricalEventsServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+diff --git a/SampleApplications/Samples/HistoryClient/Helpers.cs b/SampleApplications/Samples/HistoryClient/Helpers.cs
+index fdff0bf..dca6fb0 100644
+--- a/SampleApplications/Samples/HistoryClient/Helpers.cs
++++ b/SampleApplications/Samples/HistoryClient/Helpers.cs
+@@ -231,8 +231,8 @@ public static ApplicationConfiguration CreateServerConfiguration()
+             ServerSecurityPolicy policy1 = new ServerSecurityPolicy();
+ 
+             policy1.SecurityMode      = MessageSecurityMode.SignAndEncrypt;
+-            policy1.SecurityPolicyUri = SecurityPolicies.Basic128Rsa15;
+-            policy1.SecurityLevel     = 1;
++            policy1.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
++            policy1.SecurityLevel     = 5;
+ 
+             configuration.ServerConfiguration.SecurityPolicies.Add(policy1);
+ 
+@@ -279,7 +279,7 @@ public static EndpointDescription CreateEndpointDescription()
+             // specify the security policy to use.
+             // endpointDescription.SecurityPolicyUri = SecurityPolicies.None;
+             // endpointDescription.SecurityMode      = MessageSecurityMode.None;;
+-            endpointDescription.SecurityPolicyUri = SecurityPolicies.Basic128Rsa15;
++            endpointDescription.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
+             endpointDescription.SecurityMode      = MessageSecurityMode.SignAndEncrypt;
+             
+             // specify the transport profile.
+diff --git a/SampleApplications/Samples/Publisher/Opc.Ua.Publisher.Endpoints.xml b/SampleApplications/Samples/Publisher/Opc.Ua.Publisher.Endpoints.xml
+index 2b2f7c1..d8b41f1 100644
+--- a/SampleApplications/Samples/Publisher/Opc.Ua.Publisher.Endpoints.xml
++++ b/SampleApplications/Samples/Publisher/Opc.Ua.Publisher.Endpoints.xml
+@@ -9,14 +9,14 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://localhost:61210/UA/Publisher</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+           </UserTokenPolicy>
+         </UserIdentityTokens>
+         <TransportProfileUri>http://opcfoundation.org/UA/profiles/transport/wsxmlorbinary</TransportProfileUri>
+-        <SecurityLevel>0</SecurityLevel>
++        <SecurityLevel>5</SecurityLevel>
+       </ua:Endpoint>
+       <ua:UpdateBeforeConnect>true</ua:UpdateBeforeConnect>
+       <ua:SelectedUserTokenPolicy>0</ua:SelectedUserTokenPolicy>
+@@ -25,14 +25,14 @@
+       <ua:Endpoint>
+         <EndpointUrl>opc.tcp://192.168.2.101:51210/UA/SampleServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+           </UserTokenPolicy>
+         </UserIdentityTokens>
+         <TransportProfileUri>http://opcfoundation.org/UA/profiles/transport/wsxmlorbinary</TransportProfileUri>
+-        <SecurityLevel>0</SecurityLevel>
++        <SecurityLevel>5</SecurityLevel>
+       </ua:Endpoint>
+       <ua:UpdateBeforeConnect>true</ua:UpdateBeforeConnect>
+       <ua:SelectedUserTokenPolicy>0</ua:SelectedUserTokenPolicy>
+diff --git a/SampleApplications/Samples/Server/Opc.Ua.SampleServer.Config.xml b/SampleApplications/Samples/Server/Opc.Ua.SampleServer.Config.xml
+index be237be..6c9662e 100644
+--- a/SampleApplications/Samples/Server/Opc.Ua.SampleServer.Config.xml
++++ b/SampleApplications/Samples/Server/Opc.Ua.SampleServer.Config.xml
+@@ -84,30 +84,10 @@
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>1</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+@@ -115,6 +95,7 @@
+         <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+     </SecurityPolicies>
++    
+     <MinRequestThreadCount>5</MinRequestThreadCount>
+     <MaxRequestThreadCount>100</MaxRequestThreadCount>
+     <MaxQueuedRequestCount>2000</MaxQueuedRequestCount>
+diff --git a/SampleApplications/Samples/ServerTest/Opc.Ua.ServerTestTool.Endpoints.xml b/SampleApplications/Samples/ServerTest/Opc.Ua.ServerTestTool.Endpoints.xml
+index 9be6fb5..1b0b67c 100644
+--- a/SampleApplications/Samples/ServerTest/Opc.Ua.ServerTestTool.Endpoints.xml
++++ b/SampleApplications/Samples/ServerTest/Opc.Ua.ServerTestTool.Endpoints.xml
+@@ -8,7 +8,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>http://localhost:61211/UA/SampleClient</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+@@ -35,7 +35,7 @@
+       <ua:Endpoint>
+         <EndpointUrl>http://localhost:51211/UA/SampleServer</EndpointUrl>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <UserIdentityTokens>
+           <UserTokenPolicy>
+             <TokenType>Anonymous_0</TokenType>
+diff --git a/SampleApplications/Stack Test/Server/Opc.Ua.StackTestServer.Config.xml b/SampleApplications/Stack Test/Server/Opc.Ua.StackTestServer.Config.xml
+index c6a3c2f..df4928a 100644
+--- a/SampleApplications/Stack Test/Server/Opc.Ua.StackTestServer.Config.xml	
++++ b/SampleApplications/Stack Test/Server/Opc.Ua.StackTestServer.Config.xml	
+@@ -53,25 +53,15 @@
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+     </SecurityPolicies>
+     <UserTokenPolicies />
+diff --git a/SampleApplications/Workshop/AlarmCondition/Server/Quickstarts.AlarmConditionServer.Config.xml b/SampleApplications/Workshop/AlarmCondition/Server/Quickstarts.AlarmConditionServer.Config.xml
+index b58d4f8..b926911 100644
+--- a/SampleApplications/Workshop/AlarmCondition/Server/Quickstarts.AlarmConditionServer.Config.xml
++++ b/SampleApplications/Workshop/AlarmCondition/Server/Quickstarts.AlarmConditionServer.Config.xml
+@@ -54,33 +54,21 @@
+       <ua:String>opc.tcp://localhost:62544/Quickstarts/AlarmConditionServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Boiler/Server/Quickstarts.BoilerServer.Config.xml b/SampleApplications/Workshop/Boiler/Server/Quickstarts.BoilerServer.Config.xml
+index 94894b5..9b22d30 100644
+--- a/SampleApplications/Workshop/Boiler/Server/Quickstarts.BoilerServer.Config.xml
++++ b/SampleApplications/Workshop/Boiler/Server/Quickstarts.BoilerServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/BoilerServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/ComDa/Server/Quickstarts.ComDaServerWrapper.Config.xml b/SampleApplications/Workshop/ComDa/Server/Quickstarts.ComDaServerWrapper.Config.xml
+index f72721c..b5b7149 100644
+--- a/SampleApplications/Workshop/ComDa/Server/Quickstarts.ComDaServerWrapper.Config.xml
++++ b/SampleApplications/Workshop/ComDa/Server/Quickstarts.ComDaServerWrapper.Config.xml
+@@ -64,19 +64,19 @@
+     <AlternateBaseAddresses xmlns:d3p1="http://opcfoundation.org/UA/2008/02/Types.xsd" />
+     <SecurityPolicies>
+       <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
++        <SecurityMode>None_1</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
++        <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+-        <SecurityMode>None_1</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+-        <SecurityLevel>0</SecurityLevel>
++        <SecurityMode>SignAndEncrypt_3</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+     </SecurityPolicies>
+     <MinRequestThreadCount>10</MinRequestThreadCount>
+diff --git a/SampleApplications/Workshop/DSATS/Server/DsatsDemoServer.Config.xml b/SampleApplications/Workshop/DSATS/Server/DsatsDemoServer.Config.xml
+index 90a8e1f..1346c31 100644
+--- a/SampleApplications/Workshop/DSATS/Server/DsatsDemoServer.Config.xml
++++ b/SampleApplications/Workshop/DSATS/Server/DsatsDemoServer.Config.xml
+@@ -51,10 +51,15 @@
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityMode>Sign_2</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
++      <ServerSecurityPolicy>
++        <SecurityMode>SignAndEncrypt_3</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
++      </ServerSecurityPolicy>
+     </SecurityPolicies>
+     <MinRequestThreadCount>10</MinRequestThreadCount>
+     <MaxRequestThreadCount>100</MaxRequestThreadCount>
+diff --git a/SampleApplications/Workshop/DataAccess/Server/Quickstarts.DataAccessServer.Config.xml b/SampleApplications/Workshop/DataAccess/Server/Quickstarts.DataAccessServer.Config.xml
+index d9dc9c5..a804d99 100644
+--- a/SampleApplications/Workshop/DataAccess/Server/Quickstarts.DataAccessServer.Config.xml
++++ b/SampleApplications/Workshop/DataAccess/Server/Quickstarts.DataAccessServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62547/Quickstarts/DataAccessServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/DataTypes/Server/Quickstarts.DataTypesServer.Config.xml b/SampleApplications/Workshop/DataTypes/Server/Quickstarts.DataTypesServer.Config.xml
+index f3cc034..932e4e3 100644
+--- a/SampleApplications/Workshop/DataTypes/Server/Quickstarts.DataTypesServer.Config.xml
++++ b/SampleApplications/Workshop/DataTypes/Server/Quickstarts.DataTypesServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/DataTypesServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Empty/Server/Quickstarts.EmptyServer.Config.xml b/SampleApplications/Workshop/Empty/Server/Quickstarts.EmptyServer.Config.xml
+index ba66e05..39f00a4 100644
+--- a/SampleApplications/Workshop/Empty/Server/Quickstarts.EmptyServer.Config.xml
++++ b/SampleApplications/Workshop/Empty/Server/Quickstarts.EmptyServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62546/Quickstarts/EmptyServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/HistoricalAccess/Server/Quickstarts.HistoricalAccessServer.Config.xml b/SampleApplications/Workshop/HistoricalAccess/Server/Quickstarts.HistoricalAccessServer.Config.xml
+index 432840e..26ebe64 100644
+--- a/SampleApplications/Workshop/HistoricalAccess/Server/Quickstarts.HistoricalAccessServer.Config.xml
++++ b/SampleApplications/Workshop/HistoricalAccess/Server/Quickstarts.HistoricalAccessServer.Config.xml
+@@ -56,33 +56,21 @@
+       <ua:String>opc.tcp://localhost:62550/Quickstarts/HistoricalAccessServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/HistoricalEvents/Server/Quickstarts.HistoricalEventsServer.Config.xml b/SampleApplications/Workshop/HistoricalEvents/Server/Quickstarts.HistoricalEventsServer.Config.xml
+index d88d734..eb12236 100644
+--- a/SampleApplications/Workshop/HistoricalEvents/Server/Quickstarts.HistoricalEventsServer.Config.xml
++++ b/SampleApplications/Workshop/HistoricalEvents/Server/Quickstarts.HistoricalEventsServer.Config.xml
+@@ -56,33 +56,21 @@
+       <ua:String>opc.tcp://localhost:62553/Quickstarts/HistoricalEventsServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Methods/Server/Quickstarts.MethodsServer.Config.xml b/SampleApplications/Workshop/Methods/Server/Quickstarts.MethodsServer.Config.xml
+index 8bd9a1a..d7224d6 100644
+--- a/SampleApplications/Workshop/Methods/Server/Quickstarts.MethodsServer.Config.xml
++++ b/SampleApplications/Workshop/Methods/Server/Quickstarts.MethodsServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/MethodsServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/PerfTest/Server/Quickstarts.PerfTestServer.Config.xml b/SampleApplications/Workshop/PerfTest/Server/Quickstarts.PerfTestServer.Config.xml
+index 37c7079..257fb86 100644
+--- a/SampleApplications/Workshop/PerfTest/Server/Quickstarts.PerfTestServer.Config.xml
++++ b/SampleApplications/Workshop/PerfTest/Server/Quickstarts.PerfTestServer.Config.xml
+@@ -43,33 +43,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/PerfTestServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Reference/Server/Quickstarts.ReferenceServer.Config.xml b/SampleApplications/Workshop/Reference/Server/Quickstarts.ReferenceServer.Config.xml
+index 269b8f5..e82e7a0 100644
+--- a/SampleApplications/Workshop/Reference/Server/Quickstarts.ReferenceServer.Config.xml
++++ b/SampleApplications/Workshop/Reference/Server/Quickstarts.ReferenceServer.Config.xml
+@@ -54,16 +54,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/ReferenceServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
++      <ServerSecurityPolicy>
++        <SecurityMode>Sign_2</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>1</SecurityLevel>
++      </ServerSecurityPolicy>
++      <ServerSecurityPolicy>
++        <SecurityMode>SignAndEncrypt_3</SecurityMode>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
++      </ServerSecurityPolicy>
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/SimpleEvents/Server/Quickstarts.SimpleEventsServer.Config.xml b/SampleApplications/Workshop/SimpleEvents/Server/Quickstarts.SimpleEventsServer.Config.xml
+index 5daa3b5..981547b 100644
+--- a/SampleApplications/Workshop/SimpleEvents/Server/Quickstarts.SimpleEventsServer.Config.xml
++++ b/SampleApplications/Workshop/SimpleEvents/Server/Quickstarts.SimpleEventsServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/SimpleEventsServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Tutorial/Server - Final/TutorialServer.Config.xml b/SampleApplications/Workshop/Tutorial/Server - Final/TutorialServer.Config.xml
+index dcbf056..4dd5da7 100644
+--- a/SampleApplications/Workshop/Tutorial/Server - Final/TutorialServer.Config.xml	
++++ b/SampleApplications/Workshop/Tutorial/Server - Final/TutorialServer.Config.xml	
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/TutorialServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Tutorial/Server - Initial/TutorialServer.Config.xml b/SampleApplications/Workshop/Tutorial/Server - Initial/TutorialServer.Config.xml
+index dcbf056..4dd5da7 100644
+--- a/SampleApplications/Workshop/Tutorial/Server - Initial/TutorialServer.Config.xml	
++++ b/SampleApplications/Workshop/Tutorial/Server - Initial/TutorialServer.Config.xml	
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/TutorialServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Tutorial/Server/TutorialServer.Config.xml b/SampleApplications/Workshop/Tutorial/Server/TutorialServer.Config.xml
+index dcbf056..4dd5da7 100644
+--- a/SampleApplications/Workshop/Tutorial/Server/TutorialServer.Config.xml
++++ b/SampleApplications/Workshop/Tutorial/Server/TutorialServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/TutorialServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/UserAuthentication/Server/Quickstarts.UserAuthenticationServer.Config.xml b/SampleApplications/Workshop/UserAuthentication/Server/Quickstarts.UserAuthenticationServer.Config.xml
+index 119c4db..b287faf 100644
+--- a/SampleApplications/Workshop/UserAuthentication/Server/Quickstarts.UserAuthenticationServer.Config.xml
++++ b/SampleApplications/Workshop/UserAuthentication/Server/Quickstarts.UserAuthenticationServer.Config.xml
+@@ -55,35 +55,21 @@
+       <ua:String>opc.tcp://localhost:62541/Quickstarts/UserAuthenticationServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <!--
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      -->
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>
+diff --git a/SampleApplications/Workshop/Views/Server/Quickstarts.ViewsServer.Config.xml b/SampleApplications/Workshop/Views/Server/Quickstarts.ViewsServer.Config.xml
+index db46494..50e1f64 100644
+--- a/SampleApplications/Workshop/Views/Server/Quickstarts.ViewsServer.Config.xml
++++ b/SampleApplications/Workshop/Views/Server/Quickstarts.ViewsServer.Config.xml
+@@ -55,33 +55,21 @@
+       <ua:String>opc.tcp://localhost:62546/Quickstarts/ViewsServer</ua:String>
+     </BaseAddresses>
+     <SecurityPolicies>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+-        <SecurityLevel>3</SecurityLevel>
+-      </ServerSecurityPolicy>
+-      <ServerSecurityPolicy>
+-        <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>2</SecurityLevel>
+-      </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>None_1</SecurityMode>
+         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
+         <SecurityLevel>0</SecurityLevel>
+       </ServerSecurityPolicy>
+-      <!--
+       <ServerSecurityPolicy>
+         <SecurityMode>Sign_2</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
+         <SecurityLevel>1</SecurityLevel>
+       </ServerSecurityPolicy>
+       <ServerSecurityPolicy>
+         <SecurityMode>SignAndEncrypt_3</SecurityMode>
+-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
+-        <SecurityLevel>4</SecurityLevel>
++        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
++        <SecurityLevel>5</SecurityLevel>
+       </ServerSecurityPolicy>
+-      -->
+     </SecurityPolicies>
+     <UserTokenPolicies>
+       <ua:UserTokenPolicy>

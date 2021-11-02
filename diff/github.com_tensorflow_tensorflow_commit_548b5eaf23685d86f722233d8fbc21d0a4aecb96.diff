@@ -1,0 +1,26 @@
+From 548b5eaf23685d86f722233d8fbc21d0a4aecb96 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Thu, 29 Apr 2021 08:38:16 -0700
+Subject: [PATCH] Fix divide by zero error in `fractional_pool_common.cc`.
+
+PiperOrigin-RevId: 371126221
+Change-Id: Iea4b2f363aaeb116ab460e3bc592c687484af344
+---
+ tensorflow/core/kernels/fractional_avg_pool_op.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/kernels/fractional_avg_pool_op.cc b/tensorflow/core/kernels/fractional_avg_pool_op.cc
+index dfc2382624e3f..b8a5083e5340f 100644
+--- a/tensorflow/core/kernels/fractional_avg_pool_op.cc
++++ b/tensorflow/core/kernels/fractional_avg_pool_op.cc
+@@ -80,6 +80,10 @@ class FractionalAvgPoolOp : public OpKernel {
+     std::vector<int> output_size(tensor_in_and_out_dims);
+     for (int i = 0; i < tensor_in_and_out_dims; ++i) {
+       input_size[i] = tensor_in.dim_size(i);
++      OP_REQUIRES(
++          context, pooling_ratio_[i] <= input_size[i],
++          errors::InvalidArgument(
++              "Pooling ratio cannot be bigger than input tensor dim size."));
+     }
+     // Output size.
+     for (int i = 0; i < tensor_in_and_out_dims; ++i) {

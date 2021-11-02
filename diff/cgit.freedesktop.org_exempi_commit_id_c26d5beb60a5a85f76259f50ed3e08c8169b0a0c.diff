@@ -1,0 +1,296 @@
+From c26d5beb60a5a85f76259f50ed3e08c8169b0a0c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Hubert=20Figui=C3=A8re?= <hub@figuiere.net>
+Date: Sun, 26 Mar 2017 01:10:11 -0400
+Subject: Bug 100397 - Fix crash on malformed JPEG file
+
+- Check the buffer doesn't overrun for the TIFF tag
+- Fix a use-after-free in exception handling
+- Fix two invalid memcpy() on overlapping memory
+---
+ XMPFiles/source/FormatSupport/ReconcileTIFF.cpp    |  2 +-
+ .../source/FormatSupport/TIFF_MemoryReader.cpp     | 10 ++++--
+ XMPFiles/source/FormatSupport/TIFF_Support.hpp     |  8 ++++-
+ exempi/exempi.cpp                                  |  6 ++--
+ public/include/XMP_Const.h                         | 24 +++++++++++--
+ public/include/client-glue/WXMP_Common.hpp         | 39 +++++++++++++++++++---
+ source/XMP_LibUtils.hpp                            | 24 ++++++-------
+ 7 files changed, 85 insertions(+), 28 deletions(-)
+
+diff --git a/XMPFiles/source/FormatSupport/ReconcileTIFF.cpp b/XMPFiles/source/FormatSupport/ReconcileTIFF.cpp
+index aa4aea6..7e89b0e 100644
+--- a/XMPFiles/source/FormatSupport/ReconcileTIFF.cpp
++++ b/XMPFiles/source/FormatSupport/ReconcileTIFF.cpp
+@@ -233,7 +233,7 @@ static XMP_Uns32 GatherInt ( const char * strPtr, size_t count )
+ 
+ static size_t TrimTrailingSpaces ( char * firstChar, size_t origLen )
+ {
+-	if ( origLen == 0 ) return 0;
++	if ( !firstChar || origLen == 0 ) return 0;
+ 
+ 	char * lastChar  = firstChar + origLen - 1;
+ 	if ( (*lastChar != ' ') && (*lastChar != 0) ) return origLen;	// Nothing to do.
+diff --git a/XMPFiles/source/FormatSupport/TIFF_MemoryReader.cpp b/XMPFiles/source/FormatSupport/TIFF_MemoryReader.cpp
+index ea1b686..fcf9e43 100644
+--- a/XMPFiles/source/FormatSupport/TIFF_MemoryReader.cpp
++++ b/XMPFiles/source/FormatSupport/TIFF_MemoryReader.cpp
+@@ -70,7 +70,7 @@ void TIFF_MemoryReader::SortIFD ( TweakedIFDInfo* thisIFD )
+ 		} else if ( thisTag == prevTag ) {
+ 
+ 			// Duplicate tag, keep the 2nd copy, move the tail of the array up, prevTag is unchanged.
+-			memcpy ( &ifdEntries[i-1], &ifdEntries[i], 12*(tagCount-i) );	// AUDIT: Safe, moving tail forward, i >= 1.
++			memmove ( &ifdEntries[i-1], &ifdEntries[i], 12*(tagCount-i) ); // may overlap -- Hub
+ 			--tagCount;
+ 			--i; // ! Don't move forward in the array, we've moved the unseen part up.
+ 
+@@ -86,7 +86,7 @@ void TIFF_MemoryReader::SortIFD ( TweakedIFDInfo* thisIFD )
+ 
+ 				// Out of order duplicate, move it to position j, move the tail of the array up.
+ 				ifdEntries[j] = ifdEntries[i];
+-				memcpy ( &ifdEntries[i], &ifdEntries[i+1], 12*(tagCount-(i+1)) );	// AUDIT: Safe, moving tail forward, i >= 1.
++				memmove ( &ifdEntries[i], &ifdEntries[i+1], 12*(tagCount-(i+1)) );	// may overlap -- Hub
+ 				--tagCount;
+ 				--i; // ! Don't move forward in the array, we've moved the unseen part up.
+ 
+@@ -232,7 +232,11 @@ bool TIFF_MemoryReader::GetTag ( XMP_Uns8 ifd, XMP_Uns16 id, TagInfo* info ) con
+ 		info->dataLen = thisBytes;
+ 
+ 		info->dataPtr = this->GetDataPtr ( thisTag );
+-
++		// Here we know that if it is NULL, it is wrong. -- Hub
++		// GetDataPtr will return NULL in case of overflow.
++		if (info->dataPtr == NULL) {
++			return false;
++		}
+ 	}
+ 
+ 	return true;
+diff --git a/XMPFiles/source/FormatSupport/TIFF_Support.hpp b/XMPFiles/source/FormatSupport/TIFF_Support.hpp
+index d4e2f4d..e3e458b 100644
+--- a/XMPFiles/source/FormatSupport/TIFF_Support.hpp
++++ b/XMPFiles/source/FormatSupport/TIFF_Support.hpp
+@@ -786,7 +786,13 @@ private:
+ 		{ if ( GetUns32AsIs(&tifdEntry->bytes) <= 4 ) {
+ 		  	return &tifdEntry->dataOrPos;
+ 		  } else {
+-		  	return (this->tiffStream + GetUns32AsIs(&tifdEntry->dataOrPos));
++			XMP_Uns32 pos = GetUns32AsIs(&tifdEntry->dataOrPos);
++			if (pos + GetUns32AsIs (&tifdEntry->bytes) > this->tiffLength) {
++				// Invalid file.
++				// The data is past the length of the TIFF.
++				return NULL;
++			}
++			return (this->tiffStream + pos);
+ 		  }
+ 		}
+ 
+diff --git a/exempi/exempi.cpp b/exempi/exempi.cpp
+index 6857df9..584aaf1 100644
+--- a/exempi/exempi.cpp
++++ b/exempi/exempi.cpp
+@@ -195,10 +195,8 @@ bool xmp_init()
+     RESET_ERROR;
+     try {
+         // no need to initialize anything else.
+-        // XMP SDK 5.1.2 needs this because it has been lobotomized of local
+-        // text
+-        // conversion
+-        // the one that was done in Exempi with libiconv.
++        // XMP SDK 5.1.2 needs this because it has been stripped off local
++        // text conversion the one that was done in Exempi with libiconv.
+         bool result = SXMPFiles::Initialize(kXMPFiles_IgnoreLocalText);
+         SXMPMeta::SetDefaultErrorCallback(&_xmp_error_callback, nullptr, 1);
+         return result;
+diff --git a/public/include/XMP_Const.h b/public/include/XMP_Const.h
+index 4b72404..aa05e89 100644
+--- a/public/include/XMP_Const.h
++++ b/public/include/XMP_Const.h
+@@ -12,6 +12,8 @@
+ #include "XMP_Environment.h"
+ 
+    #include <stddef.h>
++   #include <string.h>
++   #include <stdlib.h>
+ 
+ #if XMP_MacBuild | XMP_iOSBuild	// ! No stdint.h on Windows and some UNIXes.
+     #include <stdint.h>
+@@ -1313,7 +1315,25 @@ public:
+ 	///
+ 	/// @param _errMsg The descriptive string, for debugging use only. It must not be shown to users
+ 	/// in a final product. It is written for developers, not users, and never localized.
+-	XMP_Error ( XMP_Int32 _id, XMP_StringPtr _errMsg ) : id(_id), errMsg(_errMsg), notified(false) {};
++	XMP_Error ( XMP_Int32 _id, XMP_StringPtr _errMsg ) : id(_id), errMsg(NULL), notified(false) {
++		if (_errMsg) {
++			errMsg = strdup(_errMsg);
++		}
++	};
++	/// @brief Copy constructor for an XMP_Error.
++	///
++	/// Because we rethrow it.
++	XMP_Error (const XMP_Error& e)
++		: id(e.id), errMsg(NULL), notified(e.notified) {
++		if (e.errMsg) {
++			errMsg = strdup(e.errMsg);
++		}
++	};
++	~XMP_Error() {
++		if (errMsg) {
++			free(errMsg);
++		}
++	};
+ 
+ 	/// Retrieves the numeric code from an XMP_Error.
+ 	inline XMP_Int32     GetID() const     { return id; };
+@@ -1332,7 +1352,7 @@ private:
+ 	XMP_Int32     id;
+ 	/// Descriptive string, for debugging use only. It must not be shown to users in a final
+ 	/// product. It is written for developers, not users, and never localized.
+-	XMP_StringPtr errMsg;
++	char* errMsg;
+ 	/// Variable to store whether this particular error is notified to user or not
+ 	XMP_Bool notified;
+ };
+diff --git a/public/include/client-glue/WXMP_Common.hpp b/public/include/client-glue/WXMP_Common.hpp
+index 97fb9fc..0aef5ba 100644
+--- a/public/include/client-glue/WXMP_Common.hpp
++++ b/public/include/client-glue/WXMP_Common.hpp
+@@ -9,6 +9,9 @@
+ // of the Adobe license agreement accompanying it.
+ // =================================================================================================
+ 
++#include <stdlib.h>
++#include <string.h>
++
+ #ifndef XMP_Inline
+ 	#if TXMP_EXPAND_INLINE
+ 		#define XMP_Inline inline
+@@ -24,12 +27,38 @@ typedef void (* SetClientStringProc) ( void * clientPtr, XMP_StringPtr valuePtr,
+ typedef void (* SetClientStringVectorProc) ( void * clientPtr, XMP_StringPtr * arrayPtr, XMP_Uns32 stringCount );
+ 
+ struct WXMP_Result {
+-    XMP_StringPtr errMessage;
++private:
++    char*         errMessage;
++public:
+     void *        ptrResult;
+     double        floatResult;
+     XMP_Uns64     int64Result;
+     XMP_Uns32     int32Result;
+-	WXMP_Result() : errMessage(0),ptrResult(NULL),floatResult(0),int64Result(0),int32Result(0){};
++	WXMP_Result() : errMessage(NULL),ptrResult(NULL),floatResult(0),int64Result(0),int32Result(0){};
++	~WXMP_Result()
++	{
++		if (errMessage) {
++			free(errMessage);
++		}
++	}
++	void SetErrMessage(const char* msg)
++		{
++			if (errMessage) {
++				free(errMessage);
++				errMessage = NULL;
++			}
++			if (msg) {
++				errMessage = strdup(msg);
++			}
++		}
++	const char* GetErrMessage() const
++		{
++			return errMessage;
++		}
++private:
++	// We should avoid automatic copy.
++	WXMP_Result(const WXMP_Result&);
++	WXMP_Result& operator=(const WXMP_Result&);
+ };
+ 
+ #if __cplusplus
+@@ -37,7 +66,7 @@ extern "C" {
+ #endif
+ 
+ #define PropagateException(res)	\
+-	if ( res.errMessage != 0 ) throw XMP_Error ( res.int32Result, res.errMessage );
++	if ( res.GetErrMessage() != 0 ) throw XMP_Error ( res.int32Result, res.GetErrMessage() );
+ 
+ #ifndef XMP_TraceClientCalls
+ 	#define XMP_TraceClientCalls		0
+@@ -55,10 +84,10 @@ extern "C" {
+     	WXMP_Result wResult;                                                                                 \
+     	fprintf ( xmpClientLog, "WXMP calling: %s\n", #WCallProto ); fflush ( xmpClientLog );                \
+     	WCallProto;                                                                                          \
+-    	if ( wResult.errMessage == 0 ) {                                                                     \
++	if ( wResult.GetErrMessage() == 0 ) {				\
+ 			fprintf ( xmpClientLog, "WXMP back, no error\n" ); fflush ( xmpClientLog );                      \
+     	} else {                                                                                             \
+-			fprintf ( xmpClientLog, "WXMP back, error: %s\n", wResult.errMessage ); fflush ( xmpClientLog ); \
++			fprintf ( xmpClientLog, "WXMP back, error: %s\n", wResult.GetErrMessage() ); fflush ( xmpClientLog ); \
+     	}                                                                                                    \
+ 		PropagateException ( wResult )
+ #endif
+diff --git a/source/XMP_LibUtils.hpp b/source/XMP_LibUtils.hpp
+index 6b6a96a..3fa7a8b 100644
+--- a/source/XMP_LibUtils.hpp
++++ b/source/XMP_LibUtils.hpp
+@@ -444,13 +444,13 @@ private:
+ #define XMP_ENTER_NoLock(Proc)		\
+ 	AnnounceStaticEntry ( Proc );	\
+ 	try {							\
+-		wResult->errMessage = 0;
++		wResult->SetErrMessage(0);
+ 
+ #define XMP_ENTER_Static(Proc)				\
+ 	AnnounceStaticEntry ( Proc );			\
+ 	AcquireLibraryLock ( sLibraryLock );	\
+ 	try {									\
+-		wResult->errMessage = 0;
++		wResult->SetErrMessage(0);
+ 
+ #define XMP_ENTER_ObjRead(XMPClass,Proc)				\
+ 	AnnounceObjectEntry ( Proc, "reader" );				\
+@@ -458,7 +458,7 @@ private:
+ 	const XMPClass & thiz = *((XMPClass*)xmpObjRef);	\
+ 	XMP_AutoLock objLock ( &thiz.lock, kXMP_ReadLock );	\
+ 	try {												\
+-		wResult->errMessage = 0;
++		wResult->SetErrMessage(0);
+ 
+ #define XMP_ENTER_ObjWrite(XMPClass,Proc)					\
+ 	AnnounceObjectEntry ( Proc, "writer" );					\
+@@ -466,7 +466,7 @@ private:
+ 	XMPClass * thiz = (XMPClass*)xmpObjRef;					\
+ 	XMP_AutoLock objLock ( &thiz->lock, kXMP_WriteLock );	\
+ 	try {													\
+-		wResult->errMessage = 0;
++		wResult->SetErrMessage(0);
+ 
+ #define XMP_EXIT			\
+ 	XMP_CATCH_EXCEPTIONS	\
+@@ -483,18 +483,18 @@ private:
+ 	} catch ( XMP_Error & xmpErr ) {								\
+ 		wResult->int32Result = xmpErr.GetID(); 						\
+ 		wResult->ptrResult   = (void*)"XMP";						\
+-		wResult->errMessage  = xmpErr.GetErrMsg();					\
+-		if ( wResult->errMessage == 0 ) wResult->errMessage = "";	\
+-		AnnounceCatch ( wResult->errMessage );						\
++		wResult->SetErrMessage(xmpErr.GetErrMsg());             \
++		if ( wResult->GetErrMessage() == 0 ) wResult->SetErrMessage(""); \
++		AnnounceCatch ( wResult->GetErrMessage() );             \
+ 	} catch ( std::exception & stdErr ) {							\
+ 		wResult->int32Result = kXMPErr_StdException; 				\
+-		wResult->errMessage  = stdErr.what(); 						\
+-		if ( wResult->errMessage == 0 ) wResult->errMessage = "";	\
+-		AnnounceCatch ( wResult->errMessage );						\
++		wResult->SetErrMessage(stdErr.what());                  \
++		if ( wResult->GetErrMessage() == 0 ) wResult->SetErrMessage(""); \
++		AnnounceCatch ( wResult->GetErrMessage() );             \
+ 	} catch ( ... ) {												\
+ 		wResult->int32Result = kXMPErr_UnknownException; 			\
+-		wResult->errMessage  = "Caught unknown exception";			\
+-		AnnounceCatch ( wResult->errMessage );						\
++		wResult->SetErrMessage("Caught unknown exception");     \
++		AnnounceCatch ( wResult->GetErrMessage() );                \
+ 	}
+ 
+ #if XMP_DebugBuild
+-- 
+cgit v1.2.1
+

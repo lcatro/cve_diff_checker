@@ -1,0 +1,28 @@
+From adeb4abc6c998c19524e09fde20c02b4a26765a3 Mon Sep 17 00:00:00 2001
+From: "K. Reid Wightman" <wightman@digitalbond.com>
+Date: Wed, 18 Oct 2017 09:19:20 -0400
+Subject: [PATCH] Add integer overflow check for content-length
+
+---
+ src/http.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/http.c b/src/http.c
+index 8920e45a..e59a9064 100644
+--- a/src/http.c
++++ b/src/http.c
+@@ -1090,12 +1090,12 @@ static void parseHeaders(Webs *wp)
+         } else if (strcmp(key, "content-length") == 0) {
+             wp->rxLen = atoi(value);
+             if (smatch(wp->method, "PUT")) {
+-                if (wp->rxLen > ME_GOAHEAD_LIMIT_PUT) {
++                if (wp->rxLen > ME_GOAHEAD_LIMIT_PUT || wp->rxLen < 0) {
+                     websError(wp, HTTP_CODE_REQUEST_TOO_LARGE | WEBS_CLOSE, "Too big");
+                     return;
+                 }
+             } else {
+-                if (wp->rxLen > ME_GOAHEAD_LIMIT_POST) {
++                if (wp->rxLen > ME_GOAHEAD_LIMIT_POST || wp->rxLen < 0) {
+                     websError(wp, HTTP_CODE_REQUEST_TOO_LARGE | WEBS_CLOSE, "Too big");
+                     return;
+                 }

@@ -1,0 +1,29 @@
+From 570b5e854cecddd44d2047c44126aed951b61718 Mon Sep 17 00:00:00 2001
+From: Florian Frank <flori@ping.de>
+Date: Tue, 5 Jan 2016 11:53:22 +0100
+Subject: [PATCH] Fix CVE-2015-7541
+
+Avoid passsing possible user input directly into the shell. Instead
+quote the `image_path` value before calling the `convert` command.
+
+See here http://rubysec.com/advisories/CVE-2015-7541/ for more
+information.
+---
+ lib/colorscore/histogram.rb | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/lib/colorscore/histogram.rb b/lib/colorscore/histogram.rb
+index 3c2d1b1..4debcd5 100644
+--- a/lib/colorscore/histogram.rb
++++ b/lib/colorscore/histogram.rb
+@@ -1,7 +1,9 @@
++require "shellwords"
++
+ module Colorscore
+   class Histogram
+     def initialize(image_path, colors=16, depth=8)
+-      output = `convert #{image_path} -resize 400x400 -format %c -dither None -quantize YIQ -colors #{colors} -depth #{depth} histogram:info:-`
++      output = `convert #{image_path.shellescape} -resize 400x400 -format %c -dither None -quantize YIQ -colors #{colors.to_i} -depth #{depth.to_i} histogram:info:-`
+       @lines = output.lines.sort.reverse.map(&:strip).reject(&:empty?)
+     end
+ 

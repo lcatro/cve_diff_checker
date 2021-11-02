@@ -1,0 +1,208 @@
+From 1e7d1d084ac3a89e7ec70620f2749110508d1ce1 Mon Sep 17 00:00:00 2001
+From: Andrew Welch <andrew@nystudio107.com>
+Date: Mon, 23 Jul 2018 18:19:43 -0400
+Subject: [PATCH] Changed the way requests that don't match any elements
+ generate the `canonicalUrl`, to avoid potentially executing injected Twig
+ code
+
+Signed-off-by: Andrew Welch <andrew@nystudio107.com>
+---
+ src/helpers/DynamicMeta.php                   |  6 ++
+ src/models/MetaGlobalVars.php                 | 14 ++++
+ src/seomatic-config/globalmeta/GlobalVars.php |  2 +-
+ src/services/Helper.php                       | 79 ++++++++++++-------
+ 4 files changed, 72 insertions(+), 29 deletions(-)
+
+diff --git a/src/helpers/DynamicMeta.php b/src/helpers/DynamicMeta.php
+index dec9b9c3..955106d4 100644
+--- a/src/helpers/DynamicMeta.php
++++ b/src/helpers/DynamicMeta.php
+@@ -500,6 +500,12 @@ public static function getLocalizedUrls(string $uri = null, int $siteId = null):
+                     Craft::error($e->getMessage(), __METHOD__);
+                 }
+             }
++            // Strip any query string params, and make sure we have an absolute URL with protocol
++            if ($urlParams === null) {
++                $url = UrlHelper::stripQueryString($url);
++            }
++            $url = UrlHelper::absoluteUrlWithProtocol($url);
++
+             $url = $url ?? '';
+             $language = $site->language;
+             $ogLanguage = str_replace('-', '_', $language);
+diff --git a/src/models/MetaGlobalVars.php b/src/models/MetaGlobalVars.php
+index ea17fc2d..209ca4ed 100644
+--- a/src/models/MetaGlobalVars.php
++++ b/src/models/MetaGlobalVars.php
+@@ -199,6 +199,20 @@ public function __construct(array $config = [])
+         parent::__construct($config);
+     }
+ 
++    /**
++     * @inheritdoc
++     */
++    public function init()
++    {
++        parent::init();
++        // If we have potentially unsafe Twig code, strip it out
++        if (!empty($this->canonicalUrl)) {
++            if (strpos($this->canonicalUrl, 'craft.app.request.pathInfo') !== false) {
++                $this->canonicalUrl = '{seomatic.helper.safeCanonicalUrl()}';
++            }
++        }
++    }
++
+     /**
+      * @inheritdoc
+      */
+diff --git a/src/seomatic-config/globalmeta/GlobalVars.php b/src/seomatic-config/globalmeta/GlobalVars.php
+index 01f20771..e16a5430 100644
+--- a/src/seomatic-config/globalmeta/GlobalVars.php
++++ b/src/seomatic-config/globalmeta/GlobalVars.php
+@@ -26,7 +26,7 @@
+         'seoImageWidth'           => '',
+         'seoImageHeight'          => '',
+         'seoImageDescription'     => '',
+-        'canonicalUrl'            => '{{ craft.app.request.pathInfo | striptags }}',
++        'canonicalUrl'            => '{seomatic.helper.safeCanonicalUrl()}',
+         'robots'                  => 'all',
+         'ogType'                  => 'website',
+         'ogTitle'                 => '{seomatic.meta.seoTitle}',
+diff --git a/src/services/Helper.php b/src/services/Helper.php
+index b6896cd7..1aa10a80 100644
+--- a/src/services/Helper.php
++++ b/src/services/Helper.php
+@@ -11,20 +11,23 @@
+ 
+ namespace nystudio107\seomatic\services;
+ 
++use nystudio107\seomatic\helpers\UrlHelper;
+ use nystudio107\seomatic\Seomatic;
+ use nystudio107\seomatic\helpers\DynamicMeta as DynamicMetaHelper;
+ use nystudio107\seomatic\helpers\ImageTransform as ImageTransformHelper;
+ use nystudio107\seomatic\helpers\Schema as SchemaHelper;
+ use nystudio107\seomatic\helpers\Text as TextHelper;
+ 
++use Craft;
+ use craft\base\Component;
+ use craft\elements\Asset;
+ use craft\elements\db\MatrixBlockQuery;
+ use craft\elements\db\TagQuery;
+ use craft\helpers\Template;
+-use craft\helpers\UrlHelper;
+ use craft\web\twig\variables\Paginate;
+ 
++use yii\base\InvalidConfigException;
++
+ /**
+  * @author    nystudio107
+  * @package   Seomatic
+@@ -38,9 +41,28 @@ class Helper extends Component
+     // Public Methods
+     // =========================================================================
+ 
++    /**
++     * Return the canonical URL for the request, with the query string stripped
++     *
++     * @return string
++     */
++    public static function safeCanonicalUrl(): string
++    {
++        $url = '';
++        try {
++            $url = Craft::$app->getRequest()->getPathInfo();
++        } catch (InvalidConfigException $e) {
++            Craft::error($e->getMessage(), __METHOD__);
++        }
++        $url = UrlHelper::stripQueryString($url);
++
++        return UrlHelper::absoluteUrlWithProtocol($url);
++    }
++
+     /**
+      * Paginate based on the passed in Paginate variable as returned from the
+-     * Twig {% paginate %} tag: https://docs.craftcms.com/v3/templating/tags/paginate.html#the-pageInfo-variable
++     * Twig {% paginate %} tag:
++     * https://docs.craftcms.com/v3/templating/tags/paginate.html#the-pageInfo-variable
+      *
+      * @param Paginate $pageInfo
+      */
+@@ -86,8 +108,8 @@ public static function truncateOnWord($string, $length, $substring = '…'): str
+      * Return a list of localized URLs that are in the current site's group
+      * The current URI is used if $uri is null. Similarly, the current site is
+      * used if $siteId is null.
+-     * The resulting array of arrays has `id`, `language`, `ogLanguage`, `hreflangLanguage`,
+-     * and `url` as keys.
++     * The resulting array of arrays has `id`, `language`, `ogLanguage`,
++     * `hreflangLanguage`, and `url` as keys.
+      *
+      * @param string|null $uri
+      * @param int|null    $siteId
+@@ -131,6 +153,7 @@ public static function seoFileLink($url, $robots = '', $canonical = '', $inline
+             .$inlineStr
+             .'/'
+             .$fileName;
++
+         return Template::raw(UrlHelper::siteUrl($seoFileLink));
+     }
+ 
+@@ -238,6 +261,30 @@ public static function extractSummary($text = '', $useStopWords = true): string
+         return TextHelper::extractSummary($text, $useStopWords);
+     }
+ 
++    /**
++     * Return a flattened, indented menu of the given $path
++     *
++     * @param string $path
++     *
++     * @return array
++     */
++    public static function getTypeMenu($path): array
++    {
++        return SchemaHelper::getTypeMenu($path);
++    }
++
++    /**
++     * Return a single menu of schemas starting at $path
++     *
++     * @param string $path
++     *
++     * @return array
++     */
++    public static function getSingleTypeMenu($path): array
++    {
++        return SchemaHelper::getSingleTypeMenu($path);
++    }
++
+     /**
+      * Transform the $asset for social media sites in $transformName and
+      * optional $siteId
+@@ -282,28 +329,4 @@ public function socialTransformHeight($asset, string $transformName = '', $siteI
+     {
+         return ImageTransformHelper::socialTransformHeight($asset, $transformName, $siteId);
+     }
+-
+-    /**
+-     * Return a flattened, indented menu of the given $path
+-     *
+-     * @param string $path
+-     *
+-     * @return array
+-     */
+-    public static function getTypeMenu($path): array
+-    {
+-        return SchemaHelper::getTypeMenu($path);
+-    }
+-
+-    /**
+-     * Return a single menu of schemas starting at $path
+-     *
+-     * @param string $path
+-     *
+-     * @return array
+-     */
+-    public static function getSingleTypeMenu($path): array
+-    {
+-        return SchemaHelper::getSingleTypeMenu($path);
+-    }
+ }

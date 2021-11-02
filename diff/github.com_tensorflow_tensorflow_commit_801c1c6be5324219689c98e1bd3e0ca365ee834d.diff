@@ -1,0 +1,26 @@
+From 801c1c6be5324219689c98e1bd3e0ca365ee834d Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 17:46:25 -0700
+Subject: [PATCH] Fix another division by 0 in TFLite
+
+PiperOrigin-RevId: 370800181
+Change-Id: I924809166a6131f5075e6d45c455106538d755f9
+---
+ tensorflow/lite/kernels/transpose_conv.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/transpose_conv.cc b/tensorflow/lite/kernels/transpose_conv.cc
+index 497edac5762dc..cf9d53fb3b6ee 100644
+--- a/tensorflow/lite/kernels/transpose_conv.cc
++++ b/tensorflow/lite/kernels/transpose_conv.cc
+@@ -591,6 +591,10 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+   const auto* params =
+       reinterpret_cast<TfLiteTransposeConvParams*>(node->builtin_data);
+ 
++  // Prevent divisions by 0
++  TF_LITE_ENSURE(context, params->stride_height > 0);
++  TF_LITE_ENSURE(context, params->stride_width > 0);
++
+   // Resize any deferred dynamic tensors
+   if (IsDynamicTensor(output)) {
+     TF_LITE_ENSURE_OK(context, ResizeTensor(context, output_shape, output));

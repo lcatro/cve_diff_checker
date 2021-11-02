@@ -1,0 +1,3024 @@
+From 842e44f0c2bd7d680430bb89a3bb78fd744961f9 Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Thu, 9 Jul 2015 22:49:16 +0900
+Subject: [PATCH] Reinforcement of security. Signed-off-by: MORITA Shintaro
+ <shin@sysphonic.com>
+
+---
+ app/controllers/addressbook_controller.rb     |  13 ++-
+ app/controllers/config_controller.rb          |  14 ++-
+ app/controllers/desktop_controller.rb         |  26 ++++-
+ app/controllers/equipment_controller.rb       |  19 +++-
+ app/controllers/folders_controller.rb         |  88 +++++++++++----
+ app/controllers/groups_controller.rb          |  36 ++++++-
+ app/controllers/items_controller.rb           | 100 ++++++++++++++----
+ app/controllers/locations_controller.rb       |  17 ++-
+ app/controllers/login_controller.rb           |   6 +-
+ app/controllers/logs_controller.rb            |   5 +
+ app/controllers/mail_accounts_controller.rb   |   9 +-
+ app/controllers/mail_filters_controller.rb    |  13 ++-
+ app/controllers/mail_folders_controller.rb    |  57 ++++++----
+ app/controllers/official_titles_controller.rb |  20 +++-
+ app/controllers/paintmail_controller.rb       |   2 +
+ app/controllers/researches_controller.rb      |  55 +++++++---
+ app/controllers/schedules_controller.rb       |  31 ++++--
+ app/controllers/send_mails_controller.rb      |  13 ++-
+ app/controllers/teams_controller.rb           |   6 +-
+ app/controllers/templates_controller.rb       |  18 +++-
+ app/controllers/timecards_controller.rb       |  43 ++++++--
+ app/controllers/users_controller.rb           |  66 +++++++-----
+ app/controllers/workflows_controller.rb       |  10 +-
+ app/controllers/zeptair_dist_controller.rb    |   8 +-
+ app/controllers/zeptair_post_controller.rb    |   7 +-
+ app/controllers/zeptair_xlogs_controller.rb   |   7 +-
+ app/helpers/addressbook_helper.rb             |   2 +
+ app/helpers/application_helper.rb             |  18 ++++
+ app/models/research.rb                        |  14 ++-
+ 29 files changed, 552 insertions(+), 171 deletions(-)
+
+diff --git a/app/controllers/addressbook_controller.rb b/app/controllers/addressbook_controller.rb
+index 23d1d5b..24ec7f7 100644
+--- a/app/controllers/addressbook_controller.rb
++++ b/app/controllers/addressbook_controller.rb
+@@ -58,6 +58,8 @@ def new
+       Log.add_info(request, params.inspect)
+     end
+ 
++    return unless request.post?
++
+     render(:action => 'edit', :layout => (!request.xhr?))
+   end
+ 
+@@ -68,6 +70,8 @@ def new
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @address = Address.new(params.require(:address).permit(Address::PERMIT_BASE))
+ 
+     @address = AddressbookHelper.arrange_per_scope(@address, @login_user, params[:scope], params[:groups], params[:teams])
+@@ -106,6 +110,7 @@ def edit
+     begin
+       @address = Address.find(address_id)
+     rescue => evar
++      @address = nil
+       Log.add_error(request, evar)
+       redirect_to(:controller => 'login', :action => 'logout')
+       return
+@@ -142,6 +147,8 @@ def show
+   def update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @address = Address.find(params[:id])
+     @address.attributes = params[:address]
+ 
+@@ -242,6 +249,8 @@ def search
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_address].nil?
+       list
+       render(:action => 'list')
+@@ -296,6 +305,8 @@ def export_csv
+   def import_csv
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     file = params[:imp_file]
+     mode = params[:mode]
+     enc = params[:enc]
+@@ -436,7 +447,7 @@ def import_csv
+   #
+   def check_owner
+ 
+-    return if (params[:id].nil? or params[:id].empty? or @login_user.nil?)
++    return if (params[:id].blank? or @login_user.nil?)
+ 
+     address = Address.find(params[:id])
+ 
+diff --git a/app/controllers/config_controller.rb b/app/controllers/config_controller.rb
+index 66e3cb8..ab0c987 100644
+--- a/app/controllers/config_controller.rb
++++ b/app/controllers/config_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -39,13 +39,15 @@ def edit
+   def update_by_ajax
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     cat_h = {:desktop => User::AUTH_DESKTOP, :user => User::AUTH_USER, :log => User::AUTH_LOG}
+ 
+     yaml = ApplicationHelper.get_config_yaml
+ 
+     cat_h.keys.each do |cat|
+ 
+-      next if params[cat].nil? or params[cat].empty?
++      next if params[cat].blank?
+ 
+       unless @login_user.admin?(cat_h[cat])
+         render(:text => t('msg.need_to_be_admin'))
+@@ -71,6 +73,8 @@ def update_by_ajax
+   def update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     categories = [:general, :menu, :topic, :note, :smtp, :feed, :user, :log]
+ 
+     yaml = ApplicationHelper.get_config_yaml
+@@ -149,6 +153,8 @@ def edit_header_menu
+   def destroy_header_menu
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @yaml = ApplicationHelper.get_config_yaml
+ 
+     unless params[:org_name].nil? or @yaml[:general]['header_menus'].nil?
+@@ -172,6 +178,8 @@ def destroy_header_menu
+   def update_header_menu
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @yaml = ApplicationHelper.get_config_yaml
+ 
+     @yaml[:general]['header_menus'] = [] if @yaml[:general]['header_menus'].nil?
+@@ -221,6 +229,8 @@ def update_header_menu
+   def update_header_menus_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     header_menus = params[:header_menus_order]
+ 
+     yaml = ApplicationHelper.get_config_yaml
+diff --git a/app/controllers/desktop_controller.rb b/app/controllers/desktop_controller.rb
+index 4987aa1..5e77ae7 100644
+--- a/app/controllers/desktop_controller.rb
++++ b/app/controllers/desktop_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -36,6 +36,8 @@ class DesktopController < ApplicationController
+   def drop_file
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     if params[:file].nil? or params[:file].size <= 0
+       render(:text => '')
+       return
+@@ -126,6 +128,8 @@ def edit_config
+   def update_pref
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     desktop = Desktop.get_for(@login_user, true)
+ 
+     params[:desktop].delete(:user_id)
+@@ -145,9 +149,11 @@ def update_pref
+   def update_config
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @yaml = ApplicationHelper.get_config_yaml
+ 
+-    unless params[:desktop].nil? or params[:desktop].empty?
++    unless params[:desktop].blank?
+       @yaml[:desktop] = Hash.new if @yaml[:desktop].nil?
+ 
+       params[:desktop].each do |key, val|
+@@ -294,6 +300,8 @@ def get_news_tray
+   def drop_on_desktop
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if @login_user.nil?
+       t = Time.now
+       render(:text => (t.hour.to_s + t.min.to_s + t.sec.to_s))
+@@ -319,6 +327,8 @@ def drop_on_desktop
+   def add_toy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if @login_user.nil?
+       render(:text => '0')
+       return
+@@ -343,6 +353,9 @@ def add_toy
+   def drop_on_recyclebox
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
++    SqlHelper.validate_token([params[:id]])
+     unless @login_user.nil?
+       Toy.destroy(params[:id])
+     end
+@@ -358,10 +371,13 @@ def drop_on_recyclebox
+   def on_toys_moved
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless @login_user.nil?
+       begin
+         toy = Toy.find(params[:id])
+       rescue
++        toy = nil
+       end
+ 
+       unless toy.nil?
+@@ -381,6 +397,8 @@ def on_toys_moved
+   def create_label
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:thetisBoxEdit].empty?
+       render(:partial => 'ajax_label', :layout => false)
+       return
+@@ -411,6 +429,8 @@ def create_label
+   def update_label
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     msg = params[:thetisBoxEdit]
+ 
+     if params[:thetisBoxEdit].empty?
+@@ -455,6 +475,8 @@ def show_biorhythm
+   def post_label
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:txaPostLabel].empty? or params[:post_to].empty?
+       render(:text => '')
+       return
+diff --git a/app/controllers/equipment_controller.rb b/app/controllers/equipment_controller.rb
+index e63d400..2ad8de4 100644
+--- a/app/controllers/equipment_controller.rb
++++ b/app/controllers/equipment_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -42,6 +42,10 @@ def new
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
++    SqlHelper.validate_token([params[:groups], params[:teams]])
++
+     if params[:groups].blank?
+       params[:equipment][:groups] = nil
+     else
+@@ -101,15 +105,19 @@ def show
+   def update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
++    SqlHelper.validate_token([params[:groups], params[:teams]])
++
+     @equipment = Equipment.find(params[:id])
+ 
+-    if (params[:groups].nil? or params[:groups].empty?)
++    if params[:groups].blank?
+       params[:equipment][:groups] = nil
+     else
+       params[:equipment][:groups] = '|' + params[:groups].join('|') + '|'
+     end
+ 
+-    if (params[:teams].nil? or params[:teams].empty?)
++    if params[:teams].blank?
+       params[:equipment][:teams] = nil
+     else
+       params[:equipment][:teams] = '|' + params[:teams].join('|') + '|'
+@@ -178,6 +186,8 @@ def list
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_equipment].nil?
+       list
+       render(:action => 'list')
+@@ -186,6 +196,7 @@ def destroy
+ 
+     count = 0
+     params[:check_equipment].each do |equipment_id, value|
++      SqlHelper.validate_token([equipment_id])
+       if value == '1'
+         Equipment.delete(equipment_id)
+ 
+@@ -205,7 +216,7 @@ def schedule_all
+     Log.add_info(request, params.inspect)
+ 
+     date_s = params[:date]
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+     else
+       @date = Date.parse(date_s)
+diff --git a/app/controllers/folders_controller.rb b/app/controllers/folders_controller.rb
+index 8c1ef68..e3bbe6c 100644
+--- a/app/controllers/folders_controller.rb
++++ b/app/controllers/folders_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -70,6 +70,8 @@ def ajax_get_tree
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     parent_id = params[:selectedFolderId]
+ 
+     unless Folder.check_user_auth(parent_id, @login_user, 'w', true)
+@@ -78,7 +80,7 @@ def create
+       return
+     end
+ 
+-    if params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
++    if params[:thetisBoxEdit].blank?
+       @folder = nil
+     else
+       @folder = Folder.new
+@@ -100,6 +102,8 @@ def create
+   def rename
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     unless Folder.check_user_auth(@folder.id, @login_user, 'w', true)
+@@ -108,7 +112,7 @@ def rename
+       return
+     end
+ 
+-    unless params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
++    unless params[:thetisBoxEdit].blank?
+       @folder.name = params[:thetisBoxEdit]
+       @folder.save
+     end
+@@ -123,6 +127,8 @@ def rename
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     unless Folder.check_user_auth(@folder.id, @login_user, 'w', true)
+@@ -151,6 +157,8 @@ def destroy
+   def move
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     if params[:thetisBoxSelKeeper].blank?
+@@ -198,13 +206,14 @@ def move
+   def get_path
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:thetisBoxSelKeeper].nil? or params[:thetisBoxSelKeeper].empty?
++    if params[:thetisBoxSelKeeper].blank?
+       @folder_path = '/' + t('paren.unknown')
+       render(:partial => 'ajax_folder_path', :layout => false)
+       return
+     end
+ 
+     @selected_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([@selected_id])
+ 
+     @folder_path = Folder.get_path(@selected_id)
+ 
+@@ -222,6 +231,7 @@ def get_items
+     end
+ 
+     @folder_id = params[:id]
++    SqlHelper.validate_token([@folder_id])
+ 
+     if Folder.check_user_auth(@folder_id, @login_user, 'r', true)
+ =begin
+@@ -239,6 +249,7 @@ def get_items
+       if @sort_col.blank? or @sort_type.blank?
+         @sort_col, @sort_type = FoldersHelper.get_sort_params(@folder_id)
+       end
++      SqlHelper.validate_token([@sort_col, @sort_type])
+ 
+       folder_ids = nil
+       add_con = nil
+@@ -292,11 +303,13 @@ def get_items_order
+     Log.add_info(request, params.inspect)
+ 
+     @folder_id = params[:id]
++    SqlHelper.validate_token([@folder_id])
+ 
+     if @folder_id != '0'
+       begin
+         @folder = Folder.find(@folder_id)
+       rescue => evar
++        @folder = nil
+         Log.add_error(request, evar)
+       end
+     end
+@@ -322,6 +335,8 @@ def get_items_order
+   def update_items_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     folder_id = params[:id]
+ 
+     if Folder.check_user_auth(folder_id, @login_user, 'w', true)
+@@ -353,6 +368,7 @@ def get_folders_order
+ 
+     @folder_id = params[:id]
+     @group_id = params[:group_id]
++    SqlHelper.validate_token([@folder_id, @group_id])
+ 
+     if @folder_id != '0'
+       @folder = Folder.find(@folder_id)
+@@ -382,6 +398,8 @@ def get_folders_order
+   def update_folders_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:folders_order]
+ 
+     folders = Folder.get_childs(params[:id], nil, false, true, false)
+@@ -407,6 +425,7 @@ def update_folders_order
+         folder.update_attribute(:xorder, idx)
+         idx += 1
+       rescue => evar
++        folder = nil
+         Log.add_error(request, evar)
+       end
+     end
+@@ -422,15 +441,18 @@ def update_folders_order
+   def get_disp_ctrl
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:id] != '0'
++    folder_id = params[:id]
++    SqlHelper.validate_token([folder_id])
++
++    if folder_id != '0'
+       begin
+-        @folder = Folder.find(params[:id])
++        @folder = Folder.find(folder_id)
+       rescue => evar
+         @folder = nil
+       end
+     end
+ 
+-    session[:folder_id] = params[:id]
++    session[:folder_id] = folder_id
+ 
+     render(:partial => 'ajax_disp_ctrl', :layout => false)
+   end
+@@ -443,7 +465,10 @@ def get_disp_ctrl
+   def set_disp_ctrl
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     folder_id = params[:id]
++    SqlHelper.validate_token([folder_id])
+ 
+     if Folder.check_user_auth(folder_id, @login_user, 'w', true)
+ 
+@@ -482,15 +507,18 @@ def set_disp_ctrl
+   def get_auth_users
+     Log.add_info(request, params.inspect)
+ 
++    folder_id = params[:id]
++    SqlHelper.validate_token([folder_id])
++
+     begin
+-      @folder = Folder.find(params[:id])
++      @folder = Folder.find(folder_id)
+     rescue
+       @folder = nil
+     end
+ 
+     @users = []
+ 
+-    session[:folder_id] = params[:id]
++    session[:folder_id] = folder_id
+ 
+     if !@login_user.nil? and (@login_user.admin?(User::AUTH_FOLDER) or (!@folder.nil? and @folder.in_my_folder_of?(@login_user.id)))
+       render(:partial => 'ajax_auth_users', :layout => false)
+@@ -511,6 +539,7 @@ def get_group_users
+     begin
+       @folder = Folder.find(params[:id])
+     rescue => evar
++      @folder = nil
+       Log.add_error(request, evar)
+     end
+ 
+@@ -535,6 +564,8 @@ def get_group_users
+   def set_auth_users
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     if Folder.check_user_auth(@folder.id, @login_user, 'w', true)
+@@ -559,8 +590,8 @@ def set_auth_users
+       if !user_id.nil? and (!read_users.include?(user_id.to_s) or !write_users.include?(user_id.to_s))
+         flash[:notice] = 'ERROR:' + t('folder.my_folder_without_auth_owner')
+       else
+-        @folder.set_read_users read_users
+-        @folder.set_write_users write_users
++        @folder.set_read_users(read_users)
++        @folder.set_write_users(write_users)
+ 
+         @folder.save
+ 
+@@ -571,7 +602,9 @@ def set_auth_users
+     end
+ 
+     @group_id = params[:group_id]
+-    if @group_id.nil? or @group_id.empty?
++    SqlHelper.validate_token([@group_id])
++
++    if @group_id.blank?
+       @users = []
+     else
+       @users = Group.get_users(@group_id)
+@@ -591,15 +624,18 @@ def set_auth_users
+   def get_auth_groups
+     Log.add_info(request, params.inspect)
+ 
++    folder_id = params[:id]
++    SqlHelper.validate_token([folder_id])
++
+     begin
+-      @folder = Folder.find(params[:id])
++      @folder = Folder.find(folder_id)
+     rescue
+       @folder = nil
+     end
+ 
+     @groups = Group.where(nil).to_a
+ 
+-    session[:folder_id] = params[:id]
++    session[:folder_id] = folder_id
+ 
+     render(:partial => 'ajax_auth_groups', :layout => false)
+   end
+@@ -612,6 +648,8 @@ def get_auth_groups
+   def set_auth_groups
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     if Folder.check_user_auth(@folder.id, @login_user, 'w', true)
+@@ -631,8 +669,8 @@ def set_auth_groups
+         end
+       end
+ 
+-      @folder.set_read_groups read_groups
+-      @folder.set_write_groups write_groups
++      @folder.set_read_groups(read_groups)
++      @folder.set_write_groups(write_groups)
+ 
+       @folder.save
+ 
+@@ -657,8 +695,11 @@ def set_auth_groups
+   def get_auth_teams
+     Log.add_info(request, params.inspect)
+ 
++    folder_id = params[:id]
++    SqlHelper.validate_token([folder_id])
++
+     begin
+-      @folder = Folder.find(params[:id])
++      @folder = Folder.find(folder_id)
+     rescue
+       @folder = nil
+     end
+@@ -666,7 +707,7 @@ def get_auth_teams
+     target_user_id = (@login_user.admin?(User::AUTH_TEAM))?(nil):(@login_user.id)
+     @teams = Team.get_for(target_user_id, true)
+ 
+-    session[:folder_id] = params[:id]
++    session[:folder_id] = folder_id
+ 
+     render(:partial => 'ajax_auth_teams', :layout => false)
+   end
+@@ -679,6 +720,8 @@ def get_auth_teams
+   def set_auth_teams
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder = Folder.find(params[:id])
+ 
+     if Folder.check_user_auth(@folder.id, @login_user, 'w', true)
+@@ -698,8 +741,8 @@ def set_auth_teams
+         end
+       end
+ 
+-      @folder.set_read_teams read_teams
+-      @folder.set_write_teams write_teams
++      @folder.set_read_teams(read_teams)
++      @folder.set_write_teams(write_teams)
+ 
+       @folder.save
+ 
+@@ -725,8 +768,6 @@ def set_auth_teams
+   def ajax_delete_items
+     Log.add_info(request, params.inspect)
+ 
+-    folder_id = params[:id]
+-
+     unless params[:check_item].blank?
+       is_admin = @login_user.admin?(User::AUTH_ITEM)
+ 
+@@ -741,6 +782,7 @@ def ajax_delete_items
+             item.destroy
+ 
+           rescue => evar
++            item = nil
+             Log.add_error(request, evar)
+           end
+ 
+@@ -762,6 +804,7 @@ def ajax_move_items
+     Log.add_info(request, params.inspect)
+ 
+     folder_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([folder_id])
+ 
+     unless Folder.check_user_auth(folder_id, @login_user, 'w', true)
+       flash[:notice] = 'ERROR:' + t('folder.need_auth_to_write_in')
+@@ -783,6 +826,7 @@ def ajax_move_items
+             item.update_attribute(:folder_id, folder_id)
+ 
+           rescue => evar
++            item = nil
+             Log.add_error(request, evar)
+           end
+ 
+diff --git a/app/controllers/groups_controller.rb b/app/controllers/groups_controller.rb
+index 7dc095f..e2c8f91 100644
+--- a/app/controllers/groups_controller.rb
++++ b/app/controllers/groups_controller.rb
+@@ -68,9 +68,11 @@ def ajax_get_tree
+   #Receives Group name from ThetisBox.
+   #
+   def create
+-     Log.add_info(request, params.inspect)
++    Log.add_info(request, params.inspect)
++
++    return unless request.post?
+ 
+-    if params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
++    if params[:thetisBoxEdit].blank?
+       @group = nil
+     else
+       @group = Group.new
+@@ -92,9 +94,11 @@ def create
+   def rename
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @group = Group.find(params[:id])
+-    unless params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
+-      @group.rename params[:thetisBoxEdit]
++    unless params[:thetisBoxEdit].blank?
++      @group.rename(params[:thetisBoxEdit])
+     end
+     render(:partial => 'ajax_group_name', :layout => false)
+ 
+@@ -111,6 +115,9 @@ def rename
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
++    SqlHelper.validate_token([params[:id]])
+     begin
+       Group.destroy(params[:id])
+     rescue => evar
+@@ -128,6 +135,8 @@ def destroy
+   def move
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @group = Group.find(params[:id])
+ 
+     unless params[:thetisBoxSelKeeper].blank?
+@@ -160,13 +169,14 @@ def move
+   def get_path
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:thetisBoxSelKeeper].nil? or params[:thetisBoxSelKeeper].empty?
++    if params[:thetisBoxSelKeeper].blank?
+       @group_path = '/' + t('paren.unknown')
+       render(:partial => 'ajax_group_path', :layout => false)
+       return
+     end
+ 
+     @selected_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([@selected_id])
+ 
+     @group_path = Group.get_path(@selected_id)
+ 
+@@ -181,7 +191,10 @@ def get_path
+   def ajax_exclude_users
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     group_id = params[:id]
++    SqlHelper.validate_token([group_id])
+ 
+     unless params[:check_user].blank?
+       count = 0
+@@ -193,6 +206,7 @@ def ajax_exclude_users
+             user.exclude_from(group_id)
+             user.save!
+           rescue => evar
++            user = nil
+             Log.add_error(request, evar)
+           end
+ 
+@@ -213,8 +227,11 @@ def ajax_exclude_users
+   def ajax_move_users
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     org_group_id = params[:id]
+     group_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([org_group_id, group_id])
+ 
+     unless params[:check_user].blank?
+ 
+@@ -228,6 +245,7 @@ def ajax_move_users
+             user.add_to(group_id)
+             user.save!
+           rescue => evar
++            user = nil
+             Log.add_error(request, evar)
+           end
+ 
+@@ -251,6 +269,7 @@ def get_users
+     end
+ 
+     @group_id = params[:id]
++    SqlHelper.validate_token([@group_id])
+ 
+ =begin
+ #    @users = Group.get_users(params[:id])
+@@ -323,6 +342,7 @@ def get_groups_order
+     Log.add_info(request, params.inspect)
+ 
+     @group_id = params[:id]
++    SqlHelper.validate_token([@group_id])
+ 
+     if @group_id != '0'
+       @group = Group.find(@group_id)
+@@ -348,6 +368,8 @@ def get_groups_order
+   def update_groups_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:groups_order]
+ 
+     groups = Group.get_childs(params[:id], false, false)
+@@ -373,6 +395,7 @@ def update_groups_order
+         group.update_attribute(:xorder, idx)
+         idx += 1
+       rescue => evar
++        group = nil
+         Log.add_error(request, evar)
+       end
+     end
+@@ -389,6 +412,7 @@ def get_official_titles
+     Log.add_info(request, params.inspect)
+ 
+     @group_id = (params[:id] || '0')  # '0' for ROOT
++    SqlHelper.validate_token([@group_id])
+ 
+     session[:group_id] = params[:id]
+     session[:group_option] = 'official_title'
+@@ -405,6 +429,7 @@ def get_workflows
+     Log.add_info(request, params.inspect)
+ 
+     @group_id = (params[:id] || '0')  # '0' for ROOT
++    SqlHelper.validate_token([@group_id])
+ 
+     ary = TemplatesHelper.get_tmpl_folder
+ 
+@@ -427,6 +452,7 @@ def get_map
+     Log.add_info(request, params.inspect)
+ 
+     @group_id = (params[:id] || '0')  # '0' for ROOT
++    SqlHelper.validate_token([@group_id])
+ 
+     @office_map = OfficeMap.get_for_group(@group_id)
+ 
+diff --git a/app/controllers/items_controller.rb b/app/controllers/items_controller.rb
+index aa27348..7991f79 100644
+--- a/app/controllers/items_controller.rb
++++ b/app/controllers/items_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -83,6 +83,7 @@ def list
+     else
+       @folder_id = params[:folder_id]
+     end
++    SqlHelper.validate_token([@folder_id])
+ 
+     unless @folder_id.nil?
+       session[:folder_id] = @folder_id
+@@ -141,7 +142,7 @@ def list
+   def search
+     Log.add_info(request, params.inspect)
+ 
+-    unless params[:select_sorting].nil? or params[:select_sorting].empty?
++    unless params[:select_sorting].blank?
+       sort_a = params[:select_sorting].split(' ')
+       params[:sort_col] = sort_a.first
+       params[:sort_type] = sort_a.last
+@@ -149,7 +150,7 @@ def search
+ 
+     list
+ 
+-    if params[:keyword].nil? or params[:keyword].empty?
++    if params[:keyword].blank?
+       if params[:from_action].nil? or params[:from_action] == 'bbs'
+         render(:action => 'bbs')
+       else
+@@ -166,7 +167,7 @@ def search
+   def bbs
+     Log.add_info(request, params.inspect)
+ 
+-    if !params[:select_sorting].nil?
++    unless params[:select_sorting].nil?
+       sort_a = params[:select_sorting].split(' ')
+       params[:sort_col] = sort_a.first
+       params[:sort_type] = sort_a.last
+@@ -218,7 +219,7 @@ def show_for_print
+   def new
+ 
+     @item = Item.new
+-    if params[:folder_id].nil? or params[:folder_id].empty?
++    if params[:folder_id].blank?
+       my_folder = @login_user.get_my_folder
+       if my_folder.nil?
+         @item.folder_id = 0
+@@ -244,6 +245,7 @@ def edit
+     begin
+       @item = Item.find(params[:id])
+     rescue => evar
++      @item = nil
+       Log.add_error(request, evar)
+     end
+   end
+@@ -256,6 +258,8 @@ def edit
+   def move
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @item = Item.find(params[:id])
+ 
+     unless params[:thetisBoxSelKeeper].nil?
+@@ -287,6 +291,8 @@ def move
+   def move_multi
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_item].nil? or params[:thetisBoxSelKeeper].nil?
+       list
+       render(:action => 'list')
+@@ -296,6 +302,7 @@ def move_multi
+     is_admin = @login_user.admin?(User::AUTH_ITEM)
+ 
+     folder_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([folder_id])
+ 
+     unless Folder.check_user_auth(folder_id, @login_user, 'w', true)
+       flash[:notice] = 'ERROR:' + t('folder.need_auth_to_write_in')
+@@ -316,6 +323,7 @@ def move_multi
+           item.update_attribute(:folder_id, folder_id)
+ 
+         rescue => evar
++          item = nil
+           Log.add_error(request, evar)
+         end
+ 
+@@ -335,6 +343,8 @@ def move_multi
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       Item.destroy(params[:id])
+     rescue => evar
+@@ -360,6 +370,8 @@ def destroy
+   def destroy_multi
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_item].nil?
+       list
+       render(:action => 'list')
+@@ -400,6 +412,8 @@ def destroy_multi
+   def duplicate
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     copies_folder = ItemsHelper.get_copies_folder(@login_user.id)
+ 
+     item = Item.find(params[:id])
+@@ -429,6 +443,8 @@ def duplicate
+   def set_workflow
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @item = Item.find(params[:id])
+ 
+     orders_hash = params.dup
+@@ -441,8 +457,10 @@ def set_workflow
+ 
+     orders = []
+     orders_hash.each do |key, value|
++      user_ids = value.split(',')
++      SqlHelper.validate_token([user_ids])
+ 
+-      orders << '|' + value.split(',').join('|') + '|'
++      orders << '|' + user_ids.join('|') + '|'
+     end
+     @item.workflow.update_attribute(:users, orders.join(','))
+ 
+@@ -466,6 +484,8 @@ def set_workflow
+   def set_basic
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:item][:xtype] == Item::XTYPE_ZEPTAIR_DIST \
+         and !@login_user.admin?(User::AUTH_ZEPTAIR)
+       render(:text => t('msg.need_to_be_admin'))
+@@ -580,7 +600,9 @@ def set_basic
+   def set_description
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:id].nil? or params[:id].empty?
++    return unless request.post?
++
++    if params[:id].blank?
+       @item = Item.new_info(0)
+       @item.attributes = params.require(:item).permit(Item::PERMIT_BASE)
+       @item.user_id = @login_user.id
+@@ -625,11 +647,13 @@ def recent_descriptions
+   def set_image
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     created = false
+ 
+-    if params[:id].nil? or params[:id].empty?
++    if params[:id].blank?
+       @item = Item.new_info(0)
+-      @item.attributes = params[:item]
++      @item.attributes = params.require(:item).permit(Item::PERMIT_BASE)
+       @item.user_id = @login_user.id
+       @item.title = t('paren.no_title')
+ 
+@@ -709,6 +733,8 @@ def get_image
+   def delete_image
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       image = Image.find(params[:image_id])
+ 
+@@ -759,6 +785,8 @@ def edit_image_info
+   def update_image_info
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     image = Image.find(params[:image_id])
+ 
+     # Getting Item at first for the case of resetting the db connection by an error.
+@@ -799,6 +827,8 @@ def update_image_info
+   def update_images_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:images_order]
+ 
+     item = Item.find(params[:id])
+@@ -811,7 +841,7 @@ def record_timestamps; false; end
+       img.update_attribute(:xorder, order_ary.index(img.id.to_s) + 1)
+ 
+       class << img
+-        remove_method :record_timestamps
++        remove_method(:record_timestamps)
+       end
+     end
+ 
+@@ -834,11 +864,13 @@ class << img
+   def set_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     created = false
+ 
+-    if params[:id].nil? or params[:id].empty?
++    if params[:id].blank?
+       @item = Item.new_info(0)
+-      @item.attributes = params[:item]
++      @item.attributes = params.require(:item).permit(Item::PERMIT_BASE)
+       @item.user_id = @login_user.id
+       @item.title = t('paren.no_title')
+ 
+@@ -894,7 +926,7 @@ def get_attachment
+       return
+     end
+ 
+-    parent_item = attach.item || ((attach.comment.nil?) ? nil : attach.comment.item)
++    parent_item = (attach.item || ((attach.comment.nil?) ? nil : attach.comment.item))
+     if parent_item.nil? or !parent_item.check_user_auth(@login_user, 'r', true)
+       Log.add_check(request, '[Item.check_user_auth]'+request.to_s)
+       redirect_to(:controller => 'frames', :action => 'http_error', :id => '401')
+@@ -936,6 +968,8 @@ def get_attachment
+   def delete_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       attach = Attachment.find(params[:attachment_id])
+ 
+@@ -986,6 +1020,8 @@ def edit_attachment_info
+   def update_attachment_info
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     attachment = Attachment.find(params[:attachment_id])
+ 
+     # Getting Item at first for the case of resetting the db connection by an error.
+@@ -1026,6 +1062,8 @@ def update_attachment_info
+   def update_attachments_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:attachments_order]
+ 
+     item = Item.find(params[:id])
+@@ -1038,7 +1076,7 @@ def record_timestamps; false; end
+       attach.update_attribute(:xorder, order_ary.index(attach.id.to_s) + 1)
+ 
+       class << attach
+-        remove_method :record_timestamps
++        remove_method(:record_timestamps)
+       end
+     end
+ 
+@@ -1061,6 +1099,8 @@ class << attach
+   def add_comment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:comment][:file].nil?
+       attach_params = { :file => params[:comment][:file] }
+       params[:comment].delete(:file)
+@@ -1110,6 +1150,8 @@ def add_comment
+   def update_comment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:thetisBoxEdit].empty?
+       @comment = Comment.find(params[:comment_id])
+       if @comment.nil?
+@@ -1132,6 +1174,8 @@ def update_comment
+   def destroy_comment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     comment = Comment.find(params[:comment_id])
+     @item = comment.item
+ 
+@@ -1168,6 +1212,8 @@ def destroy_comment
+   def add_comment_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:comment_file].nil?
+       attach_params = { :file => params[:comment_file] }
+       params.delete(:comment_file)
+@@ -1191,6 +1237,8 @@ def add_comment_attachment
+   def delete_comment_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       attachment = Attachment.find(params[:attachment_id])
+       @comment = Comment.find(params[:comment_id])
+@@ -1235,7 +1283,9 @@ def get_group_users
+   def wf_issue
+     Log.add_info(request, params.inspect)
+ 
+-   begin
++    return unless request.post?
++
++    begin
+       @item = Item.find(params[:id])
+       @workflow = @item.workflow
+     rescue => evar
+@@ -1258,17 +1308,18 @@ def wf_issue
+   def team_organize
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     team_id = params[:team_id]
+     unless team_id.blank?
+       begin
+         @team = Team.find(team_id)
+       rescue
+         @team = nil
+-      ensure
+-        if @team.nil?
+-          flash[:notice] = t('msg.already_deleted', :name => Team.model_name.human)
+-          return
+-        end
++      end
++      if @team.nil?
++        flash[:notice] = t('msg.already_deleted', :name => Team.model_name.human)
++        return
+       end
+ 
+       users = @team.get_users_a
+@@ -1284,7 +1335,8 @@ def team_organize
+ 
+       unless team_id.blank?
+         # @team must not be nil.
+-        @team.save if modified = @team.clear_users
++        modified = @team.clear_users
++        @team.save if modified
+       end
+ 
+     else
+@@ -1300,9 +1352,7 @@ def team_organize
+           @team.name = item.title
+           @team.item_id = params[:id]
+           @team.status = Team::STATUS_STANDBY
+-
+         else
+-
+           @team.clear_users
+         end
+ 
+@@ -1338,6 +1388,8 @@ def team_organize
+   def move_in_team_folder
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @item = Item.find(params[:id])
+ 
+     team_folder = @item.team.get_team_folder
+@@ -1361,6 +1413,8 @@ def move_in_team_folder
+   def change_team_status
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     SqlHelper.validate_token([params[:status]])
+ 
+     team_id = params[:team_id]
+diff --git a/app/controllers/locations_controller.rb b/app/controllers/locations_controller.rb
+index fff8e1d..7342b80 100644
+--- a/app/controllers/locations_controller.rb
++++ b/app/controllers/locations_controller.rb
+@@ -142,6 +142,8 @@ def get_image
+   def update_map
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     group_id = params[:group_id]
+     SqlHelper.validate_token([group_id])
+ 
+@@ -164,6 +166,8 @@ def update_map
+   def delete_map
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     group_id = params[:group_id]
+     SqlHelper.validate_token([group_id])
+ 
+@@ -189,6 +193,10 @@ def delete_map
+   def drop_on_exit
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
++    SqlHelper.validate_token([params[:id]])
++
+     unless @login_user.nil?
+       Location.destroy(params[:id])
+     end
+@@ -204,9 +212,12 @@ def drop_on_exit
+   def on_moved
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     location_id = params[:id]
++    SqlHelper.validate_token([location_id])
+ 
+-    if location_id.nil? or location_id.empty?
++    if location_id.blank?
+       location = Location.get_for(@login_user)
+       if location.nil?
+         location = Location.new
+@@ -216,12 +227,14 @@ def on_moved
+       begin
+         location = Location.find(location_id)
+       rescue
++        location = nil
+       end
+     end
+ 
+     unless location.nil?
+       group_id = params[:group_id]
+       group_id = nil if group_id.empty?
++      SqlHelper.validate_token([group_id])
+       attrs = ActionController::Parameters.new({group_id: group_id, x: params[:x], y: params[:y]})
+       location.update_attributes(attrs.permit(Location::PERMIT_BASE))
+     end
+@@ -235,7 +248,7 @@ def on_moved
+   #Filter method to check if current User is owner of the specified Location.
+   #
+   def check_owner
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     begin
+       owner_id = Location.find(params[:id]).user_id
+diff --git a/app/controllers/login_controller.rb b/app/controllers/login_controller.rb
+index 8232e33..ecc72b6 100644
+--- a/app/controllers/login_controller.rb
++++ b/app/controllers/login_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -37,7 +37,7 @@ def login
+ 
+       flash[:notice] = '<span class=\'font_msg_bold\'>'+t('user.u_name')+'</span>'+t('msg.or')+'<span class=\'font_msg_bold\'>'+t('password.name')+'</span>'+t('msg.is_invalid')
+ 
+-      if params[:fwd_controller].nil? or params[:fwd_controller].empty?
++      if params[:fwd_controller].blank?
+ 
+         redirect_to(:controller => 'login', :action => 'index')
+       else
+@@ -57,7 +57,7 @@ def login
+ 
+       @login_user = LoginHelper.on_login(user, session)
+ 
+-      if params[:fwd_controller].nil? or params[:fwd_controller].empty?
++      if params[:fwd_controller].blank?
+         prms = ApplicationHelper.get_fwd_params(params)
+         prms.delete('user')
+         prms[:controller] = 'desktop'
+diff --git a/app/controllers/logs_controller.rb b/app/controllers/logs_controller.rb
+index e9ad862..710daf3 100644
+--- a/app/controllers/logs_controller.rb
++++ b/app/controllers/logs_controller.rb
+@@ -112,6 +112,9 @@ def search
+   #Deletes Logs.
+   #
+   def destroy
++
++    return unless request.post?
++
+     if params[:check_log].nil?
+       list
+       render(:action => 'list')
+@@ -137,6 +140,8 @@ def destroy
+   #
+   def destroy_all
+ 
++    return unless request.post?
++
+     Log.delete_all
+ 
+     flash[:notice] = t('msg.delete_success')
+diff --git a/app/controllers/mail_accounts_controller.rb b/app/controllers/mail_accounts_controller.rb
+index cc52126..1add46c 100644
+--- a/app/controllers/mail_accounts_controller.rb
++++ b/app/controllers/mail_accounts_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -34,6 +34,8 @@ def new
+   def create
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     if params[:mail_account][:smtp_auth].nil? or params[:mail_account][:smtp_auth] != '1'
+       params[:mail_account].delete(:smtp_username)
+       params[:mail_account].delete(:smtp_password)
+@@ -90,6 +92,8 @@ def edit
+   def update
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     @mail_account = MailAccount.find(params[:id])
+ 
+     if params[:mail_account][:smtp_auth].nil? or params[:mail_account][:smtp_auth] != '1'
+@@ -129,6 +133,7 @@ def show_summary
+     Log.add_info(request, params.inspect)
+ 
+     mail_account_id = params[:id]
++    SqlHelper.validate_token([mail_account_id])
+ 
+     begin
+       @mail_account = MailAccount.find(mail_account_id)
+@@ -182,7 +187,7 @@ def show_summary
+   #
+   def check_owner
+ 
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     mail_account = MailAccount.find(params[:id])
+ 
+diff --git a/app/controllers/mail_filters_controller.rb b/app/controllers/mail_filters_controller.rb
+index 7654294..3526bc1 100644
+--- a/app/controllers/mail_filters_controller.rb
++++ b/app/controllers/mail_filters_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2012 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -131,6 +131,8 @@ def show
+   def update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     attrs = params[:mail_filter]
+     if attrs['and_or'] == 'none'
+       attrs['and_or'] = nil
+@@ -194,6 +196,8 @@ def update
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_filter].nil?
+       list
+       render(:action => 'list', :layout => !request.xhr?)
+@@ -208,6 +212,7 @@ def destroy
+           filter = MailFilter.find(filter_id)
+           filter.destroy if filter.editable?(@login_user)
+         rescue => evar
++          filter = nil
+           Log.add_error(request, evar)
+         end
+ 
+@@ -228,6 +233,8 @@ def destroy
+   def do_execute
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     mail_account = MailAccount.find(params[:mail_account_id])
+     mail_folder = MailFolder.find(params[:mail_folder_id])
+ 
+@@ -288,6 +295,8 @@ def get_order
+   def update_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     mail_account_id = params[:mail_account_id]
+     order_arr = params[:mail_filters_order]
+ 
+@@ -358,7 +367,7 @@ def edit_action
+   #
+   def check_owner
+ 
+-    return if (params[:id].nil? or params[:id].empty? or @login_user.nil?)
++    return if (params[:id].blank? or @login_user.nil?)
+ 
+     mail_filter = MailFilter.find(params[:id])
+ 
+diff --git a/app/controllers/mail_folders_controller.rb b/app/controllers/mail_folders_controller.rb
+index dd67e47..7883736 100644
+--- a/app/controllers/mail_folders_controller.rb
++++ b/app/controllers/mail_folders_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -76,9 +76,11 @@ def ajax_get_tree
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     parent_id = params[:selectedFolderId]
+ 
+-    if params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
++    if params[:thetisBoxEdit].blank?
+       @mail_folder = nil
+     else
+       @mail_folder = MailFolder.new
+@@ -100,9 +102,11 @@ def create
+   def rename
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @mail_folder = MailFolder.find(params[:id])
+ 
+-    unless params[:thetisBoxEdit].nil? or params[:thetisBoxEdit].empty?
++    unless params[:thetisBoxEdit].blank?
+       @mail_folder.name = params[:thetisBoxEdit]
+       @mail_folder.save
+     end
+@@ -117,7 +121,10 @@ def rename
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     mail_account_id = params[:mail_account_id]
++    SqlHelper.validate_token([mail_account_id])
+ 
+     mail_folder = MailFolder.find(params[:id])
+     trash_folder = MailFolder.get_for(@login_user, mail_account_id, MailFolder::XTYPE_TRASH)
+@@ -151,6 +158,8 @@ def destroy
+   def move
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @mail_folder = MailFolder.find(params[:id])
+ 
+     if params[:thetisBoxSelKeeper].blank?
+@@ -161,6 +170,7 @@ def move
+     end
+ 
+     parent_id = params[:thetisBoxSelKeeper].split(':').last
++    SqlHelper.validate_token([parent_id])
+ 
+     if parent_id == '0'   # '0' for ROOT
+       flash[:notice] = 'ERROR:' + t('mail_folder.root_cannot_have_folders')
+@@ -198,10 +208,13 @@ def get_mails
+     end
+ 
+     if !params[:pop].nil? and params[:pop] == 'true'
++
++      mail_account_id = params[:mail_account_id]
++      SqlHelper.validate_token([mail_account_id])
++
+       begin
+         new_arrivals_h = {}
+ 
+-        mail_account_id = params[:mail_account_id]
+         if mail_account_id.blank?
+           mail_accounts = MailAccount.find_all("user_id=#{@login_user.id}")
+           mail_accounts.each do |mail_account|
+@@ -249,6 +262,8 @@ def get_mails
+     end
+ 
+     @folder_id = params[:id]
++    SqlHelper.validate_token([@folder_id])
++
+     if @folder_id == TreeElement::ROOT_ID.to_s
+       @emails = nil
+     else
+@@ -258,13 +273,9 @@ def get_mails
+ # FEATURE_PAGING_IN_TREE >>>
+       @sort_col = (params[:sort_col] || 'sent_at')
+       @sort_type = (params[:sort_type] || 'DESC')
++      SqlHelper.validate_token([@sort_col, @sort_type])
+ 
+-      folder_ids = nil
+-      add_con = nil
+-
+-      folder_ids = [@folder_id]
+-
+-      sql = EmailsHelper.get_list_sql(@login_user, params[:keyword], folder_ids, @sort_col, @sort_type, 0, add_con)
++      sql = EmailsHelper.get_list_sql(@login_user, params[:keyword], [@folder_id], @sort_col, @sort_type, 0, nil)
+       @email_pages, @emails, @total_num = paginate_by_sql(Email, sql, 10)
+ # FEATURE_PAGING_IN_TREE <<<
+     end
+@@ -282,10 +293,10 @@ def get_mails
+   def get_mail_content
+     Log.add_info(request, params.inspect)
+ 
+-    mail_id = params[:id]
++    email_id = params[:id]
+ 
+     begin
+-      @email = Email.find(mail_id)
++      @email = Email.find(email_id)
+       render(:partial => 'ajax_mail_content', :layout => false)
+     rescue => evar
+       Log.add_error(nil, evar)
+@@ -400,14 +411,16 @@ def get_mail_raw
+   def empty
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @folder_id = params[:id]
+     mail_account_id = params[:mail_account_id]
+-    SqlHelper.validate_token([mail_account_id])
++    SqlHelper.validate_token([@folder_id, mail_account_id])
+ 
+     trash_folder = MailFolder.get_for(@login_user, mail_account_id, MailFolder::XTYPE_TRASH)
+ 
+     mail_folder = MailFolder.find(@folder_id)
+-    emails = MailFolder.get_mails(mail_folder.id, @login_user) || []
++    emails = (MailFolder.get_mails(mail_folder.id, @login_user) || [])
+ 
+     if mail_folder.id == trash_folder.id \
+         or mail_folder.get_parents(false).include?(trash_folder.id.to_s)
+@@ -433,8 +446,11 @@ def empty
+   def ajax_delete_mails
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     folder_id = params[:id]
+     mail_account_id = params[:mail_account_id]
++    SqlHelper.validate_token([folder_id, mail_account_id])
+ 
+     unless params[:check_mail].blank?
+       mail_folder = MailFolder.find(folder_id)
+@@ -481,6 +497,8 @@ def ajax_delete_mails
+   def ajax_move_mails
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     folder_id = params[:thetisBoxSelKeeper].split(':').last
+     SqlHelper.validate_token([folder_id])
+     begin
+@@ -529,6 +547,7 @@ def get_folders_order
+     Log.add_info(request, params.inspect)
+ 
+     @folder_id = params[:id]
++    SqlHelper.validate_token([@folder_id])
+ 
+     if @folder_id == '0'
+       @folders = MailFolder.get_account_roots_for(@login_user)
+@@ -540,10 +559,6 @@ def get_folders_order
+     end
+ 
+     render(:partial => 'ajax_folders_order', :layout => false)
+-
+-  rescue => evar
+-    Log.add_error(request, evar)
+-    render(:partial => 'ajax_folders_order', :layout => false)
+   end
+ 
+   #=== update_folders_order
+@@ -554,6 +569,8 @@ def get_folders_order
+   def update_folders_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_arr = params[:folders_order]
+ 
+     SqlHelper.validate_token([params[:id]])
+@@ -605,6 +622,8 @@ def update_folders_order
+   def update_mail_unread
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     email_id = params[:email_id]
+     unread = (params[:unread] == "1")
+ 
+@@ -653,7 +672,7 @@ def check_owner
+   #Filter method to check if current User is owner of the specified Email.
+   #
+   def check_mail_owner
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     begin
+       owner_id = Email.find(params[:id]).user_id
+diff --git a/app/controllers/official_titles_controller.rb b/app/controllers/official_titles_controller.rb
+index 7e99ab0..9cf5023 100644
+--- a/app/controllers/official_titles_controller.rb
++++ b/app/controllers/official_titles_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2013 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -27,8 +27,9 @@ def show
+ 
+     @group_id = params[:group_id]
+     official_title_id = params[:id]
++    SqlHelper.validate_token([@group_id, official_title_id])
+ 
+-    unless official_title_id.nil? or official_title_id.empty?
++    unless official_title_id.blank?
+       @official_title = OfficialTitle.find(official_title_id)
+     end
+ 
+@@ -44,8 +45,9 @@ def edit
+ 
+     @group_id = params[:group_id]
+     official_title_id = params[:id]
++    SqlHelper.validate_token([@group_id, official_title_id])
+ 
+-    unless official_title_id.nil? or official_title_id.empty?
++    unless official_title_id.blank?
+       @official_title = OfficialTitle.find(official_title_id)
+     end
+ 
+@@ -59,8 +61,11 @@ def edit
+   def update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @group_id = params[:group_id]
+     official_title_id = params[:id]
++    SqlHelper.validate_token([@group_id, official_title_id])
+ 
+     if official_title_id.blank?
+       @official_title = OfficialTitle.new(params.require(:official_title).permit(OfficialTitle::PERMIT_BASE))
+@@ -85,6 +90,8 @@ def update
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       OfficialTitle.destroy(params[:id])
+     rescue => evar
+@@ -92,8 +99,9 @@ def destroy
+     end
+ 
+     @group_id = params[:group_id]
++    SqlHelper.validate_token([@group_id])
+ 
+-    if @group_id.nil? or @group_id.empty?
++    if @group_id.blank?
+       @group_id = '0'   # '0' for ROOT
+     end
+ 
+@@ -108,9 +116,13 @@ def destroy
+   def update_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:official_titles_order]
+ 
+     @group_id = params[:group_id]
++    SqlHelper.validate_token([@group_id])
++
+     parent_titles = OfficialTitle.get_for(Group.find(@group_id).parent_id, true, true)
+     order_offset = parent_titles.length
+ 
+diff --git a/app/controllers/paintmail_controller.rb b/app/controllers/paintmail_controller.rb
+index 156cb84..40b39a4 100644
+--- a/app/controllers/paintmail_controller.rb
++++ b/app/controllers/paintmail_controller.rb
+@@ -33,6 +33,8 @@ def index
+   def save_conf
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     unless @login_user.nil?
+ 
+       if @login_user.paintmail.nil?
+diff --git a/app/controllers/researches_controller.rb b/app/controllers/researches_controller.rb
+index d2104e7..fde24e8 100644
+--- a/app/controllers/researches_controller.rb
++++ b/app/controllers/researches_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -96,6 +96,8 @@ def settings
+   def create_q_page
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @tmpl_folder, @tmpl_q_folder = TemplatesHelper.get_tmpl_subfolder(TemplatesHelper::TMPL_RESEARCH)
+ 
+     unless @tmpl_q_folder.nil?
+@@ -130,6 +132,8 @@ def create_q_page
+   def destroy_q_page
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       Item.find(params[:id]).destroy
+     rescue
+@@ -151,6 +155,8 @@ def destroy_q_page
+   def update_q_ctrl
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     item_id = params[:item_id]
+     q_code = params[:q_code]
+     q_param = params[:q_param]
+@@ -163,7 +169,7 @@ def update_q_ctrl
+ 
+     yaml[q_code] = {:item_id => item_id, :type => type, :values => vals, :caption => cap.to_s }
+ 
+-    Research.save_config_yaml yaml
++    Research.save_config_yaml(yaml)
+ 
+     render(:text => '')
+ 
+@@ -180,6 +186,8 @@ def update_q_ctrl
+   def reset_q_ctrl
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     Research.trim_config_yaml nil
+ 
+     settings
+@@ -216,23 +224,26 @@ def renew_q_ctrl
+   def add_statistics_group
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     current_id = params[:current_id]
+ 
+-    if !params[:thetisBoxSelKeeper].nil?
++    unless params[:thetisBoxSelKeeper].nil?
+       group_id = params[:thetisBoxSelKeeper].split(':').last
+     end
++    SqlHelper.validate_token([current_id, group_id])
+ 
+-    if group_id.nil? or group_id.empty?
+-      @group_ids = Research.get_statistics_groups 
++    if group_id.blank?
++      @group_ids = Research.get_statistics_groups
+       render(:partial => 'ajax_statistics_groups', :layout => false)
+       return
+     end
+ 
+-    unless current_id.nil? or current_id.empty?
+-      Research.delete_statistics_group current_id
++    unless current_id.blank?
++      Research.delete_statistics_group(current_id)
+     end
+ 
+-    @group_ids = Research.add_statistics_group group_id
++    @group_ids = Research.add_statistics_group(group_id)
+ 
+     render(:partial => 'ajax_statistics_groups', :layout => false)
+   end
+@@ -245,15 +256,18 @@ def add_statistics_group
+   def delete_statistics_group
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     group_id = params[:group_id]
++    SqlHelper.validate_token([group_id])
+ 
+-    if group_id.nil? or group_id.empty?
++    if group_id.blank?
+       @group_ids = Research.get_statistics_groups 
+       render(:partial => 'ajax_statistics_groups', :layout => false)
+       return
+     end
+ 
+-    @group_ids = Research.delete_statistics_group group_id
++    @group_ids = Research.delete_statistics_group(group_id)
+ 
+     render(:partial => 'ajax_statistics_groups', :layout => false)
+   end
+@@ -266,9 +280,11 @@ def delete_statistics_group
+   def update_groups_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     order_ary = params[:groups_order]
+ 
+-    Research.set_statistics_groups order_ary
++    Research.set_statistics_groups(order_ary)
+ 
+     render(:text => '')
+   end
+@@ -281,6 +297,8 @@ def update_groups_order
+   def start
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     tmpl_folder, tmpl_q_folder = TemplatesHelper.get_tmpl_subfolder(TemplatesHelper::TMPL_RESEARCH)
+ 
+     if tmpl_q_folder.nil?
+@@ -345,6 +363,8 @@ def start
+   def stop
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     ApplicationHelper.delete_file_safe(Research.get_pages)
+     render(:text => '')
+ 
+@@ -361,6 +381,8 @@ def stop
+   def reset
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     Research.delete_all
+ 
+     render(:text => '')
+@@ -377,14 +399,17 @@ def reset
+   def reset_users
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     count = 0
+ 
+     unless params[:check_user].nil?
+ 
+       params[:check_user].each do |user_id, value|
+         if value == '1'
++          SqlHelper.validate_token([user_id])
+           begin
+-            Research.destroy_all('user_id=' + user_id.to_s)
++            Research.destroy_all("user_id=#{user_id.to_i}")
+             count += 1
+           rescue => evar
+             Log.add_error(request, evar)
+@@ -447,6 +472,8 @@ def edit_page
+   def save_page
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     # Next page
+     pave_val = params[:page].to_i + 1
+     @page = sprintf('%02d', pave_val)
+@@ -523,6 +550,8 @@ def save_page
+   def do_confirm
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @research = Research.find(params[:research_id])
+     @research.update_attribute(:status, Research::U_STATUS_COMMITTED)
+ 
+@@ -619,6 +648,8 @@ def users
+   def notify
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     root_url = ApplicationHelper.root_url(request)
+     count = UsersHelper.send_notification(params[:check_user], params[:thetisBoxEdit], root_url)
+ 
+diff --git a/app/controllers/schedules_controller.rb b/app/controllers/schedules_controller.rb
+index c2d4a7e..ea28823 100644
+--- a/app/controllers/schedules_controller.rb
++++ b/app/controllers/schedules_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2013 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -45,6 +45,8 @@ def configure
+   def add_holidays
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     holidays = params[:thetisBoxEdit]
+     unless holidays.nil?
+       holidays.split("\n").each do |holiday|
+@@ -83,8 +85,11 @@ def add_holidays
+   def delete_holidays
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     holidays = params[:holidays]
+     unless holidays.nil?
++      SqlHelper.validate_token([holidays])
+       holidays.each do |schedule_id|
+         Schedule.destroy(schedule_id)
+       end
+@@ -115,6 +120,8 @@ def new
+   def save
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     date = Date.parse(params[:date])
+ 
+     unless params[:id].blank?
+@@ -149,6 +156,7 @@ def save
+       schedule.destroy unless schedule.nil?
+     else
+       [:users, :groups, :teams, :items].each do |attr|
++        SqlHelper.validate_token([params[attr]])
+         if params[attr].blank?
+           params[:schedule][attr] = nil
+         else
+@@ -163,7 +171,11 @@ def save
+         params[:schedule][:equipment] = nil
+       else
+         equipment_ids.each do |equipment_id|
+-          equipment = Equipment.find(equipment_id)
++          begin
++            equipment = Equipment.find(equipment_id)
++          rescue => evar
++            equipment = nil
++          end
+           if equipment.nil? or !equipment.is_accessible_by(@login_user)
+             flash[:notice] = 'ERROR:' + t('msg.need_auth_to_access') + t('cap.suffix') + Equipment.get_name(equipment_id)
+             redirect_to(:action => 'day', :date => params[:date])
+@@ -203,7 +215,7 @@ def save
+       if nearest_day.nil?
+         check_schedule.id = params[:id].to_i unless params[:id].nil? or params[:id].empty?
+         flash[:notice] = 'ERROR:' + t('schedule.no_day_in_rule')
+-        if params[:fwd_controller].nil? or params[:fwd_controller].empty?
++        if params[:fwd_controller].blank?
+           self.index
+         else
+           prms = ApplicationHelper.get_fwd_params(params)
+@@ -325,6 +337,8 @@ def edit
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @date = Date.parse(params[:date])
+ 
+     begin
+@@ -513,7 +527,7 @@ def week
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+     else
+       @date = Date.parse(date_s)
+@@ -530,7 +544,7 @@ def day
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+     else
+       @date = Date.parse(date_s)
+@@ -604,13 +618,14 @@ def group
+     Log.add_info(request, params.inspect)
+ 
+     date_s = params[:date]
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+     else
+       @date = Date.parse(date_s)
+     end
+ 
+     @group_id = params[:id]
++    SqlHelper.validate_token([@group_id, params[:id]])
+     group_users = Group.get_users(params[:id])
+ 
+     @user_schedule_hash = {}
+@@ -632,7 +647,7 @@ def team
+     Log.add_info(request, params.inspect)
+ 
+     date_s = params[:date]
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+     else
+       @date = Date.parse(date_s)
+@@ -737,7 +752,7 @@ def select_items
+   def get_folder_items
+     Log.add_info(request, params.inspect)
+ 
+-    unless params[:thetisBoxSelKeeper].nil? or params[:thetisBoxSelKeeper].empty?
++    unless params[:thetisBoxSelKeeper].blank?
+       @folder_id = params[:thetisBoxSelKeeper].split(':').last
+     end
+ 
+diff --git a/app/controllers/send_mails_controller.rb b/app/controllers/send_mails_controller.rb
+index bb6cbfc..59cd357 100644
+--- a/app/controllers/send_mails_controller.rb
++++ b/app/controllers/send_mails_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -29,8 +29,9 @@ def new
+ 
+     mail_account_id = params[:mail_account_id]
+ 
+-    if mail_account_id.nil? or mail_account_id.empty?
++    if mail_account_id.blank?
+       account_xtype = params[:mail_account_xtype]
++      SqlHelper.validate_token([account_xtype])
+       @mail_account = MailAccount.get_default_for(@login_user.id, account_xtype)
+     else
+       @mail_account = MailAccount.find(mail_account_id)
+@@ -171,6 +172,8 @@ def edit_send_to
+   def do_send
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       email = Email.find(params[:id])
+ 
+@@ -207,6 +210,8 @@ def do_send
+   def save
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:attach_file].nil?
+       attach_attrs = { :file => params[:attach_file] }
+       params.delete(:attach_file)
+@@ -258,6 +263,8 @@ def save
+   def add_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:attach_file].nil?
+       attach_attrs = ActionController::Parameters.new({file: params[:attach_file]})
+       params.delete(:attach_file)
+@@ -332,6 +339,8 @@ def add_attachment
+   def delete_attachment
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       attachment = MailAttachment.find(params[:attachment_id])
+       @email = Email.find(params[:id])
+diff --git a/app/controllers/teams_controller.rb b/app/controllers/teams_controller.rb
+index 9284ab6..8b9f285 100644
+--- a/app/controllers/teams_controller.rb
++++ b/app/controllers/teams_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -100,6 +100,8 @@ def search
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       team = Team.find(params[:id])
+       Item.destroy(team.item_id)
+@@ -119,7 +121,7 @@ def destroy
+   #
+   def check_member
+ 
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     if Item.find(params[:id]).user_id != @login_user.id
+       Log.add_check(request, '[check_member]'+request.to_s)
+diff --git a/app/controllers/templates_controller.rb b/app/controllers/templates_controller.rb
+index 122df14..eb226c4 100644
+--- a/app/controllers/templates_controller.rb
++++ b/app/controllers/templates_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -48,11 +48,14 @@ def list
+   def create_workflow
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @tmpl_folder, @tmpl_workflows_folder = TemplatesHelper.get_tmpl_subfolder(TemplatesHelper::TMPL_WORKFLOWS)
+ 
+     @group_id = params[:group_id]
++    SqlHelper.validate_token([@group_id])
+ 
+-    if @group_id.nil? or @group_id.empty?
++    if @group_id.blank?
+       @group_id = '0'   # '0' for ROOT
+     elsif @group_id == '0'
+       ;
+@@ -99,13 +102,16 @@ def create_workflow
+   def destroy_workflow
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     Item.find(params[:id]).destroy
+ 
+     @tmpl_folder, @tmpl_workflows_folder = TemplatesHelper.get_tmpl_subfolder(TemplatesHelper::TMPL_WORKFLOWS)
+ 
+     @group_id = params[:group_id]
++    SqlHelper.validate_token([@group_id])
+ 
+-    if @group_id.nil? or @group_id.empty?
++    if @group_id.blank?
+       @group_id = '0'   # '0' for ROOT
+     end
+ 
+@@ -120,6 +126,8 @@ def destroy_workflow
+   def create_local
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @tmpl_folder, @tmpl_local_folder = TemplatesHelper.get_tmpl_subfolder(TemplatesHelper::TMPL_LOCAL)
+ 
+     unless @tmpl_local_folder.nil?
+@@ -142,6 +150,8 @@ def create_local
+   def destroy_local
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       Item.find(params[:id]).destroy
+     rescue
+@@ -160,6 +170,8 @@ def destroy_local
+   def copy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     tmpl_id = params[:thetisBoxSelKeeper].split(':').last
+     tmpl_item = Item.find(tmpl_id)
+ 
+diff --git a/app/controllers/timecards_controller.rb b/app/controllers/timecards_controller.rb
+index de91294..f40c95b 100644
+--- a/app/controllers/timecards_controller.rb
++++ b/app/controllers/timecards_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -55,7 +55,7 @@ def month
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       date = Date.today
+     else
+       date_params = date_s.split('-')
+@@ -64,7 +64,7 @@ def month
+         @month = date_params.last.to_i
+         date = TimecardsHelper.get_first_day_in_fiscal_month(@year, @month, month_begins_at)
+       else
+-        date = Date.parse date_s
++        date = Date.parse(date_s)
+       end
+     end
+ 
+@@ -152,7 +152,9 @@ def edit
+   def update
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:id].nil? or params[:id].empty?
++    return unless request.post?
++
++    if params[:id].blank?
+       @timecard = Timecard.new
+     else
+       @timecard = Timecard.find(params[:id])
+@@ -165,9 +167,9 @@ def update
+       params[:timecard]['options'] = '|' + options.join('|') + '|'
+     end
+ 
+-    if params[:user_id].nil? or params[:user_id].empty?
++    if params[:user_id].blank?
+       @selected_user = @login_user
+-    elsif @login_user.id.to_s == params[:user_id]
++    elsif (@login_user.id.to_s == params[:user_id])
+       @selected_user = @login_user
+     else
+       unless @login_user.admin?(User::AUTH_TIMECARD)
+@@ -189,12 +191,12 @@ def update
+       unless breaks.empty?
+         check_error = false
+ 
+-        unless params[:timecard]['start'].nil? or params[:timecard]['start'].empty?
++        unless params[:timecard]['start'].blank?
+           start_t = UtilDateTime.parse(params[:timecard]['start']).to_time
+           check_error = true if breaks.first.first < start_t
+         end
+ 
+-        unless params[:timecard]['end'].nil? or params[:timecard]['end'].empty?
++        unless params[:timecard]['end'].blank?
+           end_t = UtilDateTime.parse(params[:timecard]['end']).to_time
+           check_error = true if end_t < breaks.last.last
+         end
+@@ -237,6 +239,8 @@ def update
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     begin
+       timecard = Timecard.find(params[:id])
+ 
+@@ -283,6 +287,8 @@ def recent_descriptions
+   def update_break
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:user_id].nil?
+       @selected_user = User.find(params[:user_id])
+ 
+@@ -348,6 +354,8 @@ def update_break
+   def delete_break
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @timecard = Timecard.find(params[:id])
+ 
+     if params[:org_start].nil?
+@@ -380,11 +388,11 @@ def group
+ 
+     date_s = params[:date]
+ 
+-    if date_s.nil? or date_s.empty?
++    if date_s.blank?
+       @date = Date.today
+       date_s = @date.strftime(Schedule::SYS_DATE_FORM)
+     else
+-      @date = Date.parse date_s
++      @date = Date.parse(date_s)
+     end
+ 
+     if params[:display] == 'mine'
+@@ -392,6 +400,7 @@ def group
+     else
+       display_type = params[:display].split('_').first
+       display_id = params[:display].split('_').last
++      SqlHelper.validate_token([display_id])
+ 
+       @selected_users = Group.get_users(display_id)
+       @group_id = display_id
+@@ -510,6 +519,8 @@ def paidhld_list
+   def paidhld_update
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     year = params[:year].to_i
+     num = params[:num].to_f
+ 
+@@ -536,11 +547,15 @@ def paidhld_update
+   def paidhld_update_multi
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     year = params[:year].to_i
+     num = params[:num].to_f
+ 
+     group_id = params[:group_id]
+     users_hash = (params[:check_user] || {})
++    SqlHelper.validate_token([group_id, users_hash.keys])
++
+     done = false
+     users_hash.each do |user_id, value|
+       if value == '1'
+@@ -604,9 +619,11 @@ def configure
+   def update_config
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     yaml = ApplicationHelper.get_config_yaml
+ 
+-    unless params[:timecard].nil? or params[:timecard].empty?
++    unless params[:timecard].blank?
+       yaml[:timecard] = Hash.new if yaml[:timecard].nil?
+       
+       params[:timecard].each do |key, val|
+@@ -630,6 +647,8 @@ def update_config
+   def update_default_break
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     start_t = Time.local(2000, 1, 1, params[:start_hour].to_i, params[:start_min].to_i)
+     end_t = Time.local(2000, 1, 1, params[:end_hour].to_i, params[:end_min].to_i)
+ 
+@@ -690,6 +709,8 @@ def update_default_break
+   def delete_default_break
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:org_start].nil?
+       org_start = UtilDateTime.parse(params[:org_start]).to_time
+ 
+diff --git a/app/controllers/users_controller.rb b/app/controllers/users_controller.rb
+index b12a3f9..2e73f8a 100644
+--- a/app/controllers/users_controller.rb
++++ b/app/controllers/users_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -48,6 +48,8 @@ def new
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     attrs = _process_user_attrs(nil, params[:user])
+     password = attrs[:password]
+     attrs.delete(:password)
+@@ -114,6 +116,8 @@ def show
+   def update
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     @user = User.find(params[:id])
+ 
+     attrs = _process_user_attrs(@user, params[:user])
+@@ -235,6 +239,8 @@ def search
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_user].nil?
+       list
+       render(:action => 'list')
+@@ -244,7 +250,7 @@ def destroy
+     count = 0
+     params[:check_user].each do |user_id, value|
+       if value == '1'
+-
++        SqlHelper.validate_token([user_id])
+         begin
+           User.destroy(user_id)
+         rescue => evar
+@@ -288,6 +294,8 @@ def select_official_titles
+   def add_official_titles
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @user = User.find(params[:user_id])
+ 
+     unless params[:official_titles].nil?
+@@ -313,6 +321,8 @@ def add_official_titles
+   def remove_official_titles
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     @user = User.find(params[:user_id])
+ 
+     unless params[:official_titles].nil?
+@@ -335,6 +345,8 @@ def remove_official_titles
+   def notify
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     root_url = ApplicationHelper.root_url(request)
+     count = UsersHelper.send_notification(params[:check_user], params[:thetisBoxEdit], root_url)
+ 
+@@ -370,21 +382,15 @@ def update_auth
+       end
+ 
+       if auth_selected.nil? or !auth_selected.include?(User::AUTH_USER)
+-
+         user_admin_err = false
+-
+         user_admins = User.where("auth like '%|#{User::AUTH_USER}|%' or auth='#{User::AUTH_ALL}'").to_a
+ 
+         if user_admins.nil? or user_admins.empty?
+-
+           user_admin_err = true
+-
+         elsif user_admins.length == 1
+-
+           if user_admins.first.id.to_s == params[:id]
+             user_admin_err = true
+           end
+-
+         end
+ 
+         if user_admin_err
+@@ -392,7 +398,6 @@ def update_auth
+           return
+         end
+       end
+-
+     end
+ 
+     begin
+@@ -402,16 +407,13 @@ def update_auth
+     end
+ 
+     if user.nil?
+-
+       render(:text => t('msg.already_deleted', :name => User.model_name.human))
+     else
+-
+       user.update_attribute(:auth, auth)
+ 
+       if user.id == @login_user.id
+         @login_user = user
+       end
+-
+       render(:text => '')
+     end
+   end
+@@ -426,7 +428,9 @@ def update_auth
+   def add_to_group
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:thetisBoxSelKeeper].nil? or params[:thetisBoxSelKeeper].empty?
++    return unless request.post?
++
++    if params[:thetisBoxSelKeeper].blank?
+       render(:partial => 'ajax_groups', :layout => false)
+       return
+     end
+@@ -456,7 +460,7 @@ def add_to_group
+       is_modified = false
+ 
+       # Change, not simply Add
+-      unless params[:current_id] == nil or params[:current_id].empty?
++      unless params[:current_id].blank?
+         if @user.exclude_from(params[:current_id])
+           is_modified = true
+         end
+@@ -465,7 +469,6 @@ def add_to_group
+       is_modified = true if @user.add_to(group_id)
+ 
+       if is_modified == true
+-#        @user.update_attribute(:groups, @user.groups)
+         @user.save!
+ 
+         if @user.id == @login_user.id
+@@ -485,7 +488,9 @@ def add_to_group
+   def exclude_from_group
+     Log.add_info(request, params.inspect)
+ 
+-    if params[:group_id].nil? or params[:group_id].empty?
++    return unless request.post?
++
++    if params[:group_id].blank?
+       render(:partial => 'ajax_groups', :layout => false)
+       return
+     end
+@@ -518,6 +523,8 @@ def exclude_from_group
+   def create_profile_sheet
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     user_id = params[:id]
+     @user = User.find(user_id)
+ 
+@@ -536,6 +543,8 @@ def create_profile_sheet
+   def destroy_profile_sheet
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     user_id = params[:id]
+     @user = User.find(user_id)
+     item_id = @user.item_id
+@@ -573,6 +582,8 @@ def export_csv
+   def import_csv
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     file = params[:imp_file]
+     mode = params[:mode]
+     enc = params[:enc]
+@@ -634,14 +645,10 @@ def import_csv
+     end
+ 
+     if users.empty?
+-
+       @imp_errs[0] = [t('user.nothing_to_import')]
+     else
+-
+       if mode == 'update'
+-
+         if found_update
+-
+           user_admin = users.find do |user|
+             user.admin?(User::AUTH_USER)
+           end
+@@ -734,10 +741,12 @@ def configure
+   #
+   def create_title
+ 
++    return unless request.post?
++
+     titles = User.get_config_titles
+     titles = [] if titles.nil?
+     titles << t('user.new_title')
+-    User.save_config_titles titles
++    User.save_config_titles(titles)
+ 
+     render(:partial => 'ajax_title', :layout => false)
+   end
+@@ -750,6 +759,8 @@ def create_title
+   def destroy_title
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     title = params[:title]
+ 
+     titles = User.get_config_titles
+@@ -778,6 +789,8 @@ def destroy_title
+   def rename_title
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     org_title = params[:org_title]
+     new_title = params[:new_title]
+ 
+@@ -789,15 +802,12 @@ def rename_title
+     titles = User.get_config_titles
+     unless titles.nil?
+       if titles.include?(new_title)
+-
+         flash[:notice] = 'ERROR:' + t('user.title_duplicated')
+-
+       else
+-
+         idx = titles.index(org_title)
+         unless idx.nil?
+           titles[idx] = new_title
+-          User.save_config_titles titles
++          User.save_config_titles(titles)
+ 
+           User.rename_title(org_title, new_title)
+           User.update_xorder(new_title, idx)
+@@ -816,6 +826,8 @@ def rename_title
+   def update_titles_order
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     titles = params[:titles_order]
+ 
+     org_order = User.get_config_titles
+@@ -841,6 +853,8 @@ def update_titles_order
+   def update_zept_allowed
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     user = User.find(params[:id])
+     zept_allowed = params[:zept_allowed]
+ 
+@@ -884,7 +898,7 @@ def _process_user_attrs(user, attrs)
+       user_name = attrs[:name]
+       user_name ||= user.name unless user.nil?
+       password = attrs[:password]
+-      if password.nil? or password.empty?
++      if password.blank?
+         password = UsersHelper.generate_password
+         attrs[:password] = password
+       end
+diff --git a/app/controllers/workflows_controller.rb b/app/controllers/workflows_controller.rb
+index 9d415ea..451b4f3 100644
+--- a/app/controllers/workflows_controller.rb
++++ b/app/controllers/workflows_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -48,6 +48,8 @@ def list
+   def create
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     my_wf_folder = WorkflowsHelper.get_my_wf_folder(@login_user.id)
+ 
+     tmpl_item = Item.find(params[:select_workflow])
+@@ -77,6 +79,8 @@ def create
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     workflow = Workflow.find(params[:id])
+ 
+     begin
+@@ -101,6 +105,8 @@ def destroy
+   def move
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     unless params[:thetisBoxSelKeeper].nil?
+       folder_id = params[:thetisBoxSelKeeper].split(':').last
+       SqlHelper.validate_token([folder_id])
+@@ -132,7 +138,7 @@ def move
+   #Filter method to check if the current User is owner of the specified Workflow.
+   #
+   def check_owner
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     begin
+       owner_id = Workflow.find(params[:id]).user_id
+diff --git a/app/controllers/zeptair_dist_controller.rb b/app/controllers/zeptair_dist_controller.rb
+index c3db563..bba45f8 100644
+--- a/app/controllers/zeptair_dist_controller.rb
++++ b/app/controllers/zeptair_dist_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -129,10 +129,12 @@ def users
+   def reply
+     Log.add_info(request, '')   # Not to show passwords.
+ 
+-    unless params[:attach_id].nil? or params[:attach_id].empty?
++    return unless request.post?
++
++    unless params[:attach_id].blank?
+       target = Attachment.find(params[:attach_id])
+     end
+-    unless params[:cmd_id].nil? or params[:cmd_id].empty?
++    unless params[:cmd_id].blank?
+       target = ZeptairCommand.find(params[:cmd_id])
+     end
+     if target.nil? or target.item.nil? \
+diff --git a/app/controllers/zeptair_post_controller.rb b/app/controllers/zeptair_post_controller.rb
+index f2a12b6..e161143 100644
+--- a/app/controllers/zeptair_post_controller.rb
++++ b/app/controllers/zeptair_post_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -27,6 +27,8 @@ class ZeptairPostController < ApplicationController
+   def upload
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     if params[:file].nil? or params[:file].size <= 0
+       render(:text => '')
+       return
+@@ -134,6 +136,8 @@ def query
+   def delete_attachment
+     Log.add_info(request, '')   # Not to show passwords.
+ 
++    return unless request.post?
++
+     target_user = nil
+ 
+     user_id = params[:user_id]
+@@ -158,7 +162,6 @@ def delete_attachment
+ 
+     if target_user.nil?
+       if attachment_id.blank?
+-
+         query
+         unless @post_items.nil?
+           @post_items.each do |post_item|
+diff --git a/app/controllers/zeptair_xlogs_controller.rb b/app/controllers/zeptair_xlogs_controller.rb
+index 1c85fbe..c2428a5 100644
+--- a/app/controllers/zeptair_xlogs_controller.rb
++++ b/app/controllers/zeptair_xlogs_controller.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -101,6 +101,8 @@ def search
+   def destroy
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     if params[:check_xlog].nil?
+       list
+       render(:action => 'list')
+@@ -108,6 +110,7 @@ def destroy
+     end
+ 
+     count = 0
++    SqlHelper.validate_token([params[:check_xlog].keys])
+     params[:check_xlog].each do |key, value|
+       if value == '1'
+         ZeptairXlog.delete(key)
+@@ -127,6 +130,8 @@ def destroy
+   def destroy_all
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     ZeptairXlog.delete_all
+ 
+     flash[:notice] = t('msg.delete_success')
+diff --git a/app/helpers/addressbook_helper.rb b/app/helpers/addressbook_helper.rb
+index b5a6662..a20f70a 100644
+--- a/app/helpers/addressbook_helper.rb
++++ b/app/helpers/addressbook_helper.rb
+@@ -28,6 +28,8 @@ module AddressbookHelper
+   #
+   def self.arrange_per_scope(address, user, scope, group_ids, team_ids)
+ 
++    SqlHelper.validate_token([group_ids, team_ids])
++
+     case scope
+      when 'private'
+       address.owner_id = user.id
+diff --git a/app/helpers/application_helper.rb b/app/helpers/application_helper.rb
+index 2c9128f..d3a2943 100644
+--- a/app/helpers/application_helper.rb
++++ b/app/helpers/application_helper.rb
+@@ -19,6 +19,24 @@ module ApplicationHelper
+   require 'uri'     # for URI.extract()
+ 
+ 
++  #=== self.stacktrace
++  #
++  #Gets backtrace.
++  #
++  #return:: Backtrace.
++  #
++  def self.stacktrace
++    begin
++      raise('')
++    rescue => evar
++      paths = Rails.root.split('/')
++      paths.delete('')
++      stacktrace = evar.backtrace.select {|line| !(line.match(paths.last).nil?)}.join("\n")
++      stacktrace.pop  # Remove current stack.
++    end
++    return stacktrace
++  end
++
+   #=== self.split_preserving_quot
+   #
+   #Splits string preserving quotations.
+diff --git a/app/models/research.rb b/app/models/research.rb
+index 95fb54f..240d189 100644
+--- a/app/models/research.rb
++++ b/app/models/research.rb
+@@ -241,7 +241,7 @@ def self.set_statistics_groups(group_ids)
+     if group_ids.nil?
+ 
+       unless yaml[:statistics].nil?
+-        yaml[:statistics].delete :groups
++        yaml[:statistics].delete(:groups)
+       end
+ 
+     else
+@@ -253,7 +253,7 @@ def self.set_statistics_groups(group_ids)
+       yaml[:statistics][:groups] = group_ids.join('|')
+     end
+ 
+-    Research.save_config_yaml yaml
++    Research.save_config_yaml(yaml)
+ 
+     return ary
+   end
+@@ -288,12 +288,12 @@ def self.add_statistics_group(group_id)
+       ary << group_id
+ 
+       ary.compact!
+-      ary.delete ''
++      ary.delete('')
+ 
+       yaml[:statistics][:groups] = ary.join('|')
+     end
+ 
+-    Research.save_config_yaml yaml
++    Research.save_config_yaml(yaml)
+ 
+     return ary
+   end
+@@ -321,11 +321,11 @@ def self.delete_statistics_group(group_id)
+     ary.delete group_id.to_s
+ 
+     ary.compact!
+-    ary.delete ''
++    ary.delete('')
+ 
+     yaml[:statistics][:groups] = ary.join('|')
+ 
+-    Research.save_config_yaml yaml
++    Research.save_config_yaml(yaml)
+ 
+     return ary
+  end
+@@ -406,13 +406,11 @@ def self.find_q_codes(html)
+         q_code = q_code_a.first
+ 
+         if all.include?(q_code)
+-          
+           if yaml[q_code].nil?
+             q_hash[q_code] = nil
+           else
+             q_hash[q_code] = Marshal.load(Marshal.dump(yaml[q_code]))
+           end
+-
+         end
+       end
+     end

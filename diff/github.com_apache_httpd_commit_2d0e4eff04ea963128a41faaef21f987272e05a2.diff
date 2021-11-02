@@ -1,0 +1,38 @@
+From 2d0e4eff04ea963128a41faaef21f987272e05a2 Mon Sep 17 00:00:00 2001
+From: Stefan Eissing <icing@apache.org>
+Date: Thu, 30 Jun 2016 12:08:42 +0000
+Subject: [PATCH] modssl: reset client-verify state when renegotiation is
+ aborted
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/trunk@1750779 13f79535-47bb-0310-9956-ffa450edef68
+---
+ CHANGES                         | 3 +++
+ modules/ssl/ssl_engine_kernel.c | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/CHANGES b/CHANGES
+index 22eb092b5a7..2da665d89f8 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -1,6 +1,9 @@
+                                                          -*- coding: utf-8 -*-
+ Changes with Apache 2.5.0
+ 
++  *) mod_ssl: reset client-verify state of ssl when aborting renegotiations.
++     [Erki Aring <erki@example.ee>, Stefan Eissing]
++
+   *) mod_proxy_{http,ajp,fcgi}: don't reuse backend connections with data
+      available before the request is sent.  PR 57832.  [Yann Ylavic]
+ 
+diff --git a/modules/ssl/ssl_engine_kernel.c b/modules/ssl/ssl_engine_kernel.c
+index 7cf048cf17a..d606aa3205b 100644
+--- a/modules/ssl/ssl_engine_kernel.c
++++ b/modules/ssl/ssl_engine_kernel.c
+@@ -727,6 +727,7 @@ int ssl_hook_Access(request_rec *r)
+                      * on this connection.
+                      */
+                     apr_table_setn(r->notes, "ssl-renegotiate-forbidden", "verify-client");
++                    SSL_set_verify(ssl, verify_old, ssl_callback_SSLVerify);
+                     return HTTP_FORBIDDEN;
+                 }
+                 /* optimization */

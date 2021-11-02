@@ -1,0 +1,24 @@
+From 106d196ec4a6451efedc60ab15957f231fa85639 Mon Sep 17 00:00:00 2001
+From: Martin Holst Swende <martin@swende.se>
+Date: Tue, 21 Aug 2018 09:48:53 +0200
+Subject: [PATCH] eth: ensure from<to when tracing chain (credits Chen Nan via
+ bugbounty)
+
+---
+ eth/api_tracer.go | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/eth/api_tracer.go b/eth/api_tracer.go
+index 722e2a6e329c..704a6cdbaa30 100644
+--- a/eth/api_tracer.go
++++ b/eth/api_tracer.go
+@@ -119,6 +119,9 @@ func (api *PrivateDebugAPI) TraceChain(ctx context.Context, start, end rpc.Block
+ 	if to == nil {
+ 		return nil, fmt.Errorf("end block #%d not found", end)
+ 	}
++	if from.Number().Cmp(to.Number()) >= 0 {
++		return nil, fmt.Errorf("end block (#%d) needs to come after start block (#%d)", end, start)
++	}
+ 	return api.traceChain(ctx, from, to, config)
+ }
+ 

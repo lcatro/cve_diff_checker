@@ -1,0 +1,86 @@
+From d72ccf06c98259d7261e0f3ac4fd8717778782c1 Mon Sep 17 00:00:00 2001
+From: Wez Furlong <wez@wezfurlong.org>
+Date: Mon, 12 Jul 2021 23:10:28 -0700
+Subject: [PATCH] Avoid stack overflow
+
+refs: https://github.com/wez/atomicparsley/issues/32
+---
+ .github/workflows/ci.yml |  13 +++++++++++++
+ src/extracts.cpp         |   2 +-
+ tests/issue-32.mp4       | Bin 0 -> 1824 bytes
+ tests/test.sh            |   3 +++
+ 4 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 tests/issue-32.mp4
+ create mode 100755 tests/test.sh
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 2f68277..990dd2b 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -23,3 +23,16 @@ jobs:
+       run: cmake .
+     - name: build
+       run: cmake --build . --config Release
++
++  asan:
++    runs-on: ubuntu-latest
++    strategy:
++      fail-fast: false
++    steps:
++    - uses: actions/checkout@v2
++    - name: configure
++      run: cmake -DASAN=on -DCMAKE_BUILD_TYPE=Debug .
++    - name: build
++      run: cmake --build .
++    - name: test
++      run: tests/test.sh
+diff --git a/src/extracts.cpp b/src/extracts.cpp
+index 4c09881..f5249c1 100644
+--- a/src/extracts.cpp
++++ b/src/extracts.cpp
+@@ -1588,7 +1588,7 @@ void APar_Print_TrackDetails(TrackInfo *track_info) {
+ }
+ 
+ void APar_ExtractDetails(FILE *isofile, uint8_t optional_output) {
+-  char uint32_buffer[5];
++  char uint32_buffer[8];
+   Trackage track = {0};
+ 
+   AtomicInfo *mvhdAtom = APar_FindAtom("moov.mvhd", false, VERSIONED_ATOM, 0);
+diff --git a/tests/issue-32.mp4 b/tests/issue-32.mp4
+new file mode 100644
+index 0000000000000000000000000000000000000000..bae1839de37446d1b1667e1fd1205ff322e9660f
+GIT binary patch
+literal 1824
+zcmcIkdq`7Z6hC*qwmEyDwa{W#Mua^KE6TDBgN)unFU)Lur{3IkvU^((A`B(Uh$PWJ
+ztSqEPr9CL9ps*}R5DR-*R%9!}poE_4Ke^8Nw(EA+<G&7^d(Qct^PTfOej5N73*?=p
+zVrl9uZYt~{D;#!+0H7^!+H3$^jmTSNjCa`fmzkm1G1&j)TKnbCrU_T0&-6D4%idgg
+zwf@+%D_xyEUq<gsPpkf#Egu~}=A2-ylsmUh>$+TVxBb)m#<0E9KNhz4c>Aln<|Pd-
+z@g!u~&j0+reY2sly|%CS-6bI>yV}#7*!!w7)4fPYAOB!+-RhQ|Mq`qv3gEs*HxqX-
+z$5N+>`5ONrax0Xb?Cfqz9Q?6dpVd3JRyVQ6Ta)|ral@*LJ1d`@E}wCBX>-;5<aez{
+zr}Z_Tz?B-^YWxo8>cb-*M$Yj*f4%5?N6u|kLdS(9XyPzSUHG`%$=cc124A>0j-&-K
+z)G69h9~tL1J?I9*^`S1&T)lQ=7j}VBwAMG1z_IT4hi)k#rG{JTv{N2UnmGb*Q|Zfg
+zh}HT;w<S=`h9Q{bwoLW6;Pe1t>7v8o!cKOrtB6Mn9S5yUfy=G(DLx$~6j22Ta!w_~
+ztQp|A3Qz|cJWreKv=$@0NiJSXGoyxPDx+w2sQflpU0|k=?u4z>6cq7x+L%e?gU*#_
+zr78nyTr0Vd>aW{NflJ_#r~z4rvBR{&#tYW&Olt{m@1vF)y(p9vpcCs7S?|EkZa_+<
+zFPFeOZB#=-dBZlR-Q@GRHc8I2qu(IO61#I~0V3BCt1CYRElHrKFQ&6qK_&*IBx!of
+zx(ri>gBMB)eMson==CDB0J~;zygAnEfk}lt#5N_LN=f6g3<g6P5&-aHC^biQge4BN
+zMiph&Zr~uI=%bWHj3J`y7|}6M^F{ofFZ-7>&V+2<f0DP@fl2Vm<^q`gu*w`5ibD9p
+z?pwu|g#c?9PluNHo!~hHg~VpUg7_lhBO_vp59SO07Eu1g7s44|F5YA=`vmdD#Q0+S
+z8(;F2MFaSJ#FKyWrAN(|*H}-dQS;>yz)Pho+IyjV;rx8*_>X)sO0q2ZH$gk3n<Kj=
+zKY-)E4#NmX{T7B6UzrJE;R8W=FA8FWlaLM6=K|-?r{XUupH=wsR2KnILY8`mqmo~a
+zO6$pAjB9qGRfP7s8`X?DmZ=0rv~fX7xDsQ3NRZ@w2U-&9I|W-$N8N{hEcTb$D1-Ol
+F`2{~hU`PM}
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/test.sh b/tests/test.sh
+new file mode 100755
+index 0000000..ed8fd9c
+--- /dev/null
++++ b/tests/test.sh
+@@ -0,0 +1,3 @@
++#!/bin/bash
++set -xe
++./AtomicParsley ./tests/issue-32.mp4 -T 1 -t +

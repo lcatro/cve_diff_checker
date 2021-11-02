@@ -1,0 +1,26 @@
+From 04171147948d0a3636bc6374181926f0fb2ec83a Mon Sep 17 00:00:00 2001
+From: Luke Howard <lukeh@padl.com>
+Date: Fri, 27 Aug 2021 11:42:48 +1000
+Subject: [PATCH] kdc: validate sname in TGS-REQ
+
+In tgs_build_reply(), validate the server name in the TGS-REQ is present before
+dereferencing.
+---
+ kdc/krb5tgs.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kdc/krb5tgs.c b/kdc/krb5tgs.c
+index e8a3d1b372..3394150162 100644
+--- a/kdc/krb5tgs.c
++++ b/kdc/krb5tgs.c
+@@ -1699,6 +1699,10 @@ tgs_build_reply(astgs_request_t priv,
+ 
+ 	s = &adtkt.cname;
+ 	r = adtkt.crealm;
++    } else if (s == NULL) {
++	ret = KRB5KDC_ERR_S_PRINCIPAL_UNKNOWN;
++	_kdc_set_e_text(r, "No server in request");
++	goto out;
+     }
+ 
+     _krb5_principalname2krb5_principal(context, &sp, *s, r);

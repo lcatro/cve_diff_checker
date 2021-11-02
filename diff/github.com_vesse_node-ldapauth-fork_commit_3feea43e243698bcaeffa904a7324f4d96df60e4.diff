@@ -1,0 +1,59 @@
+From 3feea43e243698bcaeffa904a7324f4d96df60e4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Vesa=20Poikaj=C3=A4rvi?= <vesa.poikajarvi@iki.fi>
+Date: Fri, 14 Aug 2015 10:49:41 +0300
+Subject: [PATCH] Sanitize user input
+
+Replace the specific special characters with codes as defined in LDAP
+specification.
+
+Closes #21
+---
+ CHANGES.md      |  4 ++++
+ lib/ldapauth.js | 13 ++++++++++++-
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGES.md b/CHANGES.md
+index f89dec9..eb1d54e 100644
+--- a/CHANGES.md
++++ b/CHANGES.md
+@@ -1,5 +1,9 @@
+ # node-ldapauth-fork Changelog
+ 
++## 2.3.3
++
++- [issue #20] Sanitize user input
++
+ ## 2.3.2
+ 
+ - [issue #19] Added messages to options asserts
+diff --git a/lib/ldapauth.js b/lib/ldapauth.js
+index 5bfafe9..103d619 100644
+--- a/lib/ldapauth.js
++++ b/lib/ldapauth.js
+@@ -219,6 +219,17 @@ LdapAuth.prototype._search = function (searchBase, options, callback) {
+   });
+ };
+ 
++// https://tools.ietf.org/search/rfc4515#section-3
++var sanitizeInput = function (username) {
++  return username
++    .replace(/\*/g, '\\2a')
++    .replace(/\(/g, '\\28')
++    .replace(/\)/g, '\\29')
++    .replace(/\\/g, '\\5c')
++    .replace(/\0/g, '\\00')
++    .replace(/\//g, '\\2f');
++};
++
+ /**
+  * Find the user record for the given username.
+  *
+@@ -233,7 +244,7 @@ LdapAuth.prototype._findUser = function (username, callback) {
+     return callback("empty username");
+   }
+ 
+-  var searchFilter = self.opts.searchFilter.replace(/{{username}}/g, username);
++  var searchFilter = self.opts.searchFilter.replace(/{{username}}/g, sanitizeInput(username));
+   var opts = {filter: searchFilter, scope: self.opts.searchScope};
+   if (self.opts.searchAttributes) {
+     opts.attributes = self.opts.searchAttributes;

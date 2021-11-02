@@ -1,0 +1,413 @@
+From 4ca3f5f486759660b87d7c146f1fdc11264f56eb Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Sun, 5 Jul 2015 22:30:39 +0900
+Subject: [PATCH] Reinforcement of security. Signed-off-by: MORITA Shintaro
+ <shin@sysphonic.com>
+
+---
+ app/controllers/desktop_controller.rb         |  3 ++-
+ app/controllers/equipment_controller.rb       |  2 ++
+ app/controllers/folders_controller.rb         |  9 +++++---
+ app/controllers/items_controller.rb           | 17 ++++++++-------
+ app/controllers/locations_controller.rb       |  3 +++
+ app/controllers/login_controller.rb           |  4 +++-
+ app/controllers/researches_controller.rb      | 12 ++++++++---
+ app/controllers/schedules_controller.rb       |  6 ++++--
+ app/controllers/send_mails_controller.rb      |  5 +++--
+ app/controllers/timecards_controller.rb       |  2 ++
+ app/controllers/users_controller.rb           |  4 ++++
+ app/controllers/zeptair_dist_controller.rb    |  2 ++
+ app/helpers/sql_helper.rb                     |  4 ++--
+ .../20110524100000_changes_for_ver110.rb      | 21 ++++++++-----------
+ 14 files changed, 61 insertions(+), 33 deletions(-)
+
+diff --git a/app/controllers/desktop_controller.rb b/app/controllers/desktop_controller.rb
+index 2b50bab..bc82891 100644
+--- a/app/controllers/desktop_controller.rb
++++ b/app/controllers/desktop_controller.rb
+@@ -498,9 +498,10 @@ def get_group_users
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     submit_url = url_for(:controller => 'desktop', :action => 'get_group_users')
+     render(:partial => 'common/select_users', :layout => false, :locals => {:target_attr => :id, :submit_url => submit_url})
+diff --git a/app/controllers/equipment_controller.rb b/app/controllers/equipment_controller.rb
+index dc21966..e63d400 100644
+--- a/app/controllers/equipment_controller.rb
++++ b/app/controllers/equipment_controller.rb
+@@ -139,6 +139,8 @@ def list
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
++
+     unless @group_id.nil?
+       if @group_id == '0'
+         con << "((groups like '%|0|%') or (groups is null))"
+diff --git a/app/controllers/folders_controller.rb b/app/controllers/folders_controller.rb
+index 6bb33b5..8c1ef68 100644
+--- a/app/controllers/folders_controller.rb
++++ b/app/controllers/folders_controller.rb
+@@ -35,9 +35,10 @@ def show_tree
+       @group_id = nil
+       if !params[:thetisBoxSelKeeper].nil?
+         @group_id = params[:thetisBoxSelKeeper].split(':').last
+-      elsif !params[:group_id].nil? and !params[:group_id].empty?
++      elsif !params[:group_id].blank?
+         @group_id = params[:group_id]
+       end
++      SqlHelper.validate_token([@group_id])
+ 
+       @folder_tree = Folder.get_tree_by_group_for_admin(@group_id || '0')
+     else
+@@ -506,6 +507,7 @@ def get_auth_users
+   def get_group_users
+     Log.add_info(request, params.inspect)
+ 
++    SqlHelper.validate_token([params[:id]])
+     begin
+       @folder = Folder.find(params[:id])
+     rescue => evar
+@@ -515,11 +517,12 @@ def get_group_users
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+-    @users = Group.get_users @group_id
++    @users = Group.get_users(@group_id)
+ 
+     render(:partial => 'ajax_select_users', :layout => false)
+   end
+diff --git a/app/controllers/items_controller.rb b/app/controllers/items_controller.rb
+index f00dd4a..ddfd150 100644
+--- a/app/controllers/items_controller.rb
++++ b/app/controllers/items_controller.rb
+@@ -1217,11 +1217,12 @@ def get_group_users
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+-    @users = Group.get_users @group_id
++    @users = Group.get_users(@group_id)
+ 
+     render(:partial => 'ajax_select_users', :layout => false)
+   end
+@@ -1234,7 +1235,7 @@ def get_group_users
+   def wf_issue
+     Log.add_info(request, params.inspect)
+ 
+-    begin
++   begin
+       @item = Item.find(params[:id])
+       @workflow = @item.workflow
+     rescue => evar
+@@ -1258,7 +1259,7 @@ def team_organize
+     Log.add_info(request, params.inspect)
+ 
+     team_id = params[:team_id]
+-    unless team_id.nil? or team_id.empty?
++    unless team_id.blank?
+       begin
+         @team = Team.find(team_id)
+       rescue
+@@ -1280,7 +1281,7 @@ def team_organize
+ 
+     if team_members.nil? or team_members.empty?
+ 
+-      unless team_id.nil? or team_id.empty?
++      unless team_id.blank?
+         # @team must not be nil.
+         @team.save if modified = @team.clear_users
+       end
+@@ -1289,7 +1290,7 @@ def team_organize
+ 
+       if team_members != users
+ 
+-        if team_id.nil? or team_id.empty?
++        if team_id.blank?
+ 
+           item = Item.find(params[:id])
+ 
+@@ -1359,6 +1360,8 @@ def move_in_team_folder
+   def change_team_status
+     Log.add_info(request, params.inspect)
+ 
++    SqlHelper.validate_token([params[:status]])
++
+     team_id = params[:team_id]
+     begin
+       team = Team.find(team_id)
+@@ -1382,7 +1385,7 @@ def change_team_status
+   #Filter method to check if the current User is owner of the specified Item.
+   #
+   def check_owner
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     begin
+       owner_id = Item.find(params[:id]).user_id
+diff --git a/app/controllers/locations_controller.rb b/app/controllers/locations_controller.rb
+index 351e91a..fff8e1d 100644
+--- a/app/controllers/locations_controller.rb
++++ b/app/controllers/locations_controller.rb
+@@ -38,6 +38,7 @@ def open_map
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     unless params[:keyword].blank?
+       con_prim = []
+@@ -142,6 +143,7 @@ def update_map
+     Log.add_info(request, params.inspect)
+ 
+     group_id = params[:group_id]
++    SqlHelper.validate_token([group_id])
+ 
+     @office_map = OfficeMap.get_for_group(group_id, true)
+ 
+@@ -163,6 +165,7 @@ def delete_map
+     Log.add_info(request, params.inspect)
+ 
+     group_id = params[:group_id]
++    SqlHelper.validate_token([group_id])
+ 
+     @office_map = OfficeMap.get_for_group(group_id, false)
+ 
+diff --git a/app/controllers/login_controller.rb b/app/controllers/login_controller.rb
+index f5f2280..65c73ac 100644
+--- a/app/controllers/login_controller.rb
++++ b/app/controllers/login_controller.rb
+@@ -96,8 +96,10 @@ def logout
+   def send_password
+     Log.add_info(request, params.inspect)
+ 
++    mail_addr = params[:thetisBoxEdit]
++    SqlHelper.validate_token([mail_addr], ['@-'])
+     begin
+-      users = User.where("email='#{params[:thetisBoxEdit]}'").to_a
++      users = User.where("email='#{mail_addr}'").to_a
+     rescue => evar
+     end
+ 
+diff --git a/app/controllers/researches_controller.rb b/app/controllers/researches_controller.rb
+index 89b1d7d..d2104e7 100644
+--- a/app/controllers/researches_controller.rb
++++ b/app/controllers/researches_controller.rb
+@@ -434,8 +434,9 @@ def edit_page
+ 
+     # Specifying page
+     @page = '01'
+-    unless params[:page].nil? or params[:page].empty?
++    unless params[:page].blank?
+       @page = params[:page]
++      SqlHelper.validate_token([@page])
+     end
+   end
+ 
+@@ -466,12 +467,14 @@ def save_page
+       end
+     end
+ 
+-    if params[:research_id].nil? or params[:research_id].empty?
++    research_id = params[:research_id]
++    SqlHelper.validate_token([research_id])
++    if research_id.blank?
+       @research = Research.new(params.require(:research).permit(Research::PERMIT_BASE))
+       @research.status = Research::U_STATUS_IN_ACTON
+       @research.update_attribute(:user_id, @login_user.id)
+     else
+-      @research = Research.find(params[:research_id])
++      @research = Research.find(research_id)
+       @research.update_attributes(params.require(:research).permit(Research::PERMIT_BASE))
+     end
+ 
+@@ -552,6 +555,8 @@ def users
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
++
+     unless @group_id.nil?
+       con << SqlHelper.get_sql_like([:groups], "|#{@group_id}|")
+     end
+@@ -690,6 +695,7 @@ def get_records_group
+ 
+     unless params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
++      SqlHelper.validate_token([@group_id])
+ 
+       group_cons = []
+ 
+diff --git a/app/controllers/schedules_controller.rb b/app/controllers/schedules_controller.rb
+index 5c38e9d..c2d4a7e 100644
+--- a/app/controllers/schedules_controller.rb
++++ b/app/controllers/schedules_controller.rb
+@@ -678,9 +678,10 @@ def get_group_users
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     submit_url = url_for(:controller => 'schedules', :action => 'get_group_users')
+     render(:partial => 'common/select_users', :layout => false, :locals => {:target_attr => :id, :submit_url => submit_url})
+@@ -708,9 +709,10 @@ def get_group_equipment
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     submit_url = url_for(:controller => 'schedules', :action => 'get_group_equipment')
+     render(:partial => 'common/select_equipment', :layout => false, :locals => {:target_attr => :id, :submit_url => submit_url})
+diff --git a/app/controllers/send_mails_controller.rb b/app/controllers/send_mails_controller.rb
+index ef2c2cd..bb6cbfc 100644
+--- a/app/controllers/send_mails_controller.rb
++++ b/app/controllers/send_mails_controller.rb
+@@ -363,9 +363,10 @@ def get_group_users
+     @group_id = nil
+     if !params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+-    elsif !params[:group_id].nil? and !params[:group_id].empty?
++    elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     submit_url = url_for(:controller => 'send_mails', :action => 'get_group_users')
+     render(:partial => 'common/select_users', :layout => false, :locals => {:target_attr => :email, :submit_url => submit_url})
+@@ -378,7 +379,7 @@ def get_group_users
+   #
+   def check_owner
+ 
+-    return if params[:id].nil? or params[:id].empty? or @login_user.nil?
++    return if params[:id].blank? or @login_user.nil?
+ 
+     email = Email.find(params[:id])
+ 
+diff --git a/app/controllers/timecards_controller.rb b/app/controllers/timecards_controller.rb
+index cc6c92c..1b9b5ff 100644
+--- a/app/controllers/timecards_controller.rb
++++ b/app/controllers/timecards_controller.rb
+@@ -427,6 +427,8 @@ def users
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
++
+     unless @group_id.nil?
+       if @group_id == '0'
+         con << "((groups like '%|0|%') or (groups is null))"
+diff --git a/app/controllers/users_controller.rb b/app/controllers/users_controller.rb
+index 988f9e7..b12a3f9 100644
+--- a/app/controllers/users_controller.rb
++++ b/app/controllers/users_controller.rb
+@@ -162,6 +162,7 @@ def list
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+ # Copy to FEATURE_PAGING_IN_TREE >>>
+     con = ['User.id > 0']
+@@ -269,6 +270,7 @@ def select_official_titles
+     unless params[:thetisBoxSelKeeper].nil?
+       @group_id = params[:thetisBoxSelKeeper].split(':').last
+     end
++    SqlHelper.validate_token([@group_id])
+ 
+     if @group_id.nil?
+       @official_titles = OfficialTitle.get_for('0', false, true)
+@@ -351,6 +353,8 @@ def notify
+   def update_auth
+     Log.add_info(request, params.inspect)
+ 
++    return unless request.post?
++
+     auth = nil
+ 
+     if params[:check_auth_all] == '1'
+diff --git a/app/controllers/zeptair_dist_controller.rb b/app/controllers/zeptair_dist_controller.rb
+index 6f2ed4f..c3db563 100644
+--- a/app/controllers/zeptair_dist_controller.rb
++++ b/app/controllers/zeptair_dist_controller.rb
+@@ -48,6 +48,8 @@ def users
+     elsif !params[:group_id].blank?
+       @group_id = params[:group_id]
+     end
++    SqlHelper.validate_token([@group_id])
++
+     unless @group_id.nil?
+       con << SqlHelper.get_sql_like([:groups], "|#{@group_id}|")
+     end
+diff --git a/app/helpers/sql_helper.rb b/app/helpers/sql_helper.rb
+index e5e129a..7a6c4c6 100644
+--- a/app/helpers/sql_helper.rb
++++ b/app/helpers/sql_helper.rb
+@@ -25,8 +25,8 @@ module SqlHelper
+   #
+   def self.validate_token(tokens, extra_chars=nil)
+ 
+-    extra_chars ||= []
+-    regexp = Regexp.new("^\s*[a-zA-Z0-9_.#{extra_chars.join()}]+\s*$")
++    extra_chars = Regexp.escape((extra_chars || []).join())
++    regexp = Regexp.new("^[ ]*[a-zA-Z0-9_.#{extra_chars}]+[ ]*$")
+ 
+     [tokens].flatten.each do |token|
+       next if token.blank?
+diff --git a/db/migrate/20110524100000_changes_for_ver110.rb b/db/migrate/20110524100000_changes_for_ver110.rb
+index d5d412d..a8bad1d 100644
+--- a/db/migrate/20110524100000_changes_for_ver110.rb
++++ b/db/migrate/20110524100000_changes_for_ver110.rb
+@@ -15,19 +15,16 @@ def self.up
+       t.timestamps
+     end
+ 
+-    teams = Team.all
+-    unless teams.nil?
+-      teams.each do |team|
+-        begin
+-          item = Item.find(team.item_id)
+-        rescue
+-        end
+-        next if item.nil?
+-
+-        attrs = ActionController::Parameters.new({created_at: item.created_at, updated_at: item.updated_at})
+-        attrs.permit!
+-        team.update_attributes(attrs)
++    Team.find_each do |team|
++      begin
++        item = Item.find(team.item_id)
++      rescue
+       end
++      next if item.nil?
++
++      attrs = ActionController::Parameters.new({created_at: item.created_at, updated_at: item.updated_at})
++      attrs.permit!
++      team.update_attributes(attrs)
+     end
+   end
+ 

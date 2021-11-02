@@ -1,0 +1,54 @@
+From 1cda0d7c2ffb62d8331c64e703131d9cabdc03ea Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Sat, 31 Dec 2016 19:31:49 -0800
+Subject: [PATCH] Fix bug #73737 FPE when parsing a tag format
+
+---
+ ext/exif/exif.c              |   2 +-
+ ext/exif/tests/bug73737.phpt |  12 ++++++++++++
+ ext/exif/tests/bug73737.tiff | Bin 0 -> 48 bytes
+ 3 files changed, 13 insertions(+), 1 deletion(-)
+ create mode 100644 ext/exif/tests/bug73737.phpt
+ create mode 100644 ext/exif/tests/bug73737.tiff
+
+diff --git a/ext/exif/exif.c b/ext/exif/exif.c
+index 8b0e34c10dc8..83daee6f54f5 100644
+--- a/ext/exif/exif.c
++++ b/ext/exif/exif.c
+@@ -1303,7 +1303,7 @@ static size_t exif_convert_any_to_int(void *value, int format, int motorola_inte
+ 			if (s_den == 0) {
+ 				return 0;
+ 			} else {
+-				return php_ifd_get32s(value, motorola_intel) / s_den;
++				return (size_t)((double)php_ifd_get32s(value, motorola_intel) / s_den);
+ 			}
+ 
+ 		case TAG_FMT_SSHORT:    return php_ifd_get16u(value, motorola_intel);
+diff --git a/ext/exif/tests/bug73737.phpt b/ext/exif/tests/bug73737.phpt
+new file mode 100644
+index 000000000000..21eaf80585bc
+--- /dev/null
++++ b/ext/exif/tests/bug73737.phpt
+@@ -0,0 +1,12 @@
++--TEST--
++Bug #73737 (Crash when parsing a tag format)
++--SKIPIF--
++<?php if (!extension_loaded('exif')) print 'skip exif extension not available';?>
++--FILE--
++<?php
++	$exif = exif_thumbnail(__DIR__ . '/bug73737.tiff');
++	var_dump($exif);
++?>
++--EXPECTF--
++Warning: exif_thumbnail(bug73737.tiff): Error in TIFF: filesize(x0030) less than start of IFD dir(x10102) in %s line %d
++bool(false)
+diff --git a/ext/exif/tests/bug73737.tiff b/ext/exif/tests/bug73737.tiff
+new file mode 100644
+index 0000000000000000000000000000000000000000..2cb036fc4730502a3e8041ab24ab12a2ad0b0327
+GIT binary patch
+literal 48
+ocmebEWzb?^VBlb2Wb|TS2C_gv49H_(-~urlfcQTUfY=}a0A>IMx&QzG
+
+literal 0
+HcmV?d00001
+

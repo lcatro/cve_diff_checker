@@ -1,0 +1,36 @@
+From dc317ac9cff859aa84eeabe03fb5004982545b3b Mon Sep 17 00:00:00 2001
+From: Wictor Lund <wlund@abo.fi>
+Date: Tue, 9 Apr 2019 22:51:30 +0300
+Subject: [PATCH] Fix two out-of-bounds array reads (#99)
+
+The patch is taken from a commit to the CPython repo with the message:
+
+bpo-36495: Fix two out-of-bounds array reads (GH-12641)
+
+Research and fix by @bradlarsen.
+---
+ ast3/Python/ast.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ast3/Python/ast.c b/ast3/Python/ast.c
+index 9eeaf15..b50412e 100644
+--- a/ast3/Python/ast.c
++++ b/ast3/Python/ast.c
+@@ -1445,7 +1445,7 @@ handle_keywordonly_args(struct compiling *c, const node *n, int start,
+                     goto error;
+                 asdl_seq_SET(kwonlyargs, j++, arg);
+                 i += 1; /* the name */
+-                if (TYPE(CHILD(n, i)) == COMMA)
++                if (i < NCH(n) && TYPE(CHILD(n, i)) == COMMA)
+                     i += 1; /* the comma, if present */
+                 break;
+             case TYPE_COMMENT:
+@@ -1644,7 +1644,7 @@ ast_for_arguments(struct compiling *c, const node *n)
+                 if (!kwarg)
+                     return NULL;
+                 i += 2; /* the double star and the name */
+-                if (TYPE(CHILD(n, i)) == COMMA)
++                if (i < NCH(n) && TYPE(CHILD(n, i)) == COMMA)
+                     i += 1; /* the comma, if present */
+                 break;
+             case TYPE_COMMENT:

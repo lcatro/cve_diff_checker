@@ -1,0 +1,179 @@
+From 626f751752875a0ddd74b9e217b6f4828713573c Mon Sep 17 00:00:00 2001
+From: Fredrick Brennan <copypaste@kittens.ph>
+Date: Tue, 13 Aug 2019 19:09:59 +0800
+Subject: [PATCH]  Warn users before discarding their unsaved scripts (#3852)
+
+* Warn users before discarding their unsaved scripts
+
+This closes #3846.
+---
+ fontforge/views.h           |  1 +
+ fontforgeexe/fontview.c     | 20 ++++++++++++++++++++
+ fontforgeexe/prefs.c        |  2 ++
+ fontforgeexe/scriptingdlg.c |  4 ++++
+ gdraw/gtextfield.c          | 19 +++++++++++++++++++
+ inc/gdraw.h                 |  2 +-
+ inc/ggadget.h               |  1 +
+ 7 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/fontforge/views.h b/fontforge/views.h
+index 55f8c7f789..2cd47ac053 100644
+--- a/fontforge/views.h
++++ b/fontforge/views.h
+@@ -476,6 +476,7 @@ typedef struct fontview {
+     struct lookup_subtable *cur_subtable;
+     struct qg_data *qg;
+     GPid pid_webfontserver;
++    bool script_unsaved; // Whether or not there's an unsaved script in script dialog
+ } FontView;
+ 
+ typedef struct findsel {
+diff --git a/fontforgeexe/fontview.c b/fontforgeexe/fontview.c
+index 4ee7e5c324..3f0725bcb2 100644
+--- a/fontforgeexe/fontview.c
++++ b/fontforgeexe/fontview.c
+@@ -80,6 +80,7 @@ char *script_filenames[SCRIPT_MENU_MAX];
+ extern int onlycopydisplayed, copymetadata, copyttfinstr, add_char_to_name_list;
+ int home_char='A';
+ int compact_font_on_open=0;
++bool warn_script_unsaved = true;
+ int navigation_mask = 0;		/* Initialized in startui.c */
+ 
+ static char *fv_fontnames = MONO_UI_FAMILIES;
+@@ -534,6 +535,22 @@ static int AskChanged(SplineFont *sf) {
+ return( ret );
+ }
+ 
++static int AskScriptChanged() {
++    int ret;
++    char *buts[4];
++
++    buts[0] = _("_Yes");
++    buts[1] = _("Yes, and don't _remind me again");
++    buts[2] = _("_No");
++    buts[3] = NULL;
++    ret = gwwv_ask( _("Unsaved script"),(const char **) buts,0,2,_("You have an unsaved script in the «Execute Script» dialog. Do you intend to discard it?"));
++    if (ret == 1) {
++        warn_script_unsaved = false;
++        SavePrefs(true);
++    }
++return( ret );
++}
++
+ int _FVMenuGenerate(FontView *fv,int family) {
+     FVFlattenAllBitmapSelections(fv);
+ return( SFGenerateFont(fv->b.sf,fv->b.active_layer,family,fv->b.normal==NULL?fv->b.map:fv->b.normal) );
+@@ -858,6 +875,9 @@ return( false );
+ 
+     if ( fv->b.nextsame!=NULL || fv->b.sf->fv!=&fv->b ) {
+ 	/* There's another view, can close this one with no problems */
++    } else if ( warn_script_unsaved && fv->script_unsaved && 
++                AskScriptChanged()==2 ) {
++        return false;
+     } else if ( SFAnyChanged(sf) ) {
+ 	i = AskChanged(fv->b.sf);
+ 	if ( i==2 )	/* Cancel */
+diff --git a/fontforgeexe/prefs.c b/fontforgeexe/prefs.c
+index e5d52d235a..4d6c278764 100644
+--- a/fontforgeexe/prefs.c
++++ b/fontforgeexe/prefs.c
+@@ -194,6 +194,7 @@ extern int prefs_cv_outline_thickness; /* from charview.c */
+ 
+ extern float OpenTypeLoadHintEqualityTolerance;  /* autohint.c */
+ extern float GenerateHintWidthEqualityTolerance; /* splinesave.c */
++extern bool warn_script_unsaved; /* fontview.c */
+ extern NameList *force_names_when_opening;
+ extern NameList *force_names_when_saving;
+ extern NameList *namelist_for_new_fonts;
+@@ -311,6 +312,7 @@ static struct prefs_list {
+ 	{ N_("AutoSaveFrequency"), pr_int, &AutoSaveFrequency, NULL, NULL, '\0', NULL, 0, N_( "The number of seconds between autosaves. If you set this to 0 there will be no autosaves.") },
+ 	{ N_("RevisionsToRetain"), pr_int, &prefRevisionsToRetain, NULL, NULL, '\0', NULL, 0, N_( "When Saving, keep this number of previous versions of the file. file.sfd-01 will be the last saved file, file.sfd-02 will be the file saved before that, and so on. If you set this to 0 then no revisions will be retained.") },
+ 	{ N_("UndoRedoLimitToSave"), pr_int, &UndoRedoLimitToSave, NULL, NULL, '\0', NULL, 0, N_( "The number of undo and redo operations which will be saved in sfd files.\nIf you set this to 0 undo/redo information is not saved to sfd files.\nIf set to -1 then all available undo/redo information is saved without limit.") },
++	{ N_("WarnScriptUnsaved"), pr_bool, &warn_script_unsaved, NULL, NULL, '\0', NULL, 0, N_( "Whether or not to warn you if you have an unsaved script in the «Execute Script» dialog.") },
+ 	PREFS_LIST_EMPTY
+ },
+   new_list[] = {
+diff --git a/fontforgeexe/scriptingdlg.c b/fontforgeexe/scriptingdlg.c
+index 72ef23ce2b..1aa3f4b7dd 100644
+--- a/fontforgeexe/scriptingdlg.c
++++ b/fontforgeexe/scriptingdlg.c
+@@ -189,6 +189,10 @@ return( true );
+     
+     if ( event->type==et_close ) {
+ 	SD_DoCancel( sd );
++    } else if ( event->type==et_controlevent && event->u.control.subtype==et_textchanged ) {
++    sd->fv->script_unsaved = !GTextFieldIsEmpty(GWidgetGetControl(sd->gw,CID_Script));
++    } else if ( event->type==et_controlevent && event->u.control.subtype==et_save ) {
++    sd->fv->script_unsaved = false;
+     } else if ( event->type==et_char ) {
+ 	if ( event->u.chr.keysym == GK_F1 || event->u.chr.keysym == GK_Help ) {
+ 	    help("scripting.html");
+diff --git a/gdraw/gtextfield.c b/gdraw/gtextfield.c
+index 002ea4c3e6..69a4a9e775 100644
+--- a/gdraw/gtextfield.c
++++ b/gdraw/gtextfield.c
+@@ -215,6 +215,19 @@ static void GTextFieldChanged(GTextField *gt,int src) {
+ 	GDrawPostEvent(&e);
+ }
+ 
++static void GTextFieldSaved(GTextField *gt) {
++    GEvent e;
++
++    e.type = et_controlevent;
++    e.w = gt->g.base;
++    e.u.control.subtype = et_save;
++    e.u.control.g = &gt->g;
++    if ( gt->g.handle_controlevent != NULL )
++	(gt->g.handle_controlevent)(&gt->g,&e);
++    else
++	GDrawPostEvent(&e);
++}
++
+ static void GTextFieldFocusChanged(GTextField *gt,int gained) {
+     GEvent e;
+ 
+@@ -878,6 +891,11 @@ static unichar_t txt[] = { '*','.','{','t','x','t',',','p','y','}',  '\0' };
+ static unichar_t errort[] = { 'C','o','u','l','d',' ','n','o','t',' ','o','p','e','n',  '\0' };
+ static unichar_t error[] = { 'C','o','u','l','d',' ','n','o','t',' ','o','p','e','n',' ','%','.','1','0','0','h','s',  '\0' };
+ 
++bool GTextFieldIsEmpty(GGadget *g) {
++    GTextField *gt = (GTextField *) g;
++    return gt->text == NULL || *gt->text == '\0';
++}
++
+ static void GTextFieldImport(GTextField *gt) {
+     unichar_t *ret;
+     char *cret;
+@@ -970,6 +988,7 @@ return;
+ 	}
+     }
+     fclose(file);
++    GTextFieldSaved(gt);
+ }
+ 
+ #define MID_Cut		1
+diff --git a/inc/gdraw.h b/inc/gdraw.h
+index dea28710d3..a111207e00 100644
+--- a/inc/gdraw.h
++++ b/inc/gdraw.h
+@@ -120,7 +120,7 @@ enum et_subtype { et_buttonpress, et_buttonactivate, et_radiochanged,
+ 		  et_listselected, et_listdoubleclick,
+ 		  et_scrollbarchange,
+ 		  et_textchanged, et_textfocuschanged,
+-		  et_lastsubtype };
++		  et_save, et_lastsubtype };
+ 
+ enum sb { et_sb_top, et_sb_uppage, et_sb_up, et_sb_left=et_sb_up,
+ 	  et_sb_down, et_sb_right=et_sb_down, et_sb_downpage,
+diff --git a/inc/ggadget.h b/inc/ggadget.h
+index ae838aee10..fb5e076da2 100644
+--- a/inc/ggadget.h
++++ b/inc/ggadget.h
+@@ -406,6 +406,7 @@ GGadgetHandler GGadgetGetHandler(GGadget *g);
+ void GTextFieldSelect(GGadget *g,int sel_start, int sel_end);
+ void GTextFieldShow(GGadget *g,int pos);
+ void GTextFieldReplace(GGadget *g,const unichar_t *txt);
++bool GTextFieldIsEmpty(GGadget *g);
+ void GCompletionFieldSetCompletion(GGadget *g,GTextCompletionHandler completion);
+ void GCompletionFieldSetCompletionMode(GGadget *g,int enabled);
+ void GGadgetClearList(GGadget *g);

@@ -1,0 +1,23 @@
+From 27151bfecc260e96714443613880e3b2e6596704 Mon Sep 17 00:00:00 2001
+From: Marcel Laverdet <marcel@laverdet.com>
+Date: Thu, 18 Mar 2021 15:20:24 -0500
+Subject: [PATCH] Disallow NativeModule creation unless main isolate
+
+---
+ src/module/native_module_handle.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/module/native_module_handle.cc b/src/module/native_module_handle.cc
+index 895044a..1802c49 100644
+--- a/src/module/native_module_handle.cc
++++ b/src/module/native_module_handle.cc
+@@ -15,6 +15,9 @@ namespace ivm {
+  * RAII wrapper around libuv dlopen
+  */
+ NativeModule::NativeModule(const std::string& filename) : init(nullptr) {
++	if (!IsolateEnvironment::GetCurrent()->IsDefault()) {
++		throw RuntimeGenericError("NativeModule may only be instantiated from default nodejs isolate");
++	}
+ 	if (uv_dlopen(filename.c_str(), &lib) != 0) {
+ 		throw RuntimeGenericError("Failed to load module");
+ 	}

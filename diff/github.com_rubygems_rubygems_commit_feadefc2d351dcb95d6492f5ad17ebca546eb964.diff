@@ -1,0 +1,67 @@
+From feadefc2d351dcb95d6492f5ad17ebca546eb964 Mon Sep 17 00:00:00 2001
+From: Jonathan Claudius <jclaudius@mozilla.com>
+Date: Fri, 2 Feb 2018 00:09:29 -0500
+Subject: [PATCH] Enforce URL validation on spec homepage attribute
+
+---
+ lib/rubygems/specification.rb           | 15 +++++++++++----
+ test/rubygems/test_gem_specification.rb | 13 +++++++++++++
+ 2 files changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/lib/rubygems/specification.rb b/lib/rubygems/specification.rb
+index efc08c4738af..be20cb9ea527 100644
+--- a/lib/rubygems/specification.rb
++++ b/lib/rubygems/specification.rb
+@@ -15,6 +15,7 @@
+ require 'rubygems/stub_specification'
+ require 'rubygems/util/list'
+ require 'stringio'
++require 'uri'
+ 
+ ##
+ # The Specification class contains the information for a Gem.  Typically
+@@ -2822,10 +2823,16 @@ def validate packaging = true
+       raise Gem::InvalidSpecificationException, "#{lazy} is not a summary"
+     end
+ 
+-    if homepage and not homepage.empty? and
+-       homepage !~ /\A[a-z][a-z\d+.-]*:/i then
+-      raise Gem::InvalidSpecificationException,
+-            "\"#{homepage}\" is not a URI"
++    # Make sure a homepage is valid HTTP/HTTPS URI
++    if homepage and not homepage.empty?
++      begin
++        homepage_uri = URI.parse(homepage)
++        unless [URI::HTTP, URI::HTTPS].member? homepage_uri.class
++          raise Gem::InvalidSpecificationException, "\"#{homepage}\" is not a URI"
++        end
++      rescue URI::InvalidURIError
++        raise Gem::InvalidSpecificationException, "\"#{homepage}\" is not a URI"
++      end
+     end
+ 
+     # Warnings
+diff --git a/test/rubygems/test_gem_specification.rb b/test/rubygems/test_gem_specification.rb
+index b1087c9f5912..600e74cc5f11 100644
+--- a/test/rubygems/test_gem_specification.rb
++++ b/test/rubygems/test_gem_specification.rb
+@@ -2887,6 +2887,19 @@ def test_validate_homepage
+       end
+ 
+       assert_equal '"over at my cool site" is not a URI', e.message
++
++      @a1.homepage = 'ftp://rubygems.org'
++
++      e = assert_raises Gem::InvalidSpecificationException do
++        @a1.validate
++      end
++
++      assert_equal '"ftp://rubygems.org" is not a URI', e.message
++
++      @a1.homepage = 'http://rubygems.org'
++
++      assert_equal true, @a1.validate
++
+     end
+   end
+ 

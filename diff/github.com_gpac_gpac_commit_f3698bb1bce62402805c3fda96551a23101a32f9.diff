@@ -1,0 +1,30 @@
+From f3698bb1bce62402805c3fda96551a23101a32f9 Mon Sep 17 00:00:00 2001
+From: Aurelien David <aurelien.david@telecom-paristech.fr>
+Date: Thu, 11 Apr 2019 14:54:53 +0200
+Subject: [PATCH] fix buffer overrun in gf_bin128_parse
+
+closes #1204
+closes #1205
+---
+ src/utils/os_divers.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/utils/os_divers.c b/src/utils/os_divers.c
+index fef591ef6f..a1e0328e75 100644
+--- a/src/utils/os_divers.c
++++ b/src/utils/os_divers.c
+@@ -1988,8 +1988,14 @@ GF_Err gf_bin128_parse(const char *string, bin128 value)
+ 				break;
+ 			sprintf(szV, "%c%c", string[j], string[j+1]);
+ 			sscanf(szV, "%x", &v);
++			if (i > 15) {
++				// force error check below
++				i++;
++				break;
++			}
+ 			value[i] = v;
+ 			i++;
++
+ 		}
+ 	}
+ 	if (i != 16) {

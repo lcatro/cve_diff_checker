@@ -1,0 +1,70 @@
+From 89b46353b9f611e9da38de3d2fedf52331167b93 Mon Sep 17 00:00:00 2001
+From: Michael Davis <mike.philip.davis@gmail.com>
+Date: Mon, 5 Sep 2016 07:51:10 -0500
+Subject: [PATCH] fix: Use constant time comparison for HMAC
+
+---
+ jose/jwk.py   |  3 ++-
+ jose/utils.py | 25 +++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/jose/jwk.py b/jose/jwk.py
+index 4f69f51..5edfc98 100644
+--- a/jose/jwk.py
++++ b/jose/jwk.py
+@@ -19,6 +19,7 @@
+ from jose.constants import ALGORITHMS
+ from jose.exceptions import JWKError
+ from jose.utils import base64url_decode
++from jose.utils import constant_time_string_compare
+ 
+ # PyCryptodome's RSA module doesn't have PyCrypto's _RSAobj class
+ # Instead it has a class named RsaKey, which serves the same purpose.
+@@ -159,7 +160,7 @@ def sign(self, msg):
+         return hmac.new(self.prepared_key, msg, self.hash_alg).digest()
+ 
+     def verify(self, msg, sig):
+-        return sig == self.sign(msg)
++        return constant_time_string_compare(sig, self.sign(msg))
+ 
+ 
+ class RSAKey(Key):
+diff --git a/jose/utils.py b/jose/utils.py
+index ce5b965..fc40942 100644
+--- a/jose/utils.py
++++ b/jose/utils.py
+@@ -1,5 +1,6 @@
+ 
+ import base64
++import hmac
+ 
+ 
+ def calculate_at_hash(access_token, hash_alg):
+@@ -58,3 +59,27 @@ def timedelta_total_seconds(delta):
+         delta (timedelta): A timedelta to convert to seconds.
+     """
+     return delta.days * 24 * 60 * 60 + delta.seconds
++
++
++def constant_time_string_compare(a, b):
++    """Helper for comparing string in constant time, independent
++    of the python version being used.
++
++    Args:
++        a (str): A string to compare
++        b (str): A string to compare
++    """
++
++    try:
++        return hmac.compare_digest(a, b)
++    except AttributeError:
++
++        if len(a) != len(b):
++            return False
++
++        result = 0
++
++        for x, y in zip(a, b):
++            result |= ord(x) ^ ord(y)
++
++        return result == 0

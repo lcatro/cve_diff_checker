@@ -1,0 +1,51 @@
+From 7414d0bda7763f9bd69c26c068e482ab297c1c96 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Mon, 26 Feb 2018 03:02:48 +0100
+Subject: [PATCH] avcodec/utvideodec: Check subsample factors
+
+Fixes: Out of array read
+Fixes: heap_poc
+
+Found-by: GwanYeong Kim <gy741.kim@gmail.com>
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavcodec/utvideodec.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/libavcodec/utvideodec.c b/libavcodec/utvideodec.c
+index c5f5534964..086129d094 100644
+--- a/libavcodec/utvideodec.c
++++ b/libavcodec/utvideodec.c
+@@ -30,6 +30,7 @@
+ #define UNCHECKED_BITSTREAM_READER 1
+ 
+ #include "libavutil/intreadwrite.h"
++#include "libavutil/pixdesc.h"
+ #include "avcodec.h"
+ #include "bswapdsp.h"
+ #include "bytestream.h"
+@@ -912,6 +913,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
+ static av_cold int decode_init(AVCodecContext *avctx)
+ {
+     UtvideoContext * const c = avctx->priv_data;
++    int h_shift, v_shift;
+ 
+     c->avctx = avctx;
+ 
+@@ -1012,6 +1014,13 @@ static av_cold int decode_init(AVCodecContext *avctx)
+         return AVERROR_INVALIDDATA;
+     }
+ 
++    av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &h_shift, &v_shift);
++    if ((avctx->width  & ((1<<h_shift)-1)) ||
++        (avctx->height & ((1<<v_shift)-1))) {
++        avpriv_request_sample(avctx, "Odd dimensions");
++        return AVERROR_PATCHWELCOME;
++    }
++
+     if (c->pack && avctx->extradata_size >= 16) {
+         av_log(avctx, AV_LOG_DEBUG, "Encoder version %d.%d.%d.%d\n",
+                avctx->extradata[3], avctx->extradata[2],
+-- 
+2.25.1
+

@@ -1,0 +1,35 @@
+From 51380baf17241728b6d48cdb84140b931e3e3cc5 Mon Sep 17 00:00:00 2001
+From: Gordon Williams <gw@pur3.co.uk>
+Date: Mon, 28 May 2018 09:06:06 +0100
+Subject: [PATCH] Fix stack overflow if interpreting a file full of '{' (fix
+ #1448)
+
+---
+ ChangeLog     | 1 +
+ src/jsparse.c | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index 285fbf4a3..36672f93a 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -8,6 +8,7 @@
+             Add for(var i of array) to iterate over elements
+             Added getter and setter support
+             Stop parsing blocks if not executing (fix #572)
++            Fix stack overflow if interpreting a file full of '{' (fix #1448)
+ 
+      1v99 : Increase jslMatch error buffer size to handle "UNFINISHED TEMPLATE LITERAL" string (#1426)
+             nRF5x: Make FlashWrite cope with flash writes > 4k
+diff --git a/src/jsparse.c b/src/jsparse.c
+index ce66a6fbf..09fa77c05 100644
+--- a/src/jsparse.c
++++ b/src/jsparse.c
+@@ -2720,6 +2720,7 @@ NO_INLINE JsVar *jspeStatement() {
+     return jspeExpression();
+   } else if (lex->tk=='{') {
+     /* A block of code */
++    if (!jspCheckStackPosition()) return 0;
+     jspeBlock();
+     return 0;
+   } else if (lex->tk==';') {

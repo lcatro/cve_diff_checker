@@ -1,0 +1,59 @@
+From 79361bd4859145f888a88d59d92b1a83ccc8ab23 Mon Sep 17 00:00:00 2001
+From: Mitsutaka Sato <mitsutakasato@catalyst.net.nz>
+Date: Thu, 16 Apr 2020 11:39:49 +1200
+Subject: [PATCH] Set content-type for presentation download, to prevent
+ vulnerable files from being executed
+
+---
+ bigbluebutton-web/grails-app/conf/application.groovy        | 6 +++++-
+ .../web/controllers/PresentationController.groovy           | 6 ++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/bigbluebutton-web/grails-app/conf/application.groovy b/bigbluebutton-web/grails-app/conf/application.groovy
+index 19dd40fcdb6..d0458c98969 100755
+--- a/bigbluebutton-web/grails-app/conf/application.groovy
++++ b/bigbluebutton-web/grails-app/conf/application.groovy
+@@ -29,7 +29,11 @@ grails.mime.types = [
+     rss:           'application/rss+xml',
+     text:          'text/plain',
+     hal:           ['application/hal+json','application/hal+xml'],
+-    xml:           ['text/xml', 'application/xml']
++    xml:           ['text/xml', 'application/xml'],
++    png:           'image/png',
++    jpg:           'image/jpg',
++    jpeg:          'image/jpg',
++    gif:           'image/gif'
+ ]
+ 
+ // URL Mapping Cache Max Size, defaults to 5000
+diff --git a/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy b/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
+index edce746e141..1dec8656173 100755
+--- a/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
++++ b/bigbluebutton-web/grails-app/controllers/org/bigbluebutton/web/controllers/PresentationController.groovy
+@@ -19,6 +19,7 @@
+ package org.bigbluebutton.web.controllers
+ 
+ import grails.converters.*
++import org.grails.web.mime.DefaultMimeUtility
+ import org.bigbluebutton.api.ParamsProcessorUtil;
+ 
+ import java.nio.charset.StandardCharsets
+@@ -33,6 +34,7 @@ class PresentationController {
+   MeetingService meetingService
+   PresentationService presentationService
+   ParamsProcessorUtil paramsProcessorUtil
++  DefaultMimeUtility grailsMimeUtility
+ 
+   def index = {
+     render(view: 'upload-file')
+@@ -300,6 +302,10 @@ class PresentationController {
+ 
+         def bytes = pres.readBytes()
+         def responseName = pres.getName();
++        def mimeType = grailsMimeUtility.getMimeTypeForURI(responseName)
++        def mimeName = mimeType != null ? mimeType.name : 'application/octet-stream'
++
++        response.contentType = mimeName
+         response.addHeader("content-disposition", "filename=" + URLEncoder.encode(responseName, StandardCharsets.UTF_8.name()))
+         response.addHeader("Cache-Control", "no-cache")
+         response.outputStream << bytes;

@@ -1,0 +1,48 @@
+From 6c724ea3fe352d10d457d334dc054ef81917fde1 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Thu, 16 Apr 2020 09:50:37 -0500
+Subject: [PATCH] xss: Queue Name
+
+This mitigates an issue discovered by Matthew Aberegg where the Name field
+for a Queue can be exploited via XSS to execute code. This sanitizes the
+`$_POST['queue-name']` variable in a few places via `Format::htmlchars()` so
+we are safe from any XSS attempts on creations and updates.
+---
+ include/class.queue.php | 4 ++--
+ scp/queues.php          | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/class.queue.php b/include/class.queue.php
+index 05970a5330..b4f9cab401 100644
+--- a/include/class.queue.php
++++ b/include/class.queue.php
+@@ -1204,14 +1204,14 @@ function update($vars, &$errors=array()) {
+         if (!$vars['queue-name'])
+             $errors['queue-name'] = __('A title is required');
+         elseif (($q=CustomQueue::lookup(array(
+-                        'title' => $vars['queue-name'],
++                        'title' => Format::htmlchars($vars['queue-name']),
+                         'parent_id' => $vars['parent_id'] ?: 0,
+                         'staff_id'  => $this->staff_id)))
+                 && $q->getId() != $this->id
+                 )
+             $errors['queue-name'] = __('Saved queue with same name exists');
+ 
+-        $this->title = $vars['queue-name'];
++        $this->title = Format::htmlchars($vars['queue-name']);
+         $this->parent_id = @$vars['parent_id'] ?: 0;
+         if ($this->parent_id && !$this->parent)
+             $errors['parent_id'] = __('Select a valid queue');
+diff --git a/scp/queues.php b/scp/queues.php
+index 37fc13e3e2..4b79e85c4c 100644
+--- a/scp/queues.php
++++ b/scp/queues.php
+@@ -43,7 +43,7 @@
+     case 'create':
+         $queue = CustomQueue::create(array(
+             'staff_id' => 0,
+-            'title' => $_POST['queue-name'],
++            'title' => Format::htmlchars($_POST['queue-name']),
+             'root' => 'T'
+         ));
+ 

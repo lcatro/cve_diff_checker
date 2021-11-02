@@ -1,0 +1,27 @@
+From 49847ae69a4e1a97ae7f2db5e217c77721e37948 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 15:37:08 -0700
+Subject: [PATCH] Fix division by zero in TFLite padding.
+
+PiperOrigin-RevId: 370777494
+Change-Id: Ic1331e4a1603b9e4c8aa183012a6c8237410aa0f
+---
+ tensorflow/lite/kernels/padding.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/padding.h b/tensorflow/lite/kernels/padding.h
+index 85950eaf34bb9..d9cca3ea13515 100644
+--- a/tensorflow/lite/kernels/padding.h
++++ b/tensorflow/lite/kernels/padding.h
+@@ -44,6 +44,11 @@ inline int ComputePaddingWithOffset(int stride, int dilation_rate, int in_size,
+ inline int ComputeOutSize(TfLitePadding padding, int image_size,
+                           int filter_size, int stride, int dilation_rate = 1) {
+   int effective_filter_size = (filter_size - 1) * dilation_rate + 1;
++
++  // TODO(b/186448822): This uses 0 since the function has no other way to
++  // report error case
++  if (stride == 0) return 0;
++
+   switch (padding) {
+     case kTfLitePaddingSame:
+       return (image_size + stride - 1) / stride;

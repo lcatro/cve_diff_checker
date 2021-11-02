@@ -1,0 +1,41 @@
+From 62041428a32de402e0be6ba45fe12df6a83bedb8 Mon Sep 17 00:00:00 2001
+From: Olav Morken <olav.morken@uninett.no>
+Date: Tue, 19 Mar 2019 13:42:22 +0100
+Subject: [PATCH] Fix redirect URL validation bypass
+
+It turns out that browsers silently convert backslash characters into
+forward slashes, while apr_uri_parse() does not.
+
+This mismatch allows an attacker to bypass the redirect URL validation
+by using an URL like:
+
+  https://sp.example.org/mellon/logout?ReturnTo=https:%5c%5cmalicious.example.org/
+
+mod_auth_mellon will assume that it is a relative URL and allow the
+request to pass through, while the browsers will use it as an absolute
+url and redirect to https://malicious.example.org/ .
+
+This patch fixes this issue by rejecting all redirect URLs with
+backslashes.
+---
+ auth_mellon_util.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/auth_mellon_util.c b/auth_mellon_util.c
+index 0fab309..fd442f9 100644
+--- a/auth_mellon_util.c
++++ b/auth_mellon_util.c
+@@ -927,6 +927,13 @@ int am_check_url(request_rec *r, const char *url)
+                           "Control character detected in URL.");
+             return HTTP_BAD_REQUEST;
+         }
++        if (*i == '\\') {
++            /* Reject backslash character, as it can be used to bypass
++             * redirect URL validation. */
++            AM_LOG_RERROR(APLOG_MARK, APLOG_ERR, HTTP_BAD_REQUEST, r,
++                          "Backslash character detected in URL.");
++            return HTTP_BAD_REQUEST;
++        }
+     }
+ 
+     return OK;

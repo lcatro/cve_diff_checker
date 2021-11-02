@@ -1,0 +1,110 @@
+From e139b87835994d007fbd64eead6c1455d7b8cf4e Mon Sep 17 00:00:00 2001
+From: Lea <weiqiang_li@hotmail.com>
+Date: Wed, 13 Jun 2018 11:45:44 +0800
+Subject: [PATCH] misc oom and possible memory leak fix
+
+---
+ extras/scandir.c | 16 ++++++++++++----
+ extras/strutil.c |  2 +-
+ src/index_dir.c  |  5 ++++-
+ src/log.c        |  4 ++--
+ src/sublog.c     |  1 +
+ 5 files changed, 20 insertions(+), 8 deletions(-)
+
+diff --git a/extras/scandir.c b/extras/scandir.c
+index a4a3427..1485d6e 100644
+--- a/extras/scandir.c
++++ b/extras/scandir.c
+@@ -56,18 +56,26 @@ scandir(const char *dir, struct dirent ***namelist,
+ 
+     while (NULL != readdir(d))
+         count++;
+-
++	
++	closedir(d);
++	
+     names = malloc(sizeof (struct dirent *) * count);
++	if (!names) 
++		return -1;
+ 
+-    closedir(d);
+     d = opendir(dir);
+-    if (NULL == d)
++    if (NULL == d) {
++		free(names);
+         return -1;
++    }
+ 
+     while (NULL != (current = readdir(d))) {
+         if (NULL == select || select(current)) {
+             struct dirent *copyentry = malloc(current->d_reclen);
+-
++			/* FIXME: OOM, silently skip it?*/
++			if (!copyentry)
++				continue;
++			
+             memcpy(copyentry, current, current->d_reclen);
+ 
+             names[pos] = copyentry;
+diff --git a/extras/strutil.c b/extras/strutil.c
+index f0727b5..f318888 100644
+--- a/extras/strutil.c
++++ b/extras/strutil.c
+@@ -13,7 +13,7 @@ char *strstr(char *s1, char *s2)
+ 
+     if (*s2 == '\0')            /* everything matches empty string */
+         return s1;
+-    for (p = s1; (p = strchr(p, *s2)) != NULL; p = strchr(p + 1, *s2)) {
++    for (p = s1; (p = strchr(p, *s2)) != NULL; p++) {
+         if (strncmp(p, s2, len) == 0)
+             return (p);
+     }
+diff --git a/src/index_dir.c b/src/index_dir.c
+index 99cc306..435b1b4 100644
+--- a/src/index_dir.c
++++ b/src/index_dir.c
+@@ -383,6 +383,9 @@ int main(int argc, char *argv[])
+     timeptr = gmtime(&timep);
+ #endif
+     now = strdup(asctime(timeptr));
++	if (!now) {
++		return -1;
++	}
+     now[strlen(now) - 1] = '\0';
+ #ifdef USE_LOCALTIME
+     printf("</table>\n<hr noshade>\nIndex generated %s %s\n"
+@@ -393,6 +396,6 @@ int main(int argc, char *argv[])
+            "<!-- This program is part of the Boa Webserver Copyright (C) 1991-2002 http://www.boa.org -->\n"
+            "</body>\n</html>\n", now);
+ #endif
+-
++	free(now);
+     return 0;
+ }
+diff --git a/src/log.c b/src/log.c
+index 1cd6281..04a0f73 100644
+--- a/src/log.c
++++ b/src/log.c
+@@ -192,8 +192,8 @@ static char *escape_pathname(const char *inp)
+     }
+     escaped = malloc (4 * strlen(inp) + 1);
+     if (!escaped) {
+-    	perror("malloc");
+-	return NULL;
++		perror("malloc");
++		return NULL;
+     }
+     for (d = escaped, s = (const unsigned char *)inp; *s; s++) {
+         if (needs_escape (*s)) {
+diff --git a/src/sublog.c b/src/sublog.c
+index 3386872..53834ef 100644
+--- a/src/sublog.c
++++ b/src/sublog.c
+@@ -142,6 +142,7 @@ int main(int argc, char *argv[])
+             exit(EXIT_FAILURE);
+         }
+     }
++	close(fd);
+     return 0;
+ }
+ #endif

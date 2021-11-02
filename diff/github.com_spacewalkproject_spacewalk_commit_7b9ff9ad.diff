@@ -1,0 +1,122 @@
+From 7b9ff9ad6caf91d789039ed106342c430223e55f Mon Sep 17 00:00:00 2001
+From: Grant Gainey <ggainey@redhat.com>
+Date: Tue, 29 Mar 2016 14:44:21 -0400
+Subject: [PATCH] 1320444 - Bad bean-message ids and navbar-vars can lead to
+ XSS issues
+
+Fixed generally in LocalizationService and DialognavRenderer, removed
+some attempts at fixing specific locations.
+---
+ .../localization/LocalizationService.java     | 24 +++++++++----------
+ .../rhn/frontend/nav/DialognavRenderer.java   |  9 ++++---
+ .../fragments/kickstart/advanced/details.jspf |  4 ++--
+ .../pages/systems/sdc/history_event.jsp       |  2 +-
+ 4 files changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/java/code/src/com/redhat/rhn/common/localization/LocalizationService.java b/java/code/src/com/redhat/rhn/common/localization/LocalizationService.java
+index ef9fda7b1e9..dd7af417b24 100644
+--- a/java/code/src/com/redhat/rhn/common/localization/LocalizationService.java
++++ b/java/code/src/com/redhat/rhn/common/localization/LocalizationService.java
+@@ -14,17 +14,6 @@
+  */
+ package com.redhat.rhn.common.localization;
+ 
+-import com.redhat.rhn.common.conf.Config;
+-import com.redhat.rhn.common.conf.ConfigDefaults;
+-import com.redhat.rhn.common.db.datasource.DataResult;
+-import com.redhat.rhn.common.db.datasource.ModeFactory;
+-import com.redhat.rhn.common.db.datasource.SelectMode;
+-import com.redhat.rhn.common.util.StringUtil;
+-import com.redhat.rhn.frontend.context.Context;
+-
+-import org.apache.commons.lang.StringEscapeUtils;
+-import org.apache.log4j.Logger;
+-
+ import java.text.Collator;
+ import java.text.DateFormat;
+ import java.text.NumberFormat;
+@@ -47,6 +36,17 @@
+ import java.util.TreeMap;
+ import java.util.TreeSet;
+ 
++import org.apache.commons.lang.StringEscapeUtils;
++import org.apache.log4j.Logger;
++
++import com.redhat.rhn.common.conf.Config;
++import com.redhat.rhn.common.conf.ConfigDefaults;
++import com.redhat.rhn.common.db.datasource.DataResult;
++import com.redhat.rhn.common.db.datasource.ModeFactory;
++import com.redhat.rhn.common.db.datasource.SelectMode;
++import com.redhat.rhn.common.util.StringUtil;
++import com.redhat.rhn.frontend.context.Context;
++
+ /**
+  * Localization service class to simplify the job for producing localized
+  * (translated) strings within the product.
+@@ -368,7 +368,7 @@ private String getMissingMessageString(String messageId) {
+         if (exceptionMode) {
+             throw new IllegalArgumentException(message);
+         }
+-        return "**" + messageId + "**";
++        return StringEscapeUtils.escapeHtml("**" + messageId + "**");
+     }
+ 
+     /**
+diff --git a/java/code/src/com/redhat/rhn/frontend/nav/DialognavRenderer.java b/java/code/src/com/redhat/rhn/frontend/nav/DialognavRenderer.java
+index 24a02f09754..5e0557aa539 100644
+--- a/java/code/src/com/redhat/rhn/frontend/nav/DialognavRenderer.java
++++ b/java/code/src/com/redhat/rhn/frontend/nav/DialognavRenderer.java
+@@ -15,11 +15,13 @@
+ 
+ package com.redhat.rhn.frontend.nav;
+ 
+-import com.redhat.rhn.frontend.html.HtmlTag;
+-
+ import java.util.Map;
+ import java.util.StringTokenizer;
+ 
++import org.apache.commons.lang.StringEscapeUtils;
++
++import com.redhat.rhn.frontend.html.HtmlTag;
++
+ /**
+  * DialognavRenderer - renders a navigation bar
+  *
+@@ -135,7 +137,8 @@ private void renderNode(StringBuffer sb, NavNode node,
+                 // if currentVar is null, values will be null too, so we can
+                 // just check values.
+                 if (values != null) {
+-                    formVars.append(currentVar + "=" + values[0]);
++                    formVars.append(currentVar + "=" +
++                             StringEscapeUtils.escapeHtml(values[0]));
+                 }
+             }
+             href += formVars.toString();
+diff --git a/java/code/webapp/WEB-INF/pages/common/fragments/kickstart/advanced/details.jspf b/java/code/webapp/WEB-INF/pages/common/fragments/kickstart/advanced/details.jspf
+index 822ebca2e2c..7677cfc117a 100644
+--- a/java/code/webapp/WEB-INF/pages/common/fragments/kickstart/advanced/details.jspf
++++ b/java/code/webapp/WEB-INF/pages/common/fragments/kickstart/advanced/details.jspf
+@@ -11,8 +11,8 @@
+                    action="${param.url}?csrf_token=${csrfToken}"
+                    enctype="multipart/form-data">
+             <rhn:csrf />
+-            <h2><bean:message key="${fn:escapeXml(param.title_key)}"/></h2>
+-            <p><bean:message key="${fn:escapeXml(param.summary_key)}"/></p>
++            <h2><bean:message key="${param.title_key)}"/></h2>
++            <p><bean:message key="${param.summary_key}"/></p>
+             <div class="form-group">
+                 <label class="col-lg-3 control-label">
+                     <rhn:required-field key="kickstart.jsp.create.wizard.kickstart.profile.label"/>:
+diff --git a/java/code/webapp/WEB-INF/pages/systems/sdc/history_event.jsp b/java/code/webapp/WEB-INF/pages/systems/sdc/history_event.jsp
+index 062fb1eac82..1607de9f09c 100644
+--- a/java/code/webapp/WEB-INF/pages/systems/sdc/history_event.jsp
++++ b/java/code/webapp/WEB-INF/pages/systems/sdc/history_event.jsp
+@@ -12,7 +12,7 @@
+ <%@ include file="/WEB-INF/pages/common/fragments/systems/system-header.jspf" %>
+ 
+ <rhn:toolbar base="h2" icon="header-event-history">
+-  <bean:message key="${fn:escapeXml(headerLabel)}" />
++  <bean:message key="${headerLabel}" />
+ </rhn:toolbar>
+ 
+ <html:form method="post" action="/systems/details/history/Event.do?sid=${system.id}&aid=${requestScope.aid}">

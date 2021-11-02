@@ -1,0 +1,583 @@
+From 23d03535cf7b50d679a60a953a0cae9519a4a130 Mon Sep 17 00:00:00 2001
+From: Peter Ohler <peter@ohler.com>
+Date: Sat, 7 Nov 2020 19:07:47 -0500
+Subject: [PATCH] Remote addr (#99)
+
+* REMOTE_ADDR added
+
+* Ready for merge
+---
+ CHANGELOG.md              | 10 +++++++
+ ext/agoo/con.c            | 17 ++++++++++++
+ ext/agoo/con.h            |  2 ++
+ ext/agoo/http.c           | 55 ++++++++++++++-----------------------
+ ext/agoo/req.h            |  2 ++
+ ext/agoo/request.c        | 57 ++++++++++++++++++++++++++++++++++++---
+ ext/agoo/server.c         |  4 +--
+ ext/agoo/websocket.c      |  1 +
+ lib/agoo/version.rb       |  2 +-
+ test/base_handler_test.rb |  8 +++---
+ test/rack_handler_test.rb |  1 +
+ 11 files changed, 113 insertions(+), 46 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 91dab4b..617acbe 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,16 @@
+ 
+ All changes to the Agoo gem are documented here. Releases follow semantic versioning.
+ 
++## [2.14.0] - 2020-11-07
++
++### Added
++
++- REMOTE_ADDR element added to requests/env argument to `call()`.
++
++- Added check for multiple Content-Length headers.
++
++- Multiple occurrances of a header are now passed to the Rack `call()` method as an array.
++
+ ## [2.13.0] - 2020-07-05
+ 
+ ### Added
+diff --git a/ext/agoo/con.c b/ext/agoo/con.c
+index d59144a..c430e24 100644
+--- a/ext/agoo/con.c
++++ b/ext/agoo/con.c
+@@ -63,6 +63,22 @@ agoo_con_create(agooErr err, int sock, uint64_t id, agooBind b) {
+     if (NULL == (c = (agooCon)AGOO_CALLOC(1, sizeof(struct _agooCon)))) {
+ 	AGOO_ERR_MEM(err, "Connection");
+     } else {
++	// It would be better to get this information in server.c after
++	// accept() but that does not work on macOS so instead a call to
++	// getpeername() is used instead.
++	struct sockaddr_storage	addr;
++	socklen_t		len = sizeof(addr);
++
++	getpeername(sock, (struct sockaddr*)&addr, &len);
++	if (addr.ss_family == AF_INET) {
++	    struct sockaddr_in	*s = (struct sockaddr_in*)&addr;
++
++	    inet_ntop(AF_INET, &s->sin_addr, c->remote, sizeof(c->remote));
++	} else {
++	    struct sockaddr_in6	*s = (struct sockaddr_in6*)&addr;
++
++	    inet_ntop(AF_INET6, &s->sin6_addr, c->remote, sizeof(c->remote));
++	}
+ 	c->sock = sock;
+ 	c->id = id;
+ 	c->timeout = dtime() + CON_TIMEOUT;
+@@ -437,6 +453,7 @@ con_header_read(agooCon c, size_t *mlenp) {
+     c->req->method = method;
+     c->req->upgrade = AGOO_UP_NONE;
+     c->req->up = NULL;
++    memcpy(c->req->remote, c->remote, sizeof(c->remote));
+     c->req->path.start = c->req->msg + (path.start - c->buf);
+     c->req->path.len = (int)(path.end - path.start);
+     c->req->query.start = c->req->msg + (query - c->buf);
+diff --git a/ext/agoo/con.h b/ext/agoo/con.h
+index 4e69812..c23ac96 100644
+--- a/ext/agoo/con.h
++++ b/ext/agoo/con.h
+@@ -3,6 +3,7 @@
+ #ifndef AGOO_CON_H
+ #define AGOO_CON_H
+ 
++#include <arpa/inet.h>
+ #include <poll.h>
+ #include <pthread.h>
+ #include <stdbool.h>
+@@ -45,6 +46,7 @@ typedef struct _agooCon {
+     struct _agooBind		*bind;
+     struct pollfd		*pp;
+     uint64_t			id;
++    char			remote[INET6_ADDRSTRLEN];
+     char			buf[MAX_HEADER_SIZE];
+     size_t			bcnt;
+ 
+diff --git a/ext/agoo/http.c b/ext/agoo/http.c
+index 28096c6..a551740 100644
+--- a/ext/agoo/http.c
++++ b/ext/agoo/http.c
+@@ -26,7 +26,7 @@ typedef struct _cache {
+ struct _cache		key_cache;
+ 
+ // The rack spec indicates the characters (),/:;<=>?@[]{} are invalid which
+-// clearly is not consisten with RFC7230 so stick with the RFC.
++// clearly is not consistent with RFC7230 so stick with the RFC.
+ static char		header_value_chars[256] = "\
+ xxxxxxxxxxoxxxxxxxxxxxxxxxxxxxxx\
+ oooooooooooooooooooooooooooooooo\
+@@ -50,7 +50,6 @@ static const char	*header_keys[] = {
+     "Accept-Encoding",
+     "Accept-Features",
+     "Accept-Language",
+-    "Accept-Language",
+     "Accept-Patch",
+     "Accept-Post",
+     "Accept-Ranges",
+@@ -74,7 +73,6 @@ static const char	*header_keys[] = {
+     "Approved",
+     "Archive",
+     "Archived-At",
+-    "Archived-At",
+     "Article-Names",
+     "Article-Updates",
+     "Authentication-Control",
+@@ -99,36 +97,27 @@ static const char	*header_keys[] = {
+     "Cc",
+     "Close",
+     "Comments",
+-    "Comments",
+     "Compliance",
+     "Connection",
+     "Content-Alternative",
+     "Content-Base",
+-    "Content-Base",
+     "Content-Description",
+     "Content-Disposition",
+-    "Content-Disposition",
+     "Content-Duration",
+     "Content-Encoding",
+     "Content-ID",
+-    "Content-ID",
+     "Content-Identifier",
+     "Content-Language",
+-    "Content-Language",
+     "Content-Length",
+     "Content-Location",
+-    "Content-Location",
+-    "Content-MD5",
+     "Content-MD5",
+     "Content-Range",
+     "Content-Return",
+     "Content-Script-Type",
+     "Content-Style-Type",
+     "Content-Transfer-Encoding",
+-    "Content-Transfer-Encoding",
+     "Content-Translation-Type",
+     "Content-Type",
+-    "Content-Type",
+     "Content-Version",
+     "Content-features",
+     "Control",
+@@ -141,8 +130,7 @@ static const char	*header_keys[] = {
+     "DAV",
+     "DKIM-Signature",
+     "DL-Expansion-History",
+-    "Date",
+-    "Date",
++    "DNT",
+     "Date",
+     "Date-Received",
+     "Default-Style",
+@@ -182,7 +170,6 @@ static const char	*header_keys[] = {
+     "Downgraded-Sender",
+     "Downgraded-To",
+     "EDIINT-Features",
+-    "EDIINT-Features",
+     "ETag",
+     "Eesst-Version",
+     "Encoding",
+@@ -190,16 +177,13 @@ static const char	*header_keys[] = {
+     "Errors-To",
+     "Expect",
+     "Expires",
+-    "Expires",
+-    "Expires",
+     "Expiry-Date",
+     "Ext",
+     "Followup-To",
+     "Form-Sub",
+     "Forwarded",
+     "From",
+-    "From",
+-    "From",
++    "Front-End-Https",
+     "Generate-Delivery-Report",
+     "GetProfile",
+     "HTTP2-Settings",
+@@ -219,10 +203,8 @@ static const char	*header_keys[] = {
+     "Injection-Date",
+     "Injection-Info",
+     "Jabber-ID",
+-    "Jabber-ID",
+     "Keep-Alive",
+     "Keywords",
+-    "Keywords",
+     "Label",
+     "Language",
+     "Last-Modified",
+@@ -240,7 +222,6 @@ static const char	*header_keys[] = {
+     "Location",
+     "Lock-Token",
+     "MIME-Version",
+-    "MIME-Version",
+     "MMHS-Acp127-Message-Identifier",
+     "MMHS-Authorizing-Users",
+     "MMHS-Codress-Message-Indicator",
+@@ -262,8 +243,6 @@ static const char	*header_keys[] = {
+     "Memento-Datetime",
+     "Message-Context",
+     "Message-ID",
+-    "Message-ID",
+-    "Message-ID",
+     "Message-Type",
+     "Meter",
+     "Method-Check",
+@@ -279,7 +258,6 @@ static const char	*header_keys[] = {
+     "Optional-WWW-Authenticate",
+     "Ordering-Type",
+     "Organization",
+-    "Organization",
+     "Origin",
+     "Original-Encoded-Information-Types",
+     "Original-From",
+@@ -292,7 +270,6 @@ static const char	*header_keys[] = {
+     "P3P",
+     "PEP",
+     "PICS-Label",
+-    "PICS-Label",
+     "Path",
+     "Pep-Info",
+     "Position",
+@@ -311,6 +288,7 @@ static const char	*header_keys[] = {
+     "Proxy-Authenticate",
+     "Proxy-Authentication-Info",
+     "Proxy-Authorization",
++    "Proxy-Connection",
+     "Proxy-Features",
+     "Proxy-Instruction",
+     "Public",
+@@ -321,13 +299,11 @@ static const char	*header_keys[] = {
+     "Received-SPF",
+     "Redirect-Ref",
+     "References",
+-    "References",
+     "Referer",
+     "Referer-Root",
+     "Relay-Version",
+     "Reply-By",
+     "Reply-To",
+-    "Reply-To",
+     "Require-Recipient-Valid-Since",
+     "Resent-Bcc",
+     "Resent-Cc",
+@@ -345,6 +321,7 @@ static const char	*header_keys[] = {
+     "SIO-Label-History",
+     "SLUG",
+     "Safe",
++    "Save-Data",
+     "Schedule-Reply",
+     "Schedule-Tag",
+     "Sec-WebSocket-Accept",
+@@ -367,11 +344,9 @@ static const char	*header_keys[] = {
+     "Strict-Transport-Security",
+     "SubOK",
+     "Subject",
+-    "Subject",
+     "Subst",
+     "Summary",
+     "Supersedes",
+-    "Supersedes",
+     "Surrogate-Capability",
+     "Surrogate-Control",
+     "TCN",
+@@ -390,9 +365,9 @@ static const char	*header_keys[] = {
+     "UA-Windowpixels",
+     "URI",
+     "Upgrade",
++    "Upgrade-Insecure-Requests",
+     "Urgency",
+     "User-Agent",
+-    "User-Agent",
+     "VBR-Info",
+     "Variant-Vary",
+     "Vary",
+@@ -401,22 +376,32 @@ static const char	*header_keys[] = {
+     "WWW-Authenticate",
+     "Want-Digest",
+     "Warning",
+-    "X-Archived-At",
++    "X-ATT-DeviceId",
+     "X-Archived-At",
+     "X-Content-Type-Options",
++    "X-Correlation-ID",
++    "X-Csrf-Token",
+     "X-Device-Accept",
+     "X-Device-Accept-Charset",
+     "X-Device-Accept-Encoding",
+     "X-Device-Accept-Language",
+     "X-Device-User-Agent",
++    "X-Forwarded-For",
++    "X-Forwarded-Host",
++    "X-Forwarded-Proto",
+     "X-Frame-Options",
++    "X-Http-Method-Override",
+     "X-Mittente",
+     "X-PGP-Sig",
++    "X-Request-ID",
++    "X-Requested-With",
+     "X-Ricevuta",
+     "X-Riferimento-Message-ID",
+     "X-TipoRicevuta",
+     "X-Trasporto",
++    "X-UIDH",
+     "X-VerificaSicurezza",
++    "X-Wap-Profile",
+     "X-XSS-Protection",
+     "X400-Content-Identifier",
+     "X400-Content-Return",
+@@ -469,7 +454,7 @@ key_set(const char *key) {
+     int64_t	h = calc_hash(key, &len);
+     Slot	*bucket = get_bucketp(h);
+     Slot	s;
+-    
++
+     if (NULL != (s = (Slot)AGOO_MALLOC(sizeof(struct _slot)))) {
+ 	s->hash = h;
+ 	s->klen = len;
+@@ -482,7 +467,7 @@ key_set(const char *key) {
+ void
+ agoo_http_init() {
+     const char	**kp = header_keys;
+-    
++
+     memset(&key_cache, 0, sizeof(struct _cache));
+     for (; NULL != *kp; kp++) {
+ 	key_set(*kp);
+@@ -550,7 +535,7 @@ agoo_http_header_ok(agooErr err, const char *key, int klen, const char *value, i
+ const char*
+ agoo_http_code_message(int code) {
+     const char	*msg = "";
+-    
++
+     switch (code) {
+     case 100:	msg = "Continue";				break;
+     case 101:	msg = "Switching Protocols";			break;
+diff --git a/ext/agoo/req.h b/ext/agoo/req.h
+index 0446845..75d23d0 100644
+--- a/ext/agoo/req.h
++++ b/ext/agoo/req.h
+@@ -3,6 +3,7 @@
+ #ifndef AGOO_REQ_H
+ #define AGOO_REQ_H
+ 
++#include <arpa/inet.h>
+ #include <stdint.h>
+ 
+ #include "hook.h"
+@@ -32,6 +33,7 @@ typedef struct _agooReq {
+     struct _agooStr		query;
+     struct _agooStr		header;
+     struct _agooStr		body;
++    char			remote[INET6_ADDRSTRLEN];
+     void			*env;
+     agooHook			hook;
+     size_t			mlen;   // allocated msg length
+diff --git a/ext/agoo/request.c b/ext/agoo/request.c
+index 602c057..7172a70 100644
+--- a/ext/agoo/request.c
++++ b/ext/agoo/request.c
+@@ -43,6 +43,7 @@ static VALUE	rack_upgrade_val = Qundef;
+ static VALUE	rack_url_scheme_val = Qundef;
+ static VALUE	rack_version_val = Qundef;
+ static VALUE	rack_version_val_val = Qundef;
++static VALUE	remote_addr_val = Qundef;
+ static VALUE	request_method_val = Qundef;
+ static VALUE	script_name_val = Qundef;
+ static VALUE	server_name_val = Qundef;
+@@ -96,6 +97,27 @@ method(VALUE self) {
+     return req_method((agooReq)DATA_PTR(self));
+ }
+ 
++static VALUE
++req_remote_addr(agooReq r) {
++
++    if (NULL == r) {
++	rb_raise(rb_eArgError, "Request is no longer valid.");
++    }
++    return rb_str_new(r->remote, strlen(r->remote));
++}
++
++/* Document-method: remote_addr
++ *
++ * call-seq: remote_addr()
++ *
++ * Returns the remote address.
++ */
++static VALUE
++remote_addr(VALUE self) {
++    return req_remote_addr((agooReq)DATA_PTR(self));
++}
++
++
+ static VALUE
+ req_script_name(agooReq r) {
+     // The logic is a bit tricky here and for path_info. If the HTTP path is /
+@@ -366,14 +388,29 @@ rack_run_once(VALUE self) {
+ 
+ static void
+ add_header_value(VALUE hh, const char *key, int klen, const char *val, int vlen) {
++    VALUE	v;
++
+     if (sizeof(content_type) - 1 == klen && 0 == strncasecmp(key, content_type, sizeof(content_type) - 1)) {
+-	rb_hash_aset(hh, content_type_val, rb_str_new(val, vlen));
++	if (Qnil == (v = rb_hash_lookup2(hh, content_type_val, Qnil))) {
++	    rb_hash_aset(hh, content_type_val, rb_str_new(val, vlen));
++	} else {
++	    volatile VALUE	a = rb_ary_new();
++
++	    rb_ary_push(a, v);
++	    rb_ary_push(a, rb_str_new(val, vlen));
++	    rb_hash_aset(hh, content_type_val, a);
++	}
+     } else if (sizeof(content_length) - 1 == klen && 0 == strncasecmp(key, content_length, sizeof(content_length) - 1)) {
+-	rb_hash_aset(hh, content_length_val, rb_str_new(val, vlen));
++	if (Qnil == (v = rb_hash_lookup2(hh, content_length_val, Qnil))) {
++	    rb_hash_aset(hh, content_length_val, rb_str_new(val, vlen));
++	} else {
++	    rb_raise(rb_eArgError, "Multiple Content-Length headers.");
++	}
+     } else {
+ 	char		hkey[1024];
+ 	char		*k = hkey;
+ 	volatile VALUE	sval = rb_str_new(val, vlen);
++	volatile VALUE	kval;
+ 
+ 	strcpy(hkey, "HTTP_");
+ 	k = hkey + 5;
+@@ -392,7 +429,16 @@ add_header_value(VALUE hh, const char *key, int klen, const char *val, int vlen)
+ 		*k = toupper(*k);
+ 	    }
+ 	}
+-	rb_hash_aset(hh, rb_str_new(hkey, klen + 5), sval);
++	kval = rb_str_new(hkey, klen + 5);
++	if (Qnil == (v = rb_hash_lookup2(hh, kval, Qnil))) {
++	    rb_hash_aset(hh, kval, sval);
++	} else {
++	    volatile VALUE	a = rb_ary_new();
++
++	    rb_ary_push(a, v);
++	    rb_ary_push(a, sval);
++	    rb_hash_aset(hh, kval, a);
++	}
+     }
+ }
+ 
+@@ -545,8 +591,9 @@ request_env(agooReq req, VALUE self) {
+ 	rb_hash_aset(env, script_name_val, req_script_name(req));
+ 	rb_hash_aset(env, path_info_val, req_path_info(req));
+ 	rb_hash_aset(env, query_string_val, req_query_string(req));
+-	rb_hash_aset(env, server_name_val, req_server_name(req));
++	rb_hash_aset(env, remote_addr_val, req_remote_addr(req));
+ 	rb_hash_aset(env, server_port_val, req_server_port(req));
++	rb_hash_aset(env, server_name_val, req_server_name(req));
+ 	fill_headers(req, env);
+ 	rb_hash_aset(env, rack_version_val, rack_version_val_val);
+ 	rb_hash_aset(env, rack_url_scheme_val, req_rack_url_scheme(req));
+@@ -663,6 +710,7 @@ request_init(VALUE mod) {
+     rb_define_method(req_class, "query_string", query_string, 0);
+     rb_define_method(req_class, "server_name", server_name, 0);
+     rb_define_method(req_class, "server_port", server_port, 0);
++    rb_define_method(req_class, "remote_addr", remote_addr, 0);
+     rb_define_method(req_class, "rack_version", rack_version, 0);
+     rb_define_method(req_class, "rack_url_scheme", rack_url_scheme, 0);
+     rb_define_method(req_class, "rack_input", rack_input, 0);
+@@ -713,6 +761,7 @@ request_init(VALUE mod) {
+     rack_upgrade_val = rb_str_new_cstr("rack.upgrade?");	rb_gc_register_address(&rack_upgrade_val);
+     rack_url_scheme_val = rb_str_new_cstr("rack.url_scheme");	rb_gc_register_address(&rack_url_scheme_val);
+     rack_version_val = rb_str_new_cstr("rack.version");		rb_gc_register_address(&rack_version_val);
++    remote_addr_val = rb_str_new_cstr("REMOTE_ADDR");		rb_gc_register_address(&remote_addr_val);
+     request_method_val = rb_str_new_cstr("REQUEST_METHOD");	rb_gc_register_address(&request_method_val);
+     script_name_val = rb_str_new_cstr("SCRIPT_NAME");		rb_gc_register_address(&script_name_val);
+     server_name_val = rb_str_new_cstr("SERVER_NAME");		rb_gc_register_address(&server_name_val);
+diff --git a/ext/agoo/server.c b/ext/agoo/server.c
+index 5891f00..c09c0b8 100644
+--- a/ext/agoo/server.c
++++ b/ext/agoo/server.c
+@@ -160,8 +160,8 @@ listen_loop(void *x) {
+ 		    //fcntl(client_sock, F_SETFL, FNDELAY);
+ 		    setsockopt(client_sock, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval));
+ 		    setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+-		    agoo_log_cat(&agoo_con_cat, "Server with pid %d accepted connection %llu on %s [%d]",
+-				 getpid(), (unsigned long long)cnt, b->id, con->sock);
++		    agoo_log_cat(&agoo_con_cat, "Server with pid %d accepted connection %llu on %s [%d] from %s",
++				 getpid(), (unsigned long long)cnt, b->id, con->sock, con->remote);
+ 
+ 		    con_cnt = atomic_fetch_add(&agoo_server.con_cnt, 1);
+ 		    if (agoo_server.loop_max > agoo_server.loop_cnt && agoo_server.loop_cnt * LOOP_UP < con_cnt) {
+diff --git a/ext/agoo/websocket.c b/ext/agoo/websocket.c
+index 590f7c2..ef5ef72 100644
+--- a/ext/agoo/websocket.c
++++ b/ext/agoo/websocket.c
+@@ -189,6 +189,7 @@ agoo_ws_create_req(agooCon c, long mlen) {
+     c->req->method = (AGOO_WS_OP_BIN == op) ? AGOO_ON_BIN : AGOO_ON_MSG;
+     c->req->upgrade = AGOO_UP_NONE;
+     c->req->up = c->up;
++    memcpy(c->req->remote, c->remote, sizeof(c->remote));
+     c->req->res = NULL;
+     if (c->up->on_msg) {
+ 	c->req->hook = agoo_hook_create(AGOO_NONE, NULL, c->up->ctx, PUSH_HOOK, &agoo_server.eval_queue);
+diff --git a/lib/agoo/version.rb b/lib/agoo/version.rb
+index a17de2f..c0b8d6a 100644
+--- a/lib/agoo/version.rb
++++ b/lib/agoo/version.rb
+@@ -1,5 +1,5 @@
+ 
+ module Agoo
+   # Agoo version.
+-  VERSION = '2.13.0'
++  VERSION = '2.14.0'
+ end
+diff --git a/test/base_handler_test.rb b/test/base_handler_test.rb
+index bdbe6f6..a318546 100755
+--- a/test/base_handler_test.rb
++++ b/test/base_handler_test.rb
+@@ -82,7 +82,7 @@ def setup
+     GC.start
+     Agoo::shutdown
+   }
+-  
++
+   def test_eval
+     uri = URI('http://localhost:6470/tellme?a=1')
+     req = Net::HTTP::Get.new(uri)
+@@ -132,13 +132,13 @@ def test_post
+     req['Accept-Encoding'] = '*'
+     req['Accept'] = 'application/json'
+     req['User-Agent'] = 'Ruby'
+-    
++
+     res = Net::HTTP.start(uri.hostname, uri.port) { |h|
+       h.request(req)
+     }
+     assert_equal(Net::HTTPNoContent, res.class)
+   end
+-  
++
+   def test_put
+     uri = URI('http://localhost:6470/makeme')
+     req = Net::HTTP::Put.new(uri)
+@@ -147,7 +147,7 @@ def test_put
+     req['Accept'] = 'application/json'
+     req['User-Agent'] = 'Ruby'
+     req.body = 'hello'
+-    
++
+     res = Net::HTTP.start(uri.hostname, uri.port) { |h|
+       h.request(req)
+     }
+diff --git a/test/rack_handler_test.rb b/test/rack_handler_test.rb
+index 7ef6f0b..5f47291 100755
+--- a/test/rack_handler_test.rb
++++ b/test/rack_handler_test.rb
+@@ -105,6 +105,7 @@ def test_eval
+       "PATH_INFO" => "/tellme",
+       "QUERY_STRING" => "a=1",
+       "REQUEST_METHOD" => "GET",
++      "REMOTE_ADDR" => "127.0.0.1",
+       "SCRIPT_NAME" => "",
+       "SERVER_NAME" => "localhost",
+       "SERVER_PORT" => "6467",

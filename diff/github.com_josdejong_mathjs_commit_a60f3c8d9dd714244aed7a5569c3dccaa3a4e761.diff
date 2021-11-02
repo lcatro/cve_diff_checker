@@ -1,0 +1,102 @@
+From a60f3c8d9dd714244aed7a5569c3dccaa3a4e761 Mon Sep 17 00:00:00 2001
+From: jos <wjosdejong@gmail.com>
+Date: Sat, 18 Nov 2017 20:11:48 +0100
+Subject: [PATCH] Fixed a security issue where forbidden properties like
+ constructor could be replaced by using unicode characters when creating an
+ object
+
+---
+ HISTORY.md                        |  3 +++
+ lib/expression/node/ObjectNode.js | 10 +++++++---
+ test/expression/security.test.js  | 17 +++++++++++++++++
+ test/utils/customs.test.js        |  5 +++++
+ 4 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/HISTORY.md b/HISTORY.md
+index 6c1c435349..78f708b494 100644
+--- a/HISTORY.md
++++ b/HISTORY.md
+@@ -7,6 +7,9 @@
+ - Fixed a security issue in `typed-function` allowing arbitrary code execution
+   in the JavaScript engine by creating a typed function with JavaScript code
+   in the name. Thanks Masato Kinugawa.
++- Fixed a security issue where forbidden properties like constructor could be
++  replaced by using unicode characters when creating an object. No known exploit,
++  but could possibly allow arbitrary code execution. Thanks Masato Kinugawa.
+ 
+ 
+ ## 2017-10-18, version 3.16.5
+diff --git a/lib/expression/node/ObjectNode.js b/lib/expression/node/ObjectNode.js
+index 22681adae8..ffb6125e62 100644
+--- a/lib/expression/node/ObjectNode.js
++++ b/lib/expression/node/ObjectNode.js
+@@ -60,11 +60,15 @@ function factory (type, config, load, typed) {
+     var entries = [];
+     for (var key in node.properties) {
+       if (hasOwnProperty(node.properties, key)) {
+-        if (!isSafeProperty(node.properties, key)) {
+-          throw new Error('No access to property "' + key + '"');
++        // we stringify/parse the key here to resolve unicode characters,
++        // so you cannot create a key like {"co\\u006Estructor": null} 
++        var stringifiedKey = stringify(key)
++        var parsedKey = JSON.parse(stringifiedKey)
++        if (!isSafeProperty(node.properties, parsedKey)) {
++          throw new Error('No access to property "' + parsedKey + '"');
+         }
+ 
+-        entries.push(stringify(key) + ': ' + compile(node.properties[key], defs, args));
++        entries.push(stringifiedKey + ': ' + compile(node.properties[key], defs, args));
+       }
+     }
+     return '{' + entries.join(', ') + '}';
+diff --git a/test/expression/security.test.js b/test/expression/security.test.js
+index 5078cce508..4e327c81d6 100644
+--- a/test/expression/security.test.js
++++ b/test/expression/security.test.js
+@@ -83,6 +83,23 @@ describe('security', function () {
+     }, /Error: No access to property "bind/);
+   })
+ 
++  it ('should not allow disguising forbidden properties with unicode characters', function () {
++    var scope = {
++      a: {}
++    };
++
++    assert.throws(function () { math.eval('a.co\u006Estructor', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a["co\\u006Estructor"]', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a.constructor', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a.constructor = 2', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a["constructor"] = 2', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a["co\\u006Estructor"] = 2', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a = {"constructor": 2}', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a = {constructor: 2}', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a = {"co\\u006Estructor": 2}', scope); }, /Error: No access to property "constructor"/);
++    assert.throws(function () { math.eval('a = {co\u006Estructor: 2}', scope); }, /Error: No access to property "constructor"/);
++  })
++
+   it ('should not allow calling Function via imported, overridden function', function () {
+     assert.throws(function () {
+       var math2 = math.create();
+diff --git a/test/utils/customs.test.js b/test/utils/customs.test.js
+index 5f362ad82d..1f662f9c25 100644
+--- a/test/utils/customs.test.js
++++ b/test/utils/customs.test.js
+@@ -85,6 +85,9 @@ describe ('customs', function () {
+ 
+       // non existing method
+       assert.equal(customs.isSafeMethod(matrix, 'nonExistingMethod'), false);
++
++      // method with unicode chars
++      assert.equal(customs.isSafeMethod(matrix, 'co\u006Estructor'), false);
+     });
+ 
+   });
+@@ -113,6 +116,8 @@ describe ('customs', function () {
+       // non existing property
+       assert.equal(customs.isSafeProperty(object, 'bar'), true);
+ 
++      // property with unicode chars
++      assert.equal(customs.isSafeProperty(object, 'co\u006Estructor'), false);
+     });
+ 
+     it ('should test inherited properties on plain objects ', function () {

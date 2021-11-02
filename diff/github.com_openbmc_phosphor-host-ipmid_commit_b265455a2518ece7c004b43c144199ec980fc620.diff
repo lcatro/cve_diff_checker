@@ -1,0 +1,33 @@
+From b265455a2518ece7c004b43c144199ec980fc620 Mon Sep 17 00:00:00 2001
+From: Vernon Mauery <vernon.mauery@linux.intel.com>
+Date: Fri, 3 Apr 2020 14:28:53 -0700
+Subject: [PATCH] Use more restrictive permissions on /etc/ipmi-pass
+
+This forces the permissions on /etc/ipmi-pass to be 0600 or RW only by
+owner. This is to prevent non-owners from reading the file, even though
+it is obfuscated to make it harder for ipmi passwords to leak.
+
+Tested: change ipmi passwords and see that the /etc/ipmi-pass file has
+        0600 permissions.
+
+Change-Id: I4be0b8a65f98ced031493f7767879eb054e1ee84
+Signed-off-by: Vernon Mauery <vernon.mauery@linux.intel.com>
+---
+ user_channel/passwd_mgr.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/user_channel/passwd_mgr.cpp b/user_channel/passwd_mgr.cpp
+index 66bdef0d..5e0b30da 100644
+--- a/user_channel/passwd_mgr.cpp
++++ b/user_channel/passwd_mgr.cpp
+@@ -444,8 +444,8 @@ int PasswdMgr::updatePasswdSpecialFile(const std::string& userName,
+         return -EIO;
+     }
+ 
+-    // Set the file mode as of actual ipmi-pass file.
+-    if (fchmod(fileno((temp)()), st.st_mode) < 0)
++    // Set the file mode as read-write for owner only
++    if (fchmod(fileno((temp)()), S_IRUSR | S_IWUSR) < 0)
+     {
+         log<level::DEBUG>("Error setting fchmod for temp file");
+         return -EIO;

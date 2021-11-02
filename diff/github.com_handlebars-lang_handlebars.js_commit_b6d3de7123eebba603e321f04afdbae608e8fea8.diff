@@ -1,0 +1,38 @@
+From b6d3de7123eebba603e321f04afdbae608e8fea8 Mon Sep 17 00:00:00 2001
+From: Nils Knappmeier <npm@knappi.org>
+Date: Sat, 13 Feb 2021 13:41:40 +0100
+Subject: [PATCH] fix: check prototype property access in strict-mode (#1736)
+
+---
+ lib/handlebars/runtime.js | 2 +-
+ spec/security.js          | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/lib/handlebars/runtime.js b/lib/handlebars/runtime.js
+index 67a500d79..36bf6c94d 100644
+--- a/lib/handlebars/runtime.js
++++ b/lib/handlebars/runtime.js
+@@ -124,7 +124,7 @@ export function template(templateSpec, env) {
+           loc: loc
+         });
+       }
+-      return obj[name];
++      return container.lookupProperty(obj, name);
+     },
+     lookupProperty: function(parent, propertyName) {
+       let result = parent[propertyName];
+diff --git a/spec/security.js b/spec/security.js
+index 2bc66f711..00eb1318b 100644
+--- a/spec/security.js
++++ b/spec/security.js
+@@ -298,6 +298,10 @@ describe('security issues', function() {
+         checkProtoPropertyAccess({ compat: true });
+       });
+ 
++      describe('in strict-mode', function() {
++        checkProtoPropertyAccess({ strict: true });
++      });
++
+       function checkProtoPropertyAccess(compileOptions) {
+         it('should be prohibited by default and log a warning', function() {
+           var spy = sinon.spy(console, 'error');

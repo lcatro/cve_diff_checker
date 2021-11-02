@@ -1,0 +1,55 @@
+From c95f938ff1effaf91729c050a0f1c8684da4dd63 Mon Sep 17 00:00:00 2001
+From: Tobias Stoeckmann <tobias@stoeckmann.org>
+Date: Sun, 19 Jan 2020 18:51:25 +0100
+Subject: ICO loader: Do not crash on invalid files
+
+If an ICO file contains icons with an excessively large amount of colors
+in its color map, an integer overflow can lead to 0 byte allocations of
+the color map.
+
+If such an icon is displayed later on, the color map access leads to
+out of boundary reads.
+
+Also verify that excessively large icons are not parsed at all to prevent
+out of boundary reads of raw pixel data during display.
+
+Signed-off-by: Tobias Stoeckmann <tobias@stoeckmann.org>
+---
+ src/modules/loaders/loader_ico.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/modules/loaders/loader_ico.c b/src/modules/loaders/loader_ico.c
+index f985a36..51457a7 100644
+--- a/src/modules/loaders/loader_ico.c
++++ b/src/modules/loaders/loader_ico.c
+@@ -7,6 +7,7 @@
+  */
+ #include "loader_common.h"
+ 
++#include <limits.h>
+ #include <string.h>
+ 
+ #define DEBUG 0
+@@ -168,6 +169,8 @@ ico_read_icon(ico_t * ico, int ino)
+      case 4:
+      case 8:
+         D("Allocating a %d slot colormap\n", ie->bih.colors);
++        if (UINT_MAX / sizeof(DATA32) < ie->bih.colors)
++           goto bail;
+         size = ie->bih.colors * sizeof(DATA32);
+         ie->cmap = malloc(size);
+         nr = fread(ie->cmap, 1, size, ico->fp);
+@@ -182,6 +185,10 @@ ico_read_icon(ico_t * ico, int ino)
+         break;
+      }
+ 
++   if (!IMAGE_DIMENSIONS_OK(ie->w, ie->h) || ie->bih.bpp == 0 ||
++       UINT_MAX / ie->bih.bpp < ie->w * ie->h)
++      goto bail;
++
+    size = ((ie->bih.bpp * ie->w + 31) / 32 * 4) * ie->h;
+    ie->pxls = malloc(size);
+    nr = fread(ie->pxls, 1, size, ico->fp);
+-- 
+cgit v1.2.3
+

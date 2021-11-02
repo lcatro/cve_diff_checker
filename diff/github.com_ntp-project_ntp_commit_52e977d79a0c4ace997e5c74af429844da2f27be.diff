@@ -1,0 +1,160 @@
+From 52e977d79a0c4ace997e5c74af429844da2f27be Mon Sep 17 00:00:00 2001
+From:  <davehart@shiny.ad.hartbrothers.com>
+Date: Thu, 6 Jan 2011 04:02:24 +0000
+Subject: [PATCH] [Bug 1773] openssl not detected during ./configure. [Bug
+ 1774] Segfaults if cryptostats enabled and built without OpenSSL.
+
+---
+ ChangeLog         |  2 ++
+ m4/ntp_openssl.m4 | 38 ++++++++++++++++----------------------
+ ntpd/ntp_config.c | 12 ++++++++++++
+ ntpd/ntp_util.c   | 12 ++----------
+ 4 files changed, 32 insertions(+), 32 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 6896b34fd..e56e89998 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,5 @@
++* [Bug 1773] openssl not detected during ./configure.
++* [Bug 1774] Segfaults if cryptostats enabled and built without OpenSSL.
+ (4.2.7p111) 2011/01/05 Released by Harlan Stenn <stenn@ntp.org>
+ * [Bug 1772] refclock_open() return value check wrong for ACTS.
+ * Default --with-openssl-libdir and --with-openssl-incdir to the values
+diff --git a/m4/ntp_openssl.m4 b/m4/ntp_openssl.m4
+index a57c55c03..192538964 100644
+--- a/m4/ntp_openssl.m4
++++ b/m4/ntp_openssl.m4
+@@ -31,23 +31,20 @@ case "$ans" in
+      '')
+ 	;;
+      *)
+-	pkgans=`$PKG_CONFIG --libs-only-L openssl | sed -e 's/^-L//'`
+-	case "$pkgans" in
+-	 '')
+-	    # Look in:
+-	    ans="/usr/lib /usr/lib/openssl /usr/sfw/lib"
+-	    ans="$ans /usr/local/lib /usr/local/ssl/lib /lib"
+-	    ;;
+-	 *)
+-	    ans="$pkgans"
+-	    ;;
+-	esac
++	pkgans="`$PKG_CONFIG --libs-only-L openssl | sed -e 's/^-L//'`" 2>/dev/null
++	test -f "${pkgans}/pkgconfig/openssl.pc" && ans="$pkgans"
+ 	;;
+     esac
+     ;;
+  *) # Look where they said
+     ;;
+ esac
++case "$ans" in
++ yes)
++    # Look in:
++    ans="/usr/lib /usr/lib/openssl /usr/sfw/lib"
++    ans="$ans /usr/local/lib /usr/local/ssl/lib /lib"
++esac
+ case "$ans" in
+  no)
+     ;;
+@@ -100,23 +97,20 @@ case "$ans" in
+      '')
+ 	;;
+      *)
+-	pkgans=`$PKG_CONFIG --cflags-only-I openssl | sed -e 's/^-I//'`
+-	case "$pkgans" in
+-	 '')
+-	    # Look in:
+-	    ans="/usr/include /usr/sfw/include /usr/local/include"
+-	    ans="$ans /usr/local/ssl/include"
+-	    ;;
+-	 *)
+-	    ans="$pkgans"
+-	    ;;
+-	esac
++	pkgans="`$PKG_CONFIG --cflags-only-I openssl | sed -e 's/^-I//'`" 2>/dev/null
++	test -f "${pkgans}/pkgconfig/openssl.pc" && ans="$pkgans"
+ 	;;
+     esac
+     ;;
+  *) # Look where they said
+     ;;
+ esac
++case "$ans" in
++ yes)
++    # Look in:
++    ans="/usr/include /usr/sfw/include /usr/local/include"
++    ans="$ans /usr/local/ssl/include"
++esac
+ case "$ans" in
+  no)
+     ;;
+diff --git a/ntpd/ntp_config.c b/ntpd/ntp_config.c
+index ca17b39ae..e6a61f083 100644
+--- a/ntpd/ntp_config.c
++++ b/ntpd/ntp_config.c
+@@ -2015,6 +2015,12 @@ config_monitor(
+ 	for (; pfilegen_token != NULL; pfilegen_token = pfilegen_token->link) {
+ 		filegen_string = keyword(pfilegen_token->i);
+ 		filegen = filegen_get(filegen_string);
++		if (NULL == filegen) {
++			msyslog(LOG_ERR,
++				"stats %s unrecognized",
++				filegen_string);
++			continue;
++		}
+ 		DPRINTF(4, ("enabling filegen for %s statistics '%s%s'\n",
+ 			    filegen_string, filegen->prefix, 
+ 			    filegen->basename));
+@@ -2026,6 +2032,12 @@ config_monitor(
+ 	for (; my_node != NULL; my_node = my_node->link) {
+ 		filegen_file = keyword(my_node->filegen_token);
+ 		filegen = filegen_get(filegen_file);
++		if (NULL == filegen) {
++			msyslog(LOG_ERR,
++				"filegen category '%s' unrecognized",
++				filegen_file);
++			continue;
++		}
+ 
+ 		/* Initialize the filegen variables to their pre-configuration states */
+ 		filegen_flag = filegen->flag;
+diff --git a/ntpd/ntp_util.c b/ntpd/ntp_util.c
+index db8bf80f6..d63156d11 100644
+--- a/ntpd/ntp_util.c
++++ b/ntpd/ntp_util.c
+@@ -80,12 +80,6 @@ double	wander_threshold = 1e-7;	/* initial frequency threshold */
+ # define MAXPATHLEN 256
+ #endif
+ 
+-#ifdef DEBUG_TIMING
+-static FILEGEN timingstats;
+-#endif
+-#ifdef AUTOKEY
+-static FILEGEN cryptostats;
+-#endif	/* AUTOKEY */
+ 
+ static	char statsdir[MAXPATHLEN] = NTP_VAR;
+ static FILEGEN peerstats;
+@@ -94,6 +88,8 @@ static FILEGEN clockstats;
+ static FILEGEN rawstats;
+ static FILEGEN sysstats;
+ static FILEGEN protostats;
++static FILEGEN cryptostats;
++static FILEGEN timingstats;
+ 
+ /*
+  * This controls whether stats are written to the fileset. Provided
+@@ -173,12 +169,8 @@ init_util(void)
+ 	filegen_register(statsdir, "rawstats",	  &rawstats);
+ 	filegen_register(statsdir, "sysstats",	  &sysstats);
+ 	filegen_register(statsdir, "protostats",  &protostats);
+-#ifdef AUTOKEY
+ 	filegen_register(statsdir, "cryptostats", &cryptostats);
+-#endif	/* AUTOKEY */
+-#ifdef DEBUG_TIMING
+ 	filegen_register(statsdir, "timingstats", &timingstats);
+-#endif	/* DEBUG_TIMING */
+ 	/*
+ 	 * register with libntp ntp_set_tod() to call us back
+ 	 * when time is stepped.

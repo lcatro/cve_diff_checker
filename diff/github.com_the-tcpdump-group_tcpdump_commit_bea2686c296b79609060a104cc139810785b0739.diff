@@ -1,0 +1,70 @@
+From bea2686c296b79609060a104cc139810785b0739 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 13:19:12 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14465/RSVP: Add a missing bounds check
+
+In rsvp_obj_print().
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-rsvp.c                        |   1 +
+ tests/TESTLIST                      |   1 +
+ tests/rsvp-rsvp_obj_print-oobr.out  |   7 +++++++
+ tests/rsvp-rsvp_obj_print-oobr.pcap | Bin 0 -> 391 bytes
+ 4 files changed, 9 insertions(+)
+ create mode 100644 tests/rsvp-rsvp_obj_print-oobr.out
+ create mode 100644 tests/rsvp-rsvp_obj_print-oobr.pcap
+
+diff --git a/print-rsvp.c b/print-rsvp.c
+index 256191692..438761ea3 100644
+--- a/print-rsvp.c
++++ b/print-rsvp.c
+@@ -1555,6 +1555,7 @@ rsvp_obj_print(netdissect_options *ndo,
+         case RSVP_OBJ_CLASSTYPE_OLD: /* fall through */
+             switch(rsvp_obj_ctype) {
+             case RSVP_CTYPE_1:
++                ND_TCHECK_32BITS(obj_tptr);
+                 ND_PRINT((ndo, "%s  CT: %u",
+                        ident,
+                        EXTRACT_32BITS(obj_tptr) & 0x7));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 73e80eba9..db1f87d84 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -555,6 +555,7 @@ isakmp-ikev1_n_print-oobr isakmp-ikev1_n_print-oobr.pcap isakmp-ikev1_n_print-oo
+ ldp-ldp_tlv_print-oobr ldp-ldp_tlv_print-oobr.pcap ldp-ldp_tlv_print-oobr.out -v -c1
+ icmp-icmp_print-oobr-1 icmp-icmp_print-oobr-1.pcap icmp-icmp_print-oobr-1.out -v -c3
+ icmp-icmp_print-oobr-2 icmp-icmp_print-oobr-2.pcap icmp-icmp_print-oobr-2.out -v -c3
++rsvp-rsvp_obj_print-oobr rsvp-rsvp_obj_print-oobr.pcap rsvp-rsvp_obj_print-oobr.out -v -c3
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/rsvp-rsvp_obj_print-oobr.out b/tests/rsvp-rsvp_obj_print-oobr.out
+new file mode 100644
+index 000000000..fc1a8c6a6
+--- /dev/null
++++ b/tests/rsvp-rsvp_obj_print-oobr.out
+@@ -0,0 +1,7 @@
++TIPC v5.0 226.0.0 > 64.14.1536, headerlength 56 bytes, MessageSize 51914 bytes, Link Changeover Protocol internal, messageType Unknown (0xcacacaca)[|TIPC]
++[|ether]
++IP (tos 0x0, ttl 14, id 44815, offset 0, flags [+, DF, rsvd], proto RSVP (46), length 40, bad cksum 3280 (->c411)!)
++    250.219.91.71 > 20.100.238.255: 
++	RSVPv1 Hello Message (20), Flags: [none], length: 16384, ttl: 0, checksum: 0x000e
++	  Class Type (old) Object (125) Flags: [reject if unknown], Class-Type: 1 (1), length: 4
++		 [|rsvp]
+diff --git a/tests/rsvp-rsvp_obj_print-oobr.pcap b/tests/rsvp-rsvp_obj_print-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c12da8d740f1f6e780dd9ac82690eb6b0a95acc3
+GIT binary patch
+literal 391
+zcmca|c+)~A1{MY|_|IUc4`eU`u|oj^ml!h>gBeJI=eOsyy0Zrv1o#;k1Q<FxPHjB}
+z0k<}Das8L)N@3uDnDPjuli?Y||NmG_0m>;bF#KbvJ8;m|boN}1|Md(E8teHVFc^3l
+zHT=2|?Jjarfk71LmIk0o5V#97MS-15Y!lN*kXt}l0c1GPlmp9vrZBidP2tl6nsOUx
+zO3J(cA|ecY3^@)A3@o*b{ESRYKnBQ13``6S|B+0=<ra`BAh$qFkzrurhMNMkUKWTU
+d;46a|j0vQ9L2QT?Ei^3%Rj69P;=h631OO6RQ2hV^
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,61 @@
+From b09edc0dbd18d8459ade4c7c941e562c16564f9e Mon Sep 17 00:00:00 2001
+From: Carsten Schmitz <carsten.schmitz@limesurvey.org>
+Date: Thu, 18 Jun 2015 08:33:50 +0200
+Subject: [PATCH] Fixed issue: SQL injection vulnerability in administration -
+ discovered by 0keeTeam / QIHU 360 company, China
+
+---
+ application/controllers/admin/questiongroups.php | 8 ++++----
+ application/helpers/admin/import_helper.php      | 3 +--
+ 2 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/application/controllers/admin/questiongroups.php b/application/controllers/admin/questiongroups.php
+index b5d858196e..4128f324ea 100644
+--- a/application/controllers/admin/questiongroups.php
++++ b/application/controllers/admin/questiongroups.php
+@@ -36,7 +36,7 @@ class questiongroups extends Survey_Common_Action
+     function import()
+     {
+         $action = $_POST['action'];
+-        $surveyid = $_POST['sid'];
++        $iSurveyID = (int)$_POST['sid'];
+ 
+         if ($action == 'importgroup')
+         {
+@@ -66,11 +66,11 @@ function import()
+ 
+             // IF WE GOT THIS FAR, THEN THE FILE HAS BEEN UPLOADED SUCCESFULLY
+             if (strtolower($sExtension) == 'lsg')
+-                $aImportResults = XMLImportGroup($sFullFilepath, $surveyid);
++                $aImportResults = XMLImportGroup($sFullFilepath, $iSurveyID);
+             else
+                 $this->getController()->error('Unknown file extension');
+             LimeExpressionManager::SetDirtyFlag(); // so refreshes syntax highlighting
+-            fixLanguageConsistency($surveyid);
++            fixLanguageConsistency($iSurveyID);
+ 
+             if (isset($aImportResults['fatalerror']))
+             {
+@@ -81,7 +81,7 @@ function import()
+             unlink($sFullFilepath);
+ 
+             $aData['display'] = $importgroup;
+-            $aData['surveyid'] = $surveyid;
++            $aData['surveyid'] = $iSurveyID;
+             $aData['aImportResults'] = $aImportResults;
+             $aData['sExtension'] = $sExtension;
+             //$aData['display']['menu_bars']['surveysummary'] = 'importgroup';
+diff --git a/application/helpers/admin/import_helper.php b/application/helpers/admin/import_helper.php
+index 6f59de6309..98e1aad437 100644
+--- a/application/helpers/admin/import_helper.php
++++ b/application/helpers/admin/import_helper.php
+@@ -59,8 +59,7 @@ function XMLImportGroup($sFullFilePath, $iNewSID)
+     // Import group table ===================================================================================
+ 
+ 
+-    $query = "SELECT MAX(group_order) AS maxgo FROM {{groups}} WHERE sid=$iNewSID";
+-    $iGroupOrder = Yii::app()->db->createCommand($query)->queryScalar();
++    $iGroupOrder = Yii::app()->db->createCommand()->select('MAX(group_order)')->from('{{groups}}')->where('sid=:sid',array(':sid'=>$iNewSID))->queryScalar();
+     if ($iGroupOrder === false)
+     {
+         $iNewGroupOrder=0;

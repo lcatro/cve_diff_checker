@@ -1,0 +1,106 @@
+From 42f249cabbbf5c026398e6d3b350f6f9536ea572 Mon Sep 17 00:00:00 2001
+From: JC Brand <jc@opkode.com>
+Date: Tue, 31 Jan 2017 22:18:26 +0000
+Subject: [PATCH] Prevent forging of messages via carbons.
+
+---
+ docs/CHANGES.md      |  1 +
+ spec/chatbox.js      | 45 +++++++++++++++++++++++++++++++++++++++++++-
+ src/converse-core.js |  9 ++++++++-
+ 3 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/docs/CHANGES.md b/docs/CHANGES.md
+index 0ec5a337d2..43f41624d8 100755
+--- a/docs/CHANGES.md
++++ b/docs/CHANGES.md
+@@ -10,6 +10,7 @@
+ - Bugfix. Login form wasn't rendered after logging out (when `auto_reconnect` is `true`). [jcbrand]
+ - Bugfix. Properly disconnect upon "host-unknown" error. [jcbrand]
+ - Bugfix. Minimized chats weren't removed when logging out. [jcbrand]
++- Security fix: Prevent message forging via carbons. (Thanks to ge0rg) [jcbrand]
+ 
+ ## 2.0.4 (2016-12-13)
+ - #737: Bugfix. Translations weren't being applied. [jcbrand]
+diff --git a/spec/chatbox.js b/spec/chatbox.js
+index 20a40e774c..fc8de582fd 100644
+--- a/spec/chatbox.js
++++ b/spec/chatbox.js
+@@ -766,7 +766,7 @@
+                     var msgtext = 'This is a carbon message';
+                     var sender_jid = mock.cur_names[1].replace(/ /g,'.').toLowerCase() + '@localhost';
+                     var msg = $msg({
+-                            'from': converse.bare_jid,
++                            'from': sender_jid,
+                             'id': (new Date()).getTime(),
+                             'to': converse.connection.jid,
+                             'type': 'chat',
+@@ -844,6 +844,49 @@
+                     expect(msg_txt).toEqual(msgtext);
+                 }));
+ 
++                it("will be discarded if it's a malicious message meant to look like a carbon copy", mock.initConverse(function (converse) {
++                    test_utils.createContacts(converse, 'current');
++                    test_utils.openControlBox();
++                    test_utils.openContactsPanel(converse);
++                    /* <message from="mallory@evil.example" to="b@xmpp.example">
++                     *    <received xmlns='urn:xmpp:carbons:2'>
++                     *      <forwarded xmlns='urn:xmpp:forward:0'>
++                     *          <message from="alice@xmpp.example" to="bob@xmpp.example/client1">
++                     *              <body>Please come to Creepy Valley tonight, alone!</body>
++                     *          </message>
++                     *      </forwarded>
++                     *    </received>
++                     * </message>
++                     */
++                    spyOn(converse, 'log');
++                    var msgtext = 'Please come to Creepy Valley tonight, alone!';
++                    var sender_jid = mock.cur_names[1].replace(/ /g,'.').toLowerCase() + '@localhost';
++                    var impersonated_jid = mock.cur_names[2].replace(/ /g,'.').toLowerCase() + '@localhost';
++                    var msg = $msg({
++                            'from': sender_jid,
++                            'id': (new Date()).getTime(),
++                            'to': converse.connection.jid,
++                            'type': 'chat',
++                            'xmlns': 'jabber:client'
++                        }).c('received', {'xmlns': 'urn:xmpp:carbons:2'})
++                          .c('forwarded', {'xmlns': 'urn:xmpp:forward:0'})
++                          .c('message', {
++                                'xmlns': 'jabber:client',
++                                'from': impersonated_jid,
++                                'to': converse.connection.jid,
++                                'type': 'chat'
++                        }).c('body').t(msgtext).tree();
++                    converse.chatboxes.onMessage(msg);
++
++                    // Check that chatbox for impersonated user is not created.
++                    var chatbox = converse.chatboxes.get(impersonated_jid);
++                    expect(chatbox).not.toBeDefined();
++
++                    // Check that the chatbox for the malicous user is not created
++                    chatbox = converse.chatboxes.get(sender_jid);
++                    expect(chatbox).not.toBeDefined();
++                }));
++
+                 it("received for a minimized chat box will increment a counter on its header", mock.initConverse(function (converse) {
+                     test_utils.createContacts(converse, 'current');
+                     test_utils.openControlBox();
+diff --git a/src/converse-core.js b/src/converse-core.js
+index 6a6389e9e9..5edaf33c8c 100755
+--- a/src/converse-core.js
++++ b/src/converse-core.js
+@@ -1447,7 +1447,14 @@
+                 }
+                 $forwarded = $message.find('forwarded');
+                 if ($forwarded.length) {
+-                    $message = $forwarded.children('message');
++                    var $forwarded_message = $forwarded.children('message');
++                    if (Strophe.getBareJidFromJid($forwarded_message.attr('from')) !== from_jid) {
++                        // Prevent message forging via carbons
++                        //
++                        // https://xmpp.org/extensions/xep-0280.html#security
++                        return true;
++                    }
++                    $message = $forwarded_message;
+                     $delay = $forwarded.children('delay');
+                     from_jid = $message.attr('from');
+                     to_jid = $message.attr('to');

@@ -1,0 +1,36 @@
+From f8378920345f4f4604202d4ab15ef64b2aceaa16 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 17:47:59 -0700
+Subject: [PATCH] Prevent a null pointer dereference in TFLite.
+
+PiperOrigin-RevId: 370800353
+Change-Id: Ic9c9712ce5c6e384c954dcd640a5bd9ff05c9a05
+---
+ tensorflow/lite/core/subgraph.cc | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/tensorflow/lite/core/subgraph.cc b/tensorflow/lite/core/subgraph.cc
+index 7f9dd2ce3363d..0273018b3bf03 100644
+--- a/tensorflow/lite/core/subgraph.cc
++++ b/tensorflow/lite/core/subgraph.cc
+@@ -1060,10 +1060,17 @@ TfLiteStatus Subgraph::Invoke() {
+         TF_LITE_ENSURE_STATUS(EnsureTensorDataIsReadable(tensor_index));
+       }
+       if (tensor->data.raw == nullptr && tensor->bytes > 0) {
+-        if (registration.builtin_code == kTfLiteBuiltinReshape && i == 1) {
++        if (registration.builtin_code == kTfLiteBuiltinReshape && i == 1 &&
++            tensor->dims->size != 1) {
+           // In general, having a tensor here with no buffer will be an error.
+-          // However, for the reshape operator, the second input tensor is only
+-          // used for the shape, not for the data. Thus, null buffer is ok.
++          // However, for the reshape operator, the second input tensor is
++          // sometimes only used for the shape, not for the data. Thus, null
++          // buffer is ok in this situation.
++          // The situation where null buffer is not ok for reshape operator is
++          // only when there are 2 inputs given to the node and the one
++          // corresponding to the shape (i == 1) is a vector that contains all
++          // dimensions. See `GetOutputShape()` function in
++          // `tensorflow/lite/kernels/reshape.cc`
+           continue;
+         } else {
+           // In all other cases, we need to return an error as otherwise we will

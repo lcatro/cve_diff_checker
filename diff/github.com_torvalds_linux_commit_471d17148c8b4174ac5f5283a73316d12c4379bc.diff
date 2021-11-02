@@ -1,0 +1,122 @@
+From 471d17148c8b4174ac5f5283a73316d12c4379bc Mon Sep 17 00:00:00 2001
+From: Benjamin Tissoires <benjamin.tissoires@redhat.com>
+Date: Thu, 24 Jul 2014 13:10:09 -0700
+Subject: [PATCH] Input: wacom - move the USB (now hid) Wacom driver in
+ drivers/hid
+
+wacom.ko is now a full HID driver, we have to move it into the proper
+subdirectory: drivers/hid.
+
+Signed-off-by: Benjamin Tissoires <benjamin.tissoires@redhat.com>
+Signed-off-by: Dmitry Torokhov <dmitry.torokhov@gmail.com>
+---
+ drivers/hid/Kconfig                       | 13 +++++++++++++
+ drivers/hid/Makefile                      |  3 +++
+ drivers/{input/tablet => hid}/wacom.h     |  0
+ drivers/{input/tablet => hid}/wacom_sys.c |  0
+ drivers/{input/tablet => hid}/wacom_wac.c |  0
+ drivers/{input/tablet => hid}/wacom_wac.h |  0
+ drivers/input/tablet/Kconfig              | 16 ----------------
+ drivers/input/tablet/Makefile             |  3 ---
+ 8 files changed, 16 insertions(+), 19 deletions(-)
+ rename drivers/{input/tablet => hid}/wacom.h (100%)
+ rename drivers/{input/tablet => hid}/wacom_sys.c (100%)
+ rename drivers/{input/tablet => hid}/wacom_wac.c (100%)
+ rename drivers/{input/tablet => hid}/wacom_wac.h (100%)
+
+diff --git a/drivers/hid/Kconfig b/drivers/hid/Kconfig
+index 5e79c6ad914f30..64366f1feb17dd 100644
+--- a/drivers/hid/Kconfig
++++ b/drivers/hid/Kconfig
+@@ -755,6 +755,19 @@ config HID_WACOM
+ 	---help---
+ 	Support for Wacom Graphire Bluetooth and Intuos4 WL tablets.
+ 
++config HID_USB_WACOM
++	tristate "Wacom Intuos/Graphire tablet support (USB)"
++	depends on HID
++	select POWER_SUPPLY
++	select NEW_LEDS
++	select LEDS_CLASS
++	help
++	  Say Y here if you want to use the USB version of the Wacom Intuos
++	  or Graphire tablet.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called wacom.
++
+ config HID_WIIMOTE
+ 	tristate "Nintendo Wii / Wii U peripherals"
+ 	depends on HID
+diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
+index a6fa6baf368e49..55b69acdb680aa 100644
+--- a/drivers/hid/Makefile
++++ b/drivers/hid/Makefile
+@@ -116,6 +116,9 @@ obj-$(CONFIG_HID_XINMO)		+= hid-xinmo.o
+ obj-$(CONFIG_HID_ZEROPLUS)	+= hid-zpff.o
+ obj-$(CONFIG_HID_ZYDACRON)	+= hid-zydacron.o
+ obj-$(CONFIG_HID_WACOM)		+= hid-wacom.o
++
++wacom-objs			:= wacom_wac.o wacom_sys.o
++obj-$(CONFIG_HID_USB_WACOM)	+= wacom.o
+ obj-$(CONFIG_HID_WALTOP)	+= hid-waltop.o
+ obj-$(CONFIG_HID_WIIMOTE)	+= hid-wiimote.o
+ obj-$(CONFIG_HID_SENSOR_HUB)	+= hid-sensor-hub.o
+diff --git a/drivers/input/tablet/wacom.h b/drivers/hid/wacom.h
+similarity index 100%
+rename from drivers/input/tablet/wacom.h
+rename to drivers/hid/wacom.h
+diff --git a/drivers/input/tablet/wacom_sys.c b/drivers/hid/wacom_sys.c
+similarity index 100%
+rename from drivers/input/tablet/wacom_sys.c
+rename to drivers/hid/wacom_sys.c
+diff --git a/drivers/input/tablet/wacom_wac.c b/drivers/hid/wacom_wac.c
+similarity index 100%
+rename from drivers/input/tablet/wacom_wac.c
+rename to drivers/hid/wacom_wac.c
+diff --git a/drivers/input/tablet/wacom_wac.h b/drivers/hid/wacom_wac.h
+similarity index 100%
+rename from drivers/input/tablet/wacom_wac.h
+rename to drivers/hid/wacom_wac.h
+diff --git a/drivers/input/tablet/Kconfig b/drivers/input/tablet/Kconfig
+index bed7cbf84cfd51..cd9c79e0a11b07 100644
+--- a/drivers/input/tablet/Kconfig
++++ b/drivers/input/tablet/Kconfig
+@@ -73,20 +73,4 @@ config TABLET_USB_KBTAB
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called kbtab.
+ 
+-config TABLET_USB_WACOM
+-	tristate "Wacom Intuos/Graphire tablet support (USB)"
+-	depends on USB_ARCH_HAS_HCD
+-	select POWER_SUPPLY
+-	select USB
+-	select NEW_LEDS
+-	select LEDS_CLASS
+-	help
+-	  Say Y here if you want to use the USB version of the Wacom Intuos
+-	  or Graphire tablet.  Make sure to say Y to "Mouse support"
+-	  (CONFIG_INPUT_MOUSEDEV) and/or "Event interface support"
+-	  (CONFIG_INPUT_EVDEV) as well.
+-
+-	  To compile this driver as a module, choose M here: the
+-	  module will be called wacom.
+-
+ endif
+diff --git a/drivers/input/tablet/Makefile b/drivers/input/tablet/Makefile
+index 3f6c25220638c1..cc3bc17d5b0874 100644
+--- a/drivers/input/tablet/Makefile
++++ b/drivers/input/tablet/Makefile
+@@ -2,12 +2,9 @@
+ # Makefile for the tablet drivers
+ #
+ 
+-# Multipart objects.
+-wacom-objs	:= wacom_wac.o wacom_sys.o
+ 
+ obj-$(CONFIG_TABLET_USB_ACECAD)	+= acecad.o
+ obj-$(CONFIG_TABLET_USB_AIPTEK)	+= aiptek.o
+ obj-$(CONFIG_TABLET_USB_GTCO)	+= gtco.o
+ obj-$(CONFIG_TABLET_USB_HANWANG) += hanwang.o
+ obj-$(CONFIG_TABLET_USB_KBTAB)	+= kbtab.o
+-obj-$(CONFIG_TABLET_USB_WACOM)	+= wacom.o

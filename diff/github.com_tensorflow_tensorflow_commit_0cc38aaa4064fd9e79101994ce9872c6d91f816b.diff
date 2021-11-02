@@ -1,0 +1,44 @@
+From 0cc38aaa4064fd9e79101994ce9872c6d91f816b Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 8 Dec 2020 09:31:57 -0800
+Subject: [PATCH] Prevent unitialized memory access in
+ `GraphConstructor::MakeEdge`
+
+The `MakeEdge` implementation assumes that there exists an output at `output_index` of `src` node and an input at `input_index` of `dst` node. However, if this is not the case this results in accessing data out of bounds. Because we are accessing an array that is a private member of a class and only in read only mode, this usually results only in unitialized memory access. However, it is reasonable to think that malicious users could manipulate these indexes to actually read data outside the class, thus resulting in information leakage and further exploits.
+
+PiperOrigin-RevId: 346343288
+Change-Id: I2127da27c2023d27f26efd39afa6c853385cab6f
+---
+ tensorflow/core/common_runtime/graph_constructor.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/tensorflow/core/common_runtime/graph_constructor.cc b/tensorflow/core/common_runtime/graph_constructor.cc
+index 92b07682d76cd..639739e9cac8c 100644
+--- a/tensorflow/core/common_runtime/graph_constructor.cc
++++ b/tensorflow/core/common_runtime/graph_constructor.cc
+@@ -44,6 +44,7 @@ limitations under the License.
+ #include "tensorflow/core/lib/gtl/inlined_vector.h"
+ #include "tensorflow/core/lib/strings/scanner.h"
+ #include "tensorflow/core/lib/strings/str_util.h"
++#include "tensorflow/core/platform/errors.h"
+ #include "tensorflow/core/platform/logging.h"
+ #include "tensorflow/core/platform/macros.h"
+ #include "tensorflow/core/public/version.h"
+@@ -1425,6 +1426,17 @@ void GraphConstructor::Undo() {
+ 
+ Status GraphConstructor::MakeEdge(Node* src, int output_index, Node* dst,
+                                   int input_index) {
++  if (output_index >= src->num_outputs()) {
++    return errors::InvalidArgument(
++        "Output ", output_index, " of node ", src->name(),
++        " does not exist. Node only has ", src->num_outputs(), " outputs.");
++  }
++  if (input_index >= dst->num_inputs()) {
++    return errors::InvalidArgument(
++        "Input ", input_index, " of node ", dst->name(),
++        " does not exist. Node only has ", dst->num_inputs(), " inputs.");
++  }
++
+   DataType src_out = src->output_type(output_index);
+   DataType dst_in = dst->input_type(input_index);
+   if (!TypesCompatible(dst_in, src_out)) {

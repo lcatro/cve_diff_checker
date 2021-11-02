@@ -1,0 +1,73 @@
+From 87b8c26b023c3fc37f0796b14bb13710f397b322 Mon Sep 17 00:00:00 2001
+From: Klaus Silveira <contact@klaussilveira.com>
+Date: Tue, 24 Apr 2018 11:16:32 -0400
+Subject: [PATCH] Fixed RCE in git grep.
+
+A specific option in git grep could be added inside the
+pattern to be searched for, resulting in possible RCE.
+
+Thanks to Kacper Szurek (https://security.szurek.pl) for
+catching this one!
+---
+ src/Git/Repository.php   |  4 +++-
+ tests/RepositoryTest.php | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+ create mode 100644 tests/RepositoryTest.php
+
+diff --git a/src/Git/Repository.php b/src/Git/Repository.php
+index 4435b114..136907c0 100644
+--- a/src/Git/Repository.php
++++ b/src/Git/Repository.php
+@@ -322,15 +322,17 @@ public function searchTree($query, $branch)
+             return null;
+         }
+ 
++        $query = preg_replace('/(--?[A-Za-z0-9\-]+)/', '', $query);
+         $query = escapeshellarg($query);
+ 
+         try {
+-            $results = $this->getClient()->run($this, "grep -i --line-number {$query} $branch");
++            $results = $this->getClient()->run($this, "grep -i --line-number -- {$query} $branch");
+         } catch (\RuntimeException $e) {
+             return false;
+         }
+ 
+         $results = explode("\n", $results);
++        $searchResults = [];
+ 
+         foreach ($results as $result) {
+             if ($result == '') {
+diff --git a/tests/RepositoryTest.php b/tests/RepositoryTest.php
+new file mode 100644
+index 00000000..65cf9f5f
+--- /dev/null
++++ b/tests/RepositoryTest.php
+@@ -0,0 +1,28 @@
++<?php
++
++use GitList\Git\Client;
++use GitList\Git\Repository;
++use PHPUnit\Framework\TestCase;
++use Prophecy\Argument;
++
++class RepositoryTest extends TestCase
++{
++    public function testIsSanitizingSearchWithPager()
++    {
++        $client = $this->prophesize(Client::class);
++        $client->run(Argument::type(Repository::class), "grep -i --line-number -- '=sleep 5;' master")->shouldBeCalled();
++
++        $repository = new Repository('/tmp', $client->reveal());
++        $repository->searchTree('--open-files-in-pager=sleep 5;', 'master');
++        $repository->searchTree('-O=sleep 5;', 'master');
++    }
++
++    public function testIsSanitizingSearchWithAnyOption()
++    {
++        $client = $this->prophesize(Client::class);
++        $client->run(Argument::type(Repository::class), "grep -i --line-number -- 'foobar  =bar;' foo")->shouldBeCalled();
++
++        $repository = new Repository('/tmp', $client->reveal());
++        $repository->searchTree('foobar --bar --foo=bar;', 'foo');
++    }
++}

@@ -1,0 +1,101 @@
+From 8d2d48d81b3c233fb64eb2ec1d7a9e1cf6a55a90 Mon Sep 17 00:00:00 2001
+From: jos <wjosdejong@gmail.com>
+Date: Sat, 18 Nov 2017 19:39:30 +0100
+Subject: [PATCH] Fixed a security issue in `typed-function` allowing arbitrary
+ code execution
+
+---
+ HISTORY.md                       |  3 +++
+ lib/expression/parse.js          |  2 +-
+ package.json                     |  2 +-
+ test/expression/parse.test.js    |  7 +++++++
+ test/expression/security.test.js | 18 ++++++++++++++++++
+ 5 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/HISTORY.md b/HISTORY.md
+index 3c27fa906e..6c1c435349 100644
+--- a/HISTORY.md
++++ b/HISTORY.md
+@@ -4,6 +4,9 @@
+ ## not yet released, version 3.17.0
+ 
+ - Improved `simplify` for nested exponentiations. Thanks @IvanVergiliev.
++- Fixed a security issue in `typed-function` allowing arbitrary code execution
++  in the JavaScript engine by creating a typed function with JavaScript code
++  in the name. Thanks Masato Kinugawa.
+ 
+ 
+ ## 2017-10-18, version 3.16.5
+diff --git a/lib/expression/parse.js b/lib/expression/parse.js
+index aef74f96e0..f956429a45 100644
+--- a/lib/expression/parse.js
++++ b/lib/expression/parse.js
+@@ -592,7 +592,7 @@ function factory (type, config, load, typed) {
+         value = parseAssignment();
+         return new AssignmentNode(node.object, node.index, value);
+       }
+-      else if (type.isFunctionNode(node)) {
++      else if (type.isFunctionNode(node) && type.isSymbolNode(node.fn)) {
+         // parse function assignment like 'f(x) = x^2'
+         valid = true;
+         args = [];
+diff --git a/package.json b/package.json
+index 6f438b8803..c6a849a839 100644
+--- a/package.json
++++ b/package.json
+@@ -93,7 +93,7 @@
+     "javascript-natural-sort": "0.7.1",
+     "seed-random": "2.2.0",
+     "tiny-emitter": "2.0.0",
+-    "typed-function": "0.10.5"
++    "typed-function": "0.10.6"
+   },
+   "devDependencies": {
+     "benchmark": "2.1.4",
+diff --git a/test/expression/parse.test.js b/test/expression/parse.test.js
+index 8a2a65454c..09a6f68684 100644
+--- a/test/expression/parse.test.js
++++ b/test/expression/parse.test.js
+@@ -812,6 +812,13 @@ describe('parse', function() {
+       assert.equal(obj.f(2), 4);
+     });
+ 
++    it('should not parse a function assignment in an accessor node', function () {
++      assert.throws(function () {
++        var scope = {}
++        var obj = parseAndEval('a["b"](x)=x^2', scope);
++      }, /SyntaxError: Invalid left hand side of assignment operator =/)
++    });
++
+     it('should parse an object containing a variable assignment', function () {
+       var scope = {};
+       assert.deepEqual(parseAndEval('{f: a=42}', scope), {f: 42});
+diff --git a/test/expression/security.test.js b/test/expression/security.test.js
+index 5583a1b63d..5078cce508 100644
+--- a/test/expression/security.test.js
++++ b/test/expression/security.test.js
+@@ -288,6 +288,24 @@ describe('security', function () {
+     }, /Undefined symbol Chain/);
+   })
+ 
++  it ('should not allow passing a function name containg bad contents', function () {
++    // underlying issues where:
++    // the input '[]["fn"]()=0'   
++    // - defines a function in the root scope, but this shouldn't be allowed syntax
++    // - there is a typed function created which unsecurely evaluates JS code with the function name in it 
++    //   -> when the function name contains JS code it can be executed, example:
++    //
++    //         var fn = typed("(){}+console.log(`hacked...`);function a", { "": function () { } })
++
++    assert.throws(function () {
++      math.eval('[]["(){}+console.log(`hacked...`);function a"]()=0')
++    }, /SyntaxError: Invalid left hand side of assignment operator =/);
++
++    assert.throws(function () {
++      math.eval('{}["(){}+console.log(`hacked...`);function a"]()=0')
++    }, /SyntaxError: Invalid left hand side of assignment operator =/);
++  })
++
+   it ('should allow calling functions on math', function () {
+     assert.equal(math.eval('sqrt(4)'), 2);
+   })

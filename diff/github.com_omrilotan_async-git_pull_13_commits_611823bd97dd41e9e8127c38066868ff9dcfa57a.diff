@@ -1,0 +1,85 @@
+From 611823bd97dd41e9e8127c38066868ff9dcfa57a Mon Sep 17 00:00:00 2001
+From: omrilotan <omri@hamadgera.com>
+Date: Wed, 20 Jan 2021 17:48:58 +0200
+Subject: [PATCH] Add test for reported vulnerabilities
+
+---
+ .npmignore              |  1 +
+ package.json            |  1 +
+ vulnerabilities/spec.js | 46 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 48 insertions(+)
+ create mode 100644 vulnerabilities/spec.js
+
+diff --git a/.npmignore b/.npmignore
+index 4d1d5ae..50bcc71 100644
+--- a/.npmignore
++++ b/.npmignore
+@@ -1,3 +1,4 @@
+ .*
+ *.log
+ spec.js
++vulnerabilities/*
+diff --git a/package.json b/package.json
+index dbd58f8..bde0369 100644
+--- a/package.json
++++ b/package.json
+@@ -33,6 +33,7 @@
+     "async-execute": "^1.1.0"
+   },
+   "devDependencies": {
++    "@lets/wait": "^2.0.2",
+     "@omrilotan/eslint-config": "^1.1.0",
+     "abuser": "^2.0.2",
+     "chai": "^4.2.0",
+diff --git a/vulnerabilities/spec.js b/vulnerabilities/spec.js
+new file mode 100644
+index 0000000..fc312e4
+--- /dev/null
++++ b/vulnerabilities/spec.js
+@@ -0,0 +1,46 @@
++const { promises: { access, unlink } } = require('fs');
++const wait = require('@lets/wait');
++const git = require('..');
++
++/**
++ * Check if file exists
++ * @param {string}
++ * @returns {boolean}
++ */
++const exists = async path => {
++	try {
++		await access(path);
++		return true;
++	} catch {
++		return false;
++	}
++};
++
++/**
++ * Fail silently and asynchronously
++ * @param {function}
++ * @param {...any}
++ * @returns {any}
++ */
++async function softly(fn, ...args) {
++	try {
++		return await fn(...args);
++	} catch (error) {
++		// ignore
++	}
++}
++
++describe('vulnerabilities', async() => {
++	afterEach(async() => {
++		await wait(100);
++		await softly(unlink, 'HACKED');
++	});
++	it('shell injection in reset', async() => {
++		await softly(git.reset, '; touch HACKED #');
++		expect(await exists('HACKED')).to.be.false;
++	});
++	it('shell injection in tag', async() => {
++		await softly(git.tag, '; touch HACKED #');
++		expect(await exists('HACKED')).to.be.false;
++	});
++});

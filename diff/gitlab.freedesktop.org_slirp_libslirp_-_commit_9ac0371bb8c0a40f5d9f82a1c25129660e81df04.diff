@@ -1,0 +1,106 @@
+From 9bd6c5913271eabcb7768a58197ed3301fe19f2d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Sat, 4 Apr 2020 22:42:13 +0200
+Subject: [PATCH 1/2] Fix use-afte-free in ip_reass() (CVE-2020-1983)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The q pointer is updated when the mbuf data is moved from m_dat to
+m_ext.
+
+m_ext buffer may also be realloc()'ed and moved during m_cat():
+q should also be updated in this case.
+
+Reported-by: Aviv Sasson <asasson@paloaltonetworks.com>
+Signed-off-by: Marc-AndrÃ© Lureau <marcandre.lureau@redhat.com>
+Reviewed-by: Samuel Thibault <samuel.thibault@ens-lyon.org>
+---
+ src/ip_input.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/ip_input.c b/src/ip_input.c
+index aa514ae..89a01d4 100644
+--- a/src/ip_input.c
++++ b/src/ip_input.c
+@@ -327,8 +327,7 @@ insert:
+      */
+     q = fp->frag_link.next;
+     m = dtom(slirp, q);
+-
+-    int was_ext = m->m_flags & M_EXT;
++    int delta = (char *)q - (m->m_flags & M_EXT ? m->m_ext : m->m_dat);
+ 
+     q = (struct ipasfrag *)q->ipf_next;
+     while (q != (struct ipasfrag *)&fp->frag_link) {
+@@ -351,8 +350,7 @@ insert:
+      * then an m_ext buffer was alloced. But fp->ipq_next points to the old
+      * buffer (in the mbuf), so we must point ip into the new buffer.
+      */
+-    if (!was_ext && m->m_flags & M_EXT) {
+-        int delta = (char *)q - m->m_dat;
++    if (m->m_flags & M_EXT) {
+         q = (struct ipasfrag *)(m->m_ext + delta);
+     }
+ 
+-- 
+GitLab
+
+
+From 1abf18b2b5edb462797629ed47ad4515a195686e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc-Andr=C3=A9=20Lureau?= <marcandre.lureau@redhat.com>
+Date: Mon, 6 Apr 2020 12:54:24 +0200
+Subject: [PATCH 2/2] Update CHANGELOG
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Marc-AndrÃ© Lureau <marcandre.lureau@redhat.com>
+---
+ CHANGELOG.md | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 67b0a74..d4c935b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ ### Added
+ 
++ - `SLIRP_VERSION_STRING` macro, with the git sha suffix when building from git
++ - `SlirpConfig.disable_dns`, to disable DNS redirection #16
++
+ ### Changed
+ 
++ - `slirp_version_string()` now has the git sha suffix when building form git
++ - Limit DNS redirection to port 53 #16
++
+ ### Deprecated
+ 
+ ### Fixed
+ 
++ - Fix build regression with mingw & NetBSD
++ - Fix use-afte-free in `ip_reass()` (CVE-2020-1983)
++
+ ## [4.2.0] - 2020-03-17
+ 
+ ### Added
+@@ -22,12 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+  - New API function `slirp_add_unix`: add a forward rule to a Unix socket.
+  - New API function `slirp_remove_guestfwd`: remove a forward rule previously
+    added by `slirp_add_exec`, `slirp_add_unix` or `slirp_add_guestfwd`
+- - New SlirpConfig.outbound_addr{,6} fields to bind output socket to a
++ - New `SlirpConfig.outbound_addr{,6}` fields to bind output socket to a
+    specific address
+ 
+ ### Changed
+ 
+- - socket: do not fallback on host loopback if get_dns_addr() failed
++ - socket: do not fallback on host loopback if `get_dns_addr()` failed
+    or the address is in slirp network
+ 
+ ### Fixed
+-- 
+GitLab
+

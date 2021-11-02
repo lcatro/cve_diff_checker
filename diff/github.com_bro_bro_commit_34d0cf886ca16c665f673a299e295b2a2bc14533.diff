@@ -1,0 +1,69 @@
+From 34d0cf886ca16c665f673a299e295b2a2bc14533 Mon Sep 17 00:00:00 2001
+From: Jon Siwek <jsiwek@corelight.com>
+Date: Mon, 10 Sep 2018 18:06:07 -0500
+Subject: [PATCH] Fix potential memory leak in Kerberos scripts
+
+Reported by Maksim Shudrak.
+---
+ scripts/base/protocols/krb/main.bro               |   6 ++++--
+ .../btest/Traces/krb/optional-service-name.pcap   | Bin 0 -> 580 bytes
+ testing/btest/core/leaks/krb-service-name.test    |   8 ++++++++
+ 3 files changed, 12 insertions(+), 2 deletions(-)
+ create mode 100755 testing/btest/Traces/krb/optional-service-name.pcap
+ create mode 100644 testing/btest/core/leaks/krb-service-name.test
+
+diff --git a/scripts/base/protocols/krb/main.bro b/scripts/base/protocols/krb/main.bro
+index e45ce92cd59..076ea0e1718 100644
+--- a/scripts/base/protocols/krb/main.bro
++++ b/scripts/base/protocols/krb/main.bro
+@@ -140,7 +140,8 @@ event krb_as_request(c: connection, msg: KDC_Request) &priority=5
+ 
+ 	c$krb$request_type = "AS";
+ 	c$krb$client       = fmt("%s/%s", msg?$client_name ? msg$client_name : "", msg$service_realm);
+-	c$krb$service      = msg$service_name;
++	if ( msg?$service_name )
++		c$krb$service      = msg$service_name;
+ 
+ 	if ( msg?$from )
+ 		c$krb$from = msg$from;
+@@ -183,7 +184,8 @@ event krb_tgs_request(c: connection, msg: KDC_Request) &priority=5
+ 		return;
+ 
+ 	c$krb$request_type = "TGS";
+-	c$krb$service = msg$service_name;
++	if ( msg?$service_name )
++		c$krb$service = msg$service_name;
+ 	if ( msg?$from ) 
+ 		c$krb$from = msg$from;
+ 	c$krb$till = msg$till;
+diff --git a/testing/btest/Traces/krb/optional-service-name.pcap b/testing/btest/Traces/krb/optional-service-name.pcap
+new file mode 100755
+index 0000000000000000000000000000000000000000..85df6b2ae28e45fa61587bdcd392a8e8f4e0d2f0
+GIT binary patch
+literal 580
+zcmca|c+)~A1{MZ55MW?n1akhAC;KaW;bRB_vO##yx})<xZ(|U1pZn=hBLhPP2ZJjE
+zgM(@%14BLAljZ{}p8h_t;#3|(#A<=b1!=FtRvob4AoS~l&oc%FCKlEdMrLLPMn(=U
+zm@SNqEKD#P+<<~03^5yG58MV5!OIQ|4s72|L8gOjSuMa20WuwE%bNxP=82oSfbIpE
+z>~--C$PkdJ2GaZtTYzj3#%k&!!7CtBza7JBss!`IFF=1mP5l5e1PHRSG7QodGBYu<
+zE&>u<OQH-S7O*q3GB_|W2rQD4mdH*mN=hxtFODxtP0Y!SFUibJ)yqpP&RHrb!Ea<>
+zY;Is_Xl!6)Vqst!wG2~eISUh0>eUsj20*j9VSZQuv=)T1hJBxEl>;#Bmzbc1{TpED
+ztZk6^)wHt~;s>T<eN4d60r?}WF2o>c0mu&^kH{?nyTcIZIzux<b0bR=v#6!4Ow3&B
+qx0eB>ZB}whvwOHY>-o8ctdcR10_kH~C~P1o&6Zu1RFYl-mjwX5kFiz&
+
+literal 0
+HcmV?d00001
+
+diff --git a/testing/btest/core/leaks/krb-service-name.test b/testing/btest/core/leaks/krb-service-name.test
+new file mode 100644
+index 00000000000..a0d8a84322b
+--- /dev/null
++++ b/testing/btest/core/leaks/krb-service-name.test
+@@ -0,0 +1,8 @@
++# Needs perftools support.
++#
++# @TEST-REQUIRES: bro  --help 2>&1 | grep -q mem-leaks
++#
++# @TEST-GROUP: leaks
++#
++# @TEST-EXEC: HEAP_CHECK_DUMP_DIRECTORY=. HEAPCHECK=local btest-bg-run bro bro -m -r $TRACES/krb/optional-service-name.pcap
++# @TEST-EXEC: btest-bg-wait 60

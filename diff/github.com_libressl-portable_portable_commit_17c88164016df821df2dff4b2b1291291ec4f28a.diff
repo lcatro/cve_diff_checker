@@ -1,0 +1,88 @@
+From 17c88164016df821df2dff4b2b1291291ec4f28a Mon Sep 17 00:00:00 2001
+From: Joel Sing <joel@sing.id.au>
+Date: Sun, 20 Sep 2020 02:09:35 +1000
+Subject: [PATCH] Make pthread_mutex static initialisation work on Windows.
+
+This takes the dynamic initialisation code added to CRYPTO_lock() in e5081719
+and applies it to the Window's pthread_mutex implementation. This allows for
+PTHREAD_MUTEX_INITIALIZER to be used on Windows.
+
+bcook has agreed to place this code in the public domain (as per the rest of
+the code in pthread.h).
+---
+ include/compat/pthread.h | 28 +++++++++++++++++++++++-----
+ 1 file changed, 23 insertions(+), 5 deletions(-)
+ mode change 100644 => 100755 include/compat/pthread.h
+
+diff --git a/include/compat/pthread.h b/include/compat/pthread.h
+old mode 100644
+new mode 100755
+index b2a42a6a2..1527d3c0d
+--- a/include/compat/pthread.h
++++ b/include/compat/pthread.h
+@@ -8,6 +8,8 @@
+ 
+ #ifdef _WIN32
+ 
++#include <malloc.h>
++#include <stdlib.h>
+ #include <windows.h>
+ 
+ /*
+@@ -18,7 +20,7 @@
+ /*
+  * Static mutex initialization values.
+  */
+-#define PTHREAD_MUTEX_INITIALIZER	{ 0, 0, 0, 0, 0, 0 }
++#define PTHREAD_MUTEX_INITIALIZER	{ .lock = NULL }
+ 
+ /*
+  * Once definitions.
+@@ -60,27 +62,43 @@ pthread_equal(pthread_t t1, pthread_t t2)
+ 	return t1 == t2;
+ }
+ 
+-typedef CRITICAL_SECTION pthread_mutex_t;
++struct pthread_mutex {
++	volatile LPCRITICAL_SECTION lock;
++};
++typedef struct pthread_mutex pthread_mutex_t;
+ typedef void pthread_mutexattr_t;
+ 
+ static inline int
+ pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
+ {
+-	InitializeCriticalSection(mutex);
++	if ((mutex->lock = malloc(sizeof(CRITICAL_SECTION))) == NULL)
++		exit(ENOMEM);
++	InitializeCriticalSection(mutex->lock);
+ 	return 0;
+ }
+ 
+ static inline int
+ pthread_mutex_lock(pthread_mutex_t *mutex)
+ {
+-	EnterCriticalSection(mutex);
++	if (mutex->lock == NULL) {
++		LPCRITICAL_SECTION lcs;
++
++		if ((lcs = malloc(sizeof(CRITICAL_SECTION))) == NULL)
++			exit(ENOMEM);
++		InitializeCriticalSection(lcs);
++		if (InterlockedCompareExchangePointer((PVOID*)&mutex->lock, (PVOID)lcs, NULL) != NULL) {
++			DeleteCriticalSection(lcs);
++			free(lcs);
++		}
++	}
++	EnterCriticalSection(mutex->lock);
+ 	return 0;
+ }
+ 
+ static inline int
+ pthread_mutex_unlock(pthread_mutex_t *mutex)
+ {
+-	LeaveCriticalSection(mutex);
++	LeaveCriticalSection(mutex->lock);
+ 	return 0;
+ }
+ 

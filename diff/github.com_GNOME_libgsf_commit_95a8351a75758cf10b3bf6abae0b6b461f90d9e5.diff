@@ -1,0 +1,56 @@
+From 95a8351a75758cf10b3bf6abae0b6b461f90d9e5 Mon Sep 17 00:00:00 2001
+From: Morten Welinder <terra@gnome.org>
+Date: Fri, 2 Dec 2016 22:19:54 -0500
+Subject: [PATCH] tar: fix crash on broken tar file.
+
+---
+ ChangeLog            | 7 +++++++
+ NEWS                 | 3 +++
+ gsf/gsf-infile-tar.c | 4 +++-
+ 3 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index c891943c..18508ece 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,10 @@
++2016-11-30  Morten Welinder  <terra@gnome.org>
++
++	* gsf/gsf-infile-tar.c (tar_directory_for_file): Handle the case
++	where what we expected to be a directory is a file.  (That implies
++	a corrupted tar file.)  Thanks to Behzad Najjarpour Jabbari,
++	Secunia Research at Flexera Software for discovering this.
++
+ 2016-08-20  Morten Welinder <terra@gnome.org>
+ 
+ 	* configure.ac: Post-release bump.
+diff --git a/NEWS b/NEWS
+index 01cc67a9..cfc1e43a 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,5 +1,8 @@
+ libgsf 1.14.41
+ 
++Morten:
++	* Fix corrupted-tar-file crash.
++
+ --------------------------------------------------------------------------
+ libgsf 1.14.40
+ 
+diff --git a/gsf/gsf-infile-tar.c b/gsf/gsf-infile-tar.c
+index 271595da..17513fe6 100644
+--- a/gsf/gsf-infile-tar.c
++++ b/gsf/gsf-infile-tar.c
+@@ -181,9 +181,11 @@ tar_directory_for_file (GsfInfileTar *dir, const char *name, gboolean last)
+ 				gsf_infile_child_by_name (GSF_INFILE (dir),
+ 							  dirname);
+ 			if (subdir) {
++				dir = GSF_IS_INFILE_TAR (subdir)
++					? GSF_INFILE_TAR (subdir)
++					: dir;
+ 				/* Undo the ref. */
+ 				g_object_unref (subdir);
+-				dir = GSF_INFILE_TAR (subdir);
+ 			} else
+ 				dir = tar_create_dir (dir, dirname);
+ 		}

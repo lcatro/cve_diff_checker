@@ -1,0 +1,60 @@
+From a4cfb3ddc1f4cdb585e05c0e9b2f8e52a0e2ee3e Mon Sep 17 00:00:00 2001
+From: Lukas Reschke <lukas@statuscode.ch>
+Date: Fri, 9 Sep 2016 13:52:34 +0200
+Subject: [PATCH] Don't print exception message in HTML
+
+The exception message is potentially influenced by user input and could thus be confusing (e.g. somebody could try to open a file like "Please send a mail to support@foo.com", and then the message would include that string.
+
+It is thus reasonable to not show the exception message by default. Also for the browser view I added an `exit()` at the end, as otherwise the XML exception would be attached.
+---
+ apps/dav/lib/files/browsererrorpageplugin.php | 7 +++----
+ apps/dav/templates/exception.php              | 1 -
+ 2 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/apps/dav/lib/files/browsererrorpageplugin.php b/apps/dav/lib/files/browsererrorpageplugin.php
+index 8c257b324b9c..b58ce4df874c 100644
+--- a/apps/dav/lib/files/browsererrorpageplugin.php
++++ b/apps/dav/lib/files/browsererrorpageplugin.php
+@@ -31,7 +31,6 @@
+ use Sabre\DAV\ServerPlugin;
+ 
+ class BrowserErrorPagePlugin extends ServerPlugin {
+-
+ 	/** @var Server */
+ 	private $server;
+ 
+@@ -88,8 +87,7 @@ public function logException(\Exception $ex) {
+ 
+ 	/**
+ 	 * @codeCoverageIgnore
+-	 * @param \Exception $ex
+-	 * @param int $httpCode
++	 * @param \Exception $exception
+ 	 * @return bool|string
+ 	 */
+ 	public function generateBody(\Exception $exception) {
+@@ -109,10 +107,11 @@ public function generateBody(\Exception $exception) {
+ 		return $content->fetchPage();
+ 	}
+ 
+-	/*
++	/**
+ 	 * @codeCoverageIgnore
+ 	 */
+ 	public function sendResponse() {
+ 		$this->server->sapi->sendResponse($this->server->httpResponse);
++		exit();
+ 	}
+ }
+diff --git a/apps/dav/templates/exception.php b/apps/dav/templates/exception.php
+index 01c4eea4b5ad..eb53e4f75aa0 100644
+--- a/apps/dav/templates/exception.php
++++ b/apps/dav/templates/exception.php
+@@ -6,7 +6,6 @@
+ ?>
+ <span class="error error-wide">
+ 	<h2><strong><?php p($_['title']) ?></strong></h2>
+-		<p><?php p($_['message']) ?></p>
+ 	<br>
+ 
+ 	<h2><strong><?php p($l->t('Technical details')) ?></strong></h2>

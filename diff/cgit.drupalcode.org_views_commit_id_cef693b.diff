@@ -1,0 +1,55 @@
+diff --git a/includes/cache.inc b/includes/cache.inc
+index 2080fddd239c41538c97036e9660dfd12eb680a9..98145c5a4968eaa846c5b24b2e72f0b1fa7d6b64 100644
+--- a/includes/cache.inc
++++ b/includes/cache.inc
+@@ -67,12 +67,11 @@ function _views_fetch_data($table = NULL, $move = TRUE, $reset = FALSE) {
+   }
+   else {
+     if (!$fully_loaded) {
+-      $data = views_cache_get('views_data', TRUE);
+-      if (!empty($data->data)) {
++      if ($data = views_cache_get('views_data', TRUE)) {
+         $cache = $data->data;
+       }
+-
+-      if (empty($cache)) {
++      else {
++        // No cache entry, rebuild.
+         $cache = _views_fetch_data_build();
+       }
+       $fully_loaded = TRUE;
+diff --git a/tests/views_module.test b/tests/views_module.test
+index 6a27443a6fe47af8eff1f7ad15f9239c46fdad6b..e160964a90e9a5e85cf6e88bb15fb6ab771bb8ca 100644
+--- a/tests/views_module.test
++++ b/tests/views_module.test
+@@ -194,6 +194,30 @@ class ViewsModuleTest extends ViewsSqlTest {
+     $this->assertEqual(variable_get('views_test_views_data_count', 0), 1, 'Views data rebuilt once');
+     $this->assertFalse(drupal_static('_views_fetch_data_fully_loaded'), 'Views data is not fully loaded');
+ 
++
++    // Test if the cache consistency is ensured. There was an issue where
++    // calling _views_fetch_data() first with a table would prevent the function
++    // from properly rebuilt a missing the general cache entry.
++    // See https://www.drupal.org/node/2475669 for details.
++    // Make sure we start with a empty cache.
++    $this->resetStaticViewsDataCache();
++    cache_clear_all('*', 'cache_views', TRUE);
++
++    // Prime the static cache of _views_fetch_data() by calling it with a table
++    // first.
++    views_fetch_data('views_test');
++    // Now remove the general cache.
++    cache_clear_all('views_data:en', 'cache_views');
++    // Reset the static cache to see if fetches from the persistent cache
++    // properly rebuild the static cache.
++    $this->resetStaticViewsDataCache();
++    // Prime the static cache of _views_fetch_data() by calling it with a table
++    // first.
++    views_fetch_data('views_test');
++    // Fetch the general cache, which was deleted, an see if it is rebuild
++    // properly.
++    views_fetch_data();
++    $this->assertTrue(cache_get('views_data:en', 'cache_views'), 'Cache for all tables was properly rebuild.');
+   }
+ 
+   /**

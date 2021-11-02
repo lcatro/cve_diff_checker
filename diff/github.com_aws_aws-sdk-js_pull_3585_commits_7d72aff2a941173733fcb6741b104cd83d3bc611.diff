@@ -1,0 +1,95 @@
+From 7d72aff2a941173733fcb6741b104cd83d3bc611 Mon Sep 17 00:00:00 2001
+From: Allan Zheng <zheallan@amazon.com>
+Date: Thu, 17 Dec 2020 16:28:57 -0800
+Subject: [PATCH] throw at invalid profile name in shared ini file
+
+---
+ .../bugfix-Credentials-74d3274e.json          |  5 +++
+ lib/util.js                                   |  5 +++
+ test/util.spec.js                             | 31 ++++++++++++++++---
+ 3 files changed, 37 insertions(+), 4 deletions(-)
+ create mode 100644 .changes/next-release/bugfix-Credentials-74d3274e.json
+
+diff --git a/.changes/next-release/bugfix-Credentials-74d3274e.json b/.changes/next-release/bugfix-Credentials-74d3274e.json
+new file mode 100644
+index 0000000000..1e09531d11
+--- /dev/null
++++ b/.changes/next-release/bugfix-Credentials-74d3274e.json
+@@ -0,0 +1,5 @@
++{
++  "type": "bugfix",
++  "category": "Credentials",
++  "description": "SDK will throw if shared ini file's profile name can be resolved to __proto__"
++}
+\ No newline at end of file
+diff --git a/lib/util.js b/lib/util.js
+index 28428bf0b6..f4f54cf7fb 100644
+--- a/lib/util.js
++++ b/lib/util.js
+@@ -219,6 +219,11 @@ var util = {
+         var section = line.match(/^\s*\[([^\[\]]+)\]\s*$/);
+         if (section) {
+           currentSection = section[1];
++          if (currentSection === '__proto__' || currentSection.split(/\s/)[1] === '__proto__') {
++            throw util.error(
++              new Error('Cannot load profile name \'' + currentSection + '\' from shared ini file.')
++            );
++          }
+         } else if (currentSection) {
+           var item = line.match(/^\s*(.+?)\s*=\s*(.+?)\s*$/);
+           if (item) {
+diff --git a/test/util.spec.js b/test/util.spec.js
+index 248d7e8a35..12caf735a9 100644
+--- a/test/util.spec.js
++++ b/test/util.spec.js
+@@ -310,7 +310,7 @@
+   });
+ 
+   describe('AWS.util.ini', function() {
+-    return describe('parse', function() {
++    describe('parse', function() {
+       it('parses an ini file', function() {
+         var ini, map;
+         ini = '; comment at the beginning of the line\n[section1] ; comment at end of line\ninvalidline\nkey1=value1 ; another comment\n  key2 = value2;value3\n  key3 = value4 # yet another comment\n[emptysection]\n#key1=value1';
+@@ -318,15 +318,38 @@
+         expect(map.section1.key1).to.equal('value1');
+         expect(map.section1.key2).to.equal('value2;value3');
+         expect(map.section1.key3).to.equal('value4');
+-        return expect(map.emptysection).to.equal(void 0);
++        expect(map.emptysection).to.equal(void 0);
+       });
+-      return it('ignores leading and trailing white space', function() {
++
++      it('ignores leading and trailing white space', function() {
+         var ini, map;
+         ini = '[section1] ; comment at end of line\n\r\tkey1=\t\rvalue1\t\r\n\v\f\tkey2=value2\f\v\n\u00a0key3   =  \u00a0value3\u3000\n[emptysection]';
+         map = AWS.util.ini.parse(ini);
+         expect(map.section1.key1).to.equal('value1');
+         expect(map.section1.key2).to.equal('value2');
+-        return expect(map.section1.key3).to.equal('value3');
++        expect(map.section1.key3).to.equal('value3');
++      });
++
++      it('throws if the profile name is __proto__', function(done) {
++        var ini, map;
++        ini = '[__proto__]\nkey1=value1';
++        try {
++          AWS.util.ini.parse(ini);
++        } catch (err) {
++          expect(err.message).to.equal('Cannot load profile name \'__proto__\' from shared ini file.');
++          done();
++        }
++      });
++
++      it('throws if the profile name is "profile __proto__"', function(done) {
++        var ini, map;
++        ini = '[profile __proto__]\nkey2=value2';
++        try {
++          AWS.util.ini.parse(ini);
++        } catch (err) {
++          expect(err.message).to.equal('Cannot load profile name \'profile __proto__\' from shared ini file.');
++          done();
++        }
+       });
+     });
+   });

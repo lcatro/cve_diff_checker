@@ -1,0 +1,64 @@
+From 88b2dac837e81cf56dce05e6e7b5989332c0092d Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Fri, 24 Mar 2017 00:55:18 +0100
+Subject: [PATCH] CVE-2017-13036/OSPFv3: Add a bounds check before fetching
+ data
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-ospf6.c                   |   1 +
+ tests/TESTLIST                  |   1 +
+ tests/ospf6_decode_v3_asan.out  |   2 ++
+ tests/ospf6_decode_v3_asan.pcap | Bin 0 -> 114 bytes
+ 4 files changed, 4 insertions(+)
+ create mode 100644 tests/ospf6_decode_v3_asan.out
+ create mode 100644 tests/ospf6_decode_v3_asan.pcap
+
+diff --git a/print-ospf6.c b/print-ospf6.c
+index e8a9dc6d5..381fdbbf7 100644
+--- a/print-ospf6.c
++++ b/print-ospf6.c
+@@ -735,6 +735,7 @@ ospf6_decode_v3(netdissect_options *ndo,
+ 	case OSPF_TYPE_HELLO: {
+ 		register const struct hello6 *hellop = (const struct hello6 *)((const uint8_t *)op + OSPF6HDR_LEN);
+ 
++		ND_TCHECK_32BITS(&hellop->hello_options);
+ 		ND_PRINT((ndo, "\n\tOptions [%s]",
+ 		          bittok2str(ospf6_option_values, "none",
+ 		          EXTRACT_32BITS(&hellop->hello_options))));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 3adc5c7f3..20d655c88 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -549,6 +549,7 @@ pim_header_asan-2	pim_header_asan-2.pcap		pim_header_asan-2.out	-v
+ pim_header_asan-3	pim_header_asan-3.pcap		pim_header_asan-3.out	-v
+ ip6_frag_asan		ip6_frag_asan.pcap		ip6_frag_asan.out	-v
+ radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
++ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/ospf6_decode_v3_asan.out b/tests/ospf6_decode_v3_asan.out
+new file mode 100644
+index 000000000..aef79e0a7
+--- /dev/null
++++ b/tests/ospf6_decode_v3_asan.out
+@@ -0,0 +1,2 @@
++IP6 (class 0x76, flowlabel 0xf6701, hlim 109, next-header OSPF (89) payload length: 30311) 6767:6780:6767:a102:4:b6:5853:f040 > 1000:a32:8847:1::116: OSPFv3, Hello, length 30311
++	Router-ID 1.1.0.34, Area 0.255.2.2, Instance 82 [|ospf3]
+diff --git a/tests/ospf6_decode_v3_asan.pcap b/tests/ospf6_decode_v3_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d50b9c1f4c865d1807e7ef51aa5f7160df16280
+GIT binary patch
+literal 114
+zcmca|c+)~A1{MZ}pZ^)S85kPe85kHCf%xsZh$v>>4hAnE+xtIX!~cW-7XX!sTe~U5
+zw%tw7PiHJkkIYR^Pj5(12OF?0BKU)Y00Wm%hdbB+kU3(^j3B_E#PFYqsZTV>6~qGo
+Dd$k<c
+
+literal 0
+HcmV?d00001
+

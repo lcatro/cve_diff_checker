@@ -1,0 +1,37 @@
+From a56346ceacad28bf470017a6bda1d5518d0bd943 Mon Sep 17 00:00:00 2001
+From: Stepan Palamarchuk <stepan@fb.com>
+Date: Thu, 14 Feb 2019 13:40:41 -0800
+Subject: [PATCH] Throw on bad types during skipping data
+
+Summary:
+The current code silently returns on bad types. In case when we have an invalid data, we may get a container of a large size with a bad type, this would lead to us running long loop doing nothing (though we already can say that the data is invalid).
+
+The new code would throw an exception as soon as we try to skip a value of invalid type.
+
+Fixes CVE-2019-3552
+
+Reviewed By: stevegury
+
+Differential Revision: D13892370
+
+fbshipit-source-id: 582c81f90cf40c105383083cb38815816140e3ad
+---
+ .../java/com/facebook/thrift/protocol/TProtocolUtil.java     | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/thrift/lib/java/thrift/src/main/java/com/facebook/thrift/protocol/TProtocolUtil.java b/thrift/lib/java/thrift/src/main/java/com/facebook/thrift/protocol/TProtocolUtil.java
+index f23d0a979e2..a18253b1acd 100644
+--- a/thrift/lib/java/thrift/src/main/java/com/facebook/thrift/protocol/TProtocolUtil.java
++++ b/thrift/lib/java/thrift/src/main/java/com/facebook/thrift/protocol/TProtocolUtil.java
+@@ -166,7 +166,10 @@ public static void skip(TProtocol prot, byte type, int maxDepth)
+         break;
+       }
+     default:
+-      break;
++      {
++        throw new TProtocolException(
++              TProtocolException.INVALID_DATA, "Invalid type encountered during skipping: " + type);
++      }
+     }
+   }
+ 

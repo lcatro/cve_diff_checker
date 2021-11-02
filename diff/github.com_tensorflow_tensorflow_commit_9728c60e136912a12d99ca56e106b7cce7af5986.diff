@@ -1,0 +1,31 @@
+From 9728c60e136912a12d99ca56e106b7cce7af5986 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 30 Jul 2021 19:05:41 -0700
+Subject: [PATCH] Ensure validation sticks in `save_restore_v2_ops.cc`
+
+PiperOrigin-RevId: 387924206
+Change-Id: I6156842eb3230076b5812c0815f3e66bd5241454
+---
+ tensorflow/core/kernels/save_restore_v2_ops.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/save_restore_v2_ops.cc b/tensorflow/core/kernels/save_restore_v2_ops.cc
+index 44738d0f0cca3..809a26030b850 100644
+--- a/tensorflow/core/kernels/save_restore_v2_ops.cc
++++ b/tensorflow/core/kernels/save_restore_v2_ops.cc
+@@ -98,6 +98,7 @@ class SaveV2 : public OpKernel {
+     const Tensor& shape_and_slices = context->input(2);
+     ValidateInputs(true /* is save op */, context, prefix, tensor_names,
+                    shape_and_slices);
++    if (!context->status().ok()) return;
+ 
+     const int kFixedInputs = 3;  // Prefix, tensor names, shape_and_slices.
+     const int num_tensors = static_cast<int>(tensor_names.NumElements());
+@@ -177,6 +178,7 @@ class RestoreV2 : public OpKernel {
+                                         " expected dtypes."));
+     ValidateInputs(false /* not save op */, context, prefix, tensor_names,
+                    shape_and_slices);
++    if (!context->status().ok()) return;
+ 
+     const string& prefix_string = prefix.scalar<tstring>()();
+ 

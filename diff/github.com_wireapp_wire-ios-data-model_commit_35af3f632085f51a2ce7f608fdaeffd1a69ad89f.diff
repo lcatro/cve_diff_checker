@@ -1,0 +1,70 @@
+From 35af3f632085f51a2ce7f608fdaeffd1a69ad89f Mon Sep 17 00:00:00 2001
+From: Jacob Persson <jacob.persson@gmail.com>
+Date: Fri, 7 May 2021 14:24:03 +0200
+Subject: [PATCH] Merge pull request from GHSA-789p-78mj-hfmc
+
+---
+ Source/Model/User/ZMUser.swift                  | 14 +++++++++++---
+ Tests/Source/Model/User/ZMUserTests+Swift.swift | 13 +++++++++++++
+ 2 files changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/Source/Model/User/ZMUser.swift b/Source/Model/User/ZMUser.swift
+index 6fddacf18..631e4893a 100644
+--- a/Source/Model/User/ZMUser.swift
++++ b/Source/Model/User/ZMUser.swift
+@@ -250,20 +250,28 @@ extension ZMUser {
+     
+     public static var previewImageDownloadFilter: NSPredicate {
+         let assetIdExists = NSPredicate(format: "(%K != nil)", ZMUser.previewProfileAssetIdentifierKey)
++        let assetIdIsValid = NSPredicate { (user, _) -> Bool in
++            guard let user = user as? ZMUser else { return false }
++            return user.previewProfileAssetIdentifier?.isValidAssetID ?? false
++        }
+         let notCached = NSPredicate() { (user, _) -> Bool in
+             guard let user = user as? ZMUser else { return false }
+             return user.imageSmallProfileData == nil
+         }
+-        return NSCompoundPredicate(andPredicateWithSubpredicates: [assetIdExists, notCached])
++        return NSCompoundPredicate(andPredicateWithSubpredicates: [assetIdExists, assetIdIsValid, notCached])
+     }
+-    
++
+     public static var completeImageDownloadFilter: NSPredicate {
+         let assetIdExists = NSPredicate(format: "(%K != nil)", ZMUser.completeProfileAssetIdentifierKey)
++        let assetIdIsValid = NSPredicate { (user, _) -> Bool in
++            guard let user = user as? ZMUser else { return false }
++            return user.completeProfileAssetIdentifier?.isValidAssetID ?? false
++        }
+         let notCached = NSPredicate() { (user, _) -> Bool in
+             guard let user = user as? ZMUser else { return false }
+             return user.imageMediumData == nil
+         }
+-        return NSCompoundPredicate(andPredicateWithSubpredicates: [assetIdExists, notCached])
++        return NSCompoundPredicate(andPredicateWithSubpredicates: [assetIdExists, assetIdIsValid, notCached])
+     }
+     
+     public func updateAndSyncProfileAssetIdentifiers(previewIdentifier: String, completeIdentifier: String) {
+diff --git a/Tests/Source/Model/User/ZMUserTests+Swift.swift b/Tests/Source/Model/User/ZMUserTests+Swift.swift
+index 8e962f3db..6de96c2b7 100644
+--- a/Tests/Source/Model/User/ZMUserTests+Swift.swift
++++ b/Tests/Source/Model/User/ZMUserTests+Swift.swift
+@@ -223,6 +223,19 @@ extension ZMUserTests_Swift {
+             XCTAssertFalse(predicate.evaluate(with: user))
+         }
+     }
++
++    func testThatCompleteImageDownloadFilterDoesNotPickUpUsersWithInvalidAssetId() {
++        syncMOC.performGroupedBlockAndWait {
++            // GIVEN
++            let predicate = ZMUser.completeImageDownloadFilter
++            let user = ZMUser(remoteID: UUID.create(), createIfNeeded: true, in: self.syncMOC)
++            user?.completeProfileAssetIdentifier = "not+valid+id"
++            user?.setImage(data: "foo".data(using: .utf8), size: .complete)
++
++            // THEN
++            XCTAssertFalse(predicate.evaluate(with: user))
++        }
++    }
+     
+     func testThatPreviewImageDownloadFilterDoesNotPickUpUsersWithCachedImages() {
+         syncMOC.performGroupedBlockAndWait {

@@ -1,0 +1,68 @@
+From 781caf83dba90c18349f930bbaaa0e89f003f874 Mon Sep 17 00:00:00 2001
+From: Chris Danis <cdanis@wikimedia.org>
+Date: Thu, 23 Sep 2021 16:21:05 -0400
+Subject: [PATCH] SECURITY: fix PoolCounter protection of Special:Contributions
+
+The call to $pager->getNumRows() itself triggers execution of
+the database query backing the page, so, that call must be inside
+the callback given to PoolCounterWorkViaCallback.
+
+CVE-2021-41800
+
+Bug: T284419
+Change-Id: I8b7b41a355be265389a4a8c9ea91301d4e23ae1b
+---
+ includes/specials/SpecialContributions.php | 32 ++++++++++++----------
+ 1 file changed, 17 insertions(+), 15 deletions(-)
+
+diff --git a/includes/specials/SpecialContributions.php b/includes/specials/SpecialContributions.php
+index 44bfe4a08db..963dc4623b1 100644
+--- a/includes/specials/SpecialContributions.php
++++ b/includes/specials/SpecialContributions.php
+@@ -310,8 +310,6 @@ public function execute( $par ) {
+ 				$limits = $this->getConfig()->get( 'RangeContributionsCIDRLimit' );
+ 				$limit = $limits[ IPUtils::isIPv4( $target ) ? 'IPv4' : 'IPv6' ];
+ 				$out->addWikiMsg( 'sp-contributions-outofrange', $limit );
+-			} elseif ( !$pager->getNumRows() ) {
+-				$out->addWikiMsg( 'nocontribs', $target );
+ 			} else {
+ 				// @todo We just want a wiki ID here, not a "DB domain", but
+ 				// current status of MediaWiki conflates the two. See T235955.
+@@ -322,20 +320,24 @@ public function execute( $par ) {
+ 					$poolKey .= 'u:' . $this->getUser()->getId();
+ 				}
+ 				$work = new PoolCounterWorkViaCallback( 'SpecialContributions', $poolKey, [
+-					'doWork' => function () use ( $pager, $out ) {
+-						# Show a message about replica DB lag, if applicable
+-						$lag = $pager->getDatabase()->getSessionLagStatus()['lag'];
+-						if ( $lag > 0 ) {
+-							$out->showLagWarning( $lag );
++					'doWork' => function () use ( $pager, $out, $target ) {
++						if ( !$pager->getNumRows() ) {
++							$out->addWikiMsg( 'nocontribs', $target );
++						} else {
++							# Show a message about replica DB lag, if applicable
++							$lag = $pager->getDatabase()->getSessionLagStatus()['lag'];
++							if ( $lag > 0 ) {
++								$out->showLagWarning( $lag );
++							}
++
++							$output = $pager->getBody();
++							if ( !$this->including() ) {
++								$output = $pager->getNavigationBar() .
++									$output .
++									$pager->getNavigationBar();
++							}
++							$out->addHTML( $output );
+ 						}
+-
+-						$output = $pager->getBody();
+-						if ( !$this->including() ) {
+-							$output = $pager->getNavigationBar() .
+-								$output .
+-								$pager->getNavigationBar();
+-						}
+-						$out->addHTML( $output );
+ 					},
+ 					'error' => function () use ( $out ) {
+ 						$msg = $this->getUser()->isAnon()

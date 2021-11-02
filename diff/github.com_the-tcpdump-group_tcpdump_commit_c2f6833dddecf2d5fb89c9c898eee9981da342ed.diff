@@ -1,0 +1,78 @@
+From c2f6833dddecf2d5fb89c9c898eee9981da342ed Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sat, 29 Jul 2017 21:45:35 +0100
+Subject: [PATCH] CVE-2017-13044/HNCP: add DHCPv4-Data bounds checks
+
+dhcpv4_print() in print-hncp.c had the same bug as dhcpv6_print(), apply
+a fix along the same lines.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-hncp.c                    |   4 ++++
+ tests/TESTLIST                  |   2 ++
+ tests/hncp_dhcpv4data-oobr.out  |   4 ++++
+ tests/hncp_dhcpv4data-oobr.pcap | Bin 0 -> 170 bytes
+ 4 files changed, 10 insertions(+)
+ create mode 100644 tests/hncp_dhcpv4data-oobr.out
+ create mode 100644 tests/hncp_dhcpv4data-oobr.pcap
+
+diff --git a/print-hncp.c b/print-hncp.c
+index d0c9a3ea6..c0e006448 100644
+--- a/print-hncp.c
++++ b/print-hncp.c
+@@ -270,6 +270,8 @@ dhcpv4_print(netdissect_options *ndo,
+ 
+     i = 0;
+     while (i < length) {
++        if (i + 2 > length)
++            return -1;
+         tlv = cp + i;
+         type = (uint8_t)tlv[0];
+         optlen = (uint8_t)tlv[1];
+@@ -281,6 +283,8 @@ dhcpv4_print(netdissect_options *ndo,
+ 
+         ND_PRINT((ndo, "%s", tok2str(dh4opt_str, "Unknown", type)));
+         ND_PRINT((ndo," (%u)", optlen + 2 ));
++        if (i + 2 + optlen > length)
++            return -1;
+ 
+         switch (type) {
+         case DH4OPT_DNS_SERVERS:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index c72f7de6f..b42ba5b14 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -560,6 +560,8 @@ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
+ # code path and will not test the vulnerability unless modified respectively.
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
++# Same comments apply to the case below.
++hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/hncp_dhcpv4data-oobr.out b/tests/hncp_dhcpv4data-oobr.out
+new file mode 100644
+index 000000000..7d558dd9d
+--- /dev/null
++++ b/tests/hncp_dhcpv4data-oobr.out
+@@ -0,0 +1,4 @@
++IP truncated-ip - 260 bytes missing! (tos 0x12,ECT(0), ttl 48, id 21323, offset 0, flags [+, DF, rsvd], proto UDP (17), length 296, bad cksum 8e0f (->cd08)!)
++    1.2.7.0.1812 > 128.253.0.96.8231: hncp (268)
++	DHCPv4-Data (6)
++		DNS-server (98) (invalid)
+diff --git a/tests/hncp_dhcpv4data-oobr.pcap b/tests/hncp_dhcpv4data-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb7c7766ad6f131f47c75e048a501de4d9cafe0a
+GIT binary patch
+literal 170
+zcmca|c+)~A1{MZR2?mDZw!57E3=9m6KrF)`u&tOufFTRWHUf+Nkf>&0P&lw)^;`}H
+zS0P4?VDASE27-P3j7;nd4SyLD*hLi7g_(g$RT-GrK)fi|0FOwyzyA+0FwAB6_Wd8j
+xydnk$p!k0vV5kKulx1Le`#*u1`;lZl%U+-gCUj9oi^N|H48J%S{{LtE1^~xPFY^EZ
+
+literal 0
+HcmV?d00001
+

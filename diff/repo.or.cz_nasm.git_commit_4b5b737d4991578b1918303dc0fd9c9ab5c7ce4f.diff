@@ -1,0 +1,37 @@
+From 4b5b737d4991578b1918303dc0fd9c9ab5c7ce4f Mon Sep 17 00:00:00 2001
+From: Cyrill Gorcunov <gorcunov@gmail.com>
+Date: Mon, 29 Oct 2018 22:54:08 +0300
+Subject: [PATCH] preproc: Don't access out of bound data on malformed input
+
+There are a number of places still where we test text
+data which is potentially may be an empty string. This
+is known to happen on fuzzer input but usually doesn't
+take place in regular valid programs. Surely we need
+to revisit preprocessor code for this kind of errors.
+
+https://bugzilla.nasm.us/show_bug.cgi?id=3392525
+
+Signed-off-by: Cyrill Gorcunov <gorcunov@gmail.com>
+---
+ asm/preproc.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/asm/preproc.c b/asm/preproc.c
+index 9034135c..ecf89f1b 100644
+--- a/asm/preproc.c
++++ b/asm/preproc.c
+@@ -2271,8 +2271,9 @@ static int do_directive(Token *tline, char **output)
+ 
+     skip_white_(tline);
+     if (!tline || !tok_type_(tline, TOK_PREPROC_ID) ||
+-        (tline->text[1] == '%' || tline->text[1] == '$'
+-         || tline->text[1] == '!'))
++        (tline->text[0] && (tline->text[1] == '%' ||
++			    tline->text[1] == '$' ||
++			    tline->text[1] == '!')))
+         return NO_DIRECTIVE_FOUND;
+ 
+     i = pp_token_hash(tline->text);
+-- 
+2.11.4.GIT
+

@@ -1,0 +1,39 @@
+From 9113dc6a303604a2d9812ac70c17d076ef11886c Mon Sep 17 00:00:00 2001
+From: Li Qiang <liq3ea@gmail.com>
+Date: Tue, 21 Feb 2017 22:34:20 -0800
+Subject: smartcard: fix memory leak in vcard_apdu_new
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In the error path, 'new_apdu->a_data' is not freed.
+This can be triggered by the guest continuely.
+
+Signed-off-by: Li Qiang <liqiang6-s@360.cn>
+Reviewed-by: Marc-André Lureau <marcandre.lureau@redhat.com>
+---
+ src/card_7816.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/card_7816.c b/src/card_7816.c
+index b598ef9..0082504 100644
+--- a/src/card_7816.c
++++ b/src/card_7816.c
+@@ -341,12 +341,12 @@ vcard_apdu_new(unsigned char *raw_apdu, int len, vcard_7816_status_t *status)
+     new_apdu->a_len = len;
+     *status = vcard_apdu_set_class(new_apdu);
+     if (*status != VCARD7816_STATUS_SUCCESS) {
+-        g_free(new_apdu);
++        vcard_apdu_delete(new_apdu);
+         return NULL;
+     }
+     *status = vcard_apdu_set_length(new_apdu);
+     if (*status != VCARD7816_STATUS_SUCCESS) {
+-        g_free(new_apdu);
++        vcard_apdu_delete(new_apdu);
+         new_apdu = NULL;
+     }
+     return new_apdu;
+-- 
+cgit v1.2.1
+

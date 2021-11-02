@@ -1,0 +1,34 @@
+From fc4c8608fa122f38673b9dddcb8fef4a15a9c884 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Thu, 16 Apr 2020 09:48:31 -0500
+Subject: [PATCH] xss: SLA Name
+
+This mitigates an issue discovered by Gais Cyber Security where the SLA Name
+can be exploited via XSS to execute code. This sanitizes the content for
+`create()` and `update()` with `Format::htmlchars()` so we are safe from any
+XSS attempts.
+---
+ include/class.sla.php | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/include/class.sla.php b/include/class.sla.php
+index 12d7beabf9..af30a7b59f 100644
+--- a/include/class.sla.php
++++ b/include/class.sla.php
+@@ -106,7 +106,7 @@ static function getVarScope() {
+     }
+ 
+     function update($vars, &$errors) {
+-
++        $vars = Format::htmlchars($vars);
+         if (!$vars['grace_period'])
+             $errors['grace_period'] = __('Grace period required');
+         elseif (!is_numeric($vars['grace_period']))
+@@ -208,6 +208,7 @@ static function getIdByName($name) {
+     }
+ 
+     static function create($vars=false, &$errors=array()) {
++        $vars = Format::htmlchars($vars);
+         $sla = new static($vars);
+         $sla->created = SqlFunction::NOW();
+         return $sla;

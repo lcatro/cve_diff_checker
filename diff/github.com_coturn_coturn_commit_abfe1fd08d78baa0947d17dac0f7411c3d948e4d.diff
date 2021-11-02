@@ -1,0 +1,255 @@
+From ff5e5478a3e1b426bad053828099403cfc5c1f5f Mon Sep 17 00:00:00 2001
+From: Sandro Gauci <sandro@enablesecurity.com>
+Date: Mon, 30 Nov 2020 14:02:35 +0100
+Subject: [PATCH 1/8] ioa_addr_is_loopback now covers 0.0.0.0/8
+
+---
+ src/client/ns_turn_ioaddr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index 5740e7c82..28a31c8a1 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -480,7 +480,7 @@ int ioa_addr_is_loopback(ioa_addr *addr)
+ 	if(addr) {
+ 		if(addr->ss.sa_family == AF_INET) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s4.sin_addr));
+-			return (u[0] == 127);
++			return (u[0] == 127 || u[0] == 0);
+ 		} else if(addr->ss.sa_family == AF_INET6) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
+ 			if(u[7] == 1) {
+
+From af50d63a152cd9505d38f02bc552848748805e7b Mon Sep 17 00:00:00 2001
+From: Sandro Gauci <sandro@enablesecurity.com>
+Date: Mon, 30 Nov 2020 14:04:27 +0100
+Subject: [PATCH 2/8] ioa_addr_is_loopback ipv6 now properly blocks ::1
+
+---
+ src/client/ns_turn_ioaddr.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index 28a31c8a1..e917ef8aa 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -483,9 +483,9 @@ int ioa_addr_is_loopback(ioa_addr *addr)
+ 			return (u[0] == 127 || u[0] == 0);
+ 		} else if(addr->ss.sa_family == AF_INET6) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
+-			if(u[7] == 1) {
++			if(u[15] == 1) {
+ 				int i;
+-				for(i=0;i<7;++i) {
++				for(i=0;i<15;++i) {
+ 					if(u[i])
+ 						return 0;
+ 				}
+
+From 6c774b9fb8d9d76576ece10a6429172ed3800466 Mon Sep 17 00:00:00 2001
+From: Sandro Gauci <sandro@enablesecurity.com>
+Date: Mon, 30 Nov 2020 14:05:22 +0100
+Subject: [PATCH 3/8] ioa_addr_is_loopback now also covers ::
+
+---
+ src/client/ns_turn_ioaddr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index e917ef8aa..4d2be204a 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -483,7 +483,7 @@ int ioa_addr_is_loopback(ioa_addr *addr)
+ 			return (u[0] == 127 || u[0] == 0);
+ 		} else if(addr->ss.sa_family == AF_INET6) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
+-			if(u[15] == 1) {
++			if(u[15] == 1 || u[15] == 0) {
+ 				int i;
+ 				for(i=0;i<15;++i) {
+ 					if(u[i])
+
+From 560684c894498285f9e4271f3c924ebf01f36307 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?M=C3=A9sz=C3=A1ros=20Mih=C3=A1ly?= <misi@majd.eu>
+Date: Mon, 7 Dec 2020 08:31:43 +0100
+Subject: [PATCH 4/8] Tidy: Move zero check to own function
+
+---
+ src/client/ns_turn_ioaddr.c | 25 +++++++++++++++++++++++--
+ src/client/ns_turn_ioaddr.h |  1 +
+ src/server/ns_turn_server.c |  2 +-
+ 3 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index 4d2be204a..86b968865 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -480,10 +480,31 @@ int ioa_addr_is_loopback(ioa_addr *addr)
+ 	if(addr) {
+ 		if(addr->ss.sa_family == AF_INET) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s4.sin_addr));
+-			return (u[0] == 127 || u[0] == 0);
++			return (u[0] == 127);
+ 		} else if(addr->ss.sa_family == AF_INET6) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
+-			if(u[15] == 1 || u[15] == 0) {
++			if(u[15] == 1) {
++				int i;
++				for(i=0;i<15;++i) {
++					if(u[i])
++						return 0;
++				}
++				return 1;
++			}
++		}
++	}
++	return 0;
++}
++
++int ioa_addr_is_zero(ioa_addr *addr)
++{
++	if(addr) {
++		if(addr->ss.sa_family == AF_INET) {
++			const uint8_t *u = ((const uint8_t*)&(addr->s4.sin_addr));
++			return (u[0] == 0);
++		} else if(addr->ss.sa_family == AF_INET6) {
++			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
++			if(u[15] == 0) {
+ 				int i;
+ 				for(i=0;i<15;++i) {
+ 					if(u[i])
+diff --git a/src/client/ns_turn_ioaddr.h b/src/client/ns_turn_ioaddr.h
+index a83d0fab4..bdd21dd76 100644
+--- a/src/client/ns_turn_ioaddr.h
++++ b/src/client/ns_turn_ioaddr.h
+@@ -89,6 +89,7 @@ void ioa_addr_range_cpy(ioa_addr_range* dest, const ioa_addr_range* src);
+ 
+ int ioa_addr_is_multicast(ioa_addr *a);
+ int ioa_addr_is_loopback(ioa_addr *addr);
++int ioa_addr_is_zero(ioa_addr *addr);
+ 
+ /////// Map "public" address to "private" address //////////////
+ 
+diff --git a/src/server/ns_turn_server.c b/src/server/ns_turn_server.c
+index 38a151348..bf8e279e4 100644
+--- a/src/server/ns_turn_server.c
++++ b/src/server/ns_turn_server.c
+@@ -271,7 +271,7 @@ static int good_peer_addr(turn_turnserver *server, const char* realm, ioa_addr *
+ 	if(server && peer_addr) {
+ 		if(*(server->no_multicast_peers) && ioa_addr_is_multicast(peer_addr))
+ 			return 0;
+-		if( !*(server->allow_loopback_peers) && ioa_addr_is_loopback(peer_addr))
++		if( !*(server->allow_loopback_peers) && ioa_addr_is_loopback(peer_addr) && ioa_addr_is_zero(peer_addr))
+ 			return 0;
+ 
+ 		{
+
+From 649cbf966181846ecdd7847e4543dd287a78d295 Mon Sep 17 00:00:00 2001
+From: Sandro Gauci <sandro@enablesecurity.com>
+Date: Mon, 7 Dec 2020 12:27:25 +0100
+Subject: [PATCH 5/8] fixed logic for banning loopback and zero addr
+
+---
+ src/server/ns_turn_server.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/server/ns_turn_server.c b/src/server/ns_turn_server.c
+index bf8e279e4..9f1e4ef13 100644
+--- a/src/server/ns_turn_server.c
++++ b/src/server/ns_turn_server.c
+@@ -271,7 +271,7 @@ static int good_peer_addr(turn_turnserver *server, const char* realm, ioa_addr *
+ 	if(server && peer_addr) {
+ 		if(*(server->no_multicast_peers) && ioa_addr_is_multicast(peer_addr))
+ 			return 0;
+-		if( !*(server->allow_loopback_peers) && ioa_addr_is_loopback(peer_addr) && ioa_addr_is_zero(peer_addr))
++		if( !*(server->allow_loopback_peers) && (ioa_addr_is_loopback(peer_addr) || ioa_addr_is_zero(peer_addr)))
+ 			return 0;
+ 
+ 		{
+
+From 9c7deff4b8ed8c323c87b9ede75481bd6bc3154d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?M=C3=A9sz=C3=A1ros=20Mih=C3=A1ly?= <misi@majd.eu>
+Date: Mon, 7 Dec 2020 14:28:23 +0100
+Subject: [PATCH 6/8] Separate addr zero check from allow_loopback_peers
+
+---
+ src/server/ns_turn_server.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/server/ns_turn_server.c b/src/server/ns_turn_server.c
+index 9f1e4ef13..2d2ef00b2 100644
+--- a/src/server/ns_turn_server.c
++++ b/src/server/ns_turn_server.c
+@@ -271,7 +271,9 @@ static int good_peer_addr(turn_turnserver *server, const char* realm, ioa_addr *
+ 	if(server && peer_addr) {
+ 		if(*(server->no_multicast_peers) && ioa_addr_is_multicast(peer_addr))
+ 			return 0;
+-		if( !*(server->allow_loopback_peers) && (ioa_addr_is_loopback(peer_addr) || ioa_addr_is_zero(peer_addr)))
++		if( !*(server->allow_loopback_peers) && ioa_addr_is_loopback(peer_addr))
++			return 0;
++		if (ioa_addr_is_zero(peer_addr))
+ 			return 0;
+ 
+ 		{
+
+From dd0ffdb51a4cddaf1d6662079fa91f6f32bd26a8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?M=C3=A9sz=C3=A1ros=20Mih=C3=A1ly?= <misi@majd.eu>
+Date: Thu, 10 Dec 2020 14:15:26 +0100
+Subject: [PATCH 7/8] Add comment to ioa_addr_is_zero
+
+---
+ src/client/ns_turn_ioaddr.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index 86b968865..c8c0faf99 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -496,6 +496,12 @@ int ioa_addr_is_loopback(ioa_addr *addr)
+ 	return 0;
+ }
+ 
++/*
++To avoid a vulnerability this function checks whether the addr is in 0.0.0.0/8 or ::/128.
++Source from (INADDR_ANY) 0.0.0.0/32 and (in6addr_any) ::/128 routed to loopback on Linux systems for old BSD backward compatibility.
++https://github.com/torvalds/linux/blob/a2f5ea9e314ba6778f885c805c921e9362ec0420/net/ipv6/tcp_ipv6.c#L182
++To avoid any trouble we match the whole 0.0.0.0/8 that defined in RFC6890 as local network "this".
++*/
+ int ioa_addr_is_zero(ioa_addr *addr)
+ {
+ 	if(addr) {
+
+From d84028b6dbc9eb7d3f8828ec37ae02a0963257b6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?M=C3=A9sz=C3=A1ros=20Mih=C3=A1ly?= <misi@majd.eu>
+Date: Thu, 10 Dec 2020 14:17:00 +0100
+Subject: [PATCH 8/8] Simplify the ipv6 ::/128 (in6addr_any) check
+
+---
+ src/client/ns_turn_ioaddr.c | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/src/client/ns_turn_ioaddr.c b/src/client/ns_turn_ioaddr.c
+index c8c0faf99..810476fe1 100644
+--- a/src/client/ns_turn_ioaddr.c
++++ b/src/client/ns_turn_ioaddr.c
+@@ -510,14 +510,12 @@ int ioa_addr_is_zero(ioa_addr *addr)
+ 			return (u[0] == 0);
+ 		} else if(addr->ss.sa_family == AF_INET6) {
+ 			const uint8_t *u = ((const uint8_t*)&(addr->s6.sin6_addr));
+-			if(u[15] == 0) {
+-				int i;
+-				for(i=0;i<15;++i) {
+-					if(u[i])
+-						return 0;
+-				}
+-				return 1;
++			int i;
++			for(i=0;i<=15;++i) {
++				if(u[i])
++					return 0;
+ 			}
++			return 1;
+ 		}
+ 	}
+ 	return 0;

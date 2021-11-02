@@ -1,0 +1,64 @@
+From cea98166008301e614e0d36776bf9435a536136e Mon Sep 17 00:00:00 2001
+From: DRC <information@virtualgl.org>
+Date: Fri, 23 Aug 2019 09:54:21 -0500
+Subject: [PATCH] Server: Fix two issues identified by ASan
+
+1. If the TLSPlain and X509Plain security types were both disabled, then
+   rfbOptPamAuth() would overflow the name field in the secTypes
+   structure when testing the "none" security type, since the name of
+   that security type has less than five characters.  This issue was
+   innocuous, since the overflow was fully contained within the secTypes
+   structure, but the ASan error caused Xvnc to abort, which made it
+   difficult to detect other errors.
+
+2. If an ill-behaved RFB client sent the TurboVNC Server a fence
+   message with more than 64 bytes, then the TurboVNC Server would
+   try to read that message and subsequently overflow the stack before
+   it detected that the payload was too large.  This could never have
+   occurred with any of the VNC viewers that currently support the RFB
+   flow control extensions (TigerVNC and TurboVNC, namely.)  This issue
+   was also innocuous, since the stack overflow affected two variables
+   (newScreens and errMsg) that were never accessed before the function
+   returned.
+---
+ unix/Xvnc/programs/Xserver/hw/vnc/auth.c      |  2 +-
+ unix/Xvnc/programs/Xserver/hw/vnc/rfbserver.c | 10 ++++++----
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/unix/Xvnc/programs/Xserver/hw/vnc/auth.c b/unix/Xvnc/programs/Xserver/hw/vnc/auth.c
+index 2abc763c8..801afbc93 100644
+--- a/unix/Xvnc/programs/Xserver/hw/vnc/auth.c
++++ b/unix/Xvnc/programs/Xserver/hw/vnc/auth.c
+@@ -393,7 +393,7 @@ Bool rfbOptPamAuth(void)
+ 
+   for (s = secTypes; s->name != NULL; s++) {
+     if ((!strcmp(s->name, "unixlogin") ||
+-         !strcmp(&s->name[strlen(s->name) - 5], "plain")) && s->enabled)
++         strstr(s->name, "plain")) && s->enabled)
+       return TRUE;
+   }
+ 
+diff --git a/unix/Xvnc/programs/Xserver/hw/vnc/rfbserver.c b/unix/Xvnc/programs/Xserver/hw/vnc/rfbserver.c
+index 03baa6360..58b306665 100644
+--- a/unix/Xvnc/programs/Xserver/hw/vnc/rfbserver.c
++++ b/unix/Xvnc/programs/Xserver/hw/vnc/rfbserver.c
+@@ -1314,13 +1314,15 @@ static void rfbProcessClientNormalMessage(rfbClientPtr cl)
+ 
+       flags = Swap32IfLE(msg.f.flags);
+ 
+-      READ(data, msg.f.length)
+-
+-      if (msg.f.length > sizeof(data))
++      if (msg.f.length > sizeof(data)) {
+         rfbLog("Ignoring fence.  Payload of %d bytes is too large.\n",
+                msg.f.length);
+-      else
++        SKIP(msg.f.length)
++      } else {
++        READ(data, msg.f.length)
+         HandleFence(cl, flags, msg.f.length, data);
++      }
++
+       return;
+     }
+ 

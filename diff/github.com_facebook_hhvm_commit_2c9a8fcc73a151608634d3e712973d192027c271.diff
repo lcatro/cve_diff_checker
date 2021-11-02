@@ -1,0 +1,52 @@
+From 2c9a8fcc73a151608634d3e712973d192027c271 Mon Sep 17 00:00:00 2001
+From: "mwilliams@fb.com" <mwilliams@fb.com>
+Date: Mon, 1 Aug 2016 15:13:08 -0700
+Subject: [PATCH] Fix integer overflow in StringUtil::implode
+
+Reviewed By: ricklavoie
+
+Differential Revision: D3623922
+
+fbshipit-source-id: 136d124a850c07cc6c63535afc11d36499d576fc
+---
+ hphp/runtime/base/string-util.cpp                         | 4 ++--
+ hphp/test/slow/string_length_overflow/implode.php         | 5 +++++
+ hphp/test/slow/string_length_overflow/implode.php.expectf | 2 ++
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+ create mode 100644 hphp/test/slow/string_length_overflow/implode.php
+ create mode 100644 hphp/test/slow/string_length_overflow/implode.php.expectf
+
+diff --git a/hphp/runtime/base/string-util.cpp b/hphp/runtime/base/string-util.cpp
+index 56d7104c14f9..51408ef85a64 100644
+--- a/hphp/runtime/base/string-util.cpp
++++ b/hphp/runtime/base/string-util.cpp
+@@ -124,8 +124,8 @@ String StringUtil::Implode(const Variant& items, const String& delim,
+ 
+   req::vector<String> sitems;
+   sitems.reserve(size);
+-  int len = 0;
+-  int lenDelim = delim.size();
++  size_t len = 0;
++  size_t lenDelim = delim.size();
+   for (ArrayIter iter(items); iter; ++iter) {
+     sitems.emplace_back(iter.second().toString());
+     len += sitems.back().size() + lenDelim;
+diff --git a/hphp/test/slow/string_length_overflow/implode.php b/hphp/test/slow/string_length_overflow/implode.php
+new file mode 100644
+index 000000000000..3d348321ac4b
+--- /dev/null
++++ b/hphp/test/slow/string_length_overflow/implode.php
+@@ -0,0 +1,5 @@
++<?php
++
++$stringLarge = str_repeat('*', 300289);
++$arrayLarge = array_fill(0, 49981, '*');
++$string_implode_2 = implode($stringLarge, $arrayLarge);
+diff --git a/hphp/test/slow/string_length_overflow/implode.php.expectf b/hphp/test/slow/string_length_overflow/implode.php.expectf
+new file mode 100644
+index 000000000000..484c51265ce7
+--- /dev/null
++++ b/hphp/test/slow/string_length_overflow/implode.php.expectf
+@@ -0,0 +1,2 @@
++
++Fatal error: String length exceeded 2^31-2: 15008494201 in %s/test/slow/string_length_overflow/implode.php on line 5

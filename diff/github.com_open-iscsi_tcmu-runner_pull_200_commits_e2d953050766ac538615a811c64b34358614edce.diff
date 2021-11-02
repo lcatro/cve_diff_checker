@@ -1,0 +1,27 @@
+From e2d953050766ac538615a811c64b34358614edce Mon Sep 17 00:00:00 2001
+From: Matthias Gerstner <matthias.gerstner@suse.de>
+Date: Fri, 14 Jul 2017 14:23:05 +0200
+Subject: [PATCH] fixed local DoS when UnregisterHandler was called for a not
+ existing handler
+
+Any user with DBUS access could cause a SEGFAULT in tcmu-runner by
+running something like this:
+
+dbus-send --system --print-reply --dest=org.kernel.TCMUService1 /org/kernel/TCMUService1/HandlerManager1 org.kernel.TCMUService1.HandlerManager1.UnregisterHandler string:123
+---
+ main.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/main.c b/main.c
+index 8c3bacab..49c6a1b0 100644
+--- a/main.c
++++ b/main.c
+@@ -386,7 +386,7 @@ on_unregister_handler(TCMUService1HandlerManager1 *interface,
+ 		      gpointer user_data)
+ {
+ 	struct tcmur_handler *handler = find_handler_by_subtype(subtype);
+-	struct dbus_info *info = handler->opaque;
++	struct dbus_info *info = handler ? handler->opaque : NULL;
+ 
+ 	if (!handler) {
+ 		g_dbus_method_invocation_return_value(invocation,

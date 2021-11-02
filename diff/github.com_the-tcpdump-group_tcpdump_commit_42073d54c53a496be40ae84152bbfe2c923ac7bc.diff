@@ -1,0 +1,88 @@
+From 42073d54c53a496be40ae84152bbfe2c923ac7bc Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Feb 2017 14:20:32 -0800
+Subject: [PATCH] CVE-2017-13004/Juniper: Add a bounds check.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add tests using the capture files supplied by the reporter(s).
+---
+ print-juniper.c         |   1 +
+ tests/TESTLIST          |   2 ++
+ tests/juniper_atm1.out  |   2 ++
+ tests/juniper_atm1.pcap | Bin 0 -> 856 bytes
+ tests/juniper_es.out    |   2 ++
+ tests/juniper_es.pcap   | Bin 0 -> 856 bytes
+ 6 files changed, 7 insertions(+)
+ create mode 100644 tests/juniper_atm1.out
+ create mode 100644 tests/juniper_atm1.pcap
+ create mode 100644 tests/juniper_es.out
+ create mode 100644 tests/juniper_es.pcap
+
+diff --git a/print-juniper.c b/print-juniper.c
+index e8879ea7b..ff1de9c03 100644
+--- a/print-juniper.c
++++ b/print-juniper.c
+@@ -1367,6 +1367,7 @@ juniper_parse_header(netdissect_options *ndo,
+             if (ndo->ndo_eflag) ND_PRINT((ndo, ": ")); /* print demarc b/w L2/L3*/
+ 
+ 
++            ND_TCHECK_16BITS(p+l2info->cookie_len);
+             l2info->proto = EXTRACT_16BITS(p+l2info->cookie_len);
+             break;
+         }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 659827f81..c0a3f8dd8 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -493,6 +493,8 @@ pimv2-oobr-4		pimv2-oobr-4.pcap		pimv2-oobr-4.out		-vvv -e
+ 802_15_4-data		802_15_4-data.pcap		802_15_4-data.out	-vvv -e
+ 802_15_4_beacon		802_15_4_beacon.pcap		802_15_4_beacon.out	-vvv -e
+ lmpv1_busyloop		lmpv1_busyloop.pcap		lmpv1_busyloop.out	-vvv -e
++juniper_atm1		juniper_atm1.pcap		juniper_atm1.out	-vvv -e
++juniper_es		juniper_es.pcap			juniper_es.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/juniper_atm1.out b/tests/juniper_atm1.out
+new file mode 100644
+index 000000000..27f99bd00
+--- /dev/null
++++ b/tests/juniper_atm1.out
+@@ -0,0 +1,2 @@
++Out 
++	Juniper PCAP Flags [none]ATM1-PIC, cookie-len 4, cookie 0x30303030: [|juniper_hdr], length 808464432
+diff --git a/tests/juniper_atm1.pcap b/tests/juniper_atm1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..fc29d299a7b00c2a1c6793594570e5a2f3fbe1fb
+GIT binary patch
+literal 856
+zcmca|c+)~A1{MYbFxX(g!N9=K$pGbo#F!x*Uw3DS5?tg4ToTyC6|f0XNz8&u=1^#i
+x5qAAxpVQL&*sX<&4xrU=Hvky|$Q&fLArc!u6Bxb)_*Gz)1?d5&5D<fg0026^qG134
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/juniper_es.out b/tests/juniper_es.out
+new file mode 100644
+index 000000000..e344d70ed
+--- /dev/null
++++ b/tests/juniper_es.out
+@@ -0,0 +1,2 @@
++Out 
++	Juniper PCAP Flags [none]ES-PIC, cookie-len 0: [|juniper_hdr], length 808464432
+diff --git a/tests/juniper_es.pcap b/tests/juniper_es.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f28aa1fa8a729a77a958df847f9392de4062257
+GIT binary patch
+literal 856
+zcmca|c+)~A1{MYbC}3q^U}#|gaxI_&%pi_|fv>wWRA5k2CbV*uAxQ=+kffTLieb@3
+cO*0J)j7T?*3@z9#8Mv?nxn~1*M-eRw07f>UT>t<8
+
+literal 0
+HcmV?d00001
+

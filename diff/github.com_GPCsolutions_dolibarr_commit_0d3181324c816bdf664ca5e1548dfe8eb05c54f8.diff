@@ -1,0 +1,58 @@
+From 0d3181324c816bdf664ca5e1548dfe8eb05c54f8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rapha=C3=ABl=20Doursenaud?= <rdoursenaud@gpcsolutions.fr>
+Date: Fri, 8 Jan 2016 06:09:15 +0100
+Subject: [PATCH] FIX #2857, #4291 & #4341 Escape GETPOST alpha data by default
+
+This should mitigate most HTML injections allowing XSS.
+---
+ htdocs/core/lib/functions.lib.php | 31 ++++++++++++++++---------------
+ 1 file changed, 16 insertions(+), 15 deletions(-)
+
+diff --git a/htdocs/core/lib/functions.lib.php b/htdocs/core/lib/functions.lib.php
+index c530f612d295..81412531262c 100644
+--- a/htdocs/core/lib/functions.lib.php
++++ b/htdocs/core/lib/functions.lib.php
+@@ -1,16 +1,17 @@
+ <?php
+-/* Copyright (C) 2000-2007 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+- * Copyright (C) 2003      Jean-Louis Bergamo   <jlb@j1b.org>
+- * Copyright (C) 2004-2013 Laurent Destailleur  <eldy@users.sourceforge.net>
+- * Copyright (C) 2004      Sebastien Di Cintio  <sdicintio@ressource-toi.org>
+- * Copyright (C) 2004      Benoit Mortier       <benoit.mortier@opensides.be>
+- * Copyright (C) 2004      Christophe Combelles <ccomb@free.fr>
+- * Copyright (C) 2005-2012 Regis Houssin        <regis.houssin@capnetworks.com>
+- * Copyright (C) 2008      Raphael Bertrand (Resultic)       <raphael.bertrand@resultic.fr>
+- * Copyright (C) 2010-2011 Juanjo Menent        <jmenent@2byte.es>
+- * Copyright (C) 2013      Cédric Salvador      <csalvador@gpcsolutions.fr>
+- * Copyright (C) 2013      Alexandre Spangaro   <alexandre.spangaro@gmail.com>
+- * Copyright (C) 2014-2015 Marcos García        <marcosgdf@gmail.com>
++/* Copyright (C) 2000-2007  Rodolphe Quiedeville        <rodolphe@quiedeville.org>
++ * Copyright (C) 2003       Jean-Louis Bergamo          <jlb@j1b.org>
++ * Copyright (C) 2004-2013  Laurent Destailleur         <eldy@users.sourceforge.net>
++ * Copyright (C) 2004       Sebastien Di Cintio         <sdicintio@ressource-toi.org>
++ * Copyright (C) 2004       Benoit Mortier              <benoit.mortier@opensides.be>
++ * Copyright (C) 2004       Christophe Combelles        <ccomb@free.fr>
++ * Copyright (C) 2005-2012  Regis Houssin               <regis.houssin@capnetworks.com>
++ * Copyright (C) 2008       Raphael Bertrand (Resultic) <raphael.bertrand@resultic.fr>
++ * Copyright (C) 2010-2011  Juanjo Menent               <jmenent@2byte.es>
++ * Copyright (C) 2013       Cédric Salvador             <csalvador@gpcsolutions.fr>
++ * Copyright (C) 2013       Alexandre Spangaro          <alexandre.spangaro@gmail.com>
++ * Copyright (C) 2014-2015  Marcos García               <marcosgdf@gmail.com>
++ * Copyright (C) 2016       Raphaël Doursenaud          <rdoursenaud@gpcsolutions.fr>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -194,10 +195,10 @@ function GETPOST($paramname,$check='',$method=0)
+ 		elseif ($check == 'alpha')
+ 		{
+ 			$out=trim($out);
+-			// '"' is dangerous because param in url can close the href= or src= and add javascript functions.
+ 			// '../' is dangerous because it allows dir transversals
+-			if (preg_match('/"/',$out)) $out='';
+-			else if (preg_match('/\.\.\//',$out)) $out='';
++			if (preg_match('/\.\.\//',$out)) $out='';
++			// Quotes are dangerous because param in url can close the href= or src= and add javascript functions.
++			$out = htmlspecialchars($out, ENT_QUOTES);
+ 		}
+ 		elseif ($check == 'aZ')
+ 		{

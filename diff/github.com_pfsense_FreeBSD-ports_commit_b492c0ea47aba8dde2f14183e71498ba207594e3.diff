@@ -1,0 +1,59 @@
+From b492c0ea47aba8dde2f14183e71498ba207594e3 Mon Sep 17 00:00:00 2001
+From: jim-p <jimp@netgate.com>
+Date: Tue, 28 May 2019 10:24:36 -0400
+Subject: [PATCH] apcupsd: Validation and Encoding. Fixes #9556
+
+---
+ sysutils/pfSense-pkg-apcupsd/Makefile         |  2 +-
+ .../files/usr/local/www/apcupsd_status.php    | 24 +++++++++++--------
+ 2 files changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/sysutils/pfSense-pkg-apcupsd/Makefile b/sysutils/pfSense-pkg-apcupsd/Makefile
+index 6531f6faee8e..c078e28d668e 100644
+--- a/sysutils/pfSense-pkg-apcupsd/Makefile
++++ b/sysutils/pfSense-pkg-apcupsd/Makefile
+@@ -2,7 +2,7 @@
+ 
+ PORTNAME=	pfSense-pkg-apcupsd
+ PORTVERSION=	0.3.91
+-PORTREVISION=	4
++PORTREVISION=	5
+ CATEGORIES=	sysutils
+ MASTER_SITES=	# empty
+ DISTFILES=	# empty
+diff --git a/sysutils/pfSense-pkg-apcupsd/files/usr/local/www/apcupsd_status.php b/sysutils/pfSense-pkg-apcupsd/files/usr/local/www/apcupsd_status.php
+index 480a18d23b23..030fc6f0eb0c 100755
+--- a/sysutils/pfSense-pkg-apcupsd/files/usr/local/www/apcupsd_status.php
++++ b/sysutils/pfSense-pkg-apcupsd/files/usr/local/www/apcupsd_status.php
+@@ -38,17 +38,21 @@ function puts($arg) {
+ $nis_server = check_nis_running_apcupsd();
+ 
+ if ( $_POST['strapcaccess'] ) {
+-	puts("<div class=\"panel panel-success responsive\"><div class=\"panel-heading\"><h2 class=\"panel-title\">Status information from apcupsd</h2></div>");
+-	puts("<pre>");
+-	puts("Running: apcaccess -h {$_POST['strapcaccess']} <br />");
+-	putenv("PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin");
+-	$ph = popen("apcaccess -h {$_POST['strapcaccess']} 2>&1", "r" );
+-	while ($line = fgets($ph)) {
+-		echo htmlspecialchars($line);
++	if (is_hostname($_POST['strapcaccess'])) {
++		puts("<div class=\"panel panel-success responsive\"><div class=\"panel-heading\"><h2 class=\"panel-title\">Status information from apcupsd</h2></div>");
++		puts("<pre>");
++		puts("Running: apcaccess -h " . htmlspecialchars($_POST['strapcaccess']) . " <br />");
++		putenv("PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin");
++		$ph = popen("apcaccess -h " . escapeshellarg($_POST['strapcaccess']) . " 2>&1", "r" );
++		while ($line = fgets($ph)) {
++			echo htmlspecialchars($line);
++		}
++		pclose($ph);
++		puts("</pre>");
++		puts("</div>");
++	} else {
++		print_input_errors(array(gettext("Invalid hostname or IP address")));
+ 	}
+-	pclose($ph);
+-	puts("</pre>");
+-	puts("</div>");
+ } elseif ($nis_server) {
+ 	$nisip = (check_nis_ip_apcupsd() != ''? check_nis_ip_apcupsd() : "localhost");
+ 	$nisport = (check_nis_port_apcupsd() != '' ? check_nis_port_apcupsd() : "3551");

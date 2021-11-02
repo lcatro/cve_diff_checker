@@ -1,0 +1,82 @@
+From 58bc24e465c0842981692adbf6d75680298989de Mon Sep 17 00:00:00 2001
+From: Odinn <odinn@Odinns-MacBook-Pro.local>
+Date: Sun, 6 May 2018 01:16:55 +0300
+Subject: [PATCH] fix: fail when trying to extract outside of dest dir
+
+A well crafted zip file may cause the code to extract outside of the destination dir.
+This PR fails when that happens so that no unexpected behaviour happens.
+---
+ .../plexus/archiver/AbstractUnArchiver.java   |   9 +++++++
+ .../archiver/zip/ZipUnArchiverTest.java       |  24 ++++++++++++++++++
+ src/test/zips/zip-slip.zip                    | Bin 0 -> 545 bytes
+ 3 files changed, 33 insertions(+)
+ create mode 100644 src/test/zips/zip-slip.zip
+
+diff --git a/src/main/java/org/codehaus/plexus/archiver/AbstractUnArchiver.java b/src/main/java/org/codehaus/plexus/archiver/AbstractUnArchiver.java
+index bd462d93..96758801 100644
+--- a/src/main/java/org/codehaus/plexus/archiver/AbstractUnArchiver.java
++++ b/src/main/java/org/codehaus/plexus/archiver/AbstractUnArchiver.java
+@@ -308,6 +308,15 @@ protected void extractFile( final File srcF, final File dir, final InputStream c
+         // Hmm. Symlinks re-evaluate back to the original file here. Unsure if this is a good thing...
+         final File f = FileUtils.resolveFile( dir, entryName );
+ 
++        // Make sure that the resolved path of the extracted file doesn't escape the destination directory
++        String canonicalDirPath = dir.getCanonicalPath();
++        String canonicalDestPath = f.getCanonicalPath();
++
++        if ( !canonicalDestPath.startsWith( canonicalDirPath ) )
++        {
++            throw new ArchiverException( "Entry is outside of the target directory (" + entryName + ")" );
++        }
++
+         try
+         {
+             if ( !isOverwrite() && f.exists() && ( f.lastModified() >= entryDate.getTime() ) )
+diff --git a/src/test/java/org/codehaus/plexus/archiver/zip/ZipUnArchiverTest.java b/src/test/java/org/codehaus/plexus/archiver/zip/ZipUnArchiverTest.java
+index 1f72a615..ea46a5aa 100644
+--- a/src/test/java/org/codehaus/plexus/archiver/zip/ZipUnArchiverTest.java
++++ b/src/test/java/org/codehaus/plexus/archiver/zip/ZipUnArchiverTest.java
+@@ -190,6 +190,30 @@ public void testSelectors()
+                        } );
+     }
+ 
++    public void testExtractingZipWithEntryOutsideDestDirThrowsException()
++            throws Exception
++    {
++        Exception ex = null;
++        String s = "target/zip-unarchiver-slip-tests";
++        File testZip = new File( getBasedir(), "src/test/zips/zip-slip.zip" );
++        File outputDirectory = new File( getBasedir(), s );
++
++        FileUtils.deleteDirectory( outputDirectory );
++
++        try
++        {
++            ZipUnArchiver zu = getZipUnArchiver( testZip );
++            zu.extract( "", outputDirectory );
++        }
++        catch ( Exception e )
++        {
++            ex = e;
++        }
++
++        assertNotNull( ex );
++        assertTrue( ex.getMessage().startsWith( "Entry is outside of the target directory" ) );
++    }
++
+     private ZipArchiver getZipArchiver()
+     {
+         try
+diff --git a/src/test/zips/zip-slip.zip b/src/test/zips/zip-slip.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..38b3f499de0163e62ca15ce18350a9d9a477a51b
+GIT binary patch
+literal 545
+zcmWIWW@h1H0D=Au{XYEp{-1?`Y!K#PkYPyA&ri`SsVE5z;bdU8U359h4v0%DxEUB(
+zzA-W|u!sQFm1JZVD*#cV0!Xz&eqJh90MJm76a&LlprHwl)s`S02)6*So}T`Ippx7I
+z{nWC|9FT|Lj?Pm62|-=W$Rx*%D=;L0E@xl>dYWNLBZ!3v8dgZqpan~SHzSh>Gwx6T
+jnE?Vz8bg8PfCLE8QsgiR@MdKLxrhk}K_2A>d6oeH^pk5C
+
+literal 0
+HcmV?d00001
+

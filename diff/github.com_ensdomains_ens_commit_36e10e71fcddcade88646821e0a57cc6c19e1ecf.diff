@@ -1,0 +1,3074 @@
+From b97af9572af1002a5bb415b45822d1030083e0ac Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 12 Nov 2019 12:00:55 +0100
+Subject: [PATCH 01/28] started expermimenting
+
+---
+ contracts/MigrationENS.sol | 122 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 122 insertions(+)
+ create mode 100644 contracts/MigrationENS.sol
+
+diff --git a/contracts/MigrationENS.sol b/contracts/MigrationENS.sol
+new file mode 100644
+index 0000000..92dea3a
+--- /dev/null
++++ b/contracts/MigrationENS.sol
+@@ -0,0 +1,122 @@
++pragma solidity ^0.5.0;
++
++import "./ENS.sol";
++
++contract MigrationENS is ENS {
++
++    struct Record {
++        address owner;
++        address resolver;
++        uint64 ttl;
++    }
++
++    mapping (bytes32 => Record) records;
++    mapping (bytes32 => bool) migrated;
++
++    ENS public old;
++
++    // Permits modifications only by the owner of the specified node.
++    modifier only_owner(bytes32 node) {
++        require(records[node].owner == msg.sender);
++        _;
++    }
++
++    // Logged when the node is migrated
++    event Migrated(bytes32 indexed node);
++
++    constructor(ENS _old) public {
++        old = _old;
++        records[0x0].owner = msg.sender;
++    }
++
++    // @todo this doesn't completely work as certain names could be registered on the new ENS
++    function migrate(bytes32 node, bytes32 label) external {
++        bytes32 subnode = keccak256(abi.encodePacked(node, label));
++        require(!migrated[subnode]);
++        require(old.owner(node) == msg.sender);
++
++        records[node] = Record(msg.sender, old.resolver(subnode), old.ttl(node));
++        emit Migrated(subnode);
++    }
++
++    /**
++     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
++     * @param node The node to transfer ownership of.
++     * @param owner The address of the new owner.
++     */
++    function setOwner(bytes32 node, address owner) external only_owner(node) {
++        emit Transfer(node, owner);
++        records[node].owner = owner;
++    }
++
++    /**
++     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
++     * @param node The parent node.
++     * @param label The hash of the label specifying the subnode.
++     * @param owner The address of the new owner.
++     */
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
++        bytes32 subnode = keccak256(abi.encodePacked(node, label));
++        emit NewOwner(node, label, owner);
++        records[subnode].owner = owner;
++    }
++
++    /**
++     * @dev Sets the resolver address for the specified node.
++     * @param node The node to update.
++     * @param resolver The address of the resolver.
++     */
++    function setResolver(bytes32 node, address resolver) external only_owner(node) {
++        emit NewResolver(node, resolver);
++        records[node].resolver = resolver;
++    }
++
++    /**
++     * @dev Sets the TTL for the specified node.
++     * @param node The node to update.
++     * @param ttl The TTL in seconds.
++     */
++    function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
++        emit NewTTL(node, ttl);
++        records[node].ttl = ttl;
++    }
++
++    /**
++     * @dev Returns the address that owns the specified node.
++     * @param node The specified node.
++     * @return address of the owner.
++     */
++    function owner(bytes32 node) external view returns (address) {
++        if (!migrated[node]) {
++            return old.owner(node);
++        }
++
++        return records[node].owner;
++    }
++
++    /**
++     * @dev Returns the address of the resolver for the specified node.
++     * @param node The specified node.
++     * @return address of the resolver.
++     */
++    function resolver(bytes32 node) external view returns (address) {
++        if (!migrated[node]) {
++            return old.resolver(node);
++        }
++
++        return records[node].resolver;
++    }
++
++    /**
++     * @dev Returns the TTL of a node, and any records associated with it.
++     * @param node The specified node.
++     * @return ttl of the node.
++     */
++    function ttl(bytes32 node) external view returns (uint64) {
++        if (!migrated[node]) {
++            return old.ttl(node);
++        }
++
++        return records[node].ttl;
++    }
++}
+
+From 157b7d7d68e67dfd15733313275769434ca4b614 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 02:55:38 +0100
+Subject: [PATCH 02/28] updated
+
+---
+ contracts/ENSRegistry.sol  |  33 +++++++---
+ contracts/MigrationENS.sol | 122 -------------------------------------
+ 2 files changed, 25 insertions(+), 130 deletions(-)
+ delete mode 100644 contracts/MigrationENS.sol
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 11bdfcf..b63e76d 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -2,10 +2,8 @@ pragma solidity ^0.5.0;
+ 
+ import "./ENS.sol";
+ 
+-/**
+- * The ENS registry contract.
+- */
+ contract ENSRegistry is ENS {
++
+     struct Record {
+         address owner;
+         address resolver;
+@@ -13,6 +11,9 @@ contract ENSRegistry is ENS {
+     }
+ 
+     mapping (bytes32 => Record) records;
++    mapping (bytes32 => bool) migrated;
++
++    ENS public old;
+ 
+     // Permits modifications only by the owner of the specified node.
+     modifier only_owner(bytes32 node) {
+@@ -20,10 +21,11 @@ contract ENSRegistry is ENS {
+         _;
+     }
+ 
+-    /**
+-     * @dev Constructs a new ENS registrar.
+-     */
+-    constructor() public {
++    // Logged when the node is migrated
++    event Migrated(bytes32 indexed node);
++
++    constructor(ENS _old) public {
++        old = _old;
+         records[0x0].owner = msg.sender;
+     }
+ 
+@@ -55,7 +57,7 @@ contract ENSRegistry is ENS {
+      * @param resolver The address of the resolver.
+      */
+     function setResolver(bytes32 node, address resolver) external only_owner(node) {
+-        emit NewResolver(node, resolver);   
++        emit NewResolver(node, resolver);
+         records[node].resolver = resolver;
+     }
+ 
+@@ -75,6 +77,10 @@ contract ENSRegistry is ENS {
+      * @return address of the owner.
+      */
+     function owner(bytes32 node) external view returns (address) {
++        if (!hasOwner(node)) {
++            return old.owner(node);
++        }
++
+         return records[node].owner;
+     }
+ 
+@@ -84,6 +90,10 @@ contract ENSRegistry is ENS {
+      * @return address of the resolver.
+      */
+     function resolver(bytes32 node) external view returns (address) {
++        if (!hasOwner(node)) {
++            return old.resolver(node);
++        }
++
+         return records[node].resolver;
+     }
+ 
+@@ -93,7 +103,14 @@ contract ENSRegistry is ENS {
+      * @return ttl of the node.
+      */
+     function ttl(bytes32 node) external view returns (uint64) {
++        if (!hasOwner(node)) {
++            return old.ttl(node);
++        }
++
+         return records[node].ttl;
+     }
+ 
++    function hasOwner(bytes32 node) private view returns (bool) {
++        return records[node].owner != address(0x0);
++    }
+ }
+diff --git a/contracts/MigrationENS.sol b/contracts/MigrationENS.sol
+deleted file mode 100644
+index 92dea3a..0000000
+--- a/contracts/MigrationENS.sol
++++ /dev/null
+@@ -1,122 +0,0 @@
+-pragma solidity ^0.5.0;
+-
+-import "./ENS.sol";
+-
+-contract MigrationENS is ENS {
+-
+-    struct Record {
+-        address owner;
+-        address resolver;
+-        uint64 ttl;
+-    }
+-
+-    mapping (bytes32 => Record) records;
+-    mapping (bytes32 => bool) migrated;
+-
+-    ENS public old;
+-
+-    // Permits modifications only by the owner of the specified node.
+-    modifier only_owner(bytes32 node) {
+-        require(records[node].owner == msg.sender);
+-        _;
+-    }
+-
+-    // Logged when the node is migrated
+-    event Migrated(bytes32 indexed node);
+-
+-    constructor(ENS _old) public {
+-        old = _old;
+-        records[0x0].owner = msg.sender;
+-    }
+-
+-    // @todo this doesn't completely work as certain names could be registered on the new ENS
+-    function migrate(bytes32 node, bytes32 label) external {
+-        bytes32 subnode = keccak256(abi.encodePacked(node, label));
+-        require(!migrated[subnode]);
+-        require(old.owner(node) == msg.sender);
+-
+-        records[node] = Record(msg.sender, old.resolver(subnode), old.ttl(node));
+-        emit Migrated(subnode);
+-    }
+-
+-    /**
+-     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
+-     * @param node The node to transfer ownership of.
+-     * @param owner The address of the new owner.
+-     */
+-    function setOwner(bytes32 node, address owner) external only_owner(node) {
+-        emit Transfer(node, owner);
+-        records[node].owner = owner;
+-    }
+-
+-    /**
+-     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
+-     * @param node The parent node.
+-     * @param label The hash of the label specifying the subnode.
+-     * @param owner The address of the new owner.
+-     */
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
+-        bytes32 subnode = keccak256(abi.encodePacked(node, label));
+-        emit NewOwner(node, label, owner);
+-        records[subnode].owner = owner;
+-    }
+-
+-    /**
+-     * @dev Sets the resolver address for the specified node.
+-     * @param node The node to update.
+-     * @param resolver The address of the resolver.
+-     */
+-    function setResolver(bytes32 node, address resolver) external only_owner(node) {
+-        emit NewResolver(node, resolver);
+-        records[node].resolver = resolver;
+-    }
+-
+-    /**
+-     * @dev Sets the TTL for the specified node.
+-     * @param node The node to update.
+-     * @param ttl The TTL in seconds.
+-     */
+-    function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
+-        emit NewTTL(node, ttl);
+-        records[node].ttl = ttl;
+-    }
+-
+-    /**
+-     * @dev Returns the address that owns the specified node.
+-     * @param node The specified node.
+-     * @return address of the owner.
+-     */
+-    function owner(bytes32 node) external view returns (address) {
+-        if (!migrated[node]) {
+-            return old.owner(node);
+-        }
+-
+-        return records[node].owner;
+-    }
+-
+-    /**
+-     * @dev Returns the address of the resolver for the specified node.
+-     * @param node The specified node.
+-     * @return address of the resolver.
+-     */
+-    function resolver(bytes32 node) external view returns (address) {
+-        if (!migrated[node]) {
+-            return old.resolver(node);
+-        }
+-
+-        return records[node].resolver;
+-    }
+-
+-    /**
+-     * @dev Returns the TTL of a node, and any records associated with it.
+-     * @param node The specified node.
+-     * @return ttl of the node.
+-     */
+-    function ttl(bytes32 node) external view returns (uint64) {
+-        if (!migrated[node]) {
+-            return old.ttl(node);
+-        }
+-
+-        return records[node].ttl;
+-    }
+-}
+
+From dc0243e9740b1b44611e6f5f9710a7da1530bf06 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 02:55:59 +0100
+Subject: [PATCH 03/28] removed
+
+---
+ contracts/ENSRegistry.sol | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index b63e76d..6d0e654 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -11,7 +11,6 @@ contract ENSRegistry is ENS {
+     }
+ 
+     mapping (bytes32 => Record) records;
+-    mapping (bytes32 => bool) migrated;
+ 
+     ENS public old;
+ 
+@@ -21,9 +20,6 @@ contract ENSRegistry is ENS {
+         _;
+     }
+ 
+-    // Logged when the node is migrated
+-    event Migrated(bytes32 indexed node);
+-
+     constructor(ENS _old) public {
+         old = _old;
+         records[0x0].owner = msg.sender;
+
+From f5c97480b6a73d7db623c2144e8d9500781a5c7d Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 03:18:13 +0100
+Subject: [PATCH 04/28] changes
+
+---
+ contracts/ENSRegistry.sol | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 6d0e654..3cb395e 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -67,13 +67,24 @@ contract ENSRegistry is ENS {
+         records[node].ttl = ttl;
+     }
+ 
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
++        emit NewTTL(node, ttl);
++        records[node].ttl = ttl;
++
++        emit NewResolver(node, resolver);
++        records[node].resolver = resolver;
++
++        emit Transfer(node, owner);
++        records[node].owner = owner;
++    }
++
+     /**
+      * @dev Returns the address that owns the specified node.
+      * @param node The specified node.
+      * @return address of the owner.
+      */
+     function owner(bytes32 node) external view returns (address) {
+-        if (!hasOwner(node)) {
++        if (!canWrite(node)) {
+             return old.owner(node);
+         }
+ 
+@@ -86,7 +97,7 @@ contract ENSRegistry is ENS {
+      * @return address of the resolver.
+      */
+     function resolver(bytes32 node) external view returns (address) {
+-        if (!hasOwner(node)) {
++        if (!canWrite(node)) {
+             return old.resolver(node);
+         }
+ 
+@@ -99,14 +110,14 @@ contract ENSRegistry is ENS {
+      * @return ttl of the node.
+      */
+     function ttl(bytes32 node) external view returns (uint64) {
+-        if (!hasOwner(node)) {
++        if (!canWrite(node)) {
+             return old.ttl(node);
+         }
+ 
+         return records[node].ttl;
+     }
+ 
+-    function hasOwner(bytes32 node) private view returns (bool) {
++    function canWrite(bytes32 node) external view returns (bool) {
+         return records[node].owner != address(0x0);
+     }
+ }
+
+From 601be521b39221aea9c9f73ab611bc0d7f85d62b Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 03:22:38 +0100
+Subject: [PATCH 05/28] added without fallback
+
+---
+ contracts/ENSRegistry.sol             |  19 ----
+ contracts/ENSRegistryWithFallback.sol | 123 ++++++++++++++++++++++++++
+ 2 files changed, 123 insertions(+), 19 deletions(-)
+ create mode 100644 contracts/ENSRegistryWithFallback.sol
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 3cb395e..1bede57 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -12,8 +12,6 @@ contract ENSRegistry is ENS {
+ 
+     mapping (bytes32 => Record) records;
+ 
+-    ENS public old;
+-
+     // Permits modifications only by the owner of the specified node.
+     modifier only_owner(bytes32 node) {
+         require(records[node].owner == msg.sender);
+@@ -21,7 +19,6 @@ contract ENSRegistry is ENS {
+     }
+ 
+     constructor(ENS _old) public {
+-        old = _old;
+         records[0x0].owner = msg.sender;
+     }
+ 
+@@ -84,10 +81,6 @@ contract ENSRegistry is ENS {
+      * @return address of the owner.
+      */
+     function owner(bytes32 node) external view returns (address) {
+-        if (!canWrite(node)) {
+-            return old.owner(node);
+-        }
+-
+         return records[node].owner;
+     }
+ 
+@@ -97,10 +90,6 @@ contract ENSRegistry is ENS {
+      * @return address of the resolver.
+      */
+     function resolver(bytes32 node) external view returns (address) {
+-        if (!canWrite(node)) {
+-            return old.resolver(node);
+-        }
+-
+         return records[node].resolver;
+     }
+ 
+@@ -110,14 +99,6 @@ contract ENSRegistry is ENS {
+      * @return ttl of the node.
+      */
+     function ttl(bytes32 node) external view returns (uint64) {
+-        if (!canWrite(node)) {
+-            return old.ttl(node);
+-        }
+-
+         return records[node].ttl;
+     }
+-
+-    function canWrite(bytes32 node) external view returns (bool) {
+-        return records[node].owner != address(0x0);
+-    }
+ }
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+new file mode 100644
+index 0000000..34fa02d
+--- /dev/null
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -0,0 +1,123 @@
++pragma solidity ^0.5.0;
++
++import "./ENS.sol";
++
++contract ENSRegistryWithFallback is ENS {
++
++    struct Record {
++        address owner;
++        address resolver;
++        uint64 ttl;
++    }
++
++    mapping (bytes32 => Record) records;
++
++    ENS public old;
++
++    // Permits modifications only by the owner of the specified node.
++    modifier only_owner(bytes32 node) {
++        require(records[node].owner == msg.sender);
++        _;
++    }
++
++    constructor(ENS _old) public {
++        old = _old;
++        records[0x0].owner = msg.sender;
++    }
++
++    /**
++     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
++     * @param node The node to transfer ownership of.
++     * @param owner The address of the new owner.
++     */
++    function setOwner(bytes32 node, address owner) external only_owner(node) {
++        emit Transfer(node, owner);
++        records[node].owner = owner;
++    }
++
++    /**
++     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
++     * @param node The parent node.
++     * @param label The hash of the label specifying the subnode.
++     * @param owner The address of the new owner.
++     */
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
++        bytes32 subnode = keccak256(abi.encodePacked(node, label));
++        emit NewOwner(node, label, owner);
++        records[subnode].owner = owner;
++    }
++
++    /**
++     * @dev Sets the resolver address for the specified node.
++     * @param node The node to update.
++     * @param resolver The address of the resolver.
++     */
++    function setResolver(bytes32 node, address resolver) external only_owner(node) {
++        emit NewResolver(node, resolver);
++        records[node].resolver = resolver;
++    }
++
++    /**
++     * @dev Sets the TTL for the specified node.
++     * @param node The node to update.
++     * @param ttl The TTL in seconds.
++     */
++    function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
++        emit NewTTL(node, ttl);
++        records[node].ttl = ttl;
++    }
++
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
++        emit NewTTL(node, ttl);
++        records[node].ttl = ttl;
++
++        emit NewResolver(node, resolver);
++        records[node].resolver = resolver;
++
++        emit Transfer(node, owner);
++        records[node].owner = owner;
++    }
++
++    /**
++     * @dev Returns the address that owns the specified node.
++     * @param node The specified node.
++     * @return address of the owner.
++     */
++    function owner(bytes32 node) external view returns (address) {
++        if (!canWrite(node)) {
++            return old.owner(node);
++        }
++
++        return records[node].owner;
++    }
++
++    /**
++     * @dev Returns the address of the resolver for the specified node.
++     * @param node The specified node.
++     * @return address of the resolver.
++     */
++    function resolver(bytes32 node) external view returns (address) {
++        if (!canWrite(node)) {
++            return old.resolver(node);
++        }
++
++        return records[node].resolver;
++    }
++
++    /**
++     * @dev Returns the TTL of a node, and any records associated with it.
++     * @param node The specified node.
++     * @return ttl of the node.
++     */
++    function ttl(bytes32 node) external view returns (uint64) {
++        if (!canWrite(node)) {
++            return old.ttl(node);
++        }
++
++        return records[node].ttl;
++    }
++
++    function canWrite(bytes32 node) external view returns (bool) {
++        return records[node].owner != address(0x0);
++    }
++}
+
+From 7e6f843c11ff689bb35190a0c40552911017fed1 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 03:26:34 +0100
+Subject: [PATCH 06/28] renamed again
+
+---
+ contracts/ENSRegistryWithFallback.sol | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 34fa02d..eea78f6 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -67,6 +67,13 @@ contract ENSRegistryWithFallback is ENS {
+         records[node].ttl = ttl;
+     }
+ 
++    /**
++     * @dev Sets the record for a node.
++     * @param node The node to update.
++     * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
++     */
+     function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+         emit NewTTL(node, ttl);
+         records[node].ttl = ttl;
+@@ -84,7 +91,7 @@ contract ENSRegistryWithFallback is ENS {
+      * @return address of the owner.
+      */
+     function owner(bytes32 node) external view returns (address) {
+-        if (!canWrite(node)) {
++        if (!recordExists(node)) {
+             return old.owner(node);
+         }
+ 
+@@ -97,7 +104,7 @@ contract ENSRegistryWithFallback is ENS {
+      * @return address of the resolver.
+      */
+     function resolver(bytes32 node) external view returns (address) {
+-        if (!canWrite(node)) {
++        if (!recordExists(node)) {
+             return old.resolver(node);
+         }
+ 
+@@ -110,14 +117,19 @@ contract ENSRegistryWithFallback is ENS {
+      * @return ttl of the node.
+      */
+     function ttl(bytes32 node) external view returns (uint64) {
+-        if (!canWrite(node)) {
++        if (!recordExists(node)) {
+             return old.ttl(node);
+         }
+ 
+         return records[node].ttl;
+     }
+ 
+-    function canWrite(bytes32 node) external view returns (bool) {
++    /**
++     * @dev Returns whether a record has been imported to the registry.
++     * @param node The specified node.
++     * @return Bool if record exists
++     */
++    function recordExists(bytes32 node) external view returns (bool) {
+         return records[node].owner != address(0x0);
+     }
+ }
+
+From f649a28f91344b7510a78e1bb63c60e4c95eae0e Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Thu, 14 Nov 2019 03:27:06 +0100
+Subject: [PATCH 07/28] added docblock
+
+---
+ contracts/ENSRegistry.sol | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 1bede57..90d4c8b 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -64,6 +64,13 @@ contract ENSRegistry is ENS {
+         records[node].ttl = ttl;
+     }
+ 
++    /**
++     * @dev Sets the record for a node.
++     * @param node The node to update.
++     * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
++     */
+     function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+         emit NewTTL(node, ttl);
+         records[node].ttl = ttl;
+
+From b0b7c5f7c585ca8594359d4a2eb5d997dccad180 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Mon, 18 Nov 2019 01:30:16 +0100
+Subject: [PATCH 08/28] tests
+
+---
+ contracts/ENS.lll                     |  2 +
+ contracts/ENSRegistry.sol             |  2 +-
+ contracts/ENSRegistryWithFallback.sol | 58 ++-------------------------
+ package-lock.json                     | 43 ++++++++++++++------
+ test/TestENS.js                       |  2 +-
+ test/TestENSRegistryWithFallback.js   | 50 +++++++++++++++++++++++
+ 6 files changed, 89 insertions(+), 68 deletions(-)
+ create mode 100644 test/TestENSRegistryWithFallback.js
+
+diff --git a/contracts/ENS.lll b/contracts/ENS.lll
+index 09cb66a..eaba864 100644
+--- a/contracts/ENS.lll
++++ b/contracts/ENS.lll
+@@ -2,6 +2,8 @@
+ ;;; @title The Ethereum Name Service registry.
+ ;;; @author Daniel Ellison <daniel@syrinx.net>
+ 
++;;; @deprecated This file is only kept as a reference.
++
+ (seq
+ 
+   ;; --------------------------------------------------------------------------
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 90d4c8b..1e2cac2 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -18,7 +18,7 @@ contract ENSRegistry is ENS {
+         _;
+     }
+ 
+-    constructor(ENS _old) public {
++    constructor() public {
+         records[0x0].owner = msg.sender;
+     }
+ 
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index eea78f6..29ce4fa 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -1,16 +1,9 @@
+ pragma solidity ^0.5.0;
+ 
+ import "./ENS.sol";
++import "./ENSRegistry.sol";
+ 
+-contract ENSRegistryWithFallback is ENS {
+-
+-    struct Record {
+-        address owner;
+-        address resolver;
+-        uint64 ttl;
+-    }
+-
+-    mapping (bytes32 => Record) records;
++contract ENSRegistryWithFallback is ENSRegistry {
+ 
+     ENS public old;
+ 
+@@ -20,51 +13,8 @@ contract ENSRegistryWithFallback is ENS {
+         _;
+     }
+ 
+-    constructor(ENS _old) public {
++    constructor(ENS _old) public ENSRegistry() {
+         old = _old;
+-        records[0x0].owner = msg.sender;
+-    }
+-
+-    /**
+-     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
+-     * @param node The node to transfer ownership of.
+-     * @param owner The address of the new owner.
+-     */
+-    function setOwner(bytes32 node, address owner) external only_owner(node) {
+-        emit Transfer(node, owner);
+-        records[node].owner = owner;
+-    }
+-
+-    /**
+-     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
+-     * @param node The parent node.
+-     * @param label The hash of the label specifying the subnode.
+-     * @param owner The address of the new owner.
+-     */
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
+-        bytes32 subnode = keccak256(abi.encodePacked(node, label));
+-        emit NewOwner(node, label, owner);
+-        records[subnode].owner = owner;
+-    }
+-
+-    /**
+-     * @dev Sets the resolver address for the specified node.
+-     * @param node The node to update.
+-     * @param resolver The address of the resolver.
+-     */
+-    function setResolver(bytes32 node, address resolver) external only_owner(node) {
+-        emit NewResolver(node, resolver);
+-        records[node].resolver = resolver;
+-    }
+-
+-    /**
+-     * @dev Sets the TTL for the specified node.
+-     * @param node The node to update.
+-     * @param ttl The TTL in seconds.
+-     */
+-    function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
+-        emit NewTTL(node, ttl);
+-        records[node].ttl = ttl;
+     }
+ 
+     /**
+@@ -129,7 +79,7 @@ contract ENSRegistryWithFallback is ENS {
+      * @param node The specified node.
+      * @return Bool if record exists
+      */
+-    function recordExists(bytes32 node) external view returns (bool) {
++    function recordExists(bytes32 node) public view returns (bool) {
+         return records[node].owner != address(0x0);
+     }
+ }
+diff --git a/package-lock.json b/package-lock.json
+index 2b9a262..a0b0105 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@ensdomains/ens",
+-  "version": "0.3.10",
++  "version": "0.3.11",
+   "lockfileVersion": 1,
+   "requires": true,
+   "dependencies": {
+@@ -1690,7 +1690,8 @@
+         "ansi-regex": {
+           "version": "2.1.1",
+           "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-2.1.1.tgz",
+-          "integrity": "sha1-w7M6te42DYbg5ijwRorn7yfWVN8="
++          "integrity": "sha1-w7M6te42DYbg5ijwRorn7yfWVN8=",
++          "optional": true
+         },
+         "aproba": {
+           "version": "1.2.0",
+@@ -1711,12 +1712,14 @@
+         "balanced-match": {
+           "version": "1.0.0",
+           "resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.0.tgz",
+-          "integrity": "sha1-ibTRmasr7kneFk6gK4nORi1xt2c="
++          "integrity": "sha1-ibTRmasr7kneFk6gK4nORi1xt2c=",
++          "optional": true
+         },
+         "brace-expansion": {
+           "version": "1.1.11",
+           "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.11.tgz",
+           "integrity": "sha512-iCuPHDFgrHX7H2vEI/5xpz07zSHB00TpugqhmYtVmMO6518mCuRMoOYFldEBl0g187ufozdaHgWKcYFb61qGiA==",
++          "optional": true,
+           "requires": {
+             "balanced-match": "^1.0.0",
+             "concat-map": "0.0.1"
+@@ -1731,17 +1734,20 @@
+         "code-point-at": {
+           "version": "1.1.0",
+           "resolved": "https://registry.npmjs.org/code-point-at/-/code-point-at-1.1.0.tgz",
+-          "integrity": "sha1-DQcLTQQ6W+ozovGkDi7bPZpMz3c="
++          "integrity": "sha1-DQcLTQQ6W+ozovGkDi7bPZpMz3c=",
++          "optional": true
+         },
+         "concat-map": {
+           "version": "0.0.1",
+           "resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
+-          "integrity": "sha1-2Klr13/Wjfd5OnMDajug1UBdR3s="
++          "integrity": "sha1-2Klr13/Wjfd5OnMDajug1UBdR3s=",
++          "optional": true
+         },
+         "console-control-strings": {
+           "version": "1.1.0",
+           "resolved": "https://registry.npmjs.org/console-control-strings/-/console-control-strings-1.1.0.tgz",
+-          "integrity": "sha1-PXz0Rk22RG6mRL9LOVB/mFEAjo4="
++          "integrity": "sha1-PXz0Rk22RG6mRL9LOVB/mFEAjo4=",
++          "optional": true
+         },
+         "core-util-is": {
+           "version": "1.0.2",
+@@ -1858,7 +1864,8 @@
+         "inherits": {
+           "version": "2.0.3",
+           "resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.3.tgz",
+-          "integrity": "sha1-Yzwsg+PaQqUC9SRmAiSA9CCCYd4="
++          "integrity": "sha1-Yzwsg+PaQqUC9SRmAiSA9CCCYd4=",
++          "optional": true
+         },
+         "ini": {
+           "version": "1.3.5",
+@@ -1870,6 +1877,7 @@
+           "version": "1.0.0",
+           "resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-1.0.0.tgz",
+           "integrity": "sha1-754xOG8DGn8NZDr4L95QxFfvAMs=",
++          "optional": true,
+           "requires": {
+             "number-is-nan": "^1.0.0"
+           }
+@@ -1884,6 +1892,7 @@
+           "version": "3.0.4",
+           "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.0.4.tgz",
+           "integrity": "sha512-yJHVQEhyqPLUTgt9B83PXu6W3rx4MvvHvSUvToogpwoGDOUQ+yDrR0HRot+yOCdCO7u4hX3pWft6kWBBcqh0UA==",
++          "optional": true,
+           "requires": {
+             "brace-expansion": "^1.1.7"
+           }
+@@ -1891,12 +1900,14 @@
+         "minimist": {
+           "version": "0.0.8",
+           "resolved": "https://registry.npmjs.org/minimist/-/minimist-0.0.8.tgz",
+-          "integrity": "sha1-hX/Kv8M5fSYluCKCYuhqp6ARsF0="
++          "integrity": "sha1-hX/Kv8M5fSYluCKCYuhqp6ARsF0=",
++          "optional": true
+         },
+         "minipass": {
+           "version": "2.2.4",
+           "resolved": "https://registry.npmjs.org/minipass/-/minipass-2.2.4.tgz",
+           "integrity": "sha512-hzXIWWet/BzWhYs2b+u7dRHlruXhwdgvlTMDKC6Cb1U7ps6Ac6yQlR39xsbjWJE377YTCtKwIXIpJ5oP+j5y8g==",
++          "optional": true,
+           "requires": {
+             "safe-buffer": "^5.1.1",
+             "yallist": "^3.0.0"
+@@ -1915,6 +1926,7 @@
+           "version": "0.5.1",
+           "resolved": "https://registry.npmjs.org/mkdirp/-/mkdirp-0.5.1.tgz",
+           "integrity": "sha1-MAV0OOrGz3+MR2fzhkjWaX11yQM=",
++          "optional": true,
+           "requires": {
+             "minimist": "0.0.8"
+           }
+@@ -1995,7 +2007,8 @@
+         "number-is-nan": {
+           "version": "1.0.1",
+           "resolved": "https://registry.npmjs.org/number-is-nan/-/number-is-nan-1.0.1.tgz",
+-          "integrity": "sha1-CXtgK1NCKlIsGvuHkDGDNpQaAR0="
++          "integrity": "sha1-CXtgK1NCKlIsGvuHkDGDNpQaAR0=",
++          "optional": true
+         },
+         "object-assign": {
+           "version": "4.1.1",
+@@ -2007,6 +2020,7 @@
+           "version": "1.4.0",
+           "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
+           "integrity": "sha1-WDsap3WWHUsROsF9nFC6753Xa9E=",
++          "optional": true,
+           "requires": {
+             "wrappy": "1"
+           }
+@@ -2092,7 +2106,8 @@
+         "safe-buffer": {
+           "version": "5.1.1",
+           "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.1.tgz",
+-          "integrity": "sha512-kKvNJn6Mm93gAczWVJg7wH+wGYWNrDHdWvpUmHyEsgCtIwwo3bqPtV4tR5tuPaUhTOo/kvhVwd8XwwOllGYkbg=="
++          "integrity": "sha512-kKvNJn6Mm93gAczWVJg7wH+wGYWNrDHdWvpUmHyEsgCtIwwo3bqPtV4tR5tuPaUhTOo/kvhVwd8XwwOllGYkbg==",
++          "optional": true
+         },
+         "safer-buffer": {
+           "version": "2.1.2",
+@@ -2128,6 +2143,7 @@
+           "version": "1.0.2",
+           "resolved": "https://registry.npmjs.org/string-width/-/string-width-1.0.2.tgz",
+           "integrity": "sha1-EYvfW4zcUaKn5w0hHgfisLmxB9M=",
++          "optional": true,
+           "requires": {
+             "code-point-at": "^1.0.0",
+             "is-fullwidth-code-point": "^1.0.0",
+@@ -2147,6 +2163,7 @@
+           "version": "3.0.1",
+           "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-3.0.1.tgz",
+           "integrity": "sha1-ajhfuIU9lS1f8F0Oiq+UJ43GPc8=",
++          "optional": true,
+           "requires": {
+             "ansi-regex": "^2.0.0"
+           }
+@@ -2190,12 +2207,14 @@
+         "wrappy": {
+           "version": "1.0.2",
+           "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+-          "integrity": "sha1-tSQ9jz7BqjXxNkYFvA0QNuMKtp8="
++          "integrity": "sha1-tSQ9jz7BqjXxNkYFvA0QNuMKtp8=",
++          "optional": true
+         },
+         "yallist": {
+           "version": "3.0.2",
+           "resolved": "https://registry.npmjs.org/yallist/-/yallist-3.0.2.tgz",
+-          "integrity": "sha1-hFK0u36Dx8GI2AQcGoN8dz1ti7k="
++          "integrity": "sha1-hFK0u36Dx8GI2AQcGoN8dz1ti7k=",
++          "optional": true
+         }
+       }
+     },
+diff --git a/test/TestENS.js b/test/TestENS.js
+index f1c90be..b3b30ec 100644
+--- a/test/TestENS.js
++++ b/test/TestENS.js
+@@ -5,7 +5,7 @@ const { exceptions } = require("@ensdomains/test-utils")
+ 
+ let contracts = [
+     [artifacts.require('ENSRegistry.sol'), 'Solidity'],
+-    [artifacts.require('ENS.lll'), 'LLL']
++    [artifacts.require('ENS.lll'), 'LLL'],
+ ];
+ 
+ contracts.forEach(function ([ENS, lang]) {
+diff --git a/test/TestENSRegistryWithFallback.js b/test/TestENSRegistryWithFallback.js
+new file mode 100644
+index 0000000..38ac248
+--- /dev/null
++++ b/test/TestENSRegistryWithFallback.js
+@@ -0,0 +1,50 @@
++const namehash = require('eth-ens-namehash');
++const sha3 = require('web3-utils').sha3;
++
++const { exceptions } = require("@ensdomains/test-utils")
++
++const ENS = artifacts.require('ENSRegistryWithFallback.sol');
++
++const ENSWithoutFallback = artifacts.require("ENSRegistry.sol");
++
++contract('ENSRegistryWithFallback', function (accounts) {
++
++    let old;
++    let ens;
++
++    beforeEach(async () => {
++        old = await ENSWithoutFallback.new();
++        ens = await ENS.new(old.address);
++    });
++
++    it('should allow setting the record', async () => {
++        let result = await ens.setRecord('0x0', accounts[0], accounts[1], 3600, {from: accounts[0]});
++        assert.equal(result.logs.length, 3);
++
++        assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
++        assert.equal((await ens.owner('0x0')), accounts[0]);
++        assert.equal((await ens.resolver('0x0')), accounts[1]);
++    });
++
++    it('should use fallback ttl if owner not set', async () => {
++        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
++
++        await old.setTTL('0x0', 3600, {from: accounts[0]});
++        assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
++    });
++
++    it('should use fallback owner if owner not set', async () => {
++        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
++
++        await old.setOwner('0x0', accounts[0], {from: accounts[0]});
++        assert.equal(await ens.owner('0x0'), accounts[0]);
++    });
++
++    it('should use fallback resolver if owner not set', async () => {
++        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
++
++        await old.setResolver('0x0', accounts[0], {from: accounts[0]});
++        assert.equal(await ens.resolver('0x0'), accounts[0]);
++    });
++
++});
+
+From 40a7f6089476213fbecc9151bd8c936de48eeb26 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 19 Nov 2019 05:16:28 +0100
+Subject: [PATCH 09/28] updagted
+
+---
+ contracts/ENSRegistry.sol             | 22 ++++++++++++++--------
+ contracts/ENSRegistryWithFallback.sol | 18 ------------------
+ 2 files changed, 14 insertions(+), 26 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 1e2cac2..3b59761 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -72,14 +72,20 @@ contract ENSRegistry is ENS {
+      * @param ttl The TTL in seconds.
+      */
+     function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        emit NewTTL(node, ttl);
+-        records[node].ttl = ttl;
+-
+-        emit NewResolver(node, resolver);
+-        records[node].resolver = resolver;
+-
+-        emit Transfer(node, owner);
+-        records[node].owner = owner;
++        if (records[node].ttl != ttl) {
++            emit NewTTL(node, ttl);
++            records[node].ttl = ttl;
++        }
++
++        if (records[node].resolver != resolver) {
++            emit NewResolver(node, resolver);
++            records[node].resolver = resolver;
++        }
++
++        if (records[node].owner != owner) {
++            emit Transfer(node, owner);
++            records[node].owner = owner;
++        }
+     }
+ 
+     /**
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 29ce4fa..59def75 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -17,24 +17,6 @@ contract ENSRegistryWithFallback is ENSRegistry {
+         old = _old;
+     }
+ 
+-    /**
+-     * @dev Sets the record for a node.
+-     * @param node The node to update.
+-     * @param owner The address of the new owner.
+-     * @param resolver The address of the resolver.
+-     * @param ttl The TTL in seconds.
+-     */
+-    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        emit NewTTL(node, ttl);
+-        records[node].ttl = ttl;
+-
+-        emit NewResolver(node, resolver);
+-        records[node].resolver = resolver;
+-
+-        emit Transfer(node, owner);
+-        records[node].owner = owner;
+-    }
+-
+     /**
+      * @dev Returns the address that owns the specified node.
+      * @param node The specified node.
+
+From 709b95fb5cad067b9be70a58a85cb75b93c5fb7a Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 19 Nov 2019 05:18:20 +0100
+Subject: [PATCH 10/28] fix
+
+---
+ test/TestENSRegistryWithFallback.js | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/test/TestENSRegistryWithFallback.js b/test/TestENSRegistryWithFallback.js
+index 38ac248..df72593 100644
+--- a/test/TestENSRegistryWithFallback.js
++++ b/test/TestENSRegistryWithFallback.js
+@@ -18,12 +18,12 @@ contract('ENSRegistryWithFallback', function (accounts) {
+     });
+ 
+     it('should allow setting the record', async () => {
+-        let result = await ens.setRecord('0x0', accounts[0], accounts[1], 3600, {from: accounts[0]});
++        let result = await ens.setRecord('0x0', accounts[1], accounts[2], 3600, {from: accounts[0]});
+         assert.equal(result.logs.length, 3);
+ 
+         assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
+-        assert.equal((await ens.owner('0x0')), accounts[0]);
+-        assert.equal((await ens.resolver('0x0')), accounts[1]);
++        assert.equal((await ens.owner('0x0')), accounts[1]);
++        assert.equal((await ens.resolver('0x0')), accounts[2]);
+     });
+ 
+     it('should use fallback ttl if owner not set', async () => {
+
+From 59f306cf7813bd4777ed9a51f9e5ddd9c8560a5d Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 19 Nov 2019 21:51:15 +0100
+Subject: [PATCH 11/28] dont set to 0
+
+---
+ contracts/ENSRegistryWithFallback.sol | 63 ++++++++++++++++++++++++++-
+ 1 file changed, 62 insertions(+), 1 deletion(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 59def75..fee3e0c 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -16,6 +16,52 @@ contract ENSRegistryWithFallback is ENSRegistry {
+     constructor(ENS _old) public ENSRegistry() {
+         old = _old;
+     }
++    /**
++     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
++     * @param node The node to transfer ownership of.
++     * @param owner The address of the new owner.
++     */
++    function setOwner(bytes32 node, address owner) external only_owner(node) {
++        emit Transfer(node, owner);
++        _setOwner(node, owner);
++    }
++
++    /**
++     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
++     * @param node The parent node.
++     * @param label The hash of the label specifying the subnode.
++     * @param owner The address of the new owner.
++     */
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
++        bytes32 subnode = keccak256(abi.encodePacked(node, label));
++        emit NewOwner(node, label, owner);
++        _setOwner(subnode, owner);
++
++    }
++
++    /**
++     * @dev Sets the record for a node.
++     * @param node The node to update.
++     * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
++     */
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
++        if (records[node].ttl != ttl) {
++            emit NewTTL(node, ttl);
++            records[node].ttl = ttl;
++        }
++
++        if (records[node].resolver != resolver) {
++            emit NewResolver(node, resolver);
++            records[node].resolver = resolver;
++        }
++
++        if (records[node].owner != owner) {
++            emit Transfer(node, owner);
++            _setOwner(node, owner);
++        }
++    }
+ 
+     /**
+      * @dev Returns the address that owns the specified node.
+@@ -27,7 +73,13 @@ contract ENSRegistryWithFallback is ENSRegistry {
+             return old.owner(node);
+         }
+ 
+-        return records[node].owner;
++        address addr = records[node].owner;
++
++        if (addr == address(this)) {
++            addr = address(0x0);
++        }
++
++        return addr;
+     }
+ 
+     /**
+@@ -64,4 +116,13 @@ contract ENSRegistryWithFallback is ENSRegistry {
+     function recordExists(bytes32 node) public view returns (bool) {
+         return records[node].owner != address(0x0);
+     }
++
++    function _setOwner(bytes32 node, address owner) internal {
++        address addr = owner;
++        if (addr == address(0x0)) {
++            addr = address(this);
++        }
++
++        records[node].owner = addr;
++    }
+ }
+
+From 6f9a249bb921927b034a151c3c7cb8ee87436d44 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 19 Nov 2019 22:10:50 +0100
+Subject: [PATCH 12/28] fix test
+
+---
+ contracts/ENSRegistryWithFallback.sol |  3 +-
+ test/TestENSRegistryWithFallback.js   | 44 +++++++++++++++------------
+ 2 files changed, 25 insertions(+), 22 deletions(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index fee3e0c..95597d5 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -74,9 +74,8 @@ contract ENSRegistryWithFallback is ENSRegistry {
+         }
+ 
+         address addr = records[node].owner;
+-
+         if (addr == address(this)) {
+-            addr = address(0x0);
++            return address(0x0);
+         }
+ 
+         return addr;
+diff --git a/test/TestENSRegistryWithFallback.js b/test/TestENSRegistryWithFallback.js
+index df72593..eb31033 100644
+--- a/test/TestENSRegistryWithFallback.js
++++ b/test/TestENSRegistryWithFallback.js
+@@ -26,25 +26,29 @@ contract('ENSRegistryWithFallback', function (accounts) {
+         assert.equal((await ens.resolver('0x0')), accounts[2]);
+     });
+ 
+-    it('should use fallback ttl if owner not set', async () => {
+-        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
+-
+-        await old.setTTL('0x0', 3600, {from: accounts[0]});
+-        assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
+-    });
+-
+-    it('should use fallback owner if owner not set', async () => {
+-        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
+-
+-        await old.setOwner('0x0', accounts[0], {from: accounts[0]});
+-        assert.equal(await ens.owner('0x0'), accounts[0]);
++    describe('fallback', async () => {
++
++        let hash = namehash('eth');
++
++        beforeEach(async () => {
++            await old.setSubnodeOwner('0x0', sha3('eth'), accounts[0], {from: accounts[0]});
++        });
++
++        it('should use fallback ttl if owner not set', async () => {
++            let hash = namehash('eth')
++            await old.setSubnodeOwner('0x0', sha3('eth'), accounts[0], {from: accounts[0]});
++            await old.setTTL(hash, 3600, {from: accounts[0]});
++            assert.equal((await ens.ttl(hash)).toNumber(), 3600);
++        });
++
++        it('should use fallback owner if owner not set', async () => {
++            await old.setOwner(hash, accounts[0], {from: accounts[0]});
++            assert.equal(await ens.owner(hash), accounts[0]);
++        });
++
++        it('should use fallback resolver if owner not set', async () => {
++            await old.setResolver(hash, accounts[0], {from: accounts[0]});
++            assert.equal(await ens.resolver(hash), accounts[0]);
++        });
+     });
+-
+-    it('should use fallback resolver if owner not set', async () => {
+-        await ens.setOwner('0x0', '0x0000000000000000000000000000000000000000');
+-
+-        await old.setResolver('0x0', accounts[0], {from: accounts[0]});
+-        assert.equal(await ens.resolver('0x0'), accounts[0]);
+-    });
+-
+ });
+
+From fd509b386041f16de3b7ea7f59d442e8f02b1d37 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Tue, 19 Nov 2019 22:34:27 +0100
+Subject: [PATCH 13/28] a mess
+
+---
+ contracts/ENSRegistryWithFallback.sol | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 95597d5..6b08879 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -57,7 +57,7 @@ contract ENSRegistryWithFallback is ENSRegistry {
+             records[node].resolver = resolver;
+         }
+ 
+-        if (records[node].owner != owner) {
++        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+             emit Transfer(node, owner);
+             _setOwner(node, owner);
+         }
+
+From 341f13595b835011f2d1a694212d2457cdbfaa7f Mon Sep 17 00:00:00 2001
+From: Dean Eigenmann <dean.eigenmann@icloud.com>
+Date: Thu, 21 Nov 2019 00:13:29 +0100
+Subject: [PATCH 14/28] Update package.json
+
+---
+ package.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package.json b/package.json
+index eb21148..7bce026 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@ensdomains/ens",
+-  "version": "0.3.11",
++  "version": "0.4.0",
+   "description": "Implementations for registrars and local resolvers for the Ethereum Name Service",
+   "scripts": {
+     "test": "truffle test",
+
+From b2cf4e0940813dcf9d2828fff4a2a07fe1c2ff6c Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Mon, 25 Nov 2019 02:19:56 +0100
+Subject: [PATCH 15/28] changes from @arachnid
+
+---
+ contracts/ENSRegistry.sol             | 35 +++++++++---
+ contracts/ENSRegistryWithFallback.sol | 78 +++------------------------
+ 2 files changed, 36 insertions(+), 77 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 3b59761..c3e099f 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -29,7 +29,7 @@ contract ENSRegistry is ENS {
+      */
+     function setOwner(bytes32 node, address owner) external only_owner(node) {
+         emit Transfer(node, owner);
+-        records[node].owner = owner;
++        _setOwner(node, owner);
+     }
+ 
+     /**
+@@ -41,9 +41,9 @@ contract ENSRegistry is ENS {
+     function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
+         bytes32 subnode = keccak256(abi.encodePacked(node, label));
+         emit NewOwner(node, label, owner);
+-        records[subnode].owner = owner;
+-    }
++        _setOwner(subnode, owner);
+ 
++    }
+     /**
+      * @dev Sets the resolver address for the specified node.
+      * @param node The node to update.
+@@ -82,9 +82,9 @@ contract ENSRegistry is ENS {
+             records[node].resolver = resolver;
+         }
+ 
+-        if (records[node].owner != owner) {
++        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+             emit Transfer(node, owner);
+-            records[node].owner = owner;
++            _setOwner(node, owner);
+         }
+     }
+ 
+@@ -94,7 +94,12 @@ contract ENSRegistry is ENS {
+      * @return address of the owner.
+      */
+     function owner(bytes32 node) external view returns (address) {
+-        return records[node].owner;
++        address addr = records[node].owner;
++        if (addr == address(this)) {
++            return address(0x0);
++        }
++
++        return addr;
+     }
+ 
+     /**
+@@ -114,4 +119,22 @@ contract ENSRegistry is ENS {
+     function ttl(bytes32 node) external view returns (uint64) {
+         return records[node].ttl;
+     }
++
++    /**
++     * @dev Returns whether a record has been imported to the registry.
++     * @param node The specified node.
++     * @return Bool if record exists
++     */
++    function recordExists(bytes32 node) public view returns (bool) {
++        return records[node].owner != address(0x0);
++    }
++
++    function _setOwner(bytes32 node, address owner) internal {
++        address addr = owner;
++        if (addr == address(0x0)) {
++            addr = address(this);
++        }
++
++        records[node].owner = addr;
++    }
+ }
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 6b08879..68b7991 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -16,51 +16,18 @@ contract ENSRegistryWithFallback is ENSRegistry {
+     constructor(ENS _old) public ENSRegistry() {
+         old = _old;
+     }
+-    /**
+-     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
+-     * @param node The node to transfer ownership of.
+-     * @param owner The address of the new owner.
+-     */
+-    function setOwner(bytes32 node, address owner) external only_owner(node) {
+-        emit Transfer(node, owner);
+-        _setOwner(node, owner);
+-    }
+-
+-    /**
+-     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
+-     * @param node The parent node.
+-     * @param label The hash of the label specifying the subnode.
+-     * @param owner The address of the new owner.
+-     */
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
+-        bytes32 subnode = keccak256(abi.encodePacked(node, label));
+-        emit NewOwner(node, label, owner);
+-        _setOwner(subnode, owner);
+-
+-    }
+ 
+     /**
+-     * @dev Sets the record for a node.
+-     * @param node The node to update.
+-     * @param owner The address of the new owner.
+-     * @param resolver The address of the resolver.
+-     * @param ttl The TTL in seconds.
++     * @dev Returns the address of the resolver for the specified node.
++     * @param node The specified node.
++     * @return address of the resolver.
+      */
+-    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        if (records[node].ttl != ttl) {
+-            emit NewTTL(node, ttl);
+-            records[node].ttl = ttl;
+-        }
+-
+-        if (records[node].resolver != resolver) {
+-            emit NewResolver(node, resolver);
+-            records[node].resolver = resolver;
++    function resolver(bytes32 node) external view returns (address) {
++        if (!recordExists(node)) {
++            return old.resolver(node);
+         }
+ 
+-        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+-            emit Transfer(node, owner);
+-            _setOwner(node, owner);
+-        }
++        return records[node].resolver;
+     }
+ 
+     /**
+@@ -81,19 +48,6 @@ contract ENSRegistryWithFallback is ENSRegistry {
+         return addr;
+     }
+ 
+-    /**
+-     * @dev Returns the address of the resolver for the specified node.
+-     * @param node The specified node.
+-     * @return address of the resolver.
+-     */
+-    function resolver(bytes32 node) external view returns (address) {
+-        if (!recordExists(node)) {
+-            return old.resolver(node);
+-        }
+-
+-        return records[node].resolver;
+-    }
+-
+     /**
+      * @dev Returns the TTL of a node, and any records associated with it.
+      * @param node The specified node.
+@@ -106,22 +60,4 @@ contract ENSRegistryWithFallback is ENSRegistry {
+ 
+         return records[node].ttl;
+     }
+-
+-    /**
+-     * @dev Returns whether a record has been imported to the registry.
+-     * @param node The specified node.
+-     * @return Bool if record exists
+-     */
+-    function recordExists(bytes32 node) public view returns (bool) {
+-        return records[node].owner != address(0x0);
+-    }
+-
+-    function _setOwner(bytes32 node, address owner) internal {
+-        address addr = owner;
+-        if (addr == address(0x0)) {
+-            addr = address(this);
+-        }
+-
+-        records[node].owner = addr;
+-    }
+ }
+
+From 47632612bc8e332e302e56b54e9070858903ab33 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Mon, 25 Nov 2019 02:23:15 +0100
+Subject: [PATCH 16/28] readded
+
+---
+ contracts/ENSRegistry.sol             | 6 ++++++
+ contracts/ENSRegistryWithFallback.sol | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index c3e099f..e2fa625 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -2,6 +2,9 @@ pragma solidity ^0.5.0;
+ 
+ import "./ENS.sol";
+ 
++/**
++ * The ENS registry contract.
++ */
+ contract ENSRegistry is ENS {
+ 
+     struct Record {
+@@ -18,6 +21,9 @@ contract ENSRegistry is ENS {
+         _;
+     }
+ 
++    /**
++     * @dev Constructs a new ENS registrar.
++     */
+     constructor() public {
+         records[0x0].owner = msg.sender;
+     }
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 68b7991..3291ea6 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -3,6 +3,9 @@ pragma solidity ^0.5.0;
+ import "./ENS.sol";
+ import "./ENSRegistry.sol";
+ 
++/**
++ * The ENS registry contract.
++ */
+ contract ENSRegistryWithFallback is ENSRegistry {
+ 
+     ENS public old;
+@@ -13,6 +16,9 @@ contract ENSRegistryWithFallback is ENSRegistry {
+         _;
+     }
+ 
++    /**
++     * @dev Constructs a new ENS registrar.
++     */
+     constructor(ENS _old) public ENSRegistry() {
+         old = _old;
+     }
+
+From be6c0dd480a63fc95ecd64f86174f7b21e04a362 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Mon, 25 Nov 2019 04:51:46 +0100
+Subject: [PATCH 17/28] removed duplicate
+
+---
+ contracts/ENSRegistryWithFallback.sol | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 3291ea6..737d2a7 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -10,12 +10,6 @@ contract ENSRegistryWithFallback is ENSRegistry {
+ 
+     ENS public old;
+ 
+-    // Permits modifications only by the owner of the specified node.
+-    modifier only_owner(bytes32 node) {
+-        require(records[node].owner == msg.sender);
+-        _;
+-    }
+-
+     /**
+      * @dev Constructs a new ENS registrar.
+      */
+
+From 93af74e32d70936ee36e0865943a9a1c93d9a10a Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Wed, 27 Nov 2019 16:27:34 +0100
+Subject: [PATCH 18/28] updated
+
+---
+ contracts/ENSRegistry.sol             |  6 +++---
+ contracts/ENSRegistryWithFallback.sol | 17 ++++++-----------
+ 2 files changed, 9 insertions(+), 14 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index e2fa625..ccadecd 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -99,7 +99,7 @@ contract ENSRegistry is ENS {
+      * @param node The specified node.
+      * @return address of the owner.
+      */
+-    function owner(bytes32 node) external view returns (address) {
++    function owner(bytes32 node) public view returns (address) {
+         address addr = records[node].owner;
+         if (addr == address(this)) {
+             return address(0x0);
+@@ -113,7 +113,7 @@ contract ENSRegistry is ENS {
+      * @param node The specified node.
+      * @return address of the resolver.
+      */
+-    function resolver(bytes32 node) external view returns (address) {
++    function resolver(bytes32 node) public view returns (address) {
+         return records[node].resolver;
+     }
+ 
+@@ -122,7 +122,7 @@ contract ENSRegistry is ENS {
+      * @param node The specified node.
+      * @return ttl of the node.
+      */
+-    function ttl(bytes32 node) external view returns (uint64) {
++    function ttl(bytes32 node) public view returns (uint64) {
+         return records[node].ttl;
+     }
+ 
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 737d2a7..2aa5d79 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -22,12 +22,12 @@ contract ENSRegistryWithFallback is ENSRegistry {
+      * @param node The specified node.
+      * @return address of the resolver.
+      */
+-    function resolver(bytes32 node) external view returns (address) {
++    function resolver(bytes32 node) public view returns (address) {
+         if (!recordExists(node)) {
+             return old.resolver(node);
+         }
+ 
+-        return records[node].resolver;
++        return super.resolver(node);
+     }
+ 
+     /**
+@@ -35,17 +35,12 @@ contract ENSRegistryWithFallback is ENSRegistry {
+      * @param node The specified node.
+      * @return address of the owner.
+      */
+-    function owner(bytes32 node) external view returns (address) {
++    function owner(bytes32 node) public view returns (address) {
+         if (!recordExists(node)) {
+             return old.owner(node);
+         }
+ 
+-        address addr = records[node].owner;
+-        if (addr == address(this)) {
+-            return address(0x0);
+-        }
+-
+-        return addr;
++        return super.owner(node);
+     }
+ 
+     /**
+@@ -53,11 +48,11 @@ contract ENSRegistryWithFallback is ENSRegistry {
+      * @param node The specified node.
+      * @return ttl of the node.
+      */
+-    function ttl(bytes32 node) external view returns (uint64) {
++    function ttl(bytes32 node) public view returns (uint64) {
+         if (!recordExists(node)) {
+             return old.ttl(node);
+         }
+ 
+-        return records[node].ttl;
++        return super.ttl(node);
+     }
+ }
+
+From 100b8fd3e4a9b4092549114c5a57182e2caa6907 Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Wed, 27 Nov 2019 16:37:53 +0100
+Subject: [PATCH 19/28] changes
+
+---
+ contracts/ENSRegistry.sol | 23 ++++++++++-------------
+ 1 file changed, 10 insertions(+), 13 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index ccadecd..6be9e09 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -56,8 +56,10 @@ contract ENSRegistry is ENS {
+      * @param resolver The address of the resolver.
+      */
+     function setResolver(bytes32 node, address resolver) external only_owner(node) {
+-        emit NewResolver(node, resolver);
+-        records[node].resolver = resolver;
++        if (records[node].resolver != resolver) {
++            emit NewResolver(node, resolver);
++            records[node].resolver = resolver;
++        }
+     }
+ 
+     /**
+@@ -66,8 +68,10 @@ contract ENSRegistry is ENS {
+      * @param ttl The TTL in seconds.
+      */
+     function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
+-        emit NewTTL(node, ttl);
+-        records[node].ttl = ttl;
++        if (records[node].ttl != ttl) {
++            emit NewTTL(node, ttl);
++            records[node].ttl = ttl;
++        }
+     }
+ 
+     /**
+@@ -78,15 +82,8 @@ contract ENSRegistry is ENS {
+      * @param ttl The TTL in seconds.
+      */
+     function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        if (records[node].ttl != ttl) {
+-            emit NewTTL(node, ttl);
+-            records[node].ttl = ttl;
+-        }
+-
+-        if (records[node].resolver != resolver) {
+-            emit NewResolver(node, resolver);
+-            records[node].resolver = resolver;
+-        }
++        setTTL(node, ttl);
++        setResolver(node, resolver);
+ 
+         if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+             emit Transfer(node, owner);
+
+From c7631107076fef9ffe5f181d1af867ccfb3cf02f Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Wed, 27 Nov 2019 16:38:37 +0100
+Subject: [PATCH 20/28] permission
+
+---
+ contracts/ENSRegistry.sol | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 6be9e09..54fd60b 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -55,7 +55,7 @@ contract ENSRegistry is ENS {
+      * @param node The node to update.
+      * @param resolver The address of the resolver.
+      */
+-    function setResolver(bytes32 node, address resolver) external only_owner(node) {
++    function setResolver(bytes32 node, address resolver) public only_owner(node) {
+         if (records[node].resolver != resolver) {
+             emit NewResolver(node, resolver);
+             records[node].resolver = resolver;
+@@ -67,7 +67,7 @@ contract ENSRegistry is ENS {
+      * @param node The node to update.
+      * @param ttl The TTL in seconds.
+      */
+-    function setTTL(bytes32 node, uint64 ttl) external only_owner(node) {
++    function setTTL(bytes32 node, uint64 ttl) public only_owner(node) {
+         if (records[node].ttl != ttl) {
+             emit NewTTL(node, ttl);
+             records[node].ttl = ttl;
+
+From 0dd0733479ebb5ce68a2a2013c42050914b97b0d Mon Sep 17 00:00:00 2001
+From: decanus <dean.eigenmann@icloud.com>
+Date: Wed, 27 Nov 2019 16:39:24 +0100
+Subject: [PATCH 21/28] fixes
+
+---
+ contracts/ENSRegistry.sol | 35 ++++++++++++++++++-----------------
+ 1 file changed, 18 insertions(+), 17 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 54fd60b..9a917e3 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -50,6 +50,24 @@ contract ENSRegistry is ENS {
+         _setOwner(subnode, owner);
+ 
+     }
++
++    /**
++     * @dev Sets the record for a node.
++     * @param node The node to update.
++     * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
++     */
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
++        setTTL(node, ttl);
++        setResolver(node, resolver);
++
++        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
++            emit Transfer(node, owner);
++            _setOwner(node, owner);
++        }
++    }
++
+     /**
+      * @dev Sets the resolver address for the specified node.
+      * @param node The node to update.
+@@ -74,23 +92,6 @@ contract ENSRegistry is ENS {
+         }
+     }
+ 
+-    /**
+-     * @dev Sets the record for a node.
+-     * @param node The node to update.
+-     * @param owner The address of the new owner.
+-     * @param resolver The address of the resolver.
+-     * @param ttl The TTL in seconds.
+-     */
+-    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        setTTL(node, ttl);
+-        setResolver(node, resolver);
+-
+-        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+-            emit Transfer(node, owner);
+-            _setOwner(node, owner);
+-        }
+-    }
+-
+     /**
+      * @dev Returns the address that owns the specified node.
+      * @param node The specified node.
+
+From bc99a4b6b7be0ead84bd054aa08957686b7d5755 Mon Sep 17 00:00:00 2001
+From: Nick Johnson <arachnid@notdot.net>
+Date: Mon, 2 Dec 2019 17:12:31 +1300
+Subject: [PATCH 22/28] More refactoring to permit setRecord and
+ setSubnodeRecord to work well
+
+---
+ contracts/ENSRegistry.sol             |  79 ++++++-----
+ contracts/ENSRegistryWithFallback.sol |   9 ++
+ package-lock.json                     | 184 +++++++++++++++++++++++---
+ package.json                          |   4 +-
+ test/TestENS.js                       |   2 +-
+ test/TestENSRegistryWithFallback.js   |  15 ++-
+ test/TestFIFSRegistrar.js             |   5 +-
+ test/TestReverseRegistrar.js          |   4 +-
+ test/TestTestRegistrar.js             |   2 +-
+ 9 files changed, 237 insertions(+), 67 deletions(-)
+
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index 9a917e3..c035dd4 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -29,43 +29,51 @@ contract ENSRegistry is ENS {
+     }
+ 
+     /**
+-     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
+-     * @param node The node to transfer ownership of.
++     * @dev Sets the record for a node.
++     * @param node The node to update.
+      * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
+      */
+-    function setOwner(bytes32 node, address owner) external only_owner(node) {
+-        emit Transfer(node, owner);
+-        _setOwner(node, owner);
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external {
++        setOwner(node, owner);
++        _setResolverAndTTL(node, resolver, ttl);
+     }
+ 
+     /**
+-     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
++     * @dev Sets the record for a subnode.
+      * @param node The parent node.
+      * @param label The hash of the label specifying the subnode.
+      * @param owner The address of the new owner.
++     * @param resolver The address of the resolver.
++     * @param ttl The TTL in seconds.
+      */
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external only_owner(node) {
+-        bytes32 subnode = keccak256(abi.encodePacked(node, label));
+-        emit NewOwner(node, label, owner);
+-        _setOwner(subnode, owner);
+-
++    function setSubnodeRecord(bytes32 node, bytes32 label, address owner, address resolver, uint64 ttl) external {
++        bytes32 subnode = setSubnodeOwner(node, label, owner);
++        _setResolverAndTTL(subnode, resolver, ttl);
+     }
+ 
+     /**
+-     * @dev Sets the record for a node.
+-     * @param node The node to update.
++     * @dev Transfers ownership of a node to a new address. May only be called by the current owner of the node.
++     * @param node The node to transfer ownership of.
+      * @param owner The address of the new owner.
+-     * @param resolver The address of the resolver.
+-     * @param ttl The TTL in seconds.
+      */
+-    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external only_owner(node) {
+-        setTTL(node, ttl);
+-        setResolver(node, resolver);
++    function setOwner(bytes32 node, address owner) public only_owner(node) {
++        _setOwner(node, owner);
++        emit Transfer(node, owner);
++    }
+ 
+-        if (records[node].owner != owner || (owner != address(0x0) && records[node].owner != address(this))) {
+-            emit Transfer(node, owner);
+-            _setOwner(node, owner);
+-        }
++    /**
++     * @dev Transfers ownership of a subnode keccak256(node, label) to a new address. May only be called by the owner of the parent node.
++     * @param node The parent node.
++     * @param label The hash of the label specifying the subnode.
++     * @param owner The address of the new owner.
++     */
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) public only_owner(node) returns(bytes32) {
++        bytes32 subnode = keccak256(abi.encodePacked(node, label));
++        _setOwner(subnode, owner);
++        emit NewOwner(node, label, owner);
++        return subnode;
+     }
+ 
+     /**
+@@ -74,10 +82,8 @@ contract ENSRegistry is ENS {
+      * @param resolver The address of the resolver.
+      */
+     function setResolver(bytes32 node, address resolver) public only_owner(node) {
+-        if (records[node].resolver != resolver) {
+-            emit NewResolver(node, resolver);
+-            records[node].resolver = resolver;
+-        }
++        emit NewResolver(node, resolver);
++        records[node].resolver = resolver;
+     }
+ 
+     /**
+@@ -86,10 +92,8 @@ contract ENSRegistry is ENS {
+      * @param ttl The TTL in seconds.
+      */
+     function setTTL(bytes32 node, uint64 ttl) public only_owner(node) {
+-        if (records[node].ttl != ttl) {
+-            emit NewTTL(node, ttl);
+-            records[node].ttl = ttl;
+-        }
++        emit NewTTL(node, ttl);
++        records[node].ttl = ttl;
+     }
+ 
+     /**
+@@ -134,11 +138,18 @@ contract ENSRegistry is ENS {
+     }
+ 
+     function _setOwner(bytes32 node, address owner) internal {
+-        address addr = owner;
+-        if (addr == address(0x0)) {
+-            addr = address(this);
++        records[node].owner = owner;
++    }
++
++    function _setResolverAndTTL(bytes32 node, address resolver, uint64 ttl) internal {
++        if(resolver != records[node].resolver) {
++            records[node].resolver = resolver;
++            emit NewResolver(node, resolver);
+         }
+ 
+-        records[node].owner = addr;
++        if(ttl != records[node].ttl) {
++            records[node].ttl = ttl;
++            emit NewTTL(node, ttl);
++        }
+     }
+ }
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 2aa5d79..97857ee 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -55,4 +55,13 @@ contract ENSRegistryWithFallback is ENSRegistry {
+ 
+         return super.ttl(node);
+     }
++
++    function _setOwner(bytes32 node, address owner) internal {
++        address addr = owner;
++        if (addr == address(0x0)) {
++            addr = address(this);
++        }
++
++        super._setOwner(node, owner);
++    }
+ }
+diff --git a/package-lock.json b/package-lock.json
+index a0b0105..4b86b48 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@ensdomains/ens",
+-  "version": "0.3.11",
++  "version": "0.4.0",
+   "lockfileVersion": 1,
+   "requires": true,
+   "dependencies": {
+@@ -314,10 +314,13 @@
+       "integrity": "sha1-RqoXUftqL5PuXmibsQh9SxTGwgU="
+     },
+     "bindings": {
+-      "version": "1.3.0",
+-      "resolved": "https://registry.npmjs.org/bindings/-/bindings-1.3.0.tgz",
+-      "integrity": "sha512-DpLh5EzMR2kzvX1KIlVC0VkC3iZtHKTgdtZ0a3pglBZdaQFjt5S9g9xd1lE+YvXyfd6mtCeRnrUfOLYiTMlNSw==",
+-      "dev": true
++      "version": "1.5.0",
++      "resolved": "https://registry.npmjs.org/bindings/-/bindings-1.5.0.tgz",
++      "integrity": "sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==",
++      "dev": true,
++      "requires": {
++        "file-uri-to-path": "1.0.0"
++      }
+     },
+     "bluebird": {
+       "version": "3.5.3",
+@@ -976,6 +979,15 @@
+       "resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-1.0.2.tgz",
+       "integrity": "sha1-rT/0yG7C0CkyL1oCw6mmBslbP1k="
+     },
++    "end-of-stream": {
++      "version": "1.4.4",
++      "resolved": "https://registry.npmjs.org/end-of-stream/-/end-of-stream-1.4.4.tgz",
++      "integrity": "sha512-+uw1inIHVPQoaVuHzRyXd21icM+cnt4CzD5rW+NC1wjOUSTOs+Te7FOv7AhN7vS9x/oIyhLP5PR1H+phQAHu5Q==",
++      "dev": true,
++      "requires": {
++        "once": "^1.4.0"
++      }
++    },
+     "enhanced-resolve": {
+       "version": "3.4.1",
+       "resolved": "https://registry.npmjs.org/enhanced-resolve/-/enhanced-resolve-3.4.1.tgz",
+@@ -1158,11 +1170,11 @@
+       "integrity": "sha1-Qa4u62XvpiJorr/qg6x9eSmbCIc="
+     },
+     "eth-ens-namehash": {
+-      "version": "1.0.2",
+-      "resolved": "https://registry.npmjs.org/eth-ens-namehash/-/eth-ens-namehash-1.0.2.tgz",
+-      "integrity": "sha1-Bezda6wtf9e8XKhKmTxrrZ2k7bk=",
++      "version": "2.0.8",
++      "resolved": "https://registry.npmjs.org/eth-ens-namehash/-/eth-ens-namehash-2.0.8.tgz",
++      "integrity": "sha1-IprEbsqG1S4MmR58sq74P/D2i88=",
+       "requires": {
+-        "idna-uts46": "^1.0.1",
++        "idna-uts46-hx": "^2.3.1",
+         "js-sha3": "^0.5.7"
+       }
+     },
+@@ -1543,6 +1555,12 @@
+       "integrity": "sha1-PYpcZog6FqMMqGQ+hR8Zuqd5eRc=",
+       "dev": true
+     },
++    "file-uri-to-path": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/file-uri-to-path/-/file-uri-to-path-1.0.0.tgz",
++      "integrity": "sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==",
++      "dev": true
++    },
+     "filename-regex": {
+       "version": "2.0.1",
+       "resolved": "https://registry.npmjs.org/filename-regex/-/filename-regex-2.0.1.tgz",
+@@ -2517,12 +2535,19 @@
+         "safer-buffer": ">= 2.1.2 < 3"
+       }
+     },
+-    "idna-uts46": {
+-      "version": "1.1.0",
+-      "resolved": "https://registry.npmjs.org/idna-uts46/-/idna-uts46-1.1.0.tgz",
+-      "integrity": "sha1-vgmLK3wcq/vvh6i4D2JvrDc2auo=",
++    "idna-uts46-hx": {
++      "version": "2.3.1",
++      "resolved": "https://registry.npmjs.org/idna-uts46-hx/-/idna-uts46-hx-2.3.1.tgz",
++      "integrity": "sha512-PWoF9Keq6laYdIRwwCdhTPl60xRqAloYNMQLiyUnG42VjT53oW07BXIRM+NK7eQjzXjAk2gUvX9caRxlnF9TAA==",
+       "requires": {
+-        "punycode": "^2.1.0"
++        "punycode": "2.1.0"
++      },
++      "dependencies": {
++        "punycode": {
++          "version": "2.1.0",
++          "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.1.0.tgz",
++          "integrity": "sha1-X4Y+3Im5bbCQdLrXlHvwkFbKTn0="
++        }
+       }
+     },
+     "ieee754": {
+@@ -3044,6 +3069,15 @@
+         "yallist": "^2.1.2"
+       }
+     },
++    "map-age-cleaner": {
++      "version": "0.1.3",
++      "resolved": "https://registry.npmjs.org/map-age-cleaner/-/map-age-cleaner-0.1.3.tgz",
++      "integrity": "sha512-bJzx6nMoP6PDLPBFmg7+xRKeFZvFboMrGlxmNj9ClvX53KrmvM5bXFXEWjbz4cz1AFn+jWJ9z/DJSz7hrs0w3w==",
++      "dev": true,
++      "requires": {
++        "p-defer": "^1.0.0"
++      }
++    },
+     "map-cache": {
+       "version": "0.2.2",
+       "resolved": "https://registry.npmjs.org/map-cache/-/map-cache-0.2.2.tgz",
+@@ -3353,6 +3387,12 @@
+       "resolved": "https://registry.npmjs.org/next-tick/-/next-tick-1.0.0.tgz",
+       "integrity": "sha1-yobR/ogoFpsBICCOPchCS524NCw="
+     },
++    "nice-try": {
++      "version": "1.0.5",
++      "resolved": "https://registry.npmjs.org/nice-try/-/nice-try-1.0.5.tgz",
++      "integrity": "sha512-1nh45deeb5olNY7eX82BkPO7SSxR5SSYJiPTrTdFUVYwAl8CKMA5N9PjTYkHiRjisVcxcQ1HXdLhx2qxxJzLNQ==",
++      "dev": true
++    },
+     "node-libs-browser": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/node-libs-browser/-/node-libs-browser-2.1.0.tgz",
+@@ -3572,11 +3612,23 @@
+         "mem": "^1.1.0"
+       }
+     },
++    "p-defer": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/p-defer/-/p-defer-1.0.0.tgz",
++      "integrity": "sha1-n26xgvbJqozXQwBKfU+WsZaw+ww=",
++      "dev": true
++    },
+     "p-finally": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/p-finally/-/p-finally-1.0.0.tgz",
+       "integrity": "sha1-P7z7FbiZpEEjs0ttzBi3JDNqLK4="
+     },
++    "p-is-promise": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/p-is-promise/-/p-is-promise-2.1.0.tgz",
++      "integrity": "sha512-Y3W0wlRPK8ZMRbNq97l4M5otioeA5lm1z7bkNkxCka8HSPjR0xRWmpCmc9utiaLP9Jb1eD8BgeIxTW4AIF45Pg==",
++      "dev": true
++    },
+     "p-limit": {
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/p-limit/-/p-limit-1.3.0.tgz",
+@@ -3813,6 +3865,16 @@
+         "randombytes": "^2.0.1"
+       }
+     },
++    "pump": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/pump/-/pump-3.0.0.tgz",
++      "integrity": "sha512-LwZy+p3SFs1Pytd/jYct4wpv49HiYCqd9Rlc5ZVdk0V+8Yzv6jR5Blk3TRmPL1ft69TxP0IMZGJ+WPFU2BFhww==",
++      "dev": true,
++      "requires": {
++        "end-of-stream": "^1.1.0",
++        "once": "^1.3.1"
++      }
++    },
+     "punycode": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.1.1.tgz",
+@@ -5347,9 +5409,9 @@
+       "integrity": "sha1-WFhUf2spB1fulczMZm+1AITEYN0="
+     },
+     "truffle": {
+-      "version": "5.0.0",
+-      "resolved": "https://registry.npmjs.org/truffle/-/truffle-5.0.0.tgz",
+-      "integrity": "sha512-la0TJu+E59Ut62i6cGY0sugeubglDqH5w49a7IrpxZ1nnsDqv6qWB3ibiyYiCp/jr+iI0bLtcr3DKkfQjVDd+g==",
++      "version": "5.0.19",
++      "resolved": "https://registry.npmjs.org/truffle/-/truffle-5.0.19.tgz",
++      "integrity": "sha512-d4fxChHYCjccW33IO/4KLcGqjTDn+mw7vqdGvGi307CMo+KTtns+5c91+1iOKDQcSKiv8SHYgvtyF7cn/+FPAg==",
+       "dev": true,
+       "requires": {
+         "app-module-path": "^2.2.0",
+@@ -5387,6 +5449,19 @@
+           "integrity": "sha512-b0553uYA5YAEGgyYIGYROzKQ7X5RAqedkfjiZxwi0kL1g3bOaBNNZfYkzt/CL0umgD5wc9Jec2FbB98CjkMRvQ==",
+           "dev": true
+         },
++        "cross-spawn": {
++          "version": "6.0.5",
++          "resolved": "https://registry.npmjs.org/cross-spawn/-/cross-spawn-6.0.5.tgz",
++          "integrity": "sha512-eTVLrBSt7fjbDygz805pMnstIs2VTBNkRm0qxZd+M7A5XDdxVRWO5MxGBXZhjY4cqLYLdtrGqRf8mBPmzwSpWQ==",
++          "dev": true,
++          "requires": {
++            "nice-try": "^1.0.4",
++            "path-key": "^2.0.1",
++            "semver": "^5.5.0",
++            "shebang-command": "^1.2.0",
++            "which": "^1.2.9"
++          }
++        },
+         "debug": {
+           "version": "3.1.0",
+           "resolved": "https://registry.npmjs.org/debug/-/debug-3.1.0.tgz",
+@@ -5408,12 +5483,68 @@
+           "integrity": "sha1-G2HAViGQqN/2rjuyzwIAyhMLhtQ=",
+           "dev": true
+         },
++        "execa": {
++          "version": "1.0.0",
++          "resolved": "https://registry.npmjs.org/execa/-/execa-1.0.0.tgz",
++          "integrity": "sha512-adbxcyWV46qiHyvSp50TKt05tB4tK3HcmF7/nxfAdhnox83seTDbwnaqKO4sXRy7roHAIFqJP/Rw/AuEbX61LA==",
++          "dev": true,
++          "requires": {
++            "cross-spawn": "^6.0.0",
++            "get-stream": "^4.0.0",
++            "is-stream": "^1.1.0",
++            "npm-run-path": "^2.0.0",
++            "p-finally": "^1.0.0",
++            "signal-exit": "^3.0.0",
++            "strip-eof": "^1.0.0"
++          }
++        },
++        "get-stream": {
++          "version": "4.1.0",
++          "resolved": "https://registry.npmjs.org/get-stream/-/get-stream-4.1.0.tgz",
++          "integrity": "sha512-GMat4EJ5161kIy2HevLlr4luNjBgvmj413KaQA7jt4V8B4RDsfpHk7WQ9GVqfYyyx8OS/L66Kox+rJRNklLK7w==",
++          "dev": true,
++          "requires": {
++            "pump": "^3.0.0"
++          }
++        },
+         "growl": {
+           "version": "1.10.3",
+           "resolved": "https://registry.npmjs.org/growl/-/growl-1.10.3.tgz",
+           "integrity": "sha512-hKlsbA5Vu3xsh1Cg3J7jSmX/WaW6A5oBeqzM88oNbCRQFz+zUaXm6yxS4RVytp1scBoJzSYl4YAEOQIt6O8V1Q==",
+           "dev": true
+         },
++        "invert-kv": {
++          "version": "2.0.0",
++          "resolved": "https://registry.npmjs.org/invert-kv/-/invert-kv-2.0.0.tgz",
++          "integrity": "sha512-wPVv/y/QQ/Uiirj/vh3oP+1Ww+AWehmi1g5fFWGPF6IpCBCDVrhgHRMvrLfdYcwDh3QJbGXDW4JAuzxElLSqKA==",
++          "dev": true
++        },
++        "lcid": {
++          "version": "2.0.0",
++          "resolved": "https://registry.npmjs.org/lcid/-/lcid-2.0.0.tgz",
++          "integrity": "sha512-avPEb8P8EGnwXKClwsNUgryVjllcRqtMYa49NTsbQagYuT1DcXnl1915oxWjoyGrXR6zH/Y0Zc96xWsPcoDKeA==",
++          "dev": true,
++          "requires": {
++            "invert-kv": "^2.0.0"
++          }
++        },
++        "mem": {
++          "version": "4.3.0",
++          "resolved": "https://registry.npmjs.org/mem/-/mem-4.3.0.tgz",
++          "integrity": "sha512-qX2bG48pTqYRVmDB37rn/6PT7LcR8T7oAX3bf99u1Tt1nzxYfxkgqDwUwolPlXweM0XzBOBFzSx4kfp7KP1s/w==",
++          "dev": true,
++          "requires": {
++            "map-age-cleaner": "^0.1.1",
++            "mimic-fn": "^2.0.0",
++            "p-is-promise": "^2.0.0"
++          }
++        },
++        "mimic-fn": {
++          "version": "2.1.0",
++          "resolved": "https://registry.npmjs.org/mimic-fn/-/mimic-fn-2.1.0.tgz",
++          "integrity": "sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==",
++          "dev": true
++        },
+         "mocha": {
+           "version": "4.1.0",
+           "resolved": "https://registry.npmjs.org/mocha/-/mocha-4.1.0.tgz",
+@@ -5432,6 +5563,17 @@
+             "supports-color": "4.4.0"
+           }
+         },
++        "os-locale": {
++          "version": "3.1.0",
++          "resolved": "https://registry.npmjs.org/os-locale/-/os-locale-3.1.0.tgz",
++          "integrity": "sha512-Z8l3R4wYWM40/52Z+S265okfFj8Kt2cC2MKY+xNi3kFs+XGI7WXu/I309QQQYbRW4ijiZ+yxs9pqEhJh0DqW3Q==",
++          "dev": true,
++          "requires": {
++            "execa": "^1.0.0",
++            "lcid": "^2.0.0",
++            "mem": "^4.0.0"
++          }
++        },
+         "require-from-string": {
+           "version": "2.0.2",
+           "resolved": "https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz",
+@@ -5471,16 +5613,16 @@
+           }
+         },
+         "yargs": {
+-          "version": "11.1.0",
+-          "resolved": "http://registry.npmjs.org/yargs/-/yargs-11.1.0.tgz",
+-          "integrity": "sha512-NwW69J42EsCSanF8kyn5upxvjp5ds+t3+udGBeTbFnERA+lF541DDpMawzo4z6W/QrzNM18D+BPMiOBibnFV5A==",
++          "version": "11.1.1",
++          "resolved": "https://registry.npmjs.org/yargs/-/yargs-11.1.1.tgz",
++          "integrity": "sha512-PRU7gJrJaXv3q3yQZ/+/X6KBswZiaQ+zOmdprZcouPYtQgvNU35i+68M4b1ZHLZtYFT5QObFLV+ZkmJYcwKdiw==",
+           "dev": true,
+           "requires": {
+             "cliui": "^4.0.0",
+             "decamelize": "^1.1.1",
+             "find-up": "^2.1.0",
+             "get-caller-file": "^1.0.1",
+-            "os-locale": "^2.0.0",
++            "os-locale": "^3.1.0",
+             "require-directory": "^2.1.1",
+             "require-main-filename": "^1.0.1",
+             "set-blocking": "^2.0.0",
+diff --git a/package.json b/package.json
+index 7bce026..f366978 100644
+--- a/package.json
++++ b/package.json
+@@ -21,7 +21,7 @@
+   "homepage": "https://github.com/ensdomains/ens#readme",
+   "dependencies": {
+     "bluebird": "^3.5.2",
+-    "eth-ens-namehash": "^1.0.2",
++    "eth-ens-namehash": "^2.0.8",
+     "ethereumjs-testrpc": "^6.0.3",
+     "ganache-cli": "^6.1.0",
+     "solc": "^0.4.20",
+@@ -32,6 +32,6 @@
+     "@ensdomains/test-utils": "^1.2.0",
+     "solidity-coverage": "^0.3.5",
+     "solium": "^1.0.4",
+-    "truffle": "^5.0.0"
++    "truffle": "5.0.19"
+   }
+ }
+diff --git a/test/TestENS.js b/test/TestENS.js
+index b3b30ec..8b11e92 100644
+--- a/test/TestENS.js
++++ b/test/TestENS.js
+@@ -87,7 +87,7 @@ contracts.forEach(function ([ENS, lang]) {
+         it('should allow the creation of subnodes', async () => {
+             let result = await ens.setSubnodeOwner('0x0', sha3('eth'), accounts[1], {from: accounts[0]});
+ 
+-            assert.equal(await ens.owner(namehash('eth')), accounts[1]);
++            assert.equal(await ens.owner(namehash.hash('eth')), accounts[1]);
+ 
+             assert.equal(result.logs.length, 1);
+             let args = result.logs[0].args;
+diff --git a/test/TestENSRegistryWithFallback.js b/test/TestENSRegistryWithFallback.js
+index eb31033..75517fc 100644
+--- a/test/TestENSRegistryWithFallback.js
++++ b/test/TestENSRegistryWithFallback.js
+@@ -21,21 +21,30 @@ contract('ENSRegistryWithFallback', function (accounts) {
+         let result = await ens.setRecord('0x0', accounts[1], accounts[2], 3600, {from: accounts[0]});
+         assert.equal(result.logs.length, 3);
+ 
+-        assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
+         assert.equal((await ens.owner('0x0')), accounts[1]);
+         assert.equal((await ens.resolver('0x0')), accounts[2]);
++        assert.equal((await ens.ttl('0x0')).toNumber(), 3600);
+     });
+ 
++    it('should allow setting subnode records', async () => {
++        let result = await ens.setSubnodeRecord('0x0', sha3('test'), accounts[1], accounts[2], 3600, {from: accounts[0]});
++
++        let hash = namehash.hash("test");
++        assert.equal(await ens.owner(hash), accounts[1]);
++        assert.equal(await ens.resolver(hash), accounts[2]);
++        assert.equal((await ens.ttl(hash)).toNumber(), 3600);
++    })
++
+     describe('fallback', async () => {
+ 
+-        let hash = namehash('eth');
++        let hash = namehash.hash('eth');
+ 
+         beforeEach(async () => {
+             await old.setSubnodeOwner('0x0', sha3('eth'), accounts[0], {from: accounts[0]});
+         });
+ 
+         it('should use fallback ttl if owner not set', async () => {
+-            let hash = namehash('eth')
++            let hash = namehash.hash('eth')
+             await old.setSubnodeOwner('0x0', sha3('eth'), accounts[0], {from: accounts[0]});
+             await old.setTTL(hash, 3600, {from: accounts[0]});
+             assert.equal((await ens.ttl(hash)).toNumber(), 3600);
+diff --git a/test/TestFIFSRegistrar.js b/test/TestFIFSRegistrar.js
+index 4fe1ee9..45d0f4b 100644
+--- a/test/TestFIFSRegistrar.js
++++ b/test/TestFIFSRegistrar.js
+@@ -19,7 +19,7 @@ contract('FIFSRegistrar', function (accounts) {
+     it('should allow registration of names', async () => {
+         await registrar.register(sha3('eth'), accounts[0], {from: accounts[0]});
+         assert.equal(await ens.owner('0x0'), registrar.address);
+-        assert.equal(await ens.owner(namehash('eth')), accounts[0]);
++        assert.equal(await ens.owner(namehash.hash('eth')), accounts[0]);
+     });
+ 
+     describe('transferring names', async () => {
+@@ -30,7 +30,7 @@ contract('FIFSRegistrar', function (accounts) {
+ 
+         it('should allow transferring name to your own', async () => {
+             await registrar.register(sha3('eth'), accounts[1], {from: accounts[0]});
+-            assert.equal(await ens.owner(namehash('eth')), accounts[1]);
++            assert.equal(await ens.owner(namehash.hash('eth')), accounts[1]);
+         });
+ 
+         it('forbids transferring the name you do not own', async () => {
+@@ -44,4 +44,3 @@ contract('FIFSRegistrar', function (accounts) {
+         });
+     });
+ });
+-
+diff --git a/test/TestReverseRegistrar.js b/test/TestReverseRegistrar.js
+index 63233b5..fa20967 100644
+--- a/test/TestReverseRegistrar.js
++++ b/test/TestReverseRegistrar.js
+@@ -11,13 +11,13 @@ contract('ReverseRegistar', function (accounts) {
+     let registrar, resolver, ens;
+ 
+     beforeEach(async () => {
+-        node = namehash(accounts[0].slice(2).toLowerCase() + ".addr.reverse");
++        node = namehash.hash(accounts[0].slice(2).toLowerCase() + ".addr.reverse");
+         ens = await ENS.new();
+         resolver = await DummyResolver.new();
+         registrar = await ReverseRegistrar.new(ens.address, resolver.address);
+ 
+         await ens.setSubnodeOwner('0x0', sha3('reverse'), accounts[0], {from: accounts[0]});
+-        await ens.setSubnodeOwner(namehash('reverse'), sha3('addr'), registrar.address, {from: accounts[0]});
++        await ens.setSubnodeOwner(namehash.hash('reverse'), sha3('addr'), registrar.address, {from: accounts[0]});
+     });
+ 
+     it('should calculate node hash correctly', async () => {
+diff --git a/test/TestTestRegistrar.js b/test/TestTestRegistrar.js
+index d0ae710..024cd61 100644
+--- a/test/TestTestRegistrar.js
++++ b/test/TestTestRegistrar.js
+@@ -11,7 +11,7 @@ contract('TestRegistrar', function (accounts) {
+     let registrar, ens;
+ 
+     beforeEach(async () => {
+-        node = namehash('eth');
++        node = namehash.hash('eth');
+ 
+         ens = await ENS.new();
+         registrar = await TestRegistrar.new(ens.address, '0x0');
+
+From 2337040c72a87562109e83143a09383986e508c2 Mon Sep 17 00:00:00 2001
+From: Nick Johnson <arachnid@notdot.net>
+Date: Mon, 2 Dec 2019 17:26:32 +1300
+Subject: [PATCH 23/28] Implement authorisations
+
+---
+ contracts/ENS.sol                   |  6 ++++-
+ contracts/ENSRegistry.sol           | 35 ++++++++++++++++++++++++-----
+ test/TestENSRegistryWithFallback.js |  8 ++++++-
+ 3 files changed, 41 insertions(+), 8 deletions(-)
+
+diff --git a/contracts/ENS.sol b/contracts/ENS.sol
+index 11f3e4a..45448b9 100644
+--- a/contracts/ENS.sol
++++ b/contracts/ENS.sol
+@@ -14,13 +14,17 @@ interface ENS {
+     // Logged when the TTL of a node changes
+     event NewTTL(bytes32 indexed node, uint64 ttl);
+ 
++    // Logged when an operator is added or removed.
++    event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
+ 
+     function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external;
+     function setResolver(bytes32 node, address resolver) external;
+     function setOwner(bytes32 node, address owner) external;
+     function setTTL(bytes32 node, uint64 ttl) external;
++    function setApprovalForAll(address operator, bool approved) external;
+     function owner(bytes32 node) external view returns (address);
+     function resolver(bytes32 node) external view returns (address);
+     function ttl(bytes32 node) external view returns (uint64);
+-
++    function recordExists(bytes32 node) external view returns (bool);
++    function isApprovedForAll(address owner, address operator) external view returns (bool);
+ }
+diff --git a/contracts/ENSRegistry.sol b/contracts/ENSRegistry.sol
+index c035dd4..4fbabd8 100644
+--- a/contracts/ENSRegistry.sol
++++ b/contracts/ENSRegistry.sol
+@@ -14,10 +14,12 @@ contract ENSRegistry is ENS {
+     }
+ 
+     mapping (bytes32 => Record) records;
++    mapping (address => mapping(address => bool)) operators;
+ 
+     // Permits modifications only by the owner of the specified node.
+-    modifier only_owner(bytes32 node) {
+-        require(records[node].owner == msg.sender);
++    modifier authorised(bytes32 node) {
++        address owner = records[node].owner;
++        require(owner == msg.sender || operators[owner][msg.sender]);
+         _;
+     }
+ 
+@@ -58,7 +60,7 @@ contract ENSRegistry is ENS {
+      * @param node The node to transfer ownership of.
+      * @param owner The address of the new owner.
+      */
+-    function setOwner(bytes32 node, address owner) public only_owner(node) {
++    function setOwner(bytes32 node, address owner) public authorised(node) {
+         _setOwner(node, owner);
+         emit Transfer(node, owner);
+     }
+@@ -69,7 +71,7 @@ contract ENSRegistry is ENS {
+      * @param label The hash of the label specifying the subnode.
+      * @param owner The address of the new owner.
+      */
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) public only_owner(node) returns(bytes32) {
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) public authorised(node) returns(bytes32) {
+         bytes32 subnode = keccak256(abi.encodePacked(node, label));
+         _setOwner(subnode, owner);
+         emit NewOwner(node, label, owner);
+@@ -81,7 +83,7 @@ contract ENSRegistry is ENS {
+      * @param node The node to update.
+      * @param resolver The address of the resolver.
+      */
+-    function setResolver(bytes32 node, address resolver) public only_owner(node) {
++    function setResolver(bytes32 node, address resolver) public authorised(node) {
+         emit NewResolver(node, resolver);
+         records[node].resolver = resolver;
+     }
+@@ -91,11 +93,22 @@ contract ENSRegistry is ENS {
+      * @param node The node to update.
+      * @param ttl The TTL in seconds.
+      */
+-    function setTTL(bytes32 node, uint64 ttl) public only_owner(node) {
++    function setTTL(bytes32 node, uint64 ttl) public authorised(node) {
+         emit NewTTL(node, ttl);
+         records[node].ttl = ttl;
+     }
+ 
++    /**
++     * @dev Enable or disable approval for a third party ("operator") to manage
++     *  all of `msg.sender`'s ENS records. Emits the ApprovalForAll event.
++     * @param operator Address to add to the set of authorized operators.
++     * @param approved True if the operator is approved, false to revoke approval.
++     */
++    function setApprovalForAll(address operator, bool approved) external {
++        operators[msg.sender][operator] = approved;
++        emit ApprovalForAll(msg.sender, operator, approved);
++    }
++
+     /**
+      * @dev Returns the address that owns the specified node.
+      * @param node The specified node.
+@@ -137,6 +150,16 @@ contract ENSRegistry is ENS {
+         return records[node].owner != address(0x0);
+     }
+ 
++    /**
++     * @dev Query if an address is an authorized operator for another address.
++     * @param owner The address that owns the records.
++     * @param operator The address that acts on behalf of the owner.
++     * @return True if `operator` is an approved operator for `owner`, false otherwise.
++     */
++    function isApprovedForAll(address owner, address operator) external view returns (bool) {
++        return operators[owner][operator];
++    }
++
+     function _setOwner(bytes32 node, address owner) internal {
+         records[node].owner = owner;
+     }
+diff --git a/test/TestENSRegistryWithFallback.js b/test/TestENSRegistryWithFallback.js
+index 75517fc..c45d013 100644
+--- a/test/TestENSRegistryWithFallback.js
++++ b/test/TestENSRegistryWithFallback.js
+@@ -33,7 +33,13 @@ contract('ENSRegistryWithFallback', function (accounts) {
+         assert.equal(await ens.owner(hash), accounts[1]);
+         assert.equal(await ens.resolver(hash), accounts[2]);
+         assert.equal((await ens.ttl(hash)).toNumber(), 3600);
+-    })
++    });
++
++    it('should implement authorisations/operators', async () => {
++        await ens.setApprovalForAll(accounts[1], true, {from: accounts[0]});
++        await ens.setOwner("0x0", accounts[2], {from: accounts[1]});
++        assert.equal(await ens.owner("0x0"), accounts[2]);
++    });
+ 
+     describe('fallback', async () => {
+ 
+
+From 4d080c984894c621fc8a3fe096831a5eb7a19e77 Mon Sep 17 00:00:00 2001
+From: Dean Eigenmann <dean.eigenmann@icloud.com>
+Date: Wed, 4 Dec 2019 20:37:06 +0100
+Subject: [PATCH 24/28] Update ENSRegistryWithFallback.sol
+
+---
+ contracts/ENSRegistryWithFallback.sol | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contracts/ENSRegistryWithFallback.sol b/contracts/ENSRegistryWithFallback.sol
+index 97857ee..f8d74a2 100644
+--- a/contracts/ENSRegistryWithFallback.sol
++++ b/contracts/ENSRegistryWithFallback.sol
+@@ -62,6 +62,6 @@ contract ENSRegistryWithFallback is ENSRegistry {
+             addr = address(this);
+         }
+ 
+-        super._setOwner(node, owner);
++        super._setOwner(node, addr);
+     }
+ }
+
+From 0c139d4a3640ce8512c145e42b851af723fa10df Mon Sep 17 00:00:00 2001
+From: Makoto <inouemak@googlemail.com>
+Date: Fri, 20 Dec 2019 10:57:37 -0500
+Subject: [PATCH 25/28] setSubnodeOwner returns bytes32
+
+---
+ contracts/ENS.sol | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contracts/ENS.sol b/contracts/ENS.sol
+index 45448b9..3513339 100644
+--- a/contracts/ENS.sol
++++ b/contracts/ENS.sol
+@@ -17,7 +17,7 @@ interface ENS {
+     // Logged when an operator is added or removed.
+     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
+ 
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external;
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external returns(bytes32);
+     function setResolver(bytes32 node, address resolver) external;
+     function setOwner(bytes32 node, address owner) external;
+     function setTTL(bytes32 node, uint64 ttl) external;
+
+From 9ef05fc6618dbc4b93d1ebd9874a5f9f1eabedfc Mon Sep 17 00:00:00 2001
+From: Nick Johnson <arachnid@notdot.net>
+Date: Thu, 23 Jan 2020 13:27:58 +1300
+Subject: [PATCH 26/28] Add setRecord and setSubnodeRecord to interface
+
+---
+ contracts/ENS.sol | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/contracts/ENS.sol b/contracts/ENS.sol
+index 45448b9..ddc2ad0 100644
+--- a/contracts/ENS.sol
++++ b/contracts/ENS.sol
+@@ -17,6 +17,8 @@ interface ENS {
+     // Logged when an operator is added or removed.
+     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
+ 
++    function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external;
++    function setSubnodeRecord(bytes32 node, bytes32 label, address owner, address resolver, uint64 ttl) external;
+     function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external;
+     function setResolver(bytes32 node, address resolver) external;
+     function setOwner(bytes32 node, address owner) external;
+
+From 72baf804ce3d829356079e9e982bc4ec2e47ee0c Mon Sep 17 00:00:00 2001
+From: Nick Johnson <arachnid@notdot.net>
+Date: Mon, 27 Jan 2020 10:43:33 +1300
+Subject: [PATCH 27/28] setSubnodeOwner retrns bytes32
+
+---
+ contracts/ENS.sol | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contracts/ENS.sol b/contracts/ENS.sol
+index ddc2ad0..3a249a6 100644
+--- a/contracts/ENS.sol
++++ b/contracts/ENS.sol
+@@ -19,7 +19,7 @@ interface ENS {
+ 
+     function setRecord(bytes32 node, address owner, address resolver, uint64 ttl) external;
+     function setSubnodeRecord(bytes32 node, bytes32 label, address owner, address resolver, uint64 ttl) external;
+-    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external;
++    function setSubnodeOwner(bytes32 node, bytes32 label, address owner) external returns(bytes32);
+     function setResolver(bytes32 node, address resolver) external;
+     function setOwner(bytes32 node, address owner) external;
+     function setTTL(bytes32 node, uint64 ttl) external;
+
+From de1a456f7cfe052e5f466e52e269db51e6b0bccb Mon Sep 17 00:00:00 2001
+From: Makoto <inouemak@googlemail.com>
+Date: Tue, 28 Jan 2020 09:01:05 +0000
+Subject: [PATCH 28/28] Remove ENS.lll
+
+---
+ .gitignore                   |   2 -
+ build/contracts/ENS.lll.json | 213 -----------------------------------
+ test/TestENS.js              |   3 +-
+ 3 files changed, 1 insertion(+), 217 deletions(-)
+ delete mode 100644 build/contracts/ENS.lll.json
+
+diff --git a/.gitignore b/.gitignore
+index a836b84..aee98c0 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -7,5 +7,3 @@ _templates
+ 
+ # Compiled contract ABIs and binaries
+ build/contracts/*
+-# Keep the ENS lll artifact
+-!build/contracts/ENS.lll.json
+\ No newline at end of file
+diff --git a/build/contracts/ENS.lll.json b/build/contracts/ENS.lll.json
+deleted file mode 100644
+index a68b397..0000000
+--- a/build/contracts/ENS.lll.json
++++ /dev/null
+@@ -1,213 +0,0 @@
+-{
+-  "contract_name": "ENS",
+-  "abi": [
+-    {
+-      "constant": true,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        }
+-      ],
+-      "name": "resolver",
+-      "outputs": [
+-        {
+-          "name": "",
+-          "type": "address"
+-        }
+-      ],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": true,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        }
+-      ],
+-      "name": "owner",
+-      "outputs": [
+-        {
+-          "name": "",
+-          "type": "address"
+-        }
+-      ],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": false,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "name": "label",
+-          "type": "bytes32"
+-        },
+-        {
+-          "name": "owner",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "setSubnodeOwner",
+-      "outputs": [],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": false,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "name": "ttl",
+-          "type": "uint64"
+-        }
+-      ],
+-      "name": "setTTL",
+-      "outputs": [],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": true,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        }
+-      ],
+-      "name": "ttl",
+-      "outputs": [
+-        {
+-          "name": "",
+-          "type": "uint64"
+-        }
+-      ],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": false,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "name": "resolver",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "setResolver",
+-      "outputs": [],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "constant": false,
+-      "inputs": [
+-        {
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "name": "owner",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "setOwner",
+-      "outputs": [],
+-      "payable": false,
+-      "type": "function"
+-    },
+-    {
+-      "inputs": [],
+-      "payable": false,
+-      "type": "constructor"
+-    },
+-    {
+-      "anonymous": false,
+-      "inputs": [
+-        {
+-          "indexed": true,
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "indexed": false,
+-          "name": "owner",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "Transfer",
+-      "type": "event"
+-    },
+-    {
+-      "anonymous": false,
+-      "inputs": [
+-        {
+-          "indexed": true,
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "indexed": true,
+-          "name": "label",
+-          "type": "bytes32"
+-        },
+-        {
+-          "indexed": false,
+-          "name": "owner",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "NewOwner",
+-      "type": "event"
+-    },
+-    {
+-      "anonymous": false,
+-      "inputs": [
+-        {
+-          "indexed": true,
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "indexed": false,
+-          "name": "resolver",
+-          "type": "address"
+-        }
+-      ],
+-      "name": "NewResolver",
+-      "type": "event"
+-    },
+-    {
+-      "anonymous": false,
+-      "inputs": [
+-        {
+-          "indexed": true,
+-          "name": "node",
+-          "type": "bytes32"
+-        },
+-        {
+-          "indexed": false,
+-          "name": "ttl",
+-          "type": "uint64"
+-        }
+-      ],
+-      "name": "NewTTL",
+-      "type": "event"
+-    }
+-  ],
+-  "unlinked_binary": "0x3360206000015561021a806100146000396000f3630178b8bf60e060020a600035041415610020576004355460405260206040f35b6302571be360e060020a600035041415610044576020600435015460405260206040f35b6316a25cbd60e060020a600035041415610068576040600435015460405260206040f35b635b0fc9c360e060020a6000350414156100b557602060043501543314151561008f576002565b6024356020600435015560243560405260043560198061020160003960002060206040a2005b6306ab592360e060020a6000350414156101135760206004350154331415156100dc576002565b6044356020600435600052602435602052604060002001556044356040526024356004356021806101e060003960002060206040a3005b631896f70a60e060020a60003504141561015d57602060043501543314151561013a576002565b60243560043555602435604052600435601c806101c460003960002060206040a2005b6314ab903860e060020a6000350414156101aa576020600435015433141515610184576002565b602435604060043501556024356040526004356016806101ae60003960002060206040a2005b6002564e657754544c28627974657333322c75696e743634294e65775265736f6c76657228627974657333322c61646472657373294e65774f776e657228627974657333322c627974657333322c61646472657373295472616e7366657228627974657333322c6164647265737329",
+-  "networks": {},
+-  "schema_version": "0.0.5",
+-  "updated_at": 1491026506835
+-}
+\ No newline at end of file
+diff --git a/test/TestENS.js b/test/TestENS.js
+index 8b11e92..2d98a36 100644
+--- a/test/TestENS.js
++++ b/test/TestENS.js
+@@ -4,8 +4,7 @@ const sha3 = require('web3-utils').sha3;
+ const { exceptions } = require("@ensdomains/test-utils")
+ 
+ let contracts = [
+-    [artifacts.require('ENSRegistry.sol'), 'Solidity'],
+-    [artifacts.require('ENS.lll'), 'LLL'],
++    [artifacts.require('ENSRegistry.sol'), 'Solidity']
+ ];
+ 
+ contracts.forEach(function ([ENS, lang]) {

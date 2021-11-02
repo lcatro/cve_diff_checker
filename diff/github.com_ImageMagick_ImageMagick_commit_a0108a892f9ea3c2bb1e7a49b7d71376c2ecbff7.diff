@@ -1,0 +1,65 @@
+From a0108a892f9ea3c2bb1e7a49b7d71376c2ecbff7 Mon Sep 17 00:00:00 2001
+From: David Lechner <david@lechnology.com>
+Date: Sat, 18 Jun 2016 22:18:20 -0500
+Subject: [PATCH] Fix abort when writing to rgf format
+
+The rgf format (LEGO MINDSTORMS EV3 images) caused a software abort because
+exception == NULL. When WriteRGFImage is called from WriteImage, it is only
+passed two parameters, not three. So, removed the extra parameter and use
+image->exception instead as in other coders.
+---
+ coders/rgf.c | 13 +++++--------
+ 1 file changed, 5 insertions(+), 8 deletions(-)
+
+diff --git a/coders/rgf.c b/coders/rgf.c
+index 461443854b..e572f96d24 100644
+--- a/coders/rgf.c
++++ b/coders/rgf.c
+@@ -68,7 +68,7 @@
+   Forward declarations.
+ */
+ static MagickBooleanType
+-  WriteRGFImage(const ImageInfo *,Image *,ExceptionInfo *);
++  WriteRGFImage(const ImageInfo *,Image *);
+ 
+ /*
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+@@ -305,7 +305,7 @@ ModuleExport void UnregisterRGFImage(void)
+ %  The format of the WriteRGFImage method is:
+ %
+ %      MagickBooleanType WriteRGFImage(const ImageInfo *image_info,
+-%        Image *image,ExceptionInfo *exception)
++%        Image *image)
+ %
+ %  A description of each parameter follows.
+ %
+@@ -316,8 +316,7 @@ ModuleExport void UnregisterRGFImage(void)
+ %    o exception: return any errors or warnings in this structure.
+ %
+ */
+-static MagickBooleanType WriteRGFImage(const ImageInfo *image_info,Image *image,
+-  ExceptionInfo *exception)
++static MagickBooleanType WriteRGFImage(const ImageInfo *image_info,Image *image)
+ {
+   MagickBooleanType
+     status;
+@@ -346,9 +345,7 @@ static MagickBooleanType WriteRGFImage(const ImageInfo *image_info,Image *image,
+   assert(image->signature == MagickSignature);
+   if (image->debug != MagickFalse)
+     (void) LogMagickEvent(TraceEvent,GetMagickModule(),"%s",image->filename);
+-  assert(exception != (ExceptionInfo *) NULL);
+-  assert(exception->signature == MagickSignature);
+-  status=OpenBlob(image_info,image,WriteBinaryBlobMode,exception);
++  status=OpenBlob(image_info,image,WriteBinaryBlobMode,&image->exception);
+   if (status == MagickFalse)
+     return(status);
+   (void) TransformImageColorspace(image,sRGBColorspace);
+@@ -367,7 +364,7 @@ static MagickBooleanType WriteRGFImage(const ImageInfo *image_info,Image *image,
+   y=0;
+   for (y=0; y < (ssize_t) image->rows; y++)
+   {
+-    p=GetVirtualPixels(image,0,y,image->columns,1,exception);
++    p=GetVirtualPixels(image,0,y,image->columns,1,&image->exception);
+     if (p == (const PixelPacket *) NULL)
+       break;
+     bit=0;

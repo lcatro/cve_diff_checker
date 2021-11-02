@@ -1,0 +1,53 @@
+From fc930d3daed1c3acef010d04acc2c5de93cd18ec Mon Sep 17 00:00:00 2001
+From: Aaron Campbell <aaron@xavisys.com>
+Date: Tue, 19 Sep 2017 17:56:45 +0000
+Subject: [PATCH] Database: Hardening to bring `wpdb::prepare()` inline with
+ documentation.
+
+`wpdb::prepare()` supports %s, %d, and %F as placeholders in the query string. Any other non-escaped % will be escaped.
+
+
+Built from https://develop.svn.wordpress.org/trunk@41496
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@41329 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/version.php | 2 +-
+ wp-includes/wp-db.php   | 4 +++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index 88d62fc71bed..63bf8c80ddf7 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.9-alpha-41483';
++$wp_version = '4.9-alpha-41496';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.
+diff --git a/wp-includes/wp-db.php b/wp-includes/wp-db.php
+index c300e240f2e2..9d125d008d7a 100644
+--- a/wp-includes/wp-db.php
++++ b/wp-includes/wp-db.php
+@@ -1252,6 +1252,7 @@ public function prepare( $query, $args ) {
+ 		$query = str_replace( '"%s"', '%s', $query ); // doublequote unquoting
+ 		$query = preg_replace( '|(?<!%)%f|' , '%F', $query ); // Force floats to be locale unaware
+ 		$query = preg_replace( '|(?<!%)%s|', "'%s'", $query ); // quote the strings, avoiding escaped strings like %%s
++		$query = preg_replace( '/%(?:%|$|([^dsF]))/', '%%\\1', $query ); // escape any unescaped percents 
+ 		array_walk( $args, array( $this, 'escape_by_ref' ) );
+ 		return @vsprintf( $query, $args );
+ 	}
+@@ -2821,7 +2822,8 @@ protected function strip_invalid_text( $data ) {
+ 					}
+ 
+ 					if ( is_array( $value['length'] ) ) {
+-						$queries[ $col ] = $this->prepare( "CONVERT( LEFT( CONVERT( %s USING $charset ), %.0f ) USING $connection_charset )", $value['value'], $value['length']['length'] );
++						$length = sprintf( '%.0f', $value['length']['length'] );
++						$queries[ $col ] = $this->prepare( "CONVERT( LEFT( CONVERT( %s USING $charset ), $length ) USING $connection_charset )", $value['value'] );
+ 					} else if ( 'binary' !== $charset ) {
+ 						// If we don't have a length, there's no need to convert binary - it will always return the same result.
+ 						$queries[ $col ] = $this->prepare( "CONVERT( CONVERT( %s USING $charset ) USING $connection_charset )", $value['value'] );

@@ -1,0 +1,68 @@
+From 38199424bc840d2ef002cd1e9bffdbb99191eb47 Mon Sep 17 00:00:00 2001
+From: Bianca Nenciu <nbianca@users.noreply.github.com>
+Date: Thu, 5 Aug 2021 16:39:17 +0300
+Subject: [PATCH] SECURITY: Sanitize d-popover attributes (#13958)
+
+---
+ app/assets/javascripts/discourse/app/lib/d-popover.js     | 8 +-------
+ .../discourse/tests/unit/lib/sanitizer-test.js            | 5 +++++
+ app/assets/javascripts/pretty-text/addon/sanitizer.js     | 4 +++-
+ 3 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/app/assets/javascripts/discourse/app/lib/d-popover.js b/app/assets/javascripts/discourse/app/lib/d-popover.js
+index 19e47c1ca00c..5438fc885ead 100644
+--- a/app/assets/javascripts/discourse/app/lib/d-popover.js
++++ b/app/assets/javascripts/discourse/app/lib/d-popover.js
+@@ -16,8 +16,7 @@ const D_ARROW_HEIGHT = 10;
+ 
+ const D_HORIZONTAL_MARGIN = 5;
+ 
+-export const POPOVER_SELECTORS =
+-  "[data-html-popover], [data-html-tooltip], [data-popover], [data-tooltip]";
++export const POPOVER_SELECTORS = "[data-popover], [data-tooltip]";
+ 
+ export function hidePopover() {
+   getPopover().fadeOut().remove();
+@@ -55,11 +54,6 @@ export function showPopover(event, options = {}) {
+ }
+ 
+ function setPopoverHtmlContent($enteredElement, content) {
+-  content =
+-    content ||
+-    $enteredElement.attr("data-html-popover") ||
+-    $enteredElement.attr("data-html-tooltip");
+-
+   replaceHtmlContent($enteredElement, content);
+ }
+ 
+diff --git a/app/assets/javascripts/discourse/tests/unit/lib/sanitizer-test.js b/app/assets/javascripts/discourse/tests/unit/lib/sanitizer-test.js
+index 27aac256de3f..f148bdb36b0b 100644
+--- a/app/assets/javascripts/discourse/tests/unit/lib/sanitizer-test.js
++++ b/app/assets/javascripts/discourse/tests/unit/lib/sanitizer-test.js
+@@ -136,6 +136,11 @@ module("Unit | Utility | sanitizer", function () {
+     );
+ 
+     cooked(`<div dir="rtl">RTL text</div>`, `<div dir="rtl">RTL text</div>`);
++
++    cooked(
++      `<div data-value="<something>" data-html-value="<something>"></div>`,
++      `<div data-value="&lt;something&gt;"></div>`
++    );
+   });
+ 
+   test("ids on headings", function (assert) {
+diff --git a/app/assets/javascripts/pretty-text/addon/sanitizer.js b/app/assets/javascripts/pretty-text/addon/sanitizer.js
+index 45342882d56b..1b61c6c243ab 100644
+--- a/app/assets/javascripts/pretty-text/addon/sanitizer.js
++++ b/app/assets/javascripts/pretty-text/addon/sanitizer.js
+@@ -75,7 +75,9 @@ export function sanitize(text, allowLister) {
+         if (
+           (forAttr &&
+             (forAttr.indexOf("*") !== -1 || forAttr.indexOf(value) !== -1)) ||
+-          (name.indexOf("data-") === 0 && forTag["data-*"]) ||
++          (name.indexOf("data-html-") === -1 &&
++            name.indexOf("data-") === 0 &&
++            forTag["data-*"]) ||
+           (tag === "a" &&
+             name === "href" &&
+             hrefAllowed(value, extraHrefMatchers)) ||

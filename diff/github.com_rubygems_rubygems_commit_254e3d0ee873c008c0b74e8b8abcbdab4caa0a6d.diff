@@ -1,0 +1,70 @@
+From 254e3d0ee873c008c0b74e8b8abcbdab4caa0a6d Mon Sep 17 00:00:00 2001
+From: Jonathan Claudius <jclaudius@mozilla.com>
+Date: Mon, 12 Feb 2018 23:41:28 -0500
+Subject: [PATCH] Fix possible Unsafe Object Deserialization Vulnerability in
+ gem owner
+
+---
+ lib/rubygems/commands/owner_command.rb        |  2 +-
+ .../test_gem_commands_owner_command.rb        | 28 +++++++++++++++++++
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/lib/rubygems/commands/owner_command.rb b/lib/rubygems/commands/owner_command.rb
+index 8e2271657a95..637b5bdc4dfe 100644
+--- a/lib/rubygems/commands/owner_command.rb
++++ b/lib/rubygems/commands/owner_command.rb
+@@ -64,7 +64,7 @@ def show_owners name
+     end
+ 
+     with_response response do |resp|
+-      owners = YAML.load resp.body
++      owners = Gem::SafeYAML.load resp.body
+ 
+       say "Owners for gem: #{name}"
+       owners.each do |owner|
+diff --git a/test/rubygems/test_gem_commands_owner_command.rb b/test/rubygems/test_gem_commands_owner_command.rb
+index 44652c10938b..05230772d995 100644
+--- a/test/rubygems/test_gem_commands_owner_command.rb
++++ b/test/rubygems/test_gem_commands_owner_command.rb
+@@ -2,6 +2,9 @@
+ require 'rubygems/test_case'
+ require 'rubygems/commands/owner_command'
+ 
++class Foo
++end
++
+ class TestGemCommandsOwnerCommand < Gem::TestCase
+ 
+   def setup
+@@ -43,6 +46,31 @@ def test_show_owners
+     assert_match %r{- 4}, @ui.output
+   end
+ 
++  def test_show_owners_dont_load_objects
++    skip "testing a psych-only API" unless defined?(::Psych::DisallowedClass)
++
++    response = <<EOF
++---
++- email: !ruby/object:Foo {}
++  id: 1
++  handle: user1
++- email: user2@example.com
++- id: 3
++  handle: user3
++- id: 4
++EOF
++
++    @fetcher.data["#{Gem.host}/api/v1/gems/freewill/owners.yaml"] = [response, 200, 'OK']
++
++    assert_raises Psych::DisallowedClass do
++      use_ui @ui do
++        @cmd.show_owners("freewill")
++      end
++    end
++
++  end
++
++
+   def test_show_owners_setting_up_host_through_env_var
+     response = "- email: user1@example.com\n"
+     host = "http://rubygems.example"

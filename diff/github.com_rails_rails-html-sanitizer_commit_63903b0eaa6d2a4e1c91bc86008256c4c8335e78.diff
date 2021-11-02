@@ -1,0 +1,61 @@
+From 63903b0eaa6d2a4e1c91bc86008256c4c8335e78 Mon Sep 17 00:00:00 2001
+From: Aaron Patterson <aaron.patterson@gmail.com>
+Date: Thu, 29 Oct 2015 12:06:26 -0700
+Subject: [PATCH] convert CDATA nodes to TEXT nodes to avoid XSS issues
+
+CDATA nodes will not be html escaped.  Users shouldn't be submitting
+CDATA nodes in the first place, so we should convert them to text nodes
+before escaping
+
+CVE-2015-7580
+---
+ lib/rails/html/scrubbers.rb |  7 ++++++-
+ test/sanitizer_test.rb      | 10 ++++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/lib/rails/html/scrubbers.rb b/lib/rails/html/scrubbers.rb
+index d6f8ce4..1e6f887 100644
+--- a/lib/rails/html/scrubbers.rb
++++ b/lib/rails/html/scrubbers.rb
+@@ -60,6 +60,11 @@ def attributes=(attributes)
+       end
+ 
+       def scrub(node)
++        if node.cdata?
++          text = node.document.create_text_node node.text
++          node.replace text
++          return CONTINUE
++        end
+         return CONTINUE if skip_node?(node)
+ 
+         unless keep_node?(node)
+@@ -76,7 +81,7 @@ def allowed_node?(node)
+       end
+ 
+       def skip_node?(node)
+-        node.text? || node.cdata?
++        node.text?
+       end
+ 
+       def scrub_attribute?(name)
+diff --git a/test/sanitizer_test.rb b/test/sanitizer_test.rb
+index 8c1ea2c..f72b702 100644
+--- a/test/sanitizer_test.rb
++++ b/test/sanitizer_test.rb
+@@ -11,6 +11,16 @@ def test_sanitizer_sanitize_raises_not_implemented_error
+     end
+   end
+ 
++  def test_sanitize_nested_script
++    sanitizer = Rails::Html::WhiteListSanitizer.new
++    assert_equal '&lt;script&gt;alert("XSS");&lt;/script&gt;', sanitizer.sanitize('<script><script></script>alert("XSS");<script><</script>/</script><script>script></script>', tags: %w(em))
++  end
++
++  def test_sanitize_nested_script_in_style
++    sanitizer = Rails::Html::WhiteListSanitizer.new
++    assert_equal '&lt;script&gt;alert("XSS");&lt;/script&gt;', sanitizer.sanitize('<style><script></style>alert("XSS");<style><</style>/</style><style>script></style>', tags: %w(em))
++  end
++
+   class XpathRemovalTestSanitizer < Rails::Html::Sanitizer
+     def sanitize(html, options = {})
+       fragment = Loofah.fragment(html)

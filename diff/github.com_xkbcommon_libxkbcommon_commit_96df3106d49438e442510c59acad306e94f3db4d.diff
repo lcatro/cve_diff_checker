@@ -1,0 +1,27 @@
+From 96df3106d49438e442510c59acad306e94f3db4d Mon Sep 17 00:00:00 2001
+From: Daniel Stone <daniels@collabora.com>
+Date: Mon, 26 Jun 2017 17:12:29 +0100
+Subject: [PATCH] xkbcomp: Don't crash on no-op modmask expressions
+
+If we have an expression of the form 'l1' in an interp section, we
+unconditionally try to dereference its args, even if it has none.
+
+Signed-off-by: Daniel Stone <daniels@collabora.com>
+---
+ src/xkbcomp/compat.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/xkbcomp/compat.c b/src/xkbcomp/compat.c
+index 9ae26cd5..bd587c8d 100644
+--- a/src/xkbcomp/compat.c
++++ b/src/xkbcomp/compat.c
+@@ -264,7 +264,8 @@ ResolveStateAndPredicate(ExprDef *expr, enum xkb_match_operation *pred_rtrn,
+     *pred_rtrn = MATCH_EXACTLY;
+     if (expr->expr.op == EXPR_ACTION_DECL) {
+         const char *pred_txt = xkb_atom_text(info->ctx, expr->action.name);
+-        if (!LookupString(symInterpretMatchMaskNames, pred_txt, pred_rtrn)) {
++        if (!LookupString(symInterpretMatchMaskNames, pred_txt, pred_rtrn) ||
++            !expr->action.args) {
+             log_err(info->ctx,
+                     "Illegal modifier predicate \"%s\"; Ignored\n", pred_txt);
+             return false;

@@ -1,0 +1,31 @@
+From 7d66da61b316c9480b63000f831b6de723b87315 Mon Sep 17 00:00:00 2001
+From: damencho <damencho@jitsi.org>
+Date: Thu, 26 Jan 2017 17:00:46 -0600
+Subject: [PATCH] Checks from for received carbon messages, should be bare jid.
+
+---
+ .../OperationSetBasicInstantMessagingJabberImpl.java  | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/net/java/sip/communicator/impl/protocol/jabber/OperationSetBasicInstantMessagingJabberImpl.java b/src/net/java/sip/communicator/impl/protocol/jabber/OperationSetBasicInstantMessagingJabberImpl.java
+index f055613379..2f35fef97d 100644
+--- a/src/net/java/sip/communicator/impl/protocol/jabber/OperationSetBasicInstantMessagingJabberImpl.java
++++ b/src/net/java/sip/communicator/impl/protocol/jabber/OperationSetBasicInstantMessagingJabberImpl.java
+@@ -815,6 +815,17 @@ public void processPacket(Packet packet)
+                         ForwardedPacketExtension.class);
+                 if(extensions.isEmpty())
+                     return;
++
++                // according to xep-0280 all carbons should come from
++                // our bare jid
++                if (!msg.getFrom().equals(
++                        StringUtils.parseBareAddress(
++                            jabberProvider.getOurJID())))
++                {
++                    logger.info("Received a carbon copy with wrong from!");
++                    return;
++                }
++
+                 ForwardedPacketExtension forwardedExt = extensions.get(0);
+                 msg = forwardedExt.getMessage();
+                 if(msg == null || msg.getBody() == null)

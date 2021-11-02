@@ -1,0 +1,50 @@
+From 8d0ef0b5edeae52960c7ed05ae8a12388324f87e Mon Sep 17 00:00:00 2001
+From: Steve Dower <steve.dower@python.org>
+Date: Tue, 4 Jun 2019 08:55:30 -0700
+Subject: [PATCH] bpo-36742: Corrects fix to handle decomposition in usernames
+ (#13812)
+
+---
+ Lib/test/test_urlparse.py | 11 ++++++-----
+ Lib/urllib/parse.py       |  6 +++---
+ 2 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/Lib/test/test_urlparse.py b/Lib/test/test_urlparse.py
+index 4344765637647..4ae6ed33858ce 100644
+--- a/Lib/test/test_urlparse.py
++++ b/Lib/test/test_urlparse.py
+@@ -1018,11 +1018,12 @@ def test_urlsplit_normalization(self):
+             urllib.parse.urlsplit('http://\u30d5\u309a\ufe1380')
+ 
+         for scheme in ["http", "https", "ftp"]:
+-            for c in denorm_chars:
+-                url = "{}://netloc{}false.netloc/path".format(scheme, c)
+-                with self.subTest(url=url, char='{:04X}'.format(ord(c))):
+-                    with self.assertRaises(ValueError):
+-                        urllib.parse.urlsplit(url)
++            for netloc in ["netloc{}false.netloc", "n{}user@netloc"]:
++                for c in denorm_chars:
++                    url = "{}://{}/path".format(scheme, netloc.format(c))
++                    with self.subTest(url=url, char='{:04X}'.format(ord(c))):
++                        with self.assertRaises(ValueError):
++                            urllib.parse.urlsplit(url)
+ 
+ class Utility_Tests(unittest.TestCase):
+     """Testcase to test the various utility functions in the urllib."""
+diff --git a/Lib/urllib/parse.py b/Lib/urllib/parse.py
+index daefb2025b14e..b6608783a8947 100644
+--- a/Lib/urllib/parse.py
++++ b/Lib/urllib/parse.py
+@@ -402,9 +402,9 @@ def _checknetloc(netloc):
+     # looking for characters like \u2100 that expand to 'a/c'
+     # IDNA uses NFKC equivalence, so normalize for this check
+     import unicodedata
+-    n = netloc.rpartition('@')[2] # ignore anything to the left of '@'
+-    n = n.replace(':', '')        # ignore characters already included
+-    n = n.replace('#', '')        # but not the surrounding text
++    n = netloc.replace('@', '')   # ignore characters already included
++    n = n.replace(':', '')        # but not the surrounding text
++    n = n.replace('#', '')
+     n = n.replace('?', '')
+     netloc2 = unicodedata.normalize('NFKC', n)
+     if n == netloc2:

@@ -1,0 +1,75 @@
+From 5d71e65049d143435b03d6b3709d82900f32276f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jan=20Pokorn=C3=BD?= <jpokorny@redhat.com>
+Date: Thu, 3 Nov 2016 14:43:10 +0100
+Subject: [PATCH] High: libcrmcommon: fix CVE-2016-7035 (improper IPC guarding)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+It was discovered that at some not so uncommon circumstances, some
+pacemaker daemons could be talked to, via libqb-facilitated IPC, by
+unprivileged clients due to flawed authorization decision.  Depending
+on the capabilities of affected daemons, this might equip unauthorized
+user with local privilege escalation or up to cluster-wide remote
+execution of possibly arbitrary commands when such user happens to
+reside at standard or remote/guest cluster node, respectively.
+
+The original vulnerability was introduced in an attempt to allow
+unprivileged IPC clients to clean up the file system materialized
+leftovers in case the server (otherwise responsible for the lifecycle
+of these files) crashes.  While the intended part of such behavior is
+now effectively voided (along with the unintended one), a best-effort
+fix to address this corner case systemically at libqb is coming along
+(https://github.com/ClusterLabs/libqb/pull/231).
+
+Affected versions:  1.1.10-rc1 (2013-04-17) - 1.1.15 (2016-06-21)
+Impact:             Important
+CVSSv3 ranking:     8.8 : AV:L/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H
+
+Credits for independent findings, in chronological order:
+  Jan "poki" Pokorný, of Red Hat
+  Alain Moulle, of ATOS/BULL
+---
+ lib/common/ipc.c | 14 +++-----------
+ 1 file changed, 3 insertions(+), 11 deletions(-)
+
+diff --git a/lib/common/ipc.c b/lib/common/ipc.c
+index f060fcdb09..2949837e37 100644
+--- a/lib/common/ipc.c
++++ b/lib/common/ipc.c
+@@ -293,7 +293,6 @@ crm_client_disconnect_all(qb_ipcs_service_t *service)
+ crm_client_t *
+ crm_client_new(qb_ipcs_connection_t * c, uid_t uid_client, gid_t gid_client)
+ {
+-    static uid_t uid_server = 0;
+     static gid_t gid_cluster = 0;
+ 
+     crm_client_t *client = NULL;
+@@ -304,7 +303,6 @@ crm_client_new(qb_ipcs_connection_t * c, uid_t uid_client, gid_t gid_client)
+     }
+ 
+     if (gid_cluster == 0) {
+-        uid_server = getuid();
+         if(crm_user_lookup(CRM_DAEMON_USER, NULL, &gid_cluster) < 0) {
+             static bool have_error = FALSE;
+             if(have_error == FALSE) {
+@@ -314,16 +312,10 @@ crm_client_new(qb_ipcs_connection_t * c, uid_t uid_client, gid_t gid_client)
+         }
+     }
+ 
+-    if(gid_cluster != 0 && gid_client != 0) {
+-        uid_t best_uid = -1; /* Passing -1 to chown(2) means don't change */
+-
+-        if(uid_client == 0 || uid_server == 0) { /* Someone is priveliged, but the other may not be */
+-            best_uid = QB_MAX(uid_client, uid_server);
+-            crm_trace("Allowing user %u to clean up after disconnect", best_uid);
+-        }
+-
++    if (uid_client != 0) {
+         crm_trace("Giving access to group %u", gid_cluster);
+-        qb_ipcs_connection_auth_set(c, best_uid, gid_cluster, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
++        /* Passing -1 to chown(2) means don't change */
++        qb_ipcs_connection_auth_set(c, -1, gid_cluster, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+     }
+ 
+     crm_client_init();

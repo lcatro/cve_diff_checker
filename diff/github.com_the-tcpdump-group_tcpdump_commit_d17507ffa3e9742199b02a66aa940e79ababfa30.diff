@@ -1,0 +1,166 @@
+From d17507ffa3e9742199b02a66aa940e79ababfa30 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sat, 4 Feb 2017 18:38:47 -0800
+Subject: [PATCH] CVE-2017-12902/Zephyr: Fix bounds checking.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Use ND_TTEST() rather than comparing against ndo->ndo_snapend ourselves;
+it's easy to get the tests wrong.
+
+Check for running out of packet data before checking for running out of
+captured data, and distinguish between running out of packet data (which
+might just mean "no more strings") and running out of captured data
+(which means "truncated").
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-zephyr.c         |  45 +++++++++++++++++++++++++++--------------
+ tests/TESTLIST         |   1 +
+ tests/zephyr-oobr.out  |   2 ++
+ tests/zephyr-oobr.pcap | Bin 0 -> 65575 bytes
+ 4 files changed, 33 insertions(+), 15 deletions(-)
+ create mode 100644 tests/zephyr-oobr.out
+ create mode 100644 tests/zephyr-oobr.pcap
+
+diff --git a/print-zephyr.c b/print-zephyr.c
+index eb7e382bc..735e273f0 100644
+--- a/print-zephyr.c
++++ b/print-zephyr.c
+@@ -83,24 +83,34 @@ static const struct tok z_types[] = {
+ static char z_buf[256];
+ 
+ static const char *
+-parse_field(netdissect_options *ndo, const char **pptr, int *len)
++parse_field(netdissect_options *ndo, const char **pptr, int *len, int *truncated)
+ {
+     const char *s;
+ 
+-    if (*len <= 0 || !pptr || !*pptr)
+-	return NULL;
+-    if (*pptr > (const char *) ndo->ndo_snapend)
+-	return NULL;
+-
++    /* Start of string */
+     s = *pptr;
+-    while (*pptr <= (const char *) ndo->ndo_snapend && *len >= 0 && **pptr) {
++    /* Scan for the NUL terminator */
++    for (;;) {
++	if (*len == 0) {
++	    /* Ran out of packet data without finding it */
++	    return NULL;
++	}
++	if (!ND_TTEST(**pptr)) {
++	    /* Ran out of captured data without finding it */
++	    *truncated = 1;
++	    return NULL;
++	}
++	if (**pptr == '\0') {
++	    /* Found it */
++	    break;
++	}
++	/* Keep scanning */
+ 	(*pptr)++;
+ 	(*len)--;
+     }
++    /* Skip the NUL terminator */
+     (*pptr)++;
+     (*len)--;
+-    if (*len < 0 || *pptr > (const char *) ndo->ndo_snapend)
+-	return NULL;
+     return s;
+ }
+ 
+@@ -139,6 +149,7 @@ zephyr_print(netdissect_options *ndo, const u_char *cp, int length)
+     int parselen = length;
+     const char *s;
+     int lose = 0;
++    int truncated = 0;
+ 
+     /* squelch compiler warnings */
+ 
+@@ -149,8 +160,9 @@ zephyr_print(netdissect_options *ndo, const u_char *cp, int length)
+     z.sender = 0;
+     z.recipient = 0;
+ 
+-#define PARSE_STRING				\
+-	s = parse_field(ndo, &parse, &parselen);	\
++#define PARSE_STRING						\
++	s = parse_field(ndo, &parse, &parselen, &truncated);	\
++	if (truncated) goto trunc;				\
+ 	if (!s) lose = 1;
+ 
+ #define PARSE_FIELD_INT(field)			\
+@@ -183,10 +195,8 @@ zephyr_print(netdissect_options *ndo, const u_char *cp, int length)
+     PARSE_FIELD_INT(z.multi);
+     PARSE_FIELD_STR(z.multi_uid);
+ 
+-    if (lose) {
+-	ND_PRINT((ndo, " [|zephyr] (%d)", length));
+-	return;
+-    }
++    if (lose)
++        goto trunc;
+ 
+     ND_PRINT((ndo, " zephyr"));
+     if (strncmp(z.version+4, "0.2", 3)) {
+@@ -318,4 +328,9 @@ zephyr_print(netdissect_options *ndo, const u_char *cp, int length)
+     ND_PRINT((ndo, " to %s", z_triple(z.class, z.inst, z.recipient)));
+     if (*z.opcode)
+ 	ND_PRINT((ndo, " op %s", z.opcode));
++    return;
++
++trunc:
++    ND_PRINT((ndo, " [|zephyr] (%d)", length));
++    return;
+ }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 350f871ea..0829e90d2 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -462,6 +462,7 @@ icmp-cksum-oobr-4	icmp-cksum-oobr-4.pcap		icmp-cksum-oobr-4.out	-vvv -e
+ tok2str-oobr-1		tok2str-oobr-1.pcap		tok2str-oobr-1.out	-vvv -e
+ tok2str-oobr-2		tok2str-oobr-2.pcap		tok2str-oobr-2.out	-vvv -e
+ eigrp-tlv-oobr		eigrp-tlv-oobr.pcap		eigrp-tlv-oobr.out	-vvv -e
++zephyr-oobr		zephyr-oobr.pcap		zephyr-oobr.out		-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/zephyr-oobr.out b/tests/zephyr-oobr.out
+new file mode 100644
+index 000000000..7f1ee1dfe
+--- /dev/null
++++ b/tests/zephyr-oobr.out
+@@ -0,0 +1,2 @@
++00:16:ca:92:12:01 > 00:15:e8:97:b2:01, ethertype IPv4 (0x0800), length 65535: (tos 0x0, ttl 124, id 16059, offset 0, flags [none], proto UDP (17), length 65521)
++    167.155.6.190.2104 > 167.155.9.153.514: [udp sum ok] 
+diff --git a/tests/zephyr-oobr.pcap b/tests/zephyr-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..af71c594b9e9d8a58ee27576ef745403e56ef0d7
+GIT binary patch
+literal 65575
+zcmeI$KWh_l9Khjg5viksf?F1GDlwGSHXH{f2C8T+CPj)mNPCoGnn?Z>3cd;#5f`1h
+zcNJXRoL${reFZiB2M$@j!^xFCg_7RyxFh85`Q+RC`Tg+AbaEv*|2aBJlBx5J@$2#S
+z@o#eT_lLu&<kpY(H>PHiW^(i=`<f*0u75r}_;mH#!KZ5<XBMZYkAA(WrO)T)vPbis
+zN^Pl9tJQ1ux%tZS+S=@cr|s2ddv>nU-0Kcok9*toN}BKG-C>sQjD}fvn0NYV_4v<p
+zcd*?Z?Pd$Lh5NPI;=QzbwvZ0S2lRJ_``L@-_13GjI>;M&|N3}49S!n+w%V>NueVp8
+zK6}{Sc-h)$wVO}U>dBt8)4My|f178md~?*_+1*d8o!<7zN;>F``kQ(7?|U4d`E>DY
+z=i7d7^X$;!_|VgxCyVLMRyMzIXHXr#9>4Ew<#l&!DX%m-y+OWJ_u?aP7hEO??sxb5
+zWxC%l*w-AMc;Z>w(G*WS@x)UHbU+899iWC9YNBfX+kdcl;)y4oI-mnO5bXdp)KC*u
+zW4NV;n$oJl6Hh$xG~DWd4wSY7c;bmCo;sidIuPvuHPlcORpZeRHPn<=4W4-7iKpRK
+z2Xvsc9l#S$Jn_^49ngVj2dJTjny4C&hNz*Yv}*9g6Hh!1w>qE$rR@Noc;bnt4(Nam
+zL_0tYHPl4acr-)}HKkR9C!ToXX}Hw^9Vl%F@Wc~OJas?^bRgORYN(+ms>Y)sYN#o#
+z8a(mD6Hmjf4(LE>JAfyic;cx8I-mp54p2i4HBmJl4N*f)Y1QC~C!Tm3ZgoHhO4|WE
+zFC5Q$qtUqC>Gd{m<Q<pq!d<>bCp;Rv%9r6Phi?l9#3>c=nc<125!Z;T13I7s(GE~U
+z4K-0UMa;1i&xt3Vc;cx8I-mp54p2i4HBmJa2hk!H@x&8PJas?^bRgORYN(+ms-}oJ
+zcH%kl#1l_EbwCGnAld<HsG%mRX5t`P#3G(};)$mY=ztDHJ3tLJ)I`-3F~?3kC!ToX
+ziKh<efDS}EKn*q2MAb|jM2lF&6Hh$x)BzpPfoKP)p@y2Mnj+@diRZ)<PdxF|0UgkR
+gXa}gFhMK6FiGyeni+JLRC!RW>13D1xz@=347p`kR*#H0l
+
+literal 0
+HcmV?d00001
+

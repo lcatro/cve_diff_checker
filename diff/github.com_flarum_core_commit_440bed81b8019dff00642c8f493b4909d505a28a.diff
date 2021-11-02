@@ -1,0 +1,42 @@
+From 440bed81b8019dff00642c8f493b4909d505a28a Mon Sep 17 00:00:00 2001
+From: David Wheatley <hi@davwheat.dev>
+Date: Sun, 6 Jun 2021 02:41:48 +0100
+Subject: [PATCH] Fix XSS vulnerability
+
+---
+ js/src/common/{Translator.ts => Translator.tsx} | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+ rename js/src/common/{Translator.ts => Translator.tsx} (86%)
+
+diff --git a/js/src/common/Translator.ts b/js/src/common/Translator.tsx
+similarity index 86%
+rename from js/src/common/Translator.ts
+rename to js/src/common/Translator.tsx
+index 51b9c95a6e..2d2036ff3f 100644
+--- a/js/src/common/Translator.ts
++++ b/js/src/common/Translator.tsx
+@@ -48,12 +48,23 @@ export default class Translator {
+     // future there should be a hook here to inspect the user and change the
+     // translation key. This will allow a gender property to determine which
+     // translation key is used.
++
+     if ('user' in parameters) {
+       const user = extract(parameters, 'user');
+ 
+       if (!parameters.username) parameters.username = username(user);
+     }
+-    return parameters;
++
++    const escapedParameters: TranslatorParameters = {};
++
++    for (const param in parameters) {
++      const paramValue = parameters[param];
++
++      if (typeof paramValue === 'string') escapedParameters[param] = <>{parameters[param]}</>;
++      else escapedParameters[param] = parameters[param];
++    }
++
++    return escapedParameters;
+   }
+ 
+   trans(id: string, parameters: TranslatorParameters = {}) {

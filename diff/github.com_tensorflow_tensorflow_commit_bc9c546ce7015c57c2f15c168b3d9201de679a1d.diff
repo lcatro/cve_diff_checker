@@ -1,0 +1,27 @@
+From bc9c546ce7015c57c2f15c168b3d9201de679a1d Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 30 Jul 2021 21:37:59 -0700
+Subject: [PATCH] Prevent heap oob access in `resource_variable_ops.cc`
+
+PiperOrigin-RevId: 387936433
+Change-Id: I9e71ddaa8dbd51ec6afbf163a6b3b591f193b4f6
+---
+ tensorflow/core/kernels/resource_variable_ops.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/resource_variable_ops.cc b/tensorflow/core/kernels/resource_variable_ops.cc
+index 71aead55690d6..32a0a43364dea 100644
+--- a/tensorflow/core/kernels/resource_variable_ops.cc
++++ b/tensorflow/core/kernels/resource_variable_ops.cc
+@@ -660,6 +660,11 @@ class ResourceGatherOp : public OpKernel {
+     OP_REQUIRES(
+         c, TensorShapeUtils::IsVectorOrHigher(params.shape()),
+         errors::InvalidArgument("params must be at least 1 dimensional"));
++    OP_REQUIRES(
++        c, params.shape().dims() >= batch_dims_,
++        errors::InvalidArgument("params must have at least ", batch_dims_,
++                                " (batch_dims) dimensions but it has shape ",
++                                params.shape().DebugString()));
+ 
+     // Check that we have enough index space
+     const int64_t N = indices.NumElements();

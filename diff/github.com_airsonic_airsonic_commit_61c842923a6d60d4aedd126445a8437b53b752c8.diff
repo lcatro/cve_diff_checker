@@ -1,0 +1,66 @@
+From 61c842923a6d60d4aedd126445a8437b53b752c8 Mon Sep 17 00:00:00 2001
+From: jvoisin <julien.voisin@dustri.org>
+Date: Thu, 28 Mar 2019 21:47:57 +0100
+Subject: [PATCH] Generate new passwords in a secure way
+
+Previously, lost passwords were generated via
+org.apache.commons.lang.RandomStringUtils,
+which is using java.util.Random internally.
+
+This PRNG is has a 48-bit seed, that can easily be bruteforced
+if an attacker is able to get the PRNG's output, for example
+but resetting their own account multiple times,
+leading to trivial privileges escalation attacks.
+
+This commit makes use of java.security.SecureRandom
+instead.
+---
+ .../player/controller/RecoverController.java       | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/airsonic-main/src/main/java/org/airsonic/player/controller/RecoverController.java b/airsonic-main/src/main/java/org/airsonic/player/controller/RecoverController.java
+index e095b3497..ecba67024 100644
+--- a/airsonic-main/src/main/java/org/airsonic/player/controller/RecoverController.java
++++ b/airsonic-main/src/main/java/org/airsonic/player/controller/RecoverController.java
+@@ -4,7 +4,6 @@
+ import org.airsonic.player.domain.User;
+ import org.airsonic.player.service.SecurityService;
+ import org.airsonic.player.service.SettingsService;
+-import org.apache.commons.lang.RandomStringUtils;
+ import org.apache.commons.lang.StringUtils;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+@@ -22,6 +21,7 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
++import java.security.SecureRandom;
+ import java.util.Date;
+ import java.util.HashMap;
+ import java.util.Map;
+@@ -37,6 +37,10 @@
+ 
+     private static final Logger LOG = LoggerFactory.getLogger(RecoverController.class);
+ 
++    private static final String SYMBOLS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
++    private final SecureRandom random = new SecureRandom();
++    private static final int PASSWORD_LENGTH = 32;
++
+     @Autowired
+     private SettingsService settingsService;
+     @Autowired
+@@ -69,7 +73,13 @@ public ModelAndView recover(HttpServletRequest request, HttpServletResponse resp
+             } else if (user.getEmail() == null) {
+                 map.put("error", "recover.error.noemail");
+             } else {
+-                String password = RandomStringUtils.randomAlphanumeric(8);
++                StringBuilder sb = new StringBuilder(PASSWORD_LENGTH);
++                for(int i=0; i<PASSWORD_LENGTH; i++) {
++                  int index = random.nextInt(SYMBOLS.length());
++                  sb.append(SYMBOLS.charAt(index));
++                }
++                String password = sb.toString();
++
+                 if (emailPassword(password, user.getUsername(), user.getEmail())) {
+                     map.put("sentTo", user.getEmail());
+                     user.setLdapAuthenticated(false);

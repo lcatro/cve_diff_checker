@@ -1,0 +1,54 @@
+From a637243270fc1faae16de059091795c32d86e65e Mon Sep 17 00:00:00 2001
+From: Joakim Bech <joakim.bech@linaro.org>
+Date: Thu, 27 Sep 2018 10:24:26 +0200
+Subject: [PATCH] svc: check for allocation overflow in crypto calls
+
+Without checking for overflow there is a risk of allocating a buffer
+with size smaller than anticipated and as a consequence of that it might
+lead to a heap based overflow with attacker controlled data written
+outside the boundaries of the buffer.
+
+Fixes: OP-TEE-2018-0010: "Integer overflow in crypto system calls (x2)"
+
+Signed-off-by: Joakim Bech <joakim.bech@linaro.org>
+Tested-by: Joakim Bech <joakim.bech@linaro.org> (QEMU v7, v8)
+Reviewed-by: Jens Wiklander <jens.wiklander@linaro.org>
+Reported-by: Riscure <inforequest@riscure.com>
+Reported-by: Alyssa Milburn <a.a.milburn@vu.nl>
+Acked-by: Etienne Carriere <etienne.carriere@linaro.org>
+---
+ core/tee/tee_svc_cryp.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/core/tee/tee_svc_cryp.c b/core/tee/tee_svc_cryp.c
+index 6fac666104c..a5beb339cc9 100644
+--- a/core/tee/tee_svc_cryp.c
++++ b/core/tee/tee_svc_cryp.c
+@@ -1759,7 +1759,12 @@ TEE_Result syscall_obj_generate_key(unsigned long obj, unsigned long key_size,
+ 	if (key_size > type_props->max_size)
+ 		return TEE_ERROR_NOT_SUPPORTED;
+ 
+-	params = malloc(sizeof(TEE_Attribute) * param_count);
++	size_t alloc_size = 0;
++
++	if (MUL_OVERFLOW(sizeof(TEE_Attribute), param_count, &alloc_size))
++		return TEE_ERROR_OVERFLOW;
++
++	params = malloc(alloc_size);
+ 	if (!params)
+ 		return TEE_ERROR_OUT_OF_MEMORY;
+ 	res = copy_in_attrs(to_user_ta_ctx(sess->ctx), usr_params, param_count,
+@@ -2668,7 +2673,12 @@ TEE_Result syscall_cryp_derive_key(unsigned long state,
+ 	if (res != TEE_SUCCESS)
+ 		return res;
+ 
+-	params = malloc(sizeof(TEE_Attribute) * param_count);
++	size_t alloc_size = 0;
++
++	if (MUL_OVERFLOW(sizeof(TEE_Attribute), param_count, &alloc_size))
++		return TEE_ERROR_OVERFLOW;
++
++	params = malloc(alloc_size);
+ 	if (!params)
+ 		return TEE_ERROR_OUT_OF_MEMORY;
+ 	res = copy_in_attrs(utc, usr_params, param_count, params);

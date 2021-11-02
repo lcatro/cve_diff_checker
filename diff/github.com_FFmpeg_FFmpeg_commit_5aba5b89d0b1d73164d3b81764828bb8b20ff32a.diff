@@ -1,0 +1,69 @@
+From 5aba5b89d0b1d73164d3b81764828bb8b20ff32a Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Tue, 3 Jul 2018 22:48:32 +0200
+Subject: [PATCH] avcodec/mpeg4videodec: Check for bitstream end in
+ read_quant_matrix_ext()
+
+Fixes: out of array read
+Fixes: asff-crash-0e53d0dc491dfdd507530b66562812fbd4c36678
+
+Found-by: Paul Ch <paulcher@icloud.com>
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavcodec/mpeg4videodec.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/mpeg4videodec.c b/libavcodec/mpeg4videodec.c
+index 2df525e03a78..24c280df4658 100644
+--- a/libavcodec/mpeg4videodec.c
++++ b/libavcodec/mpeg4videodec.c
+@@ -2867,11 +2867,13 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb)
+     return 0;
+ }
+ 
+-static void read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
++static int read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
+ {
+     int i, j, v;
+ 
+     if (get_bits1(gb)) {
++        if (get_bits_left(gb) < 64*8)
++            return AVERROR_INVALIDDATA;
+         /* intra_quantiser_matrix */
+         for (i = 0; i < 64; i++) {
+             v = get_bits(gb, 8);
+@@ -2882,6 +2884,8 @@ static void read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
+     }
+ 
+     if (get_bits1(gb)) {
++        if (get_bits_left(gb) < 64*8)
++            return AVERROR_INVALIDDATA;
+         /* non_intra_quantiser_matrix */
+         for (i = 0; i < 64; i++) {
+             get_bits(gb, 8);
+@@ -2889,6 +2893,8 @@ static void read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
+     }
+ 
+     if (get_bits1(gb)) {
++        if (get_bits_left(gb) < 64*8)
++            return AVERROR_INVALIDDATA;
+         /* chroma_intra_quantiser_matrix */
+         for (i = 0; i < 64; i++) {
+             v = get_bits(gb, 8);
+@@ -2898,6 +2904,8 @@ static void read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
+     }
+ 
+     if (get_bits1(gb)) {
++        if (get_bits_left(gb) < 64*8)
++            return AVERROR_INVALIDDATA;
+         /* chroma_non_intra_quantiser_matrix */
+         for (i = 0; i < 64; i++) {
+             get_bits(gb, 8);
+@@ -2905,6 +2913,7 @@ static void read_quant_matrix_ext(MpegEncContext *s, GetBitContext *gb)
+     }
+ 
+     next_start_code_studio(gb);
++    return 0;
+ }
+ 
+ static void extension_and_user_data(MpegEncContext *s, GetBitContext *gb, int id)

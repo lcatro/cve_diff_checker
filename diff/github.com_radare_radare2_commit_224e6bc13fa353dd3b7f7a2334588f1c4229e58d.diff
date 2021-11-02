@@ -1,0 +1,28 @@
+From 224e6bc13fa353dd3b7f7a2334588f1c4229e58d Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Mon, 11 Jun 2018 03:15:07 +0200
+Subject: [PATCH] Fix #10296 - Heap out of bounds read in java_switch_op()
+
+---
+ libr/anal/p/anal_java.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/libr/anal/p/anal_java.c b/libr/anal/p/anal_java.c
+index 6bffb867c08..62f54240db5 100644
+--- a/libr/anal/p/anal_java.c
++++ b/libr/anal/p/anal_java.c
+@@ -679,11 +679,11 @@ static int java_switch_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data,
+ 
+ 	if (op_byte == 0xaa) {
+ 		// handle a table switch condition
+-		if (pos + 8 > len) {
++		if (pos + 8 + 8 > len) {
+ 			return op->size;
+ 		}
+-		int min_val = (ut32)(UINT (data, pos + 4)),
+-			max_val = (ut32)(UINT (data, pos + 8));
++		const int min_val = (ut32)(UINT (data, pos + 4));
++		const int max_val = (ut32)(UINT (data, pos + 8));
+ 
+ 		ut32 default_loc = (ut32) (UINT (data, pos)), cur_case = 0;
+ 		op->switch_op = r_anal_switch_op_new (addr, min_val, default_loc);

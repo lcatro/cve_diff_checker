@@ -1,0 +1,101 @@
+From 990ef7cccef6f38fc1d1a1bb22a08e174dcba43b Mon Sep 17 00:00:00 2001
+From: Marcus Huewe <suse-tux@gmx.de>
+Date: Sat, 26 May 2018 19:18:29 +0200
+Subject: [PATCH] [api][webui] Check access to source package
+
+to make sure user can write to it.
+
+https://bugzilla.suse.com/show_bug.cgi?id=1094819
+
+Signed-off-by: Christian Bruckmayer <cbruckmayer@suse.com>
+Co-authored-by: Christian Bruckmayer <cbruckmayer@suse.com>
+---
+ .../app/models/bs_request_action_submit.rb    | 20 +++++++++++++
+ .../functional/request_controller_test.rb     | 29 +++++++++++++++++++
+ 2 files changed, 49 insertions(+)
+
+diff --git a/src/api/app/models/bs_request_action_submit.rb b/src/api/app/models/bs_request_action_submit.rb
+index 4d51b476150..7f5a3f848c9 100644
+--- a/src/api/app/models/bs_request_action_submit.rb
++++ b/src/api/app/models/bs_request_action_submit.rb
+@@ -98,6 +98,26 @@ def execute_accept(opts)
+     Project.find_by_name!(self.target_project).update_product_autopackages
+   end
+ 
++  def check_action_permission!(skip_source = nil)
++    super(skip_source)
++    # only perform the following check, if we are called from
++    # BsRequest.permission_check_change_state! (that is, if
++    # skip_source is set to true). Always executing this check
++    # would be a regression, because this code is also executed
++    # if a new request is created (which could fail if User.current
++    # cannot modify the source_package).
++    return unless skip_source
++    target_project = Project.get_by_name(self.target_project)
++    return unless target_project && target_project.is_a?(Project)
++    target_package = target_project.packages.find_by_name(self.target_package)
++    initialize_devel_package = target_project.find_attribute('OBS', 'InitializeDevelPackage')
++    return if target_package || !initialize_devel_package
++    source_package = Package.get_by_project_and_name(source_project, self.source_package)
++    return if !source_package || User.current.can_modify_package?(source_package)
++    msg = 'No permission to initialize the source package as a devel package'
++    raise PostRequestNoPermission, msg
++  end
++
+   #### Alias of methods
+ end
+ 
+diff --git a/src/api/test/functional/request_controller_test.rb b/src/api/test/functional/request_controller_test.rb
+index 335fe440bcc..ffe5e85ea14 100644
+--- a/src/api/test/functional/request_controller_test.rb
++++ b/src/api/test/functional/request_controller_test.rb
+@@ -2038,6 +2038,18 @@ def test_all_action_types
+     assert_no_xml_tag(tag: 'person', attributes: { userid: 'Iggy', role: 'maintainer' })
+     assert_no_xml_tag(tag: 'group', attributes: { groupid: 'test_group', role: 'reader' })
+ 
++    # Accept will fail because Fred does not have permissions on the source package
++    # which is required because of the InitializeDevelPackage attribute on kde4
++    login_fred
++    post "/request/#{id}?cmd=changestate&newstate=accepted"
++    assert_response 403
++    assert_match(/No permission to initialize the source package as a devel package/, @response.body)
++
++    # We need to set permissions on the source because of the InitializeDevelPackage attribute on kde4 project
++    login_king
++    put '/source/home:Iggy:branches:kde4/_meta', params: "<project name='home:Iggy:branches:kde4'><title/><description/><person userid='fred' role='maintainer'/></project>"
++    assert_response :success
++
+     # Successful accept the request
+     login_fred
+     post "/request/#{id}?cmd=changestate&newstate=accepted"
+@@ -2142,6 +2154,21 @@ def test_submit_with_review
+     assert_xml_tag(tag: 'state', attributes: { name: 'review' },
+                    parent: { tag: 'request' }) # switch to new after last review
+ 
++    # Accept will fail because adrian does not have permissions on the source
++    # which is required because of the InitializeDevelPackage attribute on kde4
++    post "/request/#{id}?cmd=changestate&newstate=accepted&force=1"
++    assert_response 403
++    assert_match(/No permission to initialize the source package as a devel package/, @response.body)
++
++    # Adding adrian as maintainoer of the source
++    login_Iggy
++    get '/source/home:Iggy/_meta'
++    iggy_meta = @response.body
++    put '/source/home:Iggy/_meta', params: "<project name='home:Iggy'><title/><description/><person userid='adrian' role='maintainer'/></project>"
++
++    assert_response :success
++
++    login_adrian
+     # approve accepted and check initialized devel package
+     post "/request/#{id}?cmd=changestate&newstate=accepted&force=1"
+     assert_response :success
+@@ -2155,6 +2182,8 @@ def test_submit_with_review
+     assert_response :success
+     delete '/source/kde4/Testing'
+     assert_response :success
++    login_Iggy
++    put '/source/home:Iggy/_meta', params: iggy_meta
+   end
+ 
+   def test_reviewer_added_when_source_maintainer_is_missing

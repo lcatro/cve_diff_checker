@@ -1,0 +1,106 @@
+From 365abe807cab2d60dc9ec307292a06181f77a9c2 Mon Sep 17 00:00:00 2001
+From: Bill Nell <bnell@fb.com>
+Date: Fri, 1 Jul 2016 09:55:16 -0700
+Subject: [PATCH] Use req::strndup in php_mb_parse_encoding_list to prevent oob
+ memory write.
+
+Summary:
+Fix out of bounds write access in mb_detect_encoding.  Using strndup in
+php_mb_parse_encoding_list will cause strings with embedded nulls to be
+unexpectedly shortened.  The expected length of the string is tracked in
+value_length but since strndup may copy fewer characters when there are
+mbedded null this can lead to oob writes into tmpstr.
+
+I've found a couple other places in this file that use strndup and replaced
+them with req::strndup as well.  The use of strndup in mb_send_mail also seemed
+to be a leak.
+
+This replaces uses of strndup with req::strndup which can handle embedded
+nulls properly.
+
+It looks like I also accidentally fixed t11337047 at the same time.  Adding it to the list of tasks.
+
+Reviewed By: paulbiss
+
+Differential Revision: D3360065
+
+fbshipit-source-id: 99776cf9105e3789883380bf30240009eec52cec
+---
+ hphp/runtime/ext/mbstring/ext_mbstring.cpp | 17 ++++++++++-------
+ hphp/test/quick/mbstring-oob.php           |  6 ++++++
+ 2 files changed, 16 insertions(+), 7 deletions(-)
+ create mode 100644 hphp/test/quick/mbstring-oob.php
+
+diff --git a/hphp/runtime/ext/mbstring/ext_mbstring.cpp b/hphp/runtime/ext/mbstring/ext_mbstring.cpp
+index d7f4d56d656c..869703d84fab 100644
+--- a/hphp/runtime/ext/mbstring/ext_mbstring.cpp
++++ b/hphp/runtime/ext/mbstring/ext_mbstring.cpp
+@@ -554,11 +554,11 @@ static int php_mb_parse_encoding_list(const char *value, int value_length,
+ 
+     /* copy the value string for work */
+     if (value[0]=='"' && value[value_length-1]=='"' && value_length>2) {
+-      tmpstr = (char *)strndup(value+1, value_length-2);
++      tmpstr = req::strndup(value + 1, value_length - 2);
+       value_length -= 2;
++    } else {
++      tmpstr = req::strndup(value, value_length);
+     }
+-    else
+-      tmpstr = (char *)strndup(value, value_length);
+     if (tmpstr == nullptr) {
+       return 0;
+     }
+@@ -640,7 +640,7 @@ static int php_mb_parse_encoding_list(const char *value, int value_length,
+       }
+       ret = 0;
+     }
+-    free(tmpstr);
++    req::free(tmpstr);
+   }
+ 
+   return ret;
+@@ -2254,11 +2254,11 @@ bool HHVM_FUNCTION(mb_parse_str,
+   info.num_from_encodings     = MBSTRG(http_input_list_size);
+   info.from_language          = MBSTRG(current_language);
+ 
+-  char *encstr = strndup(encoded_string.data(), encoded_string.size());
++  char *encstr = req::strndup(encoded_string.data(), encoded_string.size());
+   Array resultArr = Array::Create();
+   mbfl_encoding *detected =
+     _php_mb_encoding_handler_ex(&info, resultArr, encstr);
+-  free(encstr);
++  req::free(encstr);
+   result.assignIfRef(resultArr);
+ 
+   MBSTRG(http_input_identify) = detected;
+@@ -4251,7 +4251,7 @@ bool HHVM_FUNCTION(mb_send_mail,
+   if (!to.empty()) {
+     int to_len = to.size();
+     if (to_len > 0) {
+-      to_r = strndup(to.data(), to_len);
++      to_r = req::strndup(to.data(), to_len);
+       for (; to_len; to_len--) {
+         if (!isspace((unsigned char)to_r[to_len - 1])) {
+           break;
+@@ -4398,6 +4398,9 @@ bool HHVM_FUNCTION(mb_send_mail,
+                                encoded_message.data(),
+                                all_headers, cmd.data()));
+   mbfl_memory_device_clear(&device);
++  if (to_r != to.data()) {
++    req::free(to_r);
++  }
+   return ret;
+ }
+ 
+diff --git a/hphp/test/quick/mbstring-oob.php b/hphp/test/quick/mbstring-oob.php
+new file mode 100644
+index 000000000000..5640beb5f9be
+--- /dev/null
++++ b/hphp/test/quick/mbstring-oob.php
+@@ -0,0 +1,6 @@
++<?hh // strict
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++$var0 = null;
++$var3 = "\x00";
++$var3 = mb_detect_encoding($var0,$var3);

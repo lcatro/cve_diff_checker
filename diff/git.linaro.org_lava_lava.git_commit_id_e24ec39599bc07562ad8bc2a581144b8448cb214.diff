@@ -1,0 +1,64 @@
+From e24ec39599bc07562ad8bc2a581144b8448cb214 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Duraffort?= <remi.duraffort@linaro.org>
+Date: Fri, 15 Jun 2018 16:12:53 +0200
+Subject: Use requests instead of urlopen
+
+urllib.request.urlopen accepts every url schemes, including "file://" while
+requests does not.
+
+This commit fixes a security issue where a user can force lava-server-gunicorn
+to download any file from the filesystem if it's:
+* readable by lavaserver
+* valid yaml
+
+Change-Id: I9f43f16aef814f276f0a563bf6f31cfe9cf481df
+---
+ lava_scheduler_app/schema.py | 19 ++++---------------
+ 1 file changed, 4 insertions(+), 15 deletions(-)
+
+diff --git a/lava_scheduler_app/schema.py b/lava_scheduler_app/schema.py
+index bdd7da4f1..3f03f6111 100644
+--- a/lava_scheduler_app/schema.py
++++ b/lava_scheduler_app/schema.py
+@@ -1,4 +1,5 @@
+ import re
++import requests
+ import sys
+ import yaml
+ from voluptuous import (
+@@ -14,16 +15,6 @@ from voluptuous import (
+     Schema
+ )
+ 
+-if sys.version_info[0] == 2:
+-    # Python 2.x
+-    from urllib2 import urlopen
+-    from urllib2 import URLError
+-elif sys.version_info[0] == 3:
+-    # For Python 3.0 and later
+-    from urllib.request import urlopen
+-    from urllib.error import URLError
+-
+-
+ INVALID_CHARACTER_ERROR_MSG = "Invalid character"
+ INCLUDE_URL_TIMEOUT = 10
+ 
+@@ -444,12 +435,10 @@ def _validate_vcs_parameters(data_objects):
+ 
+ def _download_raw_yaml(url):
+     try:
+-        data = yaml.load(
+-            urlopen(url, timeout=INCLUDE_URL_TIMEOUT).read())
+-        return data
+-    except URLError as e:
++        return yaml.load(requests.get(url, timeout=INCLUDE_URL_TIMEOUT).content)
++    except requests.RequestException as exc:
+         raise SubmissionException(
+-            "Section 'include' must contain valid URL: %s" % e)
++            "Section 'include' must contain valid URL: %s" % exc)
+     except yaml.YAMLError as e:
+         raise SubmissionException("Section 'include' must contain URL to a raw file in valid YAML format: %s" % e)
+ 
+-- 
+cgit v1.2.1
+

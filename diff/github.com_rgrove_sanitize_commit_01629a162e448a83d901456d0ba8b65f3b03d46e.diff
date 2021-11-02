@@ -1,0 +1,244 @@
+From 01629a162e448a83d901456d0ba8b65f3b03d46e Mon Sep 17 00:00:00 2001
+From: Ryan Grove <ryan@wonko.com>
+Date: Mon, 19 Mar 2018 19:17:59 -0700
+Subject: [PATCH] fix: Prevent code injection due to improper escaping in
+ libxml2 >= 2.9.2
+
+When Sanitize <= 4.6.2 is used in combination with libxml2 >= 2.9.2, a
+specially crafted HTML fragment can cause libxml2 to generate improperly
+escaped output, allowing non-whitelisted attributes to be used on
+whitelisted elements.
+
+Sanitize now performs additional escaping on affected attributes to
+prevent this.
+
+Many thanks to the Shopify Application Security Team for responsibly
+reporting this issue.
+
+Fixes #176
+---
+ lib/sanitize/transformers/clean_element.rb | 93 +++++++++++++++++-----
+ test/test_clean_element.rb                 | 12 ++-
+ test/test_malicious_html.rb                | 64 +++++++++++++++
+ 3 files changed, 149 insertions(+), 20 deletions(-)
+
+diff --git a/lib/sanitize/transformers/clean_element.rb b/lib/sanitize/transformers/clean_element.rb
+index 3431be4..fbbe9c8 100644
+--- a/lib/sanitize/transformers/clean_element.rb
++++ b/lib/sanitize/transformers/clean_element.rb
+@@ -18,6 +18,31 @@ class Sanitize; module Transformers; class CleanElement
+   # http://www.whatwg.org/specs/web-apps/current-work/multipage/elements.html#embedding-custom-non-visible-data-with-the-data-*-attributes
+   REGEX_DATA_ATTR = /\Adata-(?!xml)[a-z_][\w.\u00E0-\u00F6\u00F8-\u017F\u01DD-\u02AF-]*\z/u
+ 
++  # Attributes that need additional escaping on `<a>` elements due to unsafe
++  # libxml2 behavior.
++  UNSAFE_LIBXML_ATTRS_A = Set.new(%w[
++    name
++  ])
++
++  # Attributes that need additional escaping on all elements due to unsafe
++  # libxml2 behavior.
++  UNSAFE_LIBXML_ATTRS_GLOBAL = Set.new(%w[
++    action
++    href
++    src
++  ])
++
++  # Mapping of original characters to escape sequences for characters that
++  # should be escaped in attributes affected by unsafe libxml2 behavior.
++  UNSAFE_LIBXML_ESCAPE_CHARS = {
++    ' ' => '%20',
++    '"' => '%22'
++  }
++
++  # Regex that matches any single character that needs to be escaped in
++  # attributes affected by unsafe libxml2 behavior.
++  UNSAFE_LIBXML_ESCAPE_REGEX = /[ "]/
++
+   def initialize(config)
+     @add_attributes          = config[:add_attributes]
+     @attributes              = config[:attributes].dup
+@@ -92,31 +117,61 @@ def call(env)
+       node.attribute_nodes.each do |attr|
+         attr_name = attr.name.downcase
+ 
+-        if attr_whitelist.include?(attr_name)
+-          # The attribute is whitelisted.
++        unless attr_whitelist.include?(attr_name)
++          # The attribute isn't whitelisted.
++
++          if allow_data_attributes && attr_name.start_with?('data-')
++            # Arbitrary data attributes are allowed. If this is a data
++            # attribute, continue.
++            next if attr_name =~ REGEX_DATA_ATTR
++          end
++
++          # Either the attribute isn't a data attribute or arbitrary data
++          # attributes aren't allowed. Remove the attribute.
++          attr.unlink
++          next
++        end
++
++        # The attribute is whitelisted.
+ 
+-          # Remove any attributes that use unacceptable protocols.
+-          if @protocols.include?(name) && @protocols[name].include?(attr_name)
+-            attr_protocols = @protocols[name][attr_name]
++        # Remove any attributes that use unacceptable protocols.
++        if @protocols.include?(name) && @protocols[name].include?(attr_name)
++          attr_protocols = @protocols[name][attr_name]
+ 
+-            if attr.value =~ REGEX_PROTOCOL
+-              attr.unlink unless attr_protocols.include?($1.downcase)
+-            else
+-              attr.unlink unless attr_protocols.include?(:relative)
++          if attr.value =~ REGEX_PROTOCOL
++            unless attr_protocols.include?($1.downcase)
++              attr.unlink
++              next
+             end
+-          end
+-        else
+-          # The attribute isn't whitelisted.
+ 
+-          if allow_data_attributes && attr_name.start_with?('data-')
+-            # Arbitrary data attributes are allowed. Verify that the attribute
+-            # is a valid data attribute.
+-            attr.unlink unless attr_name =~ REGEX_DATA_ATTR
+           else
+-            # Either the attribute isn't a data attribute, or arbitrary data
+-            # attributes aren't allowed. Remove the attribute.
+-            attr.unlink
++            unless attr_protocols.include?(:relative)
++              attr.unlink
++              next
++            end
+           end
++
++          # Leading and trailing whitespace around URLs is ignored at parse
++          # time. Stripping it here prevents it from being escaped by the
++          # libxml2 workaround below.
++          attr.value = attr.value.strip
++        end
++
++        # libxml2 >= 2.9.2 doesn't escape comments within some attributes, in an
++        # attempt to preserve server-side includes. This can result in XSS since
++        # an unescaped double quote can allow an attacker to inject a
++        # non-whitelisted attribute.
++        #
++        # Sanitize works around this by implementing its own escaping for
++        # affected attributes, some of which can exist on any element and some
++        # of which can only exist on `<a>` elements.
++        #
++        # The relevant libxml2 code is here:
++        # <https://github.com/GNOME/libxml2/commit/960f0e275616cadc29671a218d7fb9b69eb35588>
++        if UNSAFE_LIBXML_ATTRS_GLOBAL.include?(attr_name) ||
++            (name == 'a' && UNSAFE_LIBXML_ATTRS_A.include?(attr_name))
++
++          attr.value = attr.value.gsub(UNSAFE_LIBXML_ESCAPE_REGEX, UNSAFE_LIBXML_ESCAPE_CHARS)
+         end
+       end
+     end
+diff --git a/test/test_clean_element.rb b/test/test_clean_element.rb
+index 562464c..53d2454 100644
+--- a/test/test_clean_element.rb
++++ b/test/test_clean_element.rb
+@@ -234,7 +234,7 @@
+ 
+     it 'should not choke on valueless attributes' do
+       @s.fragment('foo <a href>foo</a> bar')
+-        .must_equal 'foo <a href="" rel="nofollow">foo</a> bar'
++        .must_equal 'foo <a href rel="nofollow">foo</a> bar'
+     end
+ 
+     it 'should downcase attribute names' do
+@@ -300,6 +300,16 @@
+       }).must_equal input
+     end
+ 
++    it "should not allow relative URLs when relative URLs aren't whitelisted" do
++      input = '<a href="/foo/bar">Link</a>'
++
++      Sanitize.fragment(input,
++        :elements   => ['a'],
++        :attributes => {'a' => ['href']},
++        :protocols  => {'a' => {'href' => ['http']}}
++      ).must_equal '<a>Link</a>'
++    end
++
+     it 'should allow relative URLs containing colons when the colon is not in the first path segment' do
+       input = '<a href="/wiki/Special:Random">Random Page</a>'
+ 
+diff --git a/test/test_malicious_html.rb b/test/test_malicious_html.rb
+index a91f7c1..5f994c6 100644
+--- a/test/test_malicious_html.rb
++++ b/test/test_malicious_html.rb
+@@ -125,4 +125,68 @@
+         must_equal '&lt;alert("XSS");//&lt;'
+     end
+   end
++
++  # libxml2 >= 2.9.2 doesn't escape comments within some attributes, in an
++  # attempt to preserve server-side includes. This can result in XSS since an
++  # unescaped double quote can allow an attacker to inject a non-whitelisted
++  # attribute. Sanitize works around this by implementing its own escaping for
++  # affected attributes.
++  #
++  # The relevant libxml2 code is here:
++  # <https://github.com/GNOME/libxml2/commit/960f0e275616cadc29671a218d7fb9b69eb35588>
++  describe 'unsafe libxml2 server-side includes in attributes' do
++    tag_configs = [
++      {
++        tag_name: 'a',
++        escaped_attrs: %w[ action href src name ],
++        unescaped_attrs: []
++      },
++
++      {
++        tag_name: 'div',
++        escaped_attrs: %w[ action href src ],
++        unescaped_attrs: %w[ name ]
++      }
++    ]
++
++    before do
++      @s = Sanitize.new({
++        elements: %w[ a div ],
++
++        attributes: {
++          all: %w[ action href src name ]
++        }
++      })
++    end
++
++    tag_configs.each do |tag_config|
++      tag_name = tag_config[:tag_name]
++
++      tag_config[:escaped_attrs].each do |attr_name|
++        input = %[<#{tag_name} #{attr_name}='examp<!--" onmouseover=alert(1)>-->le.com'>foo</#{tag_name}>]
++
++        it 'should escape unsafe characters in attributes' do
++          @s.fragment(input).must_equal(%[<#{tag_name} #{attr_name}="examp<!--%22%20onmouseover=alert(1)>-->le.com">foo</#{tag_name}>])
++        end
++
++        it 'should round-trip to the same output' do
++          output = @s.fragment(input)
++          @s.fragment(output).must_equal(output)
++        end
++      end
++
++      tag_config[:unescaped_attrs].each do |attr_name|
++        input = %[<#{tag_name} #{attr_name}='examp<!--" onmouseover=alert(1)>-->le.com'>foo</#{tag_name}>]
++
++        it 'should not escape characters unnecessarily' do
++          @s.fragment(input).must_equal(input)
++        end
++
++        it 'should round-trip to the same output' do
++          output = @s.fragment(input)
++          @s.fragment(output).must_equal(output)
++        end
++      end
++    end
++  end
+ end

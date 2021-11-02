@@ -1,0 +1,100 @@
+From 50ee8130fb4cd4ef1af7682a2c85dd99cb99424e Mon Sep 17 00:00:00 2001
+From: Jakub Filak <jfilak@redhat.com>
+Date: Wed, 30 Sep 2015 11:50:18 +0200
+Subject: [PATCH] a-a-i-d-to-abrt-cache: make own random temporary directory
+
+The set-user-ID wrapper must use own new temporary directory in order to
+avoid security issues with unpacking specially crafted debuginfo
+packages that might be used to create files or symlinks anywhere on the
+file system as the abrt user.
+
+Withot the forking code the temporary directory would remain on the
+filesystem in the case where all debuginfo data are already available.
+This is caused by the fact that the underlying libreport functionality
+accepts path to a desired temporary directory and creates it only if
+necessary. Otherwise, the directory is not touched at all.
+
+This commit addresses CVE-2015-5273
+
+Signed-off-by: Jakub Filak <jfilak@redhat.com>
+---
+ src/plugins/Makefile.am                       |  1 +
+ ...t-action-install-debuginfo-to-abrt-cache.c | 41 +++++++++++++++++--
+ 2 files changed, 38 insertions(+), 4 deletions(-)
+
+diff --git a/src/plugins/Makefile.am b/src/plugins/Makefile.am
+index 85e54ab95..005cc9da1 100644
+--- a/src/plugins/Makefile.am
++++ b/src/plugins/Makefile.am
+@@ -371,6 +371,7 @@ abrt_action_install_debuginfo_to_abrt_cache_CPPFLAGS = \
+     -D_GNU_SOURCE \
+     -DBIN_DIR=\"$(bindir)\" \
+     -DSBIN_DIR=\"$(sbindir)\" \
++    -DLARGE_DATA_TMP_DIR=\"$(LARGE_DATA_TMP_DIR)\" \
+     $(LIBREPORT_CFLAGS) \
+     -Wall -Wwrite-strings \
+     -fPIE
+diff --git a/src/plugins/abrt-action-install-debuginfo-to-abrt-cache.c b/src/plugins/abrt-action-install-debuginfo-to-abrt-cache.c
+index 81b14864a..52d00de62 100644
+--- a/src/plugins/abrt-action-install-debuginfo-to-abrt-cache.c
++++ b/src/plugins/abrt-action-install-debuginfo-to-abrt-cache.c
+@@ -108,8 +108,14 @@ int main(int argc, char **argv)
+         build_ids_self_fd = xasprintf("/proc/self/fd/%d", build_ids_fd);
+     }
+ 
+-    /* name, -v, --ids, -, -y, -e, EXACT, -r, REPO, --, NULL */
+-    const char *args[11];
++    char tmp_directory[] = LARGE_DATA_TMP_DIR"/abrt-tmp-debuginfo.XXXXXX";
++    if (mkdtemp(tmp_directory) == NULL)
++        perror_msg_and_die("Failed to create working directory");
++
++    log_info("Created working directory: %s", tmp_directory);
++
++    /* name, -v, --ids, -, -y, -e, EXACT, -r, REPO, -t, PATH, --, NULL */
++    const char *args[13];
+     {
+         const char *verbs[] = { "", "-v", "-vv", "-vvv" };
+         unsigned i = 0;
+@@ -130,6 +136,8 @@ int main(int argc, char **argv)
+             args[i++] = "--repo";
+             args[i++] = repo;
+         }
++        args[i++] = "--tmpdir";
++        args[i++] = tmp_directory;
+         args[i++] = "--";
+         args[i] = NULL;
+     }
+@@ -204,6 +212,31 @@ int main(int argc, char **argv)
+         umask(0022);
+     }
+ 
+-    execvp(EXECUTABLE, (char **)args);
+-    error_msg_and_die("Can't execute %s", EXECUTABLE);
++    pid_t pid = fork();
++    if (pid < 0)
++        perror_msg_and_die("fork");
++
++    if (pid == 0)
++    {
++        execvp(EXECUTABLE, (char **)args);
++        error_msg_and_die("Can't execute %s", EXECUTABLE);
++    }
++
++    int status;
++    if (safe_waitpid(pid, &status, 0) < 0)
++        perror_msg_and_die("waitpid");
++
++    if (rmdir(tmp_directory) >= 0)
++        log_info("Removed working directory: %s", tmp_directory);
++    else if (errno != ENOENT)
++        perror_msg("Failed to remove working directory");
++
++    /* Normal execution should exit here. */
++    if (WIFEXITED(status))
++        return WEXITSTATUS(status);
++
++    if (WIFSIGNALED(status))
++        error_msg_and_die("Child terminated with signal %d", WTERMSIG(status));
++
++    error_msg_and_die("Child exit failed");
+ }

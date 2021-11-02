@@ -1,0 +1,83 @@
+From c2b18849f8bb833253538f5dfedb4ed1dc176a30 Mon Sep 17 00:00:00 2001
+From: Jon Siwek <jsiwek@corelight.com>
+Date: Wed, 12 Sep 2018 19:47:57 -0500
+Subject: [PATCH] Fix IRC names command parsing
+
+---
+ src/analyzer/protocol/irc/IRC.cc                  |   7 ++++---
+ .../weird.log                                     |  10 ++++++++++
+ testing/btest/Traces/irc-353.pcap                 | Bin 0 -> 957 bytes
+ .../scripts/base/protocols/irc/names-weird.bro    |   7 +++++++
+ 4 files changed, 21 insertions(+), 3 deletions(-)
+ create mode 100644 testing/btest/Baseline/scripts.base.protocols.irc.names-weird/weird.log
+ create mode 100644 testing/btest/Traces/irc-353.pcap
+ create mode 100644 testing/btest/scripts/base/protocols/irc/names-weird.bro
+
+diff --git a/src/analyzer/protocol/irc/IRC.cc b/src/analyzer/protocol/irc/IRC.cc
+index a69674eb50e..a46bbb93d6d 100644
+--- a/src/analyzer/protocol/irc/IRC.cc
++++ b/src/analyzer/protocol/irc/IRC.cc
+@@ -252,14 +252,15 @@ void IRC_Analyzer::DeliverStream(int length, const u_char* line, bool orig)
+ 			{
+ 			vector<string> parts = SplitWords(params, ' ');
+ 
+-			// Remove nick name.
+-			parts.erase(parts.begin());
+-			if ( parts.size() < 2 )
++			if ( parts.size() < 3 )
+ 				{
+ 				Weird("irc_invalid_names_line");
+ 				return;
+ 				}
+ 
++			// Remove nick name.
++			parts.erase(parts.begin());
++
+ 			string type = parts[0];
+ 			string channel = parts[1];
+ 
+diff --git a/testing/btest/Baseline/scripts.base.protocols.irc.names-weird/weird.log b/testing/btest/Baseline/scripts.base.protocols.irc.names-weird/weird.log
+new file mode 100644
+index 00000000000..908df6470e9
+--- /dev/null
++++ b/testing/btest/Baseline/scripts.base.protocols.irc.names-weird/weird.log
+@@ -0,0 +1,10 @@
++#separator \x09
++#set_separator	,
++#empty_field	(empty)
++#unset_field	-
++#path	weird
++#open	2018-09-13-00-31-10
++#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	name	addl	notice	peer
++#types	time	string	addr	port	addr	port	string	string	bool	string
++1536797872.428637	ClEkJM2Vm5giqnMf4h	127.0.0.1	65389	127.0.0.1	6666	irc_invalid_names_line	-	F	bro
++#close	2018-09-13-00-31-10
+diff --git a/testing/btest/Traces/irc-353.pcap b/testing/btest/Traces/irc-353.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..61d12bffab54e6dbe84e2b829093868b8b15b5d2
+GIT binary patch
+literal 957
+zcmca|c+)~A1{MYcfUq~LnHgQx$;J=?lmKBlAWmTC{K%lg<^W_O14d*Hkj?l%M~W+T
+zq5MXW_y(r`{~1ge7?@b>k1#SbvobPra2XwwF#yT2FahO(_DloX;{fD?Fx(yy!uCjU
+z{m%hvVF22-DL@3skb#)@6KI|bkPE^<D;QkCMmsP#urV;y1KkJ0|8u3d6t14O21<k7
+z_z&X78@SwP(nZ)zpnGx`cKkR7G}mT>(EtC~%mn!z=5HIInHE6%K^W>zpewMt(*|hn
+z@dg3I>;E)>j)#UJ$ShF!ITK+H)NRK>Zo_3xEYKWVpj$u~>K;qH?vVhxM;FyS#-_#!
+zTp&l~5#cCkBshXSCy3p11w@#G<T*!No~tCy94B1nbdYKe4u35s!W?M$I03`w1UB~o
+E0Hw9e^8f$<
+
+literal 0
+HcmV?d00001
+
+diff --git a/testing/btest/scripts/base/protocols/irc/names-weird.bro b/testing/btest/scripts/base/protocols/irc/names-weird.bro
+new file mode 100644
+index 00000000000..33124416f6c
+--- /dev/null
++++ b/testing/btest/scripts/base/protocols/irc/names-weird.bro
+@@ -0,0 +1,7 @@
++# @TEST-EXEC: bro -C -r $TRACES/irc-353.pcap %INPUT
++# @TEST-EXEC: btest-diff weird.log
++
++event irc_names_info(c: connection, is_orig: bool, c_type: string, channel: string, users: string_set)
++	{
++	print channel, users;
++	}

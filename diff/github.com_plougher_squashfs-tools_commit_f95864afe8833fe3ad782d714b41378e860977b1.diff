@@ -1,0 +1,471 @@
+From f95864afe8833fe3ad782d714b41378e860977b1 Mon Sep 17 00:00:00 2001
+From: Phillip Lougher <phillip@squashfs.org.uk>
+Date: Mon, 15 Jul 2019 21:19:06 +0100
+Subject: [PATCH] unsquashfs-4: Add more sanity checks + fix CVE-2015-4645/6
+
+Add more filesystem table sanity checks to Unsquashfs-4 and
+also properly fix CVE-2015-4645 and CVE-2015-4646.
+
+The CVEs were raised due to Unsquashfs having variable
+oveflow and stack overflow in a number of vulnerable
+functions.
+
+The suggested patch only "fixed" one such function and fixed
+it badly, and so it was buggy and introduced extra bugs!
+
+The suggested patch was not only buggy, but, it used the
+essentially wrong approach too.  It was "fixing" the
+symptom but not the cause.  The symptom is wrong values
+causing overflow, the cause is filesystem corruption.
+This corruption should be detected and the filesystem
+rejected *before* trying to allocate memory.
+
+This patch applies the following fixes:
+
+1. The filesystem super-block tables are checked, and the values
+   must match across the filesystem.
+
+   This will trap corrupted filesystems created by Mksquashfs.
+
+2. The maximum (theorectical) size the filesystem tables could grow
+   to, were analysed, and some variables were increased from int to
+   long long.
+
+   This analysis has been added as comments.
+
+3. Stack allocation was removed, and a shared buffer (which is
+   checked and increased as necessary) is used to read the
+   table indexes.
+
+Signed-off-by: Phillip Lougher <phillip@squashfs.org.uk>
+---
+ squashfs-tools/read_xattrs.c |  57 ++++++---
+ squashfs-tools/unsquash-4.c  | 234 +++++++++++++++++++++++++++++------
+ squashfs-tools/unsquashfs.c  |   2 +-
+ 3 files changed, 239 insertions(+), 54 deletions(-)
+
+diff --git a/squashfs-tools/read_xattrs.c b/squashfs-tools/read_xattrs.c
+index 9c663878..189a8a14 100644
+--- a/squashfs-tools/read_xattrs.c
++++ b/squashfs-tools/read_xattrs.c
+@@ -150,7 +150,16 @@ static int read_xattr_entry(struct xattr_list *xattr,
+  */
+ int read_xattrs_from_disk(int fd, struct squashfs_super_block *sBlk, int flag, long long *table_start)
+ {
+-	int res, bytes, i, indexes, index_bytes, ids;
++	/*
++	 * Note on overflow limits:
++	 * Size of ids (id_table.xattr_ids) is 2^32 (unsigned int)
++	 * Max size of bytes is 2^32*16 or 2^36
++	 * Max indexes is (2^32*16)/8K or 2^23
++	 * Max index_bytes is ((2^32*16)/8K)*8 or 2^26 or 64M
++	 */
++	int res, i, indexes, index_bytes;
++	unsigned int ids;
++	long long bytes;
+ 	long long *index, start, end;
+ 	struct squashfs_xattr_table id_table;
+ 
+@@ -170,24 +179,44 @@ int read_xattrs_from_disk(int fd, struct squashfs_super_block *sBlk, int flag, l
+ 
+ 	SQUASHFS_INSWAP_XATTR_TABLE(&id_table);
+ 
+-	if(flag) {
+-		/*
+-		 * id_table.xattr_table_start stores the start of the compressed xattr
+-		 * * metadata blocks.  This by definition is also the end of the previous
+-		 * filesystem table - the id lookup table.
+-		 */
++	/*
++	 * Compute index table values
++	 */
++	ids = id_table.xattr_ids;
++	xattr_table_start = id_table.xattr_table_start;
++	index_bytes = SQUASHFS_XATTR_BLOCK_BYTES((long long) ids);
++	indexes = SQUASHFS_XATTR_BLOCKS((long long) ids);
++
++	/*
++	 * The size of the index table (index_bytes) should match the
++	 * table start and end points
++	 */
++	if(index_bytes != (sBlk->bytes_used - (sBlk->xattr_id_table_start + sizeof(id_table)))) {
++		ERROR("read_xattrs_from_disk: Bad xattr_ids count in super block\n");
++		return 0;
++	}
++
++	/*
++	 * id_table.xattr_table_start stores the start of the compressed xattr
++	 * metadata blocks.  This by definition is also the end of the previous
++	 * filesystem table - the id lookup table.
++	 */
++	if(table_start != NULL)
+ 		*table_start = id_table.xattr_table_start;
++
++	/*
++	 * If flag is set then return once we've read the above
++	 * table_start.  That value is necessary for sanity checking,
++	 * but we don't actually want to extract the xattrs, and so
++	 * stop here.
++	 */
++	if(flag)
+ 		return id_table.xattr_ids;
+-	}
+ 
+ 	/*
+ 	 * Allocate and read the index to the xattr id table metadata
+ 	 * blocks
+ 	 */
+-	ids = id_table.xattr_ids;
+-	xattr_table_start = id_table.xattr_table_start;
+-	index_bytes = SQUASHFS_XATTR_BLOCK_BYTES(ids);
+-	indexes = SQUASHFS_XATTR_BLOCKS(ids);
+ 	index = malloc(index_bytes);
+ 	if(index == NULL)
+ 		MEM_ERROR();
+@@ -203,7 +232,7 @@ int read_xattrs_from_disk(int fd, struct squashfs_super_block *sBlk, int flag, l
+ 	 * Allocate enough space for the uncompressed xattr id table, and
+ 	 * read and decompress it
+ 	 */
+-	bytes = SQUASHFS_XATTR_BYTES(ids);
++	bytes = SQUASHFS_XATTR_BYTES((long long) ids);
+ 	xattr_ids = malloc(bytes);
+ 	if(xattr_ids == NULL)
+ 		MEM_ERROR();
+@@ -213,7 +242,7 @@ int read_xattrs_from_disk(int fd, struct squashfs_super_block *sBlk, int flag, l
+ 					bytes & (SQUASHFS_METADATA_SIZE - 1);
+ 		int length = read_block(fd, index[i], NULL, expected,
+ 			((unsigned char *) xattr_ids) +
+-			(i * SQUASHFS_METADATA_SIZE));
++			((long long) i * SQUASHFS_METADATA_SIZE));
+ 		TRACE("Read xattr id table block %d, from 0x%llx, length "
+ 			"%d\n", i, index[i], length);
+ 		if(length == 0) {
+diff --git a/squashfs-tools/unsquash-4.c b/squashfs-tools/unsquash-4.c
+index 1273c19f..d4ebc665 100644
+--- a/squashfs-tools/unsquash-4.c
++++ b/squashfs-tools/unsquash-4.c
+@@ -29,30 +29,63 @@
+ static struct squashfs_fragment_entry *fragment_table;
+ static unsigned int *id_table;
+ 
+-static int read_fragment_table(long long *directory_table_end)
++long long *alloc_index_table(int indexes)
+ {
++	static long long *alloc_table = NULL;
++	static int alloc_size = 0;
++	int length = indexes * sizeof(long long);
++
++	if(alloc_size < length) {
++		long long *table = realloc(alloc_table, length);
++
++		if(table == NULL)
++			EXIT_UNSQUASH("alloc_index_table: failed to allocate "
++				"index table\n");
++
++		alloc_table = table;
++		alloc_size = length;
++	}
++
++	return alloc_table;
++}
++
++
++static int read_fragment_table(long long *table_start)
++{
++	/*
++	 * Note on overflow limits:
++	 * Size of SBlk.s.fragments is 2^32 (unsigned int)
++	 * Max size of bytes is 2^32*16 or 2^36
++	 * Max indexes is (2^32*16)/8K or 2^23
++	 * Max length is ((2^32*16)/8K)*8 or 2^26 or 64M
++	 */
+ 	int res, i;
+-	int bytes = SQUASHFS_FRAGMENT_BYTES(sBlk.s.fragments);
+-	int  indexes = SQUASHFS_FRAGMENT_INDEXES(sBlk.s.fragments);
+-	long long fragment_table_index[indexes];
++	long long bytes = SQUASHFS_FRAGMENT_BYTES((long long) sBlk.s.fragments);
++	int indexes = SQUASHFS_FRAGMENT_INDEXES((long long) sBlk.s.fragments);
++	int length = SQUASHFS_FRAGMENT_INDEX_BYTES((long long) sBlk.s.fragments);
++	long long *fragment_table_index;
++
++	/*
++	 * The size of the index table (length bytes) should match the
++	 * table start and end points
++	 */
++	if(length != (*table_start - sBlk.s.fragment_table_start)) {
++		ERROR("read_fragment_table: Bad fragment count in super block\n");
++		return FALSE;
++	}
+ 
+ 	TRACE("read_fragment_table: %d fragments, reading %d fragment indexes "
+ 		"from 0x%llx\n", sBlk.s.fragments, indexes,
+ 		sBlk.s.fragment_table_start);
+ 
+-	if(sBlk.s.fragments == 0) {
+-		*directory_table_end = sBlk.s.fragment_table_start;
+-		return TRUE;
+-	}
+-
++	fragment_table_index = alloc_index_table(indexes);
+ 	fragment_table = malloc(bytes);
+ 	if(fragment_table == NULL)
+ 		EXIT_UNSQUASH("read_fragment_table: failed to allocate "
+ 			"fragment table\n");
+ 
+-	res = read_fs_bytes(fd, sBlk.s.fragment_table_start,
+-		SQUASHFS_FRAGMENT_INDEX_BYTES(sBlk.s.fragments),
+-		fragment_table_index);
++	res = read_fs_bytes(fd, sBlk.s.fragment_table_start, length,
++							fragment_table_index);
+ 	if(res == FALSE) {
+ 		ERROR("read_fragment_table: failed to read fragment table "
+ 			"index\n");
+@@ -78,7 +111,7 @@ static int read_fragment_table(long long *directory_table_end)
+ 	for(i = 0; i < sBlk.s.fragments; i++) 
+ 		SQUASHFS_INSWAP_FRAGMENT_ENTRY(&fragment_table[i]);
+ 
+-	*directory_table_end = fragment_table_index[0];
++	*table_start = fragment_table_index[0];
+ 	return TRUE;
+ }
+ 
+@@ -356,25 +389,42 @@ struct dir *squashfs_opendir_4(unsigned int block_start, unsigned int offset,
+ }
+ 
+ 
+-static int read_uids_guids(long long *table_start)
++static int read_id_table(long long *table_start)
+ {
++	/*
++	 * Note on overflow limits:
++	 * Size of SBlk.s.no_ids is 2^16 (unsigned short)
++	 * Max size of bytes is 2^16*4 or 256K
++	 * Max indexes is (2^16*4)/8K or 32
++	 * Max length is ((2^16*4)/8K)*8 or 256
++	 */
+ 	int res, i;
+ 	int bytes = SQUASHFS_ID_BYTES(sBlk.s.no_ids);
+ 	int indexes = SQUASHFS_ID_BLOCKS(sBlk.s.no_ids);
+-	long long id_index_table[indexes];
++	int length = SQUASHFS_ID_BLOCK_BYTES(sBlk.s.no_ids);
++	long long *id_index_table;
++
++	/*
++	 * The size of the index table (length bytes) should match the
++	 * table start and end points
++	 */
++	if(length != (*table_start - sBlk.s.id_table_start)) {
++		ERROR("read_id_table: Bad id count in super block\n");
++		return FALSE;
++	}
+ 
+-	TRACE("read_uids_guids: no_ids %d\n", sBlk.s.no_ids);
++	TRACE("read_id_table: no_ids %d\n", sBlk.s.no_ids);
+ 
++	id_index_table = alloc_index_table(indexes);
+ 	id_table = malloc(bytes);
+ 	if(id_table == NULL) {
+-		ERROR("read_uids_guids: failed to allocate id table\n");
++		ERROR("read_id_table: failed to allocate id table\n");
+ 		return FALSE;
+ 	}
+ 
+-	res = read_fs_bytes(fd, sBlk.s.id_table_start,
+-		SQUASHFS_ID_BLOCK_BYTES(sBlk.s.no_ids), id_index_table);
++	res = read_fs_bytes(fd, sBlk.s.id_table_start, length, id_index_table);
+ 	if(res == FALSE) {
+-		ERROR("read_uids_guids: failed to read id index table\n");
++		ERROR("read_id_table: failed to read id index table\n");
+ 		return FALSE;
+ 	}
+ 	SQUASHFS_INSWAP_ID_BLOCKS(id_index_table, indexes);
+@@ -393,7 +443,7 @@ static int read_uids_guids(long long *table_start)
+ 		res = read_block(fd, id_index_table[i], NULL, expected,
+ 			((char *) id_table) + i * SQUASHFS_METADATA_SIZE);
+ 		if(res == FALSE) {
+-			ERROR("read_uids_guids: failed to read id table block"
++			ERROR("read_id_table: failed to read id table block"
+ 				"\n");
+ 			return FALSE;
+ 		}
+@@ -407,12 +457,30 @@ static int read_uids_guids(long long *table_start)
+ 
+ static int parse_exports_table(long long *table_start)
+ {
++	/*
++	 * Note on overflow limits:
++	 * Size of SBlk.s.inodes is 2^32 (unsigned int)
++	 * Max indexes is (2^32*8)/8K or 2^22
++	 * Max length is ((2^32*8)/8K)*8 or 2^25
++	 */
+ 	int res;
+-	int indexes = SQUASHFS_LOOKUP_BLOCKS(sBlk.s.inodes);
+-	long long export_index_table[indexes];
++	int indexes = SQUASHFS_LOOKUP_BLOCKS((long long) sBlk.s.inodes);
++	int length = SQUASHFS_LOOKUP_BLOCK_BYTES((long long) sBlk.s.inodes);
++	long long *export_index_table;
++
++	/*
++	 * The size of the index table (length bytes) should match the
++	 * table start and end points
++	 */
++	if(length != (*table_start - sBlk.s.lookup_table_start)) {
++		ERROR("parse_exports_table: Bad inode count in super block\n");
++		return FALSE;
++	}
+ 
+-	res = read_fs_bytes(fd, sBlk.s.lookup_table_start,
+-		SQUASHFS_LOOKUP_BLOCK_BYTES(sBlk.s.inodes), export_index_table);
++	export_index_table = alloc_index_table(indexes);
++
++	res = read_fs_bytes(fd, sBlk.s.lookup_table_start, length,
++							export_index_table);
+ 	if(res == FALSE) {
+ 		ERROR("parse_exports_table: failed to read export index table\n");
+ 		return FALSE;
+@@ -432,30 +500,118 @@ static int parse_exports_table(long long *table_start)
+ 
+ int read_filesystem_tables_4()
+ {
+-	long long directory_table_end, table_start;
++	long long table_start;
+ 
+-	if(read_xattrs_from_disk(fd, &sBlk.s, no_xattrs, &table_start) == 0)
+-		return FALSE;
++	/* Read xattrs */
++	if(sBlk.s.xattr_id_table_start != SQUASHFS_INVALID_BLK) {
++		/* sanity check super block contents */
++		if(sBlk.s.xattr_id_table_start >= sBlk.s.bytes_used) {
++			ERROR("read_filesystem_tables: xattr id table start too large in super block\n");
++			goto corrupted;
++		}
+ 
+-	if(read_uids_guids(&table_start) == FALSE)
+-		return FALSE;
++		if(read_xattrs_from_disk(fd, &sBlk.s, no_xattrs, &table_start) == 0)
++			goto corrupted;
++	} else
++		table_start = sBlk.s.bytes_used;
+ 
+-	if(parse_exports_table(&table_start) == FALSE)
+-		return FALSE;
++	/* Read id lookup table */
+ 
+-	if(read_fragment_table(&directory_table_end) == FALSE)
+-		return FALSE;
++	/* Sanity check super block contents */
++	if(sBlk.s.id_table_start >= table_start) {
++		ERROR("read_filesystem_tables: id table start too large in super block\n");
++		goto corrupted;
++	}
+ 
+-	if(read_inode_table(sBlk.s.inode_table_start,
+-				sBlk.s.directory_table_start) == FALSE)
+-		return FALSE;
++	/* there should always be at least one id */
++	if(sBlk.s.no_ids == 0) {
++		ERROR("read_filesystem_tables: Bad id count in super block\n");
++		goto corrupted;
++	}
++
++	/*
++	 * the number of ids can never be more than double the number of inodes
++	 * (the maximum is a unique uid and gid for each inode).
++	 */
++	if(sBlk.s.no_ids > (sBlk.s.inodes * 2L)) {
++		ERROR("read_filesystem_tables: Bad id count in super block\n");
++		goto corrupted;
++	}
++
++	if(read_id_table(&table_start) == FALSE)
++		goto corrupted;
++
++	/* Read exports table */
++	if(sBlk.s.lookup_table_start != SQUASHFS_INVALID_BLK) {
++
++		/* sanity check super block contents */
++		if(sBlk.s.lookup_table_start >= table_start) {
++			ERROR("read_filesystem_tables: lookup table start too large in super block\n");
++			goto corrupted;
++		}
++
++		if(parse_exports_table(&table_start) == FALSE)
++			goto corrupted;
++	}
++
++	/* Read fragment table */
++	if(sBlk.s.fragments != 0) {
++
++		/* Sanity check super block contents */
++		if(sBlk.s.fragment_table_start >= table_start) {
++			ERROR("read_filesystem_tables: fragment table start too large in super block\n");
++			goto corrupted;
++		}
++
++		/* The number of fragments should not exceed the number of inodes */
++		if(sBlk.s.fragments > sBlk.s.inodes) {
++			ERROR("read_filesystem_tables: Bad fragment count in super block\n");
++			goto corrupted;
++		}
++
++		if(read_fragment_table(&table_start) == FALSE)
++			goto corrupted;
++	} else {
++		/*
++		 * Sanity check super block contents - with 0 fragments,
++		 * the fragment table should be empty
++		 */
++		if(sBlk.s.fragment_table_start != table_start) {
++			ERROR("read_filesystem_tables: fragment table start invalid in super block\n");
++			goto corrupted;
++		}
++	}
++
++	/* Read directory table */
++
++	/* Sanity check super block contents */
++	if(sBlk.s.directory_table_start >= table_start) {
++		ERROR("read_filesystem_tables: directory table start too large in super block\n");
++		goto corrupted;
++	}
+ 
+ 	if(read_directory_table(sBlk.s.directory_table_start,
+-				directory_table_end) == FALSE)
+-		return FALSE;
++				table_start) == FALSE)
++		goto corrupted;
++
++	/* Read inode table */
++
++	/* Sanity check super block contents */
++	if(sBlk.s.inode_table_start >= sBlk.s.directory_table_start) {
++		ERROR("read_filesystem_tables: inode table start too large in super block\n");
++		goto corrupted;
++	}
++
++	if(read_inode_table(sBlk.s.inode_table_start,
++				sBlk.s.directory_table_start) == FALSE)
++		goto corrupted;
+ 
+ 	if(no_xattrs)
+ 		sBlk.s.xattr_id_table_start = SQUASHFS_INVALID_BLK;
+ 
+ 	return TRUE;
++
++corrupted:
++	ERROR("File system corruption detected\n");
++	return FALSE;
+ }
+diff --git a/squashfs-tools/unsquashfs.c b/squashfs-tools/unsquashfs.c
+index e5140477..f95ad8b4 100644
+--- a/squashfs-tools/unsquashfs.c
++++ b/squashfs-tools/unsquashfs.c
+@@ -2465,7 +2465,7 @@ int parse_number(char *arg, int *res)
+ 
+ 
+ #define VERSION() \
+-	printf("unsquashfs version 4.3-git (2019/07/05)\n");\
++	printf("unsquashfs version 4.3-git (2019/07/15)\n");\
+ 	printf("copyright (C) 2019 Phillip Lougher "\
+ 		"<phillip@squashfs.org.uk>\n\n");\
+     	printf("This program is free software; you can redistribute it and/or"\

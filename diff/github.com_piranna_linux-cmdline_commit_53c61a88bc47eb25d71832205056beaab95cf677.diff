@@ -1,0 +1,87 @@
+From 53c61a88bc47eb25d71832205056beaab95cf677 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jes=C3=BAs=20Legan=C3=A9s-Combarro=20=27piranna?=
+ <piranna@gmail.com>
+Date: Sat, 15 Aug 2020 01:41:49 +0200
+Subject: [PATCH] [fix] Don't pollute prototype
+
+---
+ index.js | 34 ++++++++++++++++++++++------------
+ test.js  | 15 +++++++++++++++
+ 2 files changed, 37 insertions(+), 12 deletions(-)
+
+diff --git a/index.js b/index.js
+index 675fe73..a6a70f1 100644
+--- a/index.js
++++ b/index.js
+@@ -5,17 +5,6 @@ function reducer(result, arg)
+   // Get key node
+   const keypath = arg.shift().split('.')
+ 
+-  let key = keypath.shift()
+-  let node = result
+-
+-  while(keypath.length)
+-  {
+-    node[key] = node[key] || {}
+-    node = node[key]
+-
+-    key = keypath.shift()
+-  }
+-
+   // Get value
+   let val = true
+   if(arg.length)
+@@ -24,8 +13,29 @@ function reducer(result, arg)
+     if(val.length === 1) val = val[0]
+   }
+ 
++  let key = keypath.shift()
++
++  if(!keypath.length) return {...result, [key]: val}
++
++  if(!result.hasOwnProperty(key)) result = {...result, [key]: {}}
++
++  let newKey
++  let newNode
++  let node = result
++
++  while(true)
++  {
++    newKey = keypath.shift()
++    newNode = node[key]
++
++    if(!keypath.length) break
++
++    node = node[key] = {...newNode, [newKey]: newNode[newKey] || {}}
++    key = newKey
++  }
++
+   // Store value
+-  node[key] = val
++  node[key] = {...newNode, [newKey]: val}
+ 
+   return result
+ }
+diff --git a/test.js b/test.js
+index 9c4ab13..36d48af 100755
+--- a/test.js
++++ b/test.js
+@@ -19,3 +19,18 @@ const expected =
+ const result = linuxCmdline(cmdline)
+ 
+ deepStrictEqual(result, expected)
++
++
++// Don't pollute prototype
++const result2 = linuxCmdline('__proto__.polluted=foo')
++const expected2 =
++{
++  ['__proto__']:
++  {
++    polluted: 'foo'
++  }
++}
++
++deepStrictEqual(result2, expected2)
++
++deepStrictEqual({}.__proto__.polluted, undefined)

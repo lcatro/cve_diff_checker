@@ -1,0 +1,187 @@
+From 06fde0cc67ff121b212715031e12574f50970fcd Mon Sep 17 00:00:00 2001
+From: Tim Buckingham <mr@timbuckingham.com>
+Date: Mon, 5 Dec 2016 15:17:52 -0500
+Subject: [PATCH] 1.2 release, forgot to add release notes in 1.1
+
+---
+ README.md                                     |  9 +++++++++
+ ajax/redraw-field.php                         | 10 ++++++----
+ classes/btx-form-builder.php                  | 15 ++++++++++++---
+ manifest.json                                 |  6 +++---
+ templates/routed/btx-form-builder/default.php |  4 ++++
+ 5 files changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/README.md b/README.md
+index 097acef..14e1c66 100644
+--- a/README.md
++++ b/README.md
+@@ -24,6 +24,15 @@ Form Elements
+ Changelog
+ ---------
+ 
++### 1.2 Release
++- Fixed potential XSS attack via redraw-field (thanks to Haojun Hou in ADLab of Venustech)
++- Fixed drawing back to back column sets breaking the display
++
++### 1.1 Release
++- Auto responder email support
++- Fixed limiting entries not showing properly after being checked while editing
++- Fixed invalid dates coming through date fields (thanks to Jordan Mason)
++
+ ### 1.0.1 Release
+ - Added a check to make sure users don't have duplicate values in select / radio / checkboxes when saving
+ 
+diff --git a/ajax/redraw-field.php b/ajax/redraw-field.php
+index 56bb0d9..c78da10 100755
+--- a/ajax/redraw-field.php
++++ b/ajax/redraw-field.php
+@@ -1,8 +1,10 @@
+ <?php
+ 	$required = false;
+ 	$label = "";
+-	$type = trim($_POST["type"]);
+-	$key = str_replace("form_builder_element_", "", $_POST["name"]);
++	$key = htmlspecialchars(str_replace("form_builder_element_", "", $_POST["name"]));
++
++	// We URLify to prevent any kind of weird include jacking via ../
++	$type = BigTreeCMS::urlify(trim($_POST["type"]));
+ 	
+ 	// Clean up prices
+ 	if ($_POST["list"]["list"]) {
+@@ -19,8 +21,8 @@
+ 	
+ 	$data = $_POST;
+ ?>
+-<input type="hidden" name="id[<?=$key?>]" value="<?=$_POST["id"]?>" />
+-<input type="hidden" name="type[<?=$key?>]" value="<?=$type?>" />
++<input type="hidden" name="id[<?=$key?>]" value="<?=htmlspecialchars($_POST["id"])?>" />
++<input type="hidden" name="type[<?=$key?>]" value="<?=htmlspecialchars($type)?>" />
+ <input type="hidden" name="data[<?=$key?>]" value="<?=htmlspecialchars(json_encode($data))?>" />
+ <div class="form_builder_wrapper">
+ 	<span class="icon"></span>
+diff --git a/classes/btx-form-builder.php b/classes/btx-form-builder.php
+index 58dd76e..cb57188 100755
+--- a/classes/btx-form-builder.php
++++ b/classes/btx-form-builder.php
+@@ -5,8 +5,9 @@
+ 	*/
+ 
+ 	class BTXFormBuilder extends BigTreeModule {
+-		var $Table = "btx_form_builder_forms";
+-		static $SearchPageCount = false;
++		public $Table = "btx_form_builder_forms";
++
++		public static $SearchPageCount = false;
+ 		
+ 		/*
+ 			Function: getForm
+@@ -29,6 +30,7 @@ static function getForm($id) {
+ 			$fields = array();
+ 			$object_count = 0;
+ 			$field_query = sqlquery("SELECT * FROM btx_form_builder_fields WHERE form = '$id' AND `column` = '0' ORDER BY position DESC, id ASC");
++			
+ 			while ($field = sqlfetch($field_query)) {
+ 				$object_count++;
+ 
+@@ -36,20 +38,24 @@ static function getForm($id) {
+ 					// Get left column
+ 					$column_fields = array();
+ 					$column_query = sqlquery("SELECT * FROM btx_form_builder_fields WHERE `column` = '".$field["id"]."' AND `alignment` = 'left' ORDER BY position DESC, id ASC");
++					
+ 					while ($sub_field = sqlfetch($column_query)) {
+ 						$column_fields[] = $sub_field;
+ 						$object_count++;
+ 					}
++
+ 					$field["fields"] = $column_fields;
+ 					$fields[] = $field;
+ 
+ 					// Get right column
+ 					$column_fields = array();
+ 					$column_query = sqlquery("SELECT * FROM btx_form_builder_fields WHERE `column` = '".$field["id"]."' AND `alignment` = 'right' ORDER BY position DESC, id ASC");
++					
+ 					while ($sub_field = sqlfetch($column_query)) {
+ 						$column_fields[] = $sub_field;
+ 						$object_count++;
+ 					}
++					
+ 					$field["fields"] = $column_fields;
+ 					$fields[] = $field;
+ 
+@@ -62,6 +68,7 @@ static function getForm($id) {
+ 
+ 			$form["fields"] = $fields;
+ 			$form["object_count"] = $object_count - 1; // We start at 0
++
+ 			return $form;
+ 		}
+ 
+@@ -78,6 +85,7 @@ static function getForm($id) {
+ 		
+ 		static function getAllForms($sort = "id ASC") {
+ 			$mod = new BigTreeModule("btx_form_builder_forms");
++
+ 			return $mod->getAll($sort);
+ 		}
+ 
+@@ -94,6 +102,7 @@ static function getAllForms($sort = "id ASC") {
+ 		
+ 		static function getEntries($id) {
+ 			$mod = new BigTreeModule("btx_form_builder_entries");
++
+ 			return $mod->getMatching("form",$id,"id DESC");
+ 		}
+ 
+@@ -184,4 +193,4 @@ static function searchEntries($id,$query,$page = 1) {
+ 
+ 			return array_slice($form_results,($page - 1) * 15,15);
+ 		}
+-	}
+\ No newline at end of file
++	}
+diff --git a/manifest.json b/manifest.json
+index 9d01a98..8ca5843 100755
+--- a/manifest.json
++++ b/manifest.json
+@@ -1,8 +1,8 @@
+ {
+     "type": "extension",
+     "id": "com.fastspot.form-builder",
+-    "version": "1.1",
+-    "revision": 21,
++    "version": "1.2",
++    "revision": 22,
+     "compatibility": "4.2+",
+     "title": "Form Builder",
+     "description": "An easy to use form builder allowing the administrative users to easily add fields to a form that stores entries in the database and sends out emails. Also supports paid forms.",
+@@ -74,7 +74,7 @@
+                         "view": null,
+                         "report": null,
+                         "class": "server",
+-                        "level": "0",
++                        "level": "2",
+                         "position": "1"
+                     }
+                 ],
+diff --git a/templates/routed/btx-form-builder/default.php b/templates/routed/btx-form-builder/default.php
+index b3df0d3..57f6b53 100755
+--- a/templates/routed/btx-form-builder/default.php
++++ b/templates/routed/btx-form-builder/default.php
+@@ -89,6 +89,9 @@
+ 			} else {
+ 				if ($last_field == "column") {
+ 					echo '<div class="form_builder_column form_builder_last">';
++
++					// Reset so that if someone did back to back columns it draws properly
++					$field_type = "second_column";
+ 				} else {
+ 					echo '<div class="form_builder_column">';
+ 				}
+@@ -124,6 +127,7 @@
+ 				
+ 				echo '</div>';
+ 			}
++
+ 			$last_field = $field_type;
+ 		}
+ 	?>

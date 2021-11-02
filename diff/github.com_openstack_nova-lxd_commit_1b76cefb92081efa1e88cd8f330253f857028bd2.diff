@@ -1,0 +1,62 @@
+From 1b76cefb92081efa1e88cd8f330253f857028bd2 Mon Sep 17 00:00:00 2001
+From: James Page <james.page@ubuntu.com>
+Date: Tue, 31 Jan 2017 11:23:06 +0000
+Subject: [PATCH] Ensure LXD veth host device is named correctly
+
+LXD uses a veth pair to plumb the LXD instance into the bridge
+providing access to neutron networking.
+
+In later nova-lxd versions, the host_name parameter is set based
+on the neutron configured name for the host part of the pair,
+ensuring that neutron iptables firewall rules are correctly
+applied to instances.
+
+Update the mitaka version of the driver to populate the LXD
+network device configuration to ensure that any firewall
+rules are correctly applied.
+
+(also dropped version from setup.cfg, as pbr will automatically
+generate the version based on git tags, so its really surplus
+to requirements).
+
+Change-Id: Ic5b9ad6944a1ac45cd1983d038431252ff738985
+Closes-Bug: 1656847
+---
+ nova_lxd/nova/virt/lxd/config.py | 8 ++++++--
+ setup.cfg                        | 1 -
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/nova_lxd/nova/virt/lxd/config.py b/nova_lxd/nova/virt/lxd/config.py
+index 0f311c0..5a2b884 100644
+--- a/nova_lxd/nova/virt/lxd/config.py
++++ b/nova_lxd/nova/virt/lxd/config.py
+@@ -224,11 +224,15 @@ def create_network(self, instance_name, instance, network_info):
+ 
+             for vifaddr in network_info:
+                 cfg = self.vif_driver.get_config(instance, vifaddr)
+-                network_devices[str(cfg['bridge'])] = \
++                key = str(cfg['bridge'])
++                network_devices[key] = \
+                     {'nictype': 'bridged',
+                      'hwaddr': str(cfg['mac_address']),
+-                     'parent': str(cfg['bridge']),
++                     'parent': key,
+                      'type': 'nic'}
++                host_device = self.vif_driver.get_vif_devname(vifaddr)
++                if host_device:
++                    network_devices[key]['host_name'] = host_device
+                 return network_devices
+         except Exception as ex:
+             with excutils.save_and_reraise_exception():
+diff --git a/setup.cfg b/setup.cfg
+index 45feda3..23ba223 100644
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -3,7 +3,6 @@ name = nova-lxd
+ summary = native lxd driver for openstack
+ description-file =
+     README.md
+-version = 13.2.0
+ author = OpenStack
+ author-email = openstack-dev@lists.openstack.org
+ home-page = http://www.openstack.org/

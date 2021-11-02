@@ -1,0 +1,51 @@
+From daf50ebb16574badfb7ae0b8526ddc5871378f1b Mon Sep 17 00:00:00 2001
+From: Olle Harstedt <olleharstedt@yahoo.com>
+Date: Tue, 24 Mar 2020 11:07:38 +0100
+Subject: [PATCH] Fixed issue [security] #16018: Path Traversal Vulnerability
+ (Matthew Aberegg, Michael Burkey)
+
+---
+ .../admin/LimeSurveyFileManager.php           | 21 ++++++++-----------
+ 1 file changed, 9 insertions(+), 12 deletions(-)
+
+diff --git a/application/controllers/admin/LimeSurveyFileManager.php b/application/controllers/admin/LimeSurveyFileManager.php
+index 3d3116bcf5..17c6b9d060 100644
+--- a/application/controllers/admin/LimeSurveyFileManager.php
++++ b/application/controllers/admin/LimeSurveyFileManager.php
+@@ -380,11 +380,7 @@ public function downloadFiles() {
+         $checkFileCreate = $archive->create($arrayOfFiles, PCLZIP_OPT_REMOVE_ALL_PATH);
+         $urlFormat = Yii::app()->getUrlManager()->getUrlFormat();
+         $getFileLink = Yii::app()->createUrl('admin/filemanager/sa/getZipFile');
+-        if($urlFormat == 'path') {
+-            $getFileLink .= '?path='.$zipfile;
+-        } else {
+-            $getFileLink .= '&path='.$zipfile;
+-        }
++        $_SESSION['__path'] = $zipfile;
+ 
+         $this->_printJsonResponse(
+             [
+@@ -395,15 +391,16 @@ public function downloadFiles() {
+         );
+     }
+ 
+-    public function getZipFile($path) {
++    /**
++     * @return void
++     */
++    public function getZipFile()
++    {
++        $path = $_SESSION['__path'];
++        unset($_SESSION['__path']);
+         $filename = basename($path);
+ 
+-        // echo "<pre>";
+-        // echo $path."\n";
+-        // echo $filename."\n";
+-        // echo "isFile => ".is_file($path) ? 'isFile' : 'isNoFile'."\n";
+-        // echo "</pre>";
+-        if (is_file($path) || true) {
++        if (is_file($path)) {
+             // Send the file for download!
+             header("Expires: 0");
+             header("Cache-Control: must-revalidate");

@@ -1,0 +1,46 @@
+From 8407575b4ce63dfa7fcd273f556dd420e046003b Mon Sep 17 00:00:00 2001
+From: Nick Satterly <nfsatterly@gmail.com>
+Date: Sat, 24 Oct 2020 20:17:23 +0200
+Subject: [PATCH 1/2] Do not allow LDAP login with empty password
+
+---
+ alerta/auth/basic_ldap.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/alerta/auth/basic_ldap.py b/alerta/auth/basic_ldap.py
+index e923c1096..d08b9f82c 100644
+--- a/alerta/auth/basic_ldap.py
++++ b/alerta/auth/basic_ldap.py
+@@ -27,6 +27,9 @@ def login():
+     except KeyError:
+         raise ApiError("must supply 'username' and 'password'", 401)
+ 
++    if not password:
++        raise ApiError('password not allowed to be empty', 401)
++
+     try:
+         if '\\' in login:
+             domain, username = login.split('\\')
+
+From 7397b21acd0c44e5cafabf3e301dcef91663cea8 Mon Sep 17 00:00:00 2001
+From: Nick Satterly <nfsatterly@gmail.com>
+Date: Sat, 24 Oct 2020 22:41:12 +0200
+Subject: [PATCH 2/2] Fix type error on Note serialization
+
+---
+ alerta/models/note.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/alerta/models/note.py b/alerta/models/note.py
+index 7e1d79293..58812cc96 100644
+--- a/alerta/models/note.py
++++ b/alerta/models/note.py
+@@ -55,7 +55,7 @@ def serialize(self) -> Dict[str, Any]:
+             'updateTime': self.update_time,
+             '_links': dict(),
+             'customer': self.customer
+-        }
++        }  # type: Dict[str, Any]
+         if self.alert:
+             note['_links'] = {
+                 'alert': absolute_url('/alert/' + self.alert)

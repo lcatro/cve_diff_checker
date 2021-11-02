@@ -1,0 +1,106 @@
+From 1a1bce0526a77b62e41531b00f8bb5e21fd4f3a3 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 12:06:56 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14462/ICMP: Add a missing bounds check
+
+In icmp_print().
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add two tests using the capture files supplied by the reporter(s).
+---
+ print-icmp.c                      |   1 +
+ tests/TESTLIST                    |   2 ++
+ tests/icmp-icmp_print-oobr-1.out  |   7 +++++++
+ tests/icmp-icmp_print-oobr-1.pcap | Bin 0 -> 1208 bytes
+ tests/icmp-icmp_print-oobr-2.out  |   5 +++++
+ tests/icmp-icmp_print-oobr-2.pcap | Bin 0 -> 2514 bytes
+ 6 files changed, 15 insertions(+)
+ create mode 100644 tests/icmp-icmp_print-oobr-1.out
+ create mode 100644 tests/icmp-icmp_print-oobr-1.pcap
+ create mode 100644 tests/icmp-icmp_print-oobr-2.out
+ create mode 100644 tests/icmp-icmp_print-oobr-2.pcap
+
+diff --git a/print-icmp.c b/print-icmp.c
+index de31b2c9c..c5005fb58 100644
+--- a/print-icmp.c
++++ b/print-icmp.c
+@@ -564,6 +564,7 @@ icmp_print(netdissect_options *ndo, const u_char *bp, u_int plen, const u_char *
+ 			vec[0].len = plen;
+ 			sum = in_cksum(vec, 1);
+ 			if (sum != 0) {
++				ND_TCHECK_16BITS(&dp->icmp_cksum);
+ 				uint16_t icmp_sum = EXTRACT_16BITS(&dp->icmp_cksum);
+ 				ND_PRINT((ndo, " (wrong icmp cksum %x (->%x)!)",
+ 					     icmp_sum,
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index ac8feb4aa..73e80eba9 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -553,6 +553,8 @@ ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
+ isakmp-ikev1_n_print-oobr isakmp-ikev1_n_print-oobr.pcap isakmp-ikev1_n_print-oobr.out -v -c3
+ ldp-ldp_tlv_print-oobr ldp-ldp_tlv_print-oobr.pcap ldp-ldp_tlv_print-oobr.out -v -c1
++icmp-icmp_print-oobr-1 icmp-icmp_print-oobr-1.pcap icmp-icmp_print-oobr-1.out -v -c3
++icmp-icmp_print-oobr-2 icmp-icmp_print-oobr-2.pcap icmp-icmp_print-oobr-2.out -v -c3
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/icmp-icmp_print-oobr-1.out b/tests/icmp-icmp_print-oobr-1.out
+new file mode 100644
+index 000000000..20874b31c
+--- /dev/null
++++ b/tests/icmp-icmp_print-oobr-1.out
+@@ -0,0 +1,7 @@
++IP (tos 0x4, ttl 64, id 3584, offset 0, flags [none], proto ICMP (1), length 23, bad cksum a (->1e0f)!)
++    22.3.2.0 > 54.209.0.0: ICMP type-#49, length 3[|icmp]
++IP (tos 0x4, ttl 64, id 32512, offset 0, flags [none], proto VRRP (112), length 31, bad cksum 82 (->db96)!)
++    22.3.211.0 > 54.209.0.0: vrrp 22.3.211.0 > 54.209.0.0: VRRPv3, Advertisement, (ttl 64), vrid 128, prio 69[|vrrp]
++c0:05:ff:ff:40:9d > 00:0c:02:49:96:7e, ethertype Unknown (0xf1ff), length 65570: 
++	0x0000:  4404 0020 0e00 0000 4070 000a 1603 0200  D.......@p......
++	0x0010:  36d1 0000 3180 bc                        6...1..
+diff --git a/tests/icmp-icmp_print-oobr-1.pcap b/tests/icmp-icmp_print-oobr-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..86827dfffdaf545f7f7a0af3cdf956a2afb545cb
+GIT binary patch
+literal 1208
+zcmd^9yH3L}6g{aE#H&@OB2feZ1Um~7n+F&eSm;1U2D*1)g@{jJVC&Fd$WRuLkopCP
+z{sD6b7T9{Z*LISo38D)Vk(^j|eC~N%c{Ggs75MPhiM{~r@$k%Ox72>!(>!0|6&in@
+zKHR(nL_u#6CqC9{yrVrVH&g|OufRd{v=Y(dJ<){tIhPj}c#Qc+R0r+WJ2f{n&v&H4
+zYQ^A%L>6!BmUna)cMbLC@VH7?L);IApPbnQcKI*iSDnzMQgvvaPva5k-Ul6<lLqf6
+zenQVY4ll@<5Myc|9ji>SGGQ_r#v+*+S=`Ku?PMu|l&^&~RuDChG@r_N#<SIo?!?DL
+zx5;I0-5yLXDZeb2=jmKhj!yUBLUJkiIO9ea9ha*)Z*sLc{F<wAGpFy&<vOoEDZ#}g
+zc0imB_$v*izztf`RJleiF(hqND}h_-3T3V2TD^#H{a-E3-vLEqqCYeyyIZ&izX3dO
+Bdj$Xh
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/icmp-icmp_print-oobr-2.out b/tests/icmp-icmp_print-oobr-2.out
+new file mode 100644
+index 000000000..70250dadb
+--- /dev/null
++++ b/tests/icmp-icmp_print-oobr-2.out
+@@ -0,0 +1,5 @@
++IP truncated-ip - 39 bytes missing! (tos 0x7f,CE, ttl 254, id 40208, offset 0, flags [none], proto VRRP (112), length 68, options (unknown 69 [bad length 83]), bad cksum 9b15 (->b774)!)
++    250.219.91.20 > 209.150.251.64: vrrp 250.219.91.20 > 209.150.251.64: VRRPv2, Advertisement, (ttl 254)[|vrrp]
++[|fr]
++IP (tos 0x7f,CE, ttl 254, id 40208, offset 0, flags [none], proto ICMP (1), length 30, options (unknown 201 [bad length 255]), bad cksum 101 (->6470)!)
++    1.241.1.250 > 219.91.15.170: ICMP type-#255, length 2[|icmp]
+diff --git a/tests/icmp-icmp_print-oobr-2.pcap b/tests/icmp-icmp_print-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..515ac9210200da8bf630006063d9bebdbdb1ad69
+GIT binary patch
+literal 2514
+zcmca|c+)~A1{MYoh-DC9PzKW3K+L-=BAA6i*USOPRs!ONS93WS-0K-!<_a({{41C(
+z`s;SI$i->D9bAJMq!<MLGAJ@JFf#sUWMKUNn4zKmKLgmzeG2~>-vV``ng`;;%+r9F
+z*N4MA1_nluVu*Q+K=3~nVxB_*2bUNF|0f5av=Y!sF!SWV=7CgxWCS{qf7QwVK=2NT
+z8UC;{Fr+YS0*ZVEiTww<P!p)GrlzK#rsg&#xSj$N0~tpcNE22<nF?Vdv;%!Z0>~jj
+zEpDYmI17)G?-03vz~n;&5Maen#QXw72u<JxGnxP%ZVE6#;gQBG#RHQCC0iI9iG~GX
+zT@8{TK_*ZaFo6<O23PREo}dpNU~?VZ02~aM>xrRp7=aKL1Tnuez5-E1Mm<O=r2xb2
+z<U|FmSU{#JC@Yvip5mm`XC&%>LZW)wE60c$hydXtiXo*QhhBs*WzMHV5yi;J!YD+v
+xEB_O%5?vvoA_`qSE<Q9!a7hy(4vZY^_3mv-^AZu3Q=~+JBHa{dX81>hW&jzpK?(o>
+
+literal 0
+HcmV?d00001
+

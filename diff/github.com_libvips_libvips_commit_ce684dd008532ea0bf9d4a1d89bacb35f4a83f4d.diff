@@ -1,0 +1,33 @@
+From ce684dd008532ea0bf9d4a1d89bacb35f4a83f4d Mon Sep 17 00:00:00 2001
+From: John Cupitt <jcupitt@gmail.com>
+Date: Tue, 27 Aug 2019 12:50:52 +0100
+Subject: [PATCH] fetch map after DGifGetImageDesc()
+
+Earlier refactoring broke GIF map fetch.
+---
+ libvips/foreign/gifload.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libvips/foreign/gifload.c b/libvips/foreign/gifload.c
+index 67fe4c803..a394da7ac 100644
+--- a/libvips/foreign/gifload.c
++++ b/libvips/foreign/gifload.c
+@@ -408,9 +408,8 @@ vips_foreign_load_gif_scan_image( VipsForeignLoadGif *gif )
+ {
+ 	VipsObjectClass *class = VIPS_OBJECT_GET_CLASS( gif );
+ 	GifFileType *file = gif->file;
+-	ColorMapObject *map = file->Image.ColorMap ?
+-		file->Image.ColorMap : file->SColorMap;
+ 
++	ColorMapObject *map;
+ 	GifByteType *extension;
+ 
+ 	if( DGifGetImageDesc( gif->file ) == GIF_ERROR ) {
+@@ -435,6 +434,7 @@ vips_foreign_load_gif_scan_image( VipsForeignLoadGif *gif )
+ 
+ 	/* Test for a non-greyscale colourmap for this frame.
+ 	 */
++	map = file->Image.ColorMap ? file->Image.ColorMap : file->SColorMap;
+ 	if( !gif->has_colour &&
+ 		map ) {
+ 		int i;

@@ -1,0 +1,35 @@
+From f274aa6787cb8b3ec1cc12c440a56665b7231882 Mon Sep 17 00:00:00 2001
+From: Nathaniel McCallum <npmccallum@redhat.com>
+Date: Mon, 3 Aug 2015 14:38:49 -0400
+Subject: [PATCH] Enforce a maximum packet length
+
+Permanently fixes CVE-2015-5159 for all applications.
+---
+ kdcproxy/__init__.py | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/kdcproxy/__init__.py b/kdcproxy/__init__.py
+index 865abac..9fc1418 100644
+--- a/kdcproxy/__init__.py
++++ b/kdcproxy/__init__.py
+@@ -61,6 +61,7 @@ def __str__(self):
+ 
+ 
+ class Application:
++    MAX_LENGTH = 128 * 1024
+     SOCKTYPES = {
+         "tcp": socket.SOCK_STREAM,
+         "udp": socket.SOCK_DGRAM,
+@@ -180,7 +181,11 @@ def __call__(self, env, start_response):
+             try:
+                 length = int(env["CONTENT_LENGTH"])
+             except AttributeError:
+-                length = -1
++                raise HTTPException(411, "Length required.")
++            if length < 0:
++                raise HTTPException(411, "Length required.")
++            if length > self.MAX_LENGTH:
++                raise HTTPException(413, "Request entity too large.")
+             try:
+                 pr = codec.decode(env["wsgi.input"].read(length))
+             except codec.ParsingError as e:

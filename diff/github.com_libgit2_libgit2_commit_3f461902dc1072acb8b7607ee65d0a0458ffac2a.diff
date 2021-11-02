@@ -1,0 +1,158 @@
+From 3f461902dc1072acb8b7607ee65d0a0458ffac2a Mon Sep 17 00:00:00 2001
+From: Patrick Steinhardt <ps@pks.im>
+Date: Fri, 29 Jun 2018 07:45:18 +0200
+Subject: [PATCH] delta: fix sign-extension of big left-shift
+
+Our delta code was originally adapted from JGit, which itself adapted it
+from git itself. Due to this heritage, we inherited a bug from git.git
+in how we compute the delta offset, which was fixed upstream in
+48fb7deb5 (Fix big left-shifts of unsigned char, 2009-06-17). As
+explained by Linus:
+
+    Shifting 'unsigned char' or 'unsigned short' left can result in sign
+    extension errors, since the C integer promotion rules means that the
+    unsigned char/short will get implicitly promoted to a signed 'int' due to
+    the shift (or due to other operations).
+
+    This normally doesn't matter, but if you shift things up sufficiently, it
+    will now set the sign bit in 'int', and a subsequent cast to a bigger type
+    (eg 'long' or 'unsigned long') will now sign-extend the value despite the
+    original expression being unsigned.
+
+    One example of this would be something like
+
+            unsigned long size;
+            unsigned char c;
+
+            size += c << 24;
+
+    where despite all the variables being unsigned, 'c << 24' ends up being a
+    signed entity, and will get sign-extended when then doing the addition in
+    an 'unsigned long' type.
+
+    Since git uses 'unsigned char' pointers extensively, we actually have this
+    bug in a couple of places.
+
+In our delta code, we inherited such a bogus shift when computing the
+offset at which the delta base is to be found. Due to the sign extension
+we can end up with an offset where all the bits are set. This can allow
+an arbitrary memory read, as the addition in `base_len < off + len` can
+now overflow if `off` has all its bits set.
+
+Fix the issue by casting the result of `*delta++ << 24UL` to an unsigned
+integer again. Add a test with a crafted delta that would actually
+succeed with an out-of-bounds read in case where the cast wouldn't
+exist.
+
+Reported-by: Riccardo Schirone <rschiron@redhat.com>
+Test-provided-by: Riccardo Schirone <rschiron@redhat.com>
+---
+ src/delta.c         | 32 +++++++++++++++-----------------
+ tests/delta/apply.c | 12 ++++++++++++
+ tests/diff/binary.c |  1 +
+ 3 files changed, 28 insertions(+), 17 deletions(-)
+ create mode 100644 tests/delta/apply.c
+
+diff --git a/src/delta.c b/src/delta.c
+index 073cba7c674..8d9e6146e74 100644
+--- a/src/delta.c
++++ b/src/delta.c
+@@ -539,10 +539,11 @@ int git_delta_apply(
+ 	*out = NULL;
+ 	*out_len = 0;
+ 
+-	/* Check that the base size matches the data we were given;
+-	* if not we would underflow while accessing data from the
+-	* base object, resulting in data corruption or segfault.
+-	*/
++	/*
++	 * Check that the base size matches the data we were given;
++	 * if not we would underflow while accessing data from the
++	 * base object, resulting in data corruption or segfault.
++	 */
+ 	if ((hdr_sz(&base_sz, &delta, delta_end) < 0) || (base_sz != base_len)) {
+ 		giterr_set(GITERR_INVALID, "failed to apply delta: base size does not match given data");
+ 		return -1;
+@@ -564,19 +565,18 @@ int git_delta_apply(
+ 	while (delta < delta_end) {
+ 		unsigned char cmd = *delta++;
+ 		if (cmd & 0x80) {
+-			/* cmd is a copy instruction; copy from the base.
+-			*/
++			/* cmd is a copy instruction; copy from the base. */
+ 			size_t off = 0, len = 0;
+ 
+ 			if (cmd & 0x01) off = *delta++;
+ 			if (cmd & 0x02) off |= *delta++ << 8UL;
+ 			if (cmd & 0x04) off |= *delta++ << 16UL;
+-			if (cmd & 0x08) off |= *delta++ << 24UL;
++			if (cmd & 0x08) off |= ((unsigned) *delta++ << 24UL);
+ 
+ 			if (cmd & 0x10) len = *delta++;
+ 			if (cmd & 0x20) len |= *delta++ << 8UL;
+ 			if (cmd & 0x40) len |= *delta++ << 16UL;
+-			if (!len)		len = 0x10000;
++			if (!len)       len = 0x10000;
+ 
+ 			if (base_len < off + len || res_sz < len)
+ 				goto fail;
+@@ -584,11 +584,11 @@ int git_delta_apply(
+ 			res_dp += len;
+ 			res_sz -= len;
+ 
+-		}
+-		else if (cmd) {
+-			/* cmd is a literal insert instruction; copy from
+-			* the delta stream itself.
+-			*/
++		} else if (cmd) {
++			/*
++			 * cmd is a literal insert instruction; copy from
++			 * the delta stream itself.
++			 */
+ 			if (delta_end - delta < cmd || res_sz < cmd)
+ 				goto fail;
+ 			memcpy(res_dp, delta, cmd);
+@@ -596,10 +596,8 @@ int git_delta_apply(
+ 			res_dp += cmd;
+ 			res_sz -= cmd;
+ 
+-		}
+-		else {
+-			/* cmd == 0 is reserved for future encodings.
+-			*/
++		} else {
++			/* cmd == 0 is reserved for future encodings. */
+ 			goto fail;
+ 		}
+ 	}
+diff --git a/tests/delta/apply.c b/tests/delta/apply.c
+new file mode 100644
+index 00000000000..24513e040d2
+--- /dev/null
++++ b/tests/delta/apply.c
+@@ -0,0 +1,12 @@
++#include "clar_libgit2.h"
++
++#include "delta.h"
++
++void test_delta_apply__read_at_off(void)
++{
++	unsigned char base[16] = { 0 }, delta[] = { 0x10, 0x10, 0xff, 0xff, 0xff, 0xff, 0xff, 0x10, 0x00, 0x00 };
++	void *out;
++	size_t outlen;
++
++	cl_git_fail(git_delta_apply(&out, &outlen, base, sizeof(base), delta, sizeof(delta)));
++}
+diff --git a/tests/diff/binary.c b/tests/diff/binary.c
+index 173a5994e59..c17ba5ef4e6 100644
+--- a/tests/diff/binary.c
++++ b/tests/diff/binary.c
+@@ -3,6 +3,7 @@
+ #include "git2/sys/diff.h"
+ 
+ #include "buffer.h"
++#include "delta.h"
+ #include "filebuf.h"
+ #include "repository.h"
+ 

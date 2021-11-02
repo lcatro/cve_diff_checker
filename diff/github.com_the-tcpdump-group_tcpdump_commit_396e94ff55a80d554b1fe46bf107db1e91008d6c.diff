@@ -1,0 +1,72 @@
+From 396e94ff55a80d554b1fe46bf107db1e91008d6c Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 11:36:55 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14469/ISAKMP: Add a missing bounds check
+
+In ikev1_n_print() check bounds before trying to fetch the replay detection
+status.
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-isakmp.c                       |   1 +
+ tests/TESTLIST                       |   1 +
+ tests/isakmp-ikev1_n_print-oobr.out  |   8 ++++++++
+ tests/isakmp-ikev1_n_print-oobr.pcap | Bin 0 -> 376 bytes
+ 4 files changed, 10 insertions(+)
+ create mode 100644 tests/isakmp-ikev1_n_print-oobr.out
+ create mode 100644 tests/isakmp-ikev1_n_print-oobr.pcap
+
+diff --git a/print-isakmp.c b/print-isakmp.c
+index 04374b0b3..951c8a741 100644
+--- a/print-isakmp.c
++++ b/print-isakmp.c
+@@ -1769,6 +1769,7 @@ ikev1_n_print(netdissect_options *ndo, u_char tpay _U_,
+ 		    }
+ 		case IPSECDOI_NTYPE_REPLAY_STATUS:
+ 			ND_PRINT((ndo," status=("));
++			ND_TCHECK_32BITS(cp);
+ 			ND_PRINT((ndo,"replay detection %sabled",
+ 				  EXTRACT_32BITS(cp) ? "en" : "dis"));
+ 			ND_PRINT((ndo,")"));
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index ac7325a02..0bc46baed 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -551,6 +551,7 @@ radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
+ ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
+ ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
++isakmp-ikev1_n_print-oobr isakmp-ikev1_n_print-oobr.pcap isakmp-ikev1_n_print-oobr.out -v -c3
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/isakmp-ikev1_n_print-oobr.out b/tests/isakmp-ikev1_n_print-oobr.out
+new file mode 100644
+index 000000000..edbd19035
+--- /dev/null
++++ b/tests/isakmp-ikev1_n_print-oobr.out
+@@ -0,0 +1,8 @@
++IP (tos 0x12,ECT(0), ttl 17, id 47119, offset 0, flags [+, DF, rsvd], proto UDP (17), length 296, bad cksum 1ff (->327b)!)
++    80.236.128.20.500 > 12.251.0.45.49152: isakmp 2.12 msgid 10101010: child_sa  ikev2_auth[V]:
++    (n: doi=0 proto=128 type=#24577) [|#126] (len mismatch: isakmp 4278190080/ip 268)
++IP (tos 0x12,ECT(0), ttl 17, id 21263, offset 72, flags [+, DF, rsvd], proto unknown (40), length 296, bad cksum fbff (->9847)!)
++    80.0.128.20 > 12.251.0.45: ip-proto-40
++IP (tos 0x15,ECT(1), ttl 17, id 21263, offset 0, flags [+, DF, rsvd], proto UDP (17), length 296, bad cksum 1ff (->9864)!)
++    80.0.128.20.500 > 12.251.0.45.49152: isakmp 2.12 msgid 1010100b: child_sa  ikev2_auth[V]:
++    (n: doi=ipsec proto=#16 type=REPLAY-STATUS spi=04 status=( [|n]) (len mismatch: isakmp 620756992/ip 268)
+diff --git a/tests/isakmp-ikev1_n_print-oobr.pcap b/tests/isakmp-ikev1_n_print-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..026724b869f9c8f10742bdce30030c755cf99520
+GIT binary patch
+literal 376
+zcmca|c+)~A1{MZR35KUdZFfaN7#J8BftYt&#Q*;R3?eB&wwW4(I0Mh`S0@-5jviRB
+znvsLSRfthz2mb>GK|#j<0dE>acz!eJGJZM0Q2(Ei!G^)MVKxK9-%p?a*Vi)&yyMnU
+z765_&K$GfzGq3_Fh6aWNMiyyH0R|Be?=DaZYUcrMBs<^m2%Sc?GnoGYr=Z4fpu^DZ
+zl!n{c$|&#?YA3fU&~%8M_Zb-&p?0z`{Qm~F^Xvcr|Dpa=#o<p;Mh&2y5PxFWX%4p&
+c=ua$mGB65&?fgH7fuSDcFBuSM_zxuf0Z!L$m;e9(
+
+literal 0
+HcmV?d00001
+

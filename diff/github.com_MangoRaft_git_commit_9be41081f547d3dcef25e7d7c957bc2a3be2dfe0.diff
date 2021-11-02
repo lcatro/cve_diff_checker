@@ -1,0 +1,43 @@
+From 9be41081f547d3dcef25e7d7c957bc2a3be2dfe0 Mon Sep 17 00:00:00 2001
+From: Tim <price.timmy@gmail.com>
+Date: Wed, 29 Jan 2020 10:18:40 -0500
+Subject: [PATCH] Vulnerability: Command Injection
+
+Technical Details from Reporter: The first arguments "repo" of function pull() can be controlled by users without any sanitization. This is used within multiple functions within the package.
+
+ Reporter/Credit: Song Li of Johns Hopkins University
+---
+ lib/git.js | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/git.js b/lib/git.js
+index 2863e6a..82d3a90 100644
+--- a/lib/git.js
++++ b/lib/git.js
+@@ -190,7 +190,7 @@ Git.prototype.checkout = function(repo, cb) {
+ 	}
+ 
+ 	function fetch() {
+-		var cmd = ['git', 'fetch', 'file://' + path.resolve(self.repoDir, repo.organization, repo.name), repo.branch].join(' ');
++		var cmd = ['git', 'fetch', 'file://' + path.resolve(self.repoDir, repo.organization, repo.name), encodeURIComponent(repo.branch)].join(' ');
+ 
+ 		child.exec(cmd, {
+ 			cwd : dir
+@@ -203,7 +203,7 @@ Git.prototype.checkout = function(repo, cb) {
+ 	}
+ 
+ 	function checkout() {
+-		var cmd = ['git', 'checkout', '-b', repo.branch, repo.commit].join(' ');
++		var cmd = ['git', 'checkout', '-b', encodeURIComponent(repo.branch), repo.commit].join(' ');
+ 
+ 		child.exec(cmd, {
+ 			cwd : dir
+@@ -218,7 +218,7 @@ Git.prototype.pull = function(repo, cb) {
+ 	var self = this;
+ 	var dir = this.checkoutDir(repo.organization, repo.name);
+ 	repo.id = repo.commit + '.' + Date.now();
+-	var cmd = ['git', 'pull', 'file://' + path.resolve(self.repoDir, repo.organization, repo.name), repo.branch].join(' ');
++	var cmd = ['git', 'pull', 'file://' + path.resolve(self.repoDir, repo.organization, repo.name), encodeURIComponent(repo.branch)].join(' ');
+ 	debug('Git.pull ' + dir + ': ' + cmd);
+ 	child.exec(cmd, {
+ 		cwd : dir

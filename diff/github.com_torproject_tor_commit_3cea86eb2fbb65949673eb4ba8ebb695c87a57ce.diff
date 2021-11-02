@@ -1,0 +1,108 @@
+From 3cea86eb2fbb65949673eb4ba8ebb695c87a57ce Mon Sep 17 00:00:00 2001
+From: Nick Mathewson <nickm@torproject.org>
+Date: Fri, 14 Oct 2016 09:38:12 -0400
+Subject: [PATCH] Add a one-word sentinel value of 0x0 at the end of each buf_t
+ chunk
+
+This helps protect against bugs where any part of a buf_t's memory
+is passed to a function that expects a NUL-terminated input.
+
+It also closes TROVE-2016-10-001 (aka bug 20384).
+---
+ changes/buf-sentinel | 11 +++++++++++
+ src/or/buffers.c     | 40 ++++++++++++++++++++++++++++++++--------
+ 2 files changed, 43 insertions(+), 8 deletions(-)
+ create mode 100644 changes/buf-sentinel
+
+diff --git a/changes/buf-sentinel b/changes/buf-sentinel
+new file mode 100644
+index 00000000000..7c5b829c19c
+--- /dev/null
++++ b/changes/buf-sentinel
+@@ -0,0 +1,11 @@
++  o Major features (security fixes):
++
++    - Prevent a class of security bugs caused by treating the contents
++      of a buffer chunk as if they were a NUL-terminated string.  At
++      least one such bug seems to be present in all currently used
++      versions of Tor, and would allow an attacker to remotely crash
++      most Tor instances, especially those compiled with extra compiler
++      hardening. With this defense in place, such bugs can't crash Tor,
++      though we should still fix them as they occur. Closes ticket 20384
++      (TROVE-2016-10-001).
++
+diff --git a/src/or/buffers.c b/src/or/buffers.c
+index be9974418d9..74aebccb77c 100644
+--- a/src/or/buffers.c
++++ b/src/or/buffers.c
+@@ -69,12 +69,33 @@ static int parse_socks_client(const uint8_t *data, size_t datalen,
+ 
+ #define CHUNK_HEADER_LEN STRUCT_OFFSET(chunk_t, mem[0])
+ 
++/* We leave this many NUL bytes at the end of the buffer. */
++#define SENTINEL_LEN 4
++
++/* Header size plus NUL bytes at the end */
++#define CHUNK_OVERHEAD (CHUNK_HEADER_LEN + SENTINEL_LEN)
++
+ /** Return the number of bytes needed to allocate a chunk to hold
+  * <b>memlen</b> bytes. */
+-#define CHUNK_ALLOC_SIZE(memlen) (CHUNK_HEADER_LEN + (memlen))
++#define CHUNK_ALLOC_SIZE(memlen) (CHUNK_OVERHEAD + (memlen))
+ /** Return the number of usable bytes in a chunk allocated with
+  * malloc(<b>memlen</b>). */
+-#define CHUNK_SIZE_WITH_ALLOC(memlen) ((memlen) - CHUNK_HEADER_LEN)
++#define CHUNK_SIZE_WITH_ALLOC(memlen) ((memlen) - CHUNK_OVERHEAD)
++
++#define DEBUG_SENTINEL
++
++#ifdef DEBUG_SENTINEL
++#define DBG_S(s) s
++#else
++#define DBG_S(s) (void)0
++#endif
++
++#define CHUNK_SET_SENTINEL(chunk, alloclen) do {                        \
++    uint8_t *a = (uint8_t*) &(chunk)->mem[(chunk)->memlen];             \
++    DBG_S(uint8_t *b = &((uint8_t*)(chunk))[(alloclen)-SENTINEL_LEN]);  \
++    DBG_S(tor_assert(a == b));                                          \
++    memset(a,0,SENTINEL_LEN);                                           \
++  } while (0)
+ 
+ /** Return the next character in <b>chunk</b> onto which data can be appended.
+  * If the chunk is full, this might be off the end of chunk->mem. */
+@@ -131,6 +152,7 @@ chunk_new_with_alloc_size(size_t alloc)
+   ch->memlen = CHUNK_SIZE_WITH_ALLOC(alloc);
+   total_bytes_allocated_in_chunks += alloc;
+   ch->data = &ch->mem[0];
++  CHUNK_SET_SENTINEL(ch, alloc);
+   return ch;
+ }
+ 
+@@ -140,18 +162,20 @@ static INLINE chunk_t *
+ chunk_grow(chunk_t *chunk, size_t sz)
+ {
+   off_t offset;
+-  size_t memlen_orig = chunk->memlen;
++  const size_t memlen_orig = chunk->memlen;
++  const size_t orig_alloc = CHUNK_ALLOC_SIZE(memlen_orig);
++  const size_t new_alloc = CHUNK_ALLOC_SIZE(sz);
+   tor_assert(sz > chunk->memlen);
+   offset = chunk->data - chunk->mem;
+-  chunk = tor_realloc(chunk, CHUNK_ALLOC_SIZE(sz));
++  chunk = tor_realloc(chunk, new_alloc);
+   chunk->memlen = sz;
+   chunk->data = chunk->mem + offset;
+ #ifdef DEBUG_CHUNK_ALLOC
+-  tor_assert(chunk->DBG_alloc == CHUNK_ALLOC_SIZE(memlen_orig));
+-  chunk->DBG_alloc = CHUNK_ALLOC_SIZE(sz);
++  tor_assert(chunk->DBG_alloc == orig_alloc);
++  chunk->DBG_alloc = new_alloc;
+ #endif
+-  total_bytes_allocated_in_chunks +=
+-    CHUNK_ALLOC_SIZE(sz) - CHUNK_ALLOC_SIZE(memlen_orig);
++  total_bytes_allocated_in_chunks += new_alloc - orig_alloc;
++  CHUNK_SET_SENTINEL(chunk, new_alloc);
+   return chunk;
+ }
+ 

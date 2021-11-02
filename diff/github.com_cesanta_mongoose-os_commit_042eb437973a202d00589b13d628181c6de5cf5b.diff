@@ -1,0 +1,29 @@
+From 042eb437973a202d00589b13d628181c6de5cf5b Mon Sep 17 00:00:00 2001
+From: Alexander Alashkin <alexander.alashkin@cesanta.com>
+Date: Mon, 3 Apr 2017 10:14:16 +0100
+Subject: [PATCH] Fix crash in multipart handling
+
+Close cesanta/dev#6974
+
+PUBLISHED_FROM=4d4e4a46eceba10aec8dacb7f8f58bd078c92307
+---
+ mongoose/mongoose.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/mongoose/mongoose.c b/mongoose/mongoose.c
+index 8bc2546ba..bd9535719 100644
+--- a/mongoose/mongoose.c
++++ b/mongoose/mongoose.c
+@@ -5961,6 +5961,12 @@ static int mg_http_multipart_wait_for_boundary(struct mg_connection *c) {
+   struct mbuf *io = &c->recv_mbuf;
+   struct mg_http_proto_data *pd = mg_http_get_proto_data(c);
+ 
++  if (pd->mp_stream.boundary == NULL) {
++    pd->mp_stream.state = MPS_FINALIZE;
++    DBG(("Invalid request: boundary not initilaized"));
++    return 0;
++  }
++
+   if ((int) io->len < pd->mp_stream.boundary_len + 2) {
+     return 0;
+   }

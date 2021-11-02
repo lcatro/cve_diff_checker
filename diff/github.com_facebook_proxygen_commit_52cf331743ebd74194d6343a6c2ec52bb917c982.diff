@@ -1,0 +1,90 @@
+From 52cf331743ebd74194d6343a6c2ec52bb917c982 Mon Sep 17 00:00:00 2001
+From: Jorge Lopez Silva <jls@fb.com>
+Date: Thu, 27 Dec 2018 12:44:29 -0800
+Subject: [PATCH] Fix h2 codec state after bad priority header.
+
+Summary:
+It's possible for the http2 codec to enter an invalid state after processing a http2 header with invalid priorities.
+CVE-2018-6346
+
+Reviewed By: maxgeorg
+
+Differential Revision: D13510025
+
+fbshipit-source-id: 7c4e42daf1cd2b912454d13a66ab8488d1863263
+---
+ proxygen/lib/http/codec/HTTP2Codec.cpp        | 18 +++++++-------
+ .../lib/http/codec/test/HTTP2CodecTest.cpp    | 24 +++++++++++++++++++
+ 2 files changed, 34 insertions(+), 8 deletions(-)
+
+diff --git a/proxygen/lib/http/codec/HTTP2Codec.cpp b/proxygen/lib/http/codec/HTTP2Codec.cpp
+index 5ce0fe3f5..db9a82731 100644
+--- a/proxygen/lib/http/codec/HTTP2Codec.cpp
++++ b/proxygen/lib/http/codec/HTTP2Codec.cpp
+@@ -514,21 +514,23 @@ folly::Optional<ErrorCode> HTTP2Codec::parseHeadersDecodeFrames(
+     isReq = transportDirection_ == TransportDirection::DOWNSTREAM;
+   }
+ 
++  // Validate circular dependencies.
++  if (priority && (curHeader_.stream == priority->streamDependency)) {
++    streamError(
++        folly::to<string>("Circular dependency for txn=", curHeader_.stream),
++        ErrorCode::PROTOCOL_ERROR,
++        curHeader_.type == http2::FrameType::HEADERS);
++    return ErrorCode::NO_ERROR;
++  }
++
+   decodeInfo_.init(isReq, parsingDownstreamTrailers_);
+   if (priority) {
+-    if (curHeader_.stream == priority->streamDependency) {
+-      streamError(folly::to<string>("Circular dependency for txn=",
+-                                    curHeader_.stream),
+-                  ErrorCode::PROTOCOL_ERROR,
+-                  curHeader_.type == http2::FrameType::HEADERS);
+-      return ErrorCode::NO_ERROR;
+-    }
+-
+     decodeInfo_.msg->setHTTP2Priority(
+         std::make_tuple(priority->streamDependency,
+                         priority->exclusive,
+                         priority->weight));
+   }
++
+   headerCodec_.decodeStreaming(
+       headerCursor, curHeaderBlock_.chainLength(), this);
+   msg = std::move(decodeInfo_.msg);
+diff --git a/proxygen/lib/http/codec/test/HTTP2CodecTest.cpp b/proxygen/lib/http/codec/test/HTTP2CodecTest.cpp
+index 7c818dd1b..22471b13e 100644
+--- a/proxygen/lib/http/codec/test/HTTP2CodecTest.cpp
++++ b/proxygen/lib/http/codec/test/HTTP2CodecTest.cpp
+@@ -1377,6 +1377,30 @@ TEST_F(HTTP2CodecTest, BadHeaderPriority) {
+   EXPECT_EQ(callbacks_.sessionErrors, 0);
+ }
+ 
++TEST_F(HTTP2CodecTest, DuplicateBadHeaderPriority) {
++  // Sent an initial header with a circular dependency
++  HTTPMessage req = getGetRequest();
++  req.setHTTP2Priority(HTTPMessage::HTTPPriority(0, false, 7));
++  upstreamCodec_.generateHeader(output_, 1, req, true /* eom */);
++
++  // Hack ingress with circular dependency.
++  EXPECT_TRUE(parse([&](IOBuf* ingress) {
++    folly::io::RWPrivateCursor c(ingress);
++    c.skip(http2::kFrameHeaderSize + http2::kConnectionPreface.length());
++    c.writeBE<uint32_t>(1);
++  }));
++
++  EXPECT_EQ(callbacks_.streamErrors, 1);
++  EXPECT_EQ(callbacks_.sessionErrors, 0);
++
++  // On the same stream, send another request.
++  HTTPMessage nextRequest = getGetRequest();
++  upstreamCodec_.generateHeader(output_, 1, nextRequest, true /* eom */);
++  parse();
++  EXPECT_EQ(callbacks_.streamErrors, 2);
++  EXPECT_EQ(callbacks_.sessionErrors, 0);
++}
++
+ TEST_F(HTTP2CodecTest, BadPriority) {
+   auto pri = HTTPMessage::HTTPPriority(0, true, 1);
+   upstreamCodec_.generatePriority(output_, 1, pri);

@@ -1,0 +1,29 @@
+From 38e1766bc6e20108948aec8a0b222a4bad0254e9 Mon Sep 17 00:00:00 2001
+From: Daniel Stone <daniels@collabora.com>
+Date: Mon, 26 Jun 2017 17:21:45 +0100
+Subject: [PATCH] xkbcomp: Don't falsely promise from ExprResolveLhs
+
+Every user of ExprReturnLhs goes on to unconditionally dereference the
+field return, which can be NULL if xkb_intern_atom fails. Return false
+if this is the case, so we fail safely.
+
+testcase: splice geometry data into interp
+
+Signed-off-by: Daniel Stone <daniels@collabora.com>
+---
+ src/xkbcomp/expr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/xkbcomp/expr.c b/src/xkbcomp/expr.c
+index 91713dae..b5ab7170 100644
+--- a/src/xkbcomp/expr.c
++++ b/src/xkbcomp/expr.c
+@@ -42,7 +42,7 @@ ExprResolveLhs(struct xkb_context *ctx, const ExprDef *expr,
+         *elem_rtrn = NULL;
+         *field_rtrn = xkb_atom_text(ctx, expr->ident.ident);
+         *index_rtrn = NULL;
+-        return true;
++        return (*field_rtrn != NULL);
+     case EXPR_FIELD_REF:
+         *elem_rtrn = xkb_atom_text(ctx, expr->field_ref.element);
+         *field_rtrn = xkb_atom_text(ctx, expr->field_ref.field);

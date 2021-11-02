@@ -1,0 +1,70 @@
+From 7ac73d6cd41e9d4ac0ca7e6830ca390e195bb21c Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sat, 4 Feb 2017 14:06:23 -0800
+Subject: [PATCH] CVE-2017-12986/IPv6 R.H.: Update to reflect the actual IPv6
+ RFC.
+
+In RFC 1883, the Type 0 routing header had a 1-byte reserved field and a
+3-byte strict/loose bit map; in RFC 2460, that changed to a 4-byte
+reserved field.
+
+This fixes a buffer over-read discovered by Brian 'geeknik' Carpenter (by
+making an ND_TCHECK() call check for the presence in the captured data
+of all 4 bytes of the reserved field; we were printing it as a 4-byte
+field, so we needed to check for them).
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ ip6.h                      |   5 ++---
+ tests/TESTLIST             |   1 +
+ tests/ipv6-rthdr-oobr.out  |   1 +
+ tests/ipv6-rthdr-oobr.pcap | Bin 0 -> 88 bytes
+ 4 files changed, 4 insertions(+), 3 deletions(-)
+ create mode 100644 tests/ipv6-rthdr-oobr.out
+ create mode 100644 tests/ipv6-rthdr-oobr.pcap
+
+diff --git a/ip6.h b/ip6.h
+index 2ea1d0abe..986203414 100644
+--- a/ip6.h
++++ b/ip6.h
+@@ -181,9 +181,8 @@ struct ip6_rthdr0 {
+ 	uint8_t  ip6r0_nxt;		/* next header */
+ 	uint8_t  ip6r0_len;		/* length in units of 8 octets */
+ 	uint8_t  ip6r0_type;		/* always zero */
+-	uint8_t  ip6r0_segleft;	/* segments left */
+-	uint8_t  ip6r0_reserved;	/* reserved field */
+-	uint8_t  ip6r0_slmap[3];	/* strict/loose bit map */
++	uint8_t  ip6r0_segleft;		/* segments left */
++	uint32_t ip6r0_reserved;	/* reserved field */
+ 	struct in6_addr ip6r0_addr[1];	/* up to 23 addresses */
+ } UNALIGNED;
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 9b60df27b..6d6f41b75 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -434,6 +434,7 @@ q933-heapoverflow-2	q933-heapoverflow-2.pcap	q933-heapoverflow-2.out
+ atm-heapoverflow	atm-heapoverflow.pcap		atm-heapoverflow.out		-c1 -e
+ ipv6-next-header-oobr-1	ipv6-next-header-oobr-1.pcap	ipv6-next-header-oobr-1.out
+ ipv6-next-header-oobr-2	ipv6-next-header-oobr-2.pcap	ipv6-next-header-oobr-2.out
++ipv6-rthdr-oobr		ipv6-rthdr-oobr.pcap		ipv6-rthdr-oobr.out
+ 
+ # bad packets from Kamil Frankowicz
+ snmp-heapoverflow-1	snmp-heapoverflow-1.pcap	snmp-heapoverflow-1.out
+diff --git a/tests/ipv6-rthdr-oobr.out b/tests/ipv6-rthdr-oobr.out
+new file mode 100644
+index 000000000..05824e40c
+--- /dev/null
++++ b/tests/ipv6-rthdr-oobr.out
+@@ -0,0 +1 @@
++IP6 3030:3030:3030:3030:3030:3030:3030:3030 > 3030:3030:3030:3030:3030:3030:3030:3030: srcrt (len=48, type=0, segleft=48[|srcrt]
+diff --git a/tests/ipv6-rthdr-oobr.pcap b/tests/ipv6-rthdr-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..41f96b6d635d094559fc1e82b4daae3c16a24348
+GIT binary patch
+literal 88
+pcmca|c+)~A1{MYbD9~kKV0g*^=NcFQ`5>t*u)H=@6+Q~07XUZa5hwrv
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,44 @@
+From 4d4957f12a6aa0becc9d01d9f97061e1e3d809c5 Mon Sep 17 00:00:00 2001
+From: Stefano Bonicatti <stefano.bonicatti@gmail.com>
+Date: Sat, 9 May 2020 04:14:12 +0200
+Subject: [PATCH] Disable openssl compression support (#6433)
+
+Openssl was depending on zlib for SSL/TLS compression,
+though it was trying to load it as a dynamic library.
+On Windows especially this is an issue because the dll
+could possibly be loaded from a insecure place,
+so this can be exploited.
+
+Moreover it's proven that compression can lead
+to leaks of information; so we completely disable it
+to resolve both issues.
+---
+ libraries/cmake/formula/openssl/CMakeLists.txt | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/libraries/cmake/formula/openssl/CMakeLists.txt b/libraries/cmake/formula/openssl/CMakeLists.txt
+index 2f89bb50e0a..9b2803df23d 100644
+--- a/libraries/cmake/formula/openssl/CMakeLists.txt
++++ b/libraries/cmake/formula/openssl/CMakeLists.txt
+@@ -7,20 +7,14 @@ include(ExternalProject)
+ 
+ function(opensslMain)
+ 
+-  get_target_property(zlib_library_dir_path thirdparty_zlib BINARY_DIR)
+-  get_target_property(zlib_library_lib_name thirdparty_zlib OUTPUT_NAME)
+-  get_target_property(zlib_library_source_dir thirdparty_zlib SOURCE_DIR)
+-
+   set(common_options
+     no-ssl2
+     no-ssl3
+     no-asm
+     no-shared
+     no-weak-ssl-ciphers
+-    zlib-dynamic
++    no-comp
+     enable-cms
+-    "--with-zlib-include=${zlib_library_source_dir}/src"
+-    "--with-zlib-lib=${zlib_library_dir_path}/${zlib_library_lib_name}"
+   )
+ 
+   add_library(thirdparty_openssl_ssl STATIC IMPORTED GLOBAL)

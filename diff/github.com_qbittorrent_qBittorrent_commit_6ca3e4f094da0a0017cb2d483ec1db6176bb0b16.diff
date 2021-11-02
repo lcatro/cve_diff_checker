@@ -1,0 +1,139 @@
+From 6ca3e4f094da0a0017cb2d483ec1db6176bb0b16 Mon Sep 17 00:00:00 2001
+From: Chocobo1 <Chocobo1@users.noreply.github.com>
+Date: Sat, 11 Feb 2017 14:04:06 +0800
+Subject: [PATCH] Add Utils::String::toHtmlEscaped
+
+---
+ src/base/logger.cpp                     | 5 +++--
+ src/base/utils/string.cpp               | 9 +++++++++
+ src/base/utils/string.h                 | 2 ++
+ src/gui/deletionconfirmationdlg.h       | 5 +++--
+ src/gui/properties/peerlistwidget.cpp   | 4 ++--
+ src/gui/properties/propertieswidget.cpp | 4 ++--
+ 6 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/src/base/logger.cpp b/src/base/logger.cpp
+index d0a1e1220ed..d2e95ab58e2 100644
+--- a/src/base/logger.cpp
++++ b/src/base/logger.cpp
+@@ -1,6 +1,7 @@
+ #include "logger.h"
+ 
+ #include <QDateTime>
++#include "base/utils/string.h"
+ 
+ Logger* Logger::m_instance = 0;
+ 
+@@ -36,7 +37,7 @@ void Logger::addMessage(const QString &message, const Log::MsgType &type)
+ {
+     QWriteLocker locker(&lock);
+ 
+-    Log::Msg temp = { msgCounter++, QDateTime::currentMSecsSinceEpoch(), type, message };
++    Log::Msg temp = { msgCounter++, QDateTime::currentMSecsSinceEpoch(), type, Utils::String::toHtmlEscaped(message) };
+     m_messages.push_back(temp);
+ 
+     if (m_messages.size() >= MAX_LOG_MESSAGES)
+@@ -49,7 +50,7 @@ void Logger::addPeer(const QString &ip, bool blocked, const QString &reason)
+ {
+     QWriteLocker locker(&lock);
+ 
+-    Log::Peer temp = { peerCounter++, QDateTime::currentMSecsSinceEpoch(), ip, blocked, reason };
++    Log::Peer temp = { peerCounter++, QDateTime::currentMSecsSinceEpoch(), Utils::String::toHtmlEscaped(ip), blocked, Utils::String::toHtmlEscaped(reason) };
+     m_peers.push_back(temp);
+ 
+     if (m_peers.size() >= MAX_LOG_MESSAGES)
+diff --git a/src/base/utils/string.cpp b/src/base/utils/string.cpp
+index 51e4d62ace7..7d76d9aaf08 100644
+--- a/src/base/utils/string.cpp
++++ b/src/base/utils/string.cpp
+@@ -211,3 +211,12 @@ bool Utils::String::slowEquals(const QByteArray &a, const QByteArray &b)
+ 
+     return (diff == 0);
+ }
++
++QString Utils::String::toHtmlEscaped(const QString &str)
++{
++#ifdef QBT_USES_QT5
++    return str.toHtmlEscaped();
++#else
++    return Qt::escape(str);
++#endif
++}
+diff --git a/src/base/utils/string.h b/src/base/utils/string.h
+index 8ca2f2e45f9..52f4863ef68 100644
+--- a/src/base/utils/string.h
++++ b/src/base/utils/string.h
+@@ -47,6 +47,8 @@ namespace Utils
+         // Taken from https://crackstation.net/hashing-security.htm
+         bool slowEquals(const QByteArray &a, const QByteArray &b);
+ 
++        QString toHtmlEscaped(const QString &str);
++
+         bool naturalCompareCaseSensitive(const QString &left, const QString &right);
+         bool naturalCompareCaseInsensitive(const QString &left, const QString &right);
+     }
+diff --git a/src/gui/deletionconfirmationdlg.h b/src/gui/deletionconfirmationdlg.h
+index 2715f7ce9be..7e65df46c38 100644
+--- a/src/gui/deletionconfirmationdlg.h
++++ b/src/gui/deletionconfirmationdlg.h
+@@ -35,8 +35,9 @@
+ #include <QPushButton>
+ #include "ui_confirmdeletiondlg.h"
+ #include "base/preferences.h"
+-#include "guiiconprovider.h"
+ #include "base/utils/misc.h"
++#include "base/utils/string.h"
++#include "guiiconprovider.h"
+ 
+ class DeletionConfirmationDlg : public QDialog, private Ui::confirmDeletionDlg {
+   Q_OBJECT
+@@ -45,7 +46,7 @@ class DeletionConfirmationDlg : public QDialog, private Ui::confirmDeletionDlg {
+   DeletionConfirmationDlg(QWidget *parent, const int &size, const QString &name, bool defaultDeleteFiles): QDialog(parent) {
+     setupUi(this);
+     if (size == 1)
+-      label->setText(tr("Are you sure you want to delete '%1' from the transfer list?", "Are you sure you want to delete 'ubuntu-linux-iso' from the transfer list?").arg(name));
++      label->setText(tr("Are you sure you want to delete '%1' from the transfer list?", "Are you sure you want to delete 'ubuntu-linux-iso' from the transfer list?").arg(Utils::String::toHtmlEscaped(name)));
+     else
+       label->setText(tr("Are you sure you want to delete these %1 torrents from the transfer list?", "Are you sure you want to delete these 5 torrents from the transfer list?").arg(QString::number(size)));
+     // Icons
+diff --git a/src/gui/properties/peerlistwidget.cpp b/src/gui/properties/peerlistwidget.cpp
+index eb6a49d7cb8..01551e12ce8 100644
+--- a/src/gui/properties/peerlistwidget.cpp
++++ b/src/gui/properties/peerlistwidget.cpp
+@@ -401,7 +401,7 @@ QStandardItem* PeerListWidget::addPeer(const QString& ip, BitTorrent::TorrentHan
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::CONNECTION), peer.connectionType());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::FLAGS), peer.flags());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::FLAGS), peer.flagsDescription(), Qt::ToolTipRole);
+-    m_listModel->setData(m_listModel->index(row, PeerListDelegate::CLIENT), peer.client());
++    m_listModel->setData(m_listModel->index(row, PeerListDelegate::CLIENT), Utils::String::toHtmlEscaped(peer.client()));
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::PROGRESS), peer.progress());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::DOWN_SPEED), peer.payloadDownSpeed());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::UP_SPEED), peer.payloadUpSpeed());
+@@ -432,7 +432,7 @@ void PeerListWidget::updatePeer(const QString &ip, BitTorrent::TorrentHandle *co
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::PORT), peer.address().port);
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::FLAGS), peer.flags());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::FLAGS), peer.flagsDescription(), Qt::ToolTipRole);
+-    m_listModel->setData(m_listModel->index(row, PeerListDelegate::CLIENT), peer.client());
++    m_listModel->setData(m_listModel->index(row, PeerListDelegate::CLIENT), Utils::String::toHtmlEscaped(peer.client()));
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::PROGRESS), peer.progress());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::DOWN_SPEED), peer.payloadDownSpeed());
+     m_listModel->setData(m_listModel->index(row, PeerListDelegate::UP_SPEED), peer.payloadUpSpeed());
+diff --git a/src/gui/properties/propertieswidget.cpp b/src/gui/properties/propertieswidget.cpp
+index 2dc3ee015ce..0e27c1c0494 100644
+--- a/src/gui/properties/propertieswidget.cpp
++++ b/src/gui/properties/propertieswidget.cpp
+@@ -314,12 +314,12 @@ void PropertiesWidget::loadTorrentInfos(BitTorrent::TorrentHandle *const torrent
+         label_total_size_val->setText(Utils::Misc::friendlyUnit(m_torrent->totalSize()));
+ 
+         // Comment
+-        comment_text->setText(Utils::Misc::parseHtmlLinks(m_torrent->comment()));
++        comment_text->setText(Utils::Misc::parseHtmlLinks(Utils::String::toHtmlEscaped(m_torrent->comment())));
+ 
+         // URL seeds
+         loadUrlSeeds();
+ 
+-        label_created_by_val->setText(m_torrent->creator());
++        label_created_by_val->setText(Utils::String::toHtmlEscaped(m_torrent->creator()));
+ 
+         // List files in torrent
+         PropListModel->model()->setupModelData(m_torrent->info());

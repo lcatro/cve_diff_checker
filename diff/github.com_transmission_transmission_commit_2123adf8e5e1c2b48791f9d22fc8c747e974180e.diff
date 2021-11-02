@@ -1,0 +1,74 @@
+From 2123adf8e5e1c2b48791f9d22fc8c747e974180e Mon Sep 17 00:00:00 2001
+From: Mike Gelfand <mikedld@mikedld.com>
+Date: Sun, 28 Apr 2019 11:27:33 +0300
+Subject: [PATCH] CVE-2018-10756: Fix heap-use-after-free in tr_variantWalk
+
+In libtransmission/variant.c, function tr_variantWalk, when the variant
+stack is reallocated, a pointer to the previously allocated memory
+region is kept. This address is later accessed (heap use-after-free)
+while walking back down the stack, causing the application to crash.
+The application can be any application which uses libtransmission, such
+as transmission-daemon, transmission-gtk, transmission-show, etc.
+
+Reported-by: Tom Richards <tom@tomrichards.net>
+---
+ libtransmission/variant.c | 22 ++++++++++++++--------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/libtransmission/variant.c b/libtransmission/variant.c
+index df577f2f01..8a14001c2a 100644
+--- a/libtransmission/variant.c
++++ b/libtransmission/variant.c
+@@ -758,7 +758,7 @@ static int compareKeyIndex(void const* va, void const* vb)
+ struct SaveNode
+ {
+     tr_variant const* v;
+-    tr_variant sorted;
++    tr_variant* sorted;
+     size_t childIndex;
+     bool isVisited;
+ };
+@@ -783,30 +783,36 @@ static void nodeConstruct(struct SaveNode* node, tr_variant const* v, bool sort_
+ 
+         qsort(tmp, n, sizeof(struct KeyIndex), compareKeyIndex);
+ 
+-        tr_variantInitDict(&node->sorted, n);
++        node->sorted = tr_new(tr_variant, 1);
++        tr_variantInitDict(node->sorted, n);
+ 
+         for (size_t i = 0; i < n; ++i)
+         {
+-            node->sorted.val.l.vals[i] = *tmp[i].val;
++            node->sorted->val.l.vals[i] = *tmp[i].val;
+         }
+ 
+-        node->sorted.val.l.count = n;
++        node->sorted->val.l.count = n;
+ 
+         tr_free(tmp);
+ 
+-        node->v = &node->sorted;
++        v = node->sorted;
+     }
+     else
+     {
+-        node->v = v;
++        node->sorted = NULL;
+     }
++
++    node->v = v;
+ }
+ 
+ static void nodeDestruct(struct SaveNode* node)
+ {
+-    if (node->v == &node->sorted)
++    TR_ASSERT(node != NULL);
++
++    if (node->sorted != NULL)
+     {
+-        tr_free(node->sorted.val.l.vals);
++        tr_free(node->sorted->val.l.vals);
++        tr_free(node->sorted);
+     }
+ }
+ 

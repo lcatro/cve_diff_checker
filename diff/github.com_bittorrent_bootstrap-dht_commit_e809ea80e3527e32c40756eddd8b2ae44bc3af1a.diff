@@ -1,0 +1,43 @@
+From e809ea80e3527e32c40756eddd8b2ae44bc3af1a Mon Sep 17 00:00:00 2001
+From: xercesblue <francisco@bittorrent.com>
+Date: Mon, 29 Jun 2015 14:45:09 -0700
+Subject: [PATCH] Check for out-of-bounds bencoded lengths before advancing
+ buffer pointer
+
+---
+ lazy_bdecode.cpp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/lazy_bdecode.cpp b/lazy_bdecode.cpp
+index 0f7b292..fe6cb67 100644
+--- a/lazy_bdecode.cpp
++++ b/lazy_bdecode.cpp
+@@ -150,7 +150,9 @@ namespace libtorrent
+ 					if (e)
+ 						TORRENT_FAIL_BDECODE(e);
+ 
+-					if (start + len + 1 > end)
++					// remaining buffer size excluding ':'
++					const ptrdiff_t buff_size = end - start - 1;
++					if (len > buff_size)
+ 						TORRENT_FAIL_BDECODE(bdecode_errors::unexpected_eof);
+ 
+ 					if (len < 0)
+@@ -216,12 +218,16 @@ namespace libtorrent
+ 					start = parse_int(start, end, ':', len, e);
+ 					if (e)
+ 						TORRENT_FAIL_BDECODE(e);
+-					if (start + len + 1 > end)
++
++					// remaining buffer size excluding ':'
++					const ptrdiff_t buff_size = end - start - 1;
++					if (len > buff_size)
+ 						TORRENT_FAIL_BDECODE(bdecode_errors::unexpected_eof);
+ 					if (len < 0)
+ 						TORRENT_FAIL_BDECODE(bdecode_errors::overflow);
+ 
+ 					++start;
++					if (start == end) TORRENT_FAIL_BDECODE(bdecode_errors::unexpected_eof);
+ 					top->construct_string(start, int(len));
+ 					stack.pop_back();
+ 					start += len;

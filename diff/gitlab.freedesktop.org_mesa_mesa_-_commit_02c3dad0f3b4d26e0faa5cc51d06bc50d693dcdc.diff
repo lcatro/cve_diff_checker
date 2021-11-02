@@ -1,0 +1,68 @@
+From 02c3dad0f3b4d26e0faa5cc51d06bc50d693dcdc Mon Sep 17 00:00:00 2001
+From: Brian Paul <brianp@vmware.com>
+Date: Wed, 9 Oct 2019 12:05:16 -0600
+Subject: [PATCH] Call shmget() with permission 0600 instead of 0777
+
+A security advisory (TALOS-2019-0857/CVE-2019-5068) found that
+creating shared memory regions with permission mode 0777 could allow
+any user to access that memory.  Several Mesa drivers use shared-
+memory XImages to implement back buffers for improved performance.
+
+This path changes the shmget() calls to use 0600 (user r/w).
+
+Tested with legacy Xlib driver and llvmpipe.
+
+Cc: mesa-stable@lists.freedesktop.org
+Reviewed-by: Kristian H. Kristensen <hoegsberg@google.com>
+---
+ src/gallium/winsys/sw/dri/dri_sw_winsys.c   | 3 ++-
+ src/gallium/winsys/sw/xlib/xlib_sw_winsys.c | 3 ++-
+ src/mesa/drivers/x11/xm_buffer.c            | 3 ++-
+ 3 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/gallium/winsys/sw/dri/dri_sw_winsys.c b/src/gallium/winsys/sw/dri/dri_sw_winsys.c
+index cbccf4d01df..6173147a1ff 100644
+--- a/src/gallium/winsys/sw/dri/dri_sw_winsys.c
++++ b/src/gallium/winsys/sw/dri/dri_sw_winsys.c
+@@ -92,7 +92,8 @@ alloc_shm(struct dri_sw_displaytarget *dri_sw_dt, unsigned size)
+ {
+    char *addr;
+ 
+-   dri_sw_dt->shmid = shmget(IPC_PRIVATE, size, IPC_CREAT|0777);
++   /* 0600 = user read+write */
++   dri_sw_dt->shmid = shmget(IPC_PRIVATE, size, IPC_CREAT | 0600);
+    if (dri_sw_dt->shmid < 0)
+       return NULL;
+ 
+diff --git a/src/gallium/winsys/sw/xlib/xlib_sw_winsys.c b/src/gallium/winsys/sw/xlib/xlib_sw_winsys.c
+index be28fae3df2..8e97f0a24af 100644
+--- a/src/gallium/winsys/sw/xlib/xlib_sw_winsys.c
++++ b/src/gallium/winsys/sw/xlib/xlib_sw_winsys.c
+@@ -126,7 +126,8 @@ alloc_shm(struct xlib_displaytarget *buf, unsigned size)
+    shminfo->shmid = -1;
+    shminfo->shmaddr = (char *) -1;
+ 
+-   shminfo->shmid = shmget(IPC_PRIVATE, size, IPC_CREAT|0777);
++   /* 0600 = user read+write */
++   shminfo->shmid = shmget(IPC_PRIVATE, size, IPC_CREAT | 0600);
+    if (shminfo->shmid < 0) {
+       return NULL;
+    }
+diff --git a/src/mesa/drivers/x11/xm_buffer.c b/src/mesa/drivers/x11/xm_buffer.c
+index d945d8af556..0da08a6e64d 100644
+--- a/src/mesa/drivers/x11/xm_buffer.c
++++ b/src/mesa/drivers/x11/xm_buffer.c
+@@ -89,8 +89,9 @@ alloc_back_shm_ximage(XMesaBuffer b, GLuint width, GLuint height)
+       return GL_FALSE;
+    }
+ 
++   /* 0600 = user read+write */
+    b->shminfo.shmid = shmget(IPC_PRIVATE, b->backxrb->ximage->bytes_per_line
+-			     * b->backxrb->ximage->height, IPC_CREAT|0777);
++                             * b->backxrb->ximage->height, IPC_CREAT | 0600);
+    if (b->shminfo.shmid < 0) {
+       _mesa_warning(NULL, "shmget failed while allocating back buffer.\n");
+       XDestroyImage(b->backxrb->ximage);
+-- 
+GitLab
+

@@ -1,0 +1,102 @@
+From 9d18b6246755472c8324bf3e20e234e08ac45618 Mon Sep 17 00:00:00 2001
+From: Sergei Golubchik <serg@mariadb.org>
+Date: Wed, 15 Jan 2020 18:08:02 +0100
+Subject: [PATCH] rpm/deb and auth_pam_tool_dir/auth_pam_tool
+
+don't let mysql_install_db set SUID bit for auth_pam_tool in rpm/deb
+packages - instead package files with correct permissions and
+only fix the ownership of auth_pam_tool_dir (which can only be done
+after mysql user is created, so in post-install).
+
+keep old mysql_install_db behavior for bintars
+---
+ debian/mariadb-server-10.4.postinst |  3 +++
+ debian/rules                        |  4 ++++
+ scripts/mysql_install_db.sh         | 18 +++++++++---------
+ support-files/rpm/server-postin.sh  |  7 ++-----
+ 4 files changed, 18 insertions(+), 14 deletions(-)
+
+diff --git a/debian/mariadb-server-10.4.postinst b/debian/mariadb-server-10.4.postinst
+index fbb2584f2df36..3db4d50ea08de 100644
+--- a/debian/mariadb-server-10.4.postinst
++++ b/debian/mariadb-server-10.4.postinst
+@@ -94,6 +94,9 @@ EOF
+     chmod 2750 $mysql_logdir
+     set -e
+ 
++    # Set the correct filesystem ownership for the PAM v2 plugin
++    chown mysql /usr/lib/mysql/plugin/auth_pam_tool_dir
++
+     # This is important to avoid dataloss when there is a removed
+     # mysql-server version from Woody lying around which used the same
+     # data directory and then somewhen gets purged by the admin.
+diff --git a/debian/rules b/debian/rules
+index 9914bae721b2a..ac85ef7dc2669 100755
+--- a/debian/rules
++++ b/debian/rules
+@@ -146,6 +146,10 @@ endif
+ 	ln -s libmariadb.so.3 $(TMP)/usr/lib/$(DEB_HOST_MULTIARCH)/libmysqlclient.so.19
+ 	ln -s libmariadb.so.3 $(TMP)/usr/lib/$(DEB_HOST_MULTIARCH)/libmysqlclient.so.20
+ 
++override_dh_fixperms:
++	dh_fixperms
++	chmod 04755 debian/mariadb-server-10.4/usr/lib/mysql/plugin/auth_pam_tool_dir/auth_pam_tool
++	chmod  0700 debian/mariadb-server-10.4/usr/lib/mysql/plugin/auth_pam_tool_dir
+ 
+ override_dh_installlogrotate-arch:
+ 	dh_installlogrotate --name mysql-server
+diff --git a/scripts/mysql_install_db.sh b/scripts/mysql_install_db.sh
+index caa575dc091e9..e9744333af5b5 100644
+--- a/scripts/mysql_install_db.sh
++++ b/scripts/mysql_install_db.sh
+@@ -478,16 +478,8 @@ do
+   fi
+ done
+ 
+-if test -n "$user"
++if test -n "$user" -a "$in_rpm" -eq 0
+ then
+-  chown $user "$pamtooldir/auth_pam_tool_dir" && \
+-  chmod 0700 "$pamtooldir/auth_pam_tool_dir"
+-  if test $? -ne 0
+-  then
+-      echo "Cannot change ownership of the '$pamtooldir/auth_pam_tool_dir' directory"
+-      echo " to the '$user' user. Check that you have the necessary permissions and try again."
+-      exit 1
+-  fi
+   if test -z "$srcdir"
+   then
+     chown 0 "$pamtooldir/auth_pam_tool_dir/auth_pam_tool" && \
+@@ -499,6 +491,14 @@ then
+         echo
+     fi
+   fi
++  chown $user "$pamtooldir/auth_pam_tool_dir" && \
++  chmod 0700 "$pamtooldir/auth_pam_tool_dir"
++  if test $? -ne 0
++  then
++      echo "Cannot change ownership of the '$pamtooldir/auth_pam_tool_dir' directory"
++      echo " to the '$user' user. Check that you have the necessary permissions and try again."
++      exit 1
++  fi
+   args="$args --user=$user"
+ fi
+ 
+diff --git a/support-files/rpm/server-postin.sh b/support-files/rpm/server-postin.sh
+index bccda7fbb8b9b..db249c326a673 100644
+--- a/support-files/rpm/server-postin.sh
++++ b/support-files/rpm/server-postin.sh
+@@ -69,11 +69,8 @@ if [ $1 = 1 ] ; then
+   chmod -R og-rw $datadir/mysql
+ fi
+ 
+-# Set correct filesystem ownership/permissions for the PAM v2 plugin
+-chown %{mysqld_group} /usr/lib*/mysql/plugin/auth_pam_tool_dir
+-chmod 0700            /usr/lib*/mysql/plugin/auth_pam_tool_dir
+-chown 0               /usr/lib*/mysql/plugin/auth_pam_tool_dir/auth_pam_tool
+-chmod 04755           /usr/lib*/mysql/plugin/auth_pam_tool_dir/auth_pam_tool
++# Set the correct filesystem ownership for the PAM v2 plugin
++chown %{mysqld_user} /usr/lib*/mysql/plugin/auth_pam_tool_dir
+ 
+ # install SELinux files - but don't override existing ones
+ SETARGETDIR=/etc/selinux/targeted/src/policy

@@ -1,0 +1,41 @@
+From b6b318431983f35a7734cae227478df3dc93a818 Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Fri, 29 Sep 2017 09:51:11 +0800
+Subject: QcomModulePkg: Input Buffer correction for Decompress
+
+1. Correct the available of input buffer length
+2. Correct the input buffer length check, otherwise the pointer of
+next input byte maybe access a incorrect address
+
+Change-Id: Id5cc4fe596d50978fa669de5f59a28bb91d4a80b
+---
+ QcomModulePkg/Library/BootLib/Decompress.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/Decompress.c b/QcomModulePkg/Library/BootLib/Decompress.c
+index 4824fa4..3145f0e 100644
+--- a/QcomModulePkg/Library/BootLib/Decompress.c
++++ b/QcomModulePkg/Library/BootLib/Decompress.c
+@@ -82,7 +82,7 @@ int decompress(unsigned char *in_buf, unsigned int in_len,
+ 		DEBUG((EFI_D_ERROR, "the input data is not a gzip package.\n"));
+ 		return rc;
+ 	}
+-	if (out_buf_len < in_len) {
++    if (out_buf_len <= in_len) {
+ 		DEBUG((EFI_D_ERROR, "the available length: %u of out_buf is not enough, need %u.\n", out_buf_len, in_len));
+ 		return rc;
+ 	}
+@@ -100,8 +100,8 @@ int decompress(unsigned char *in_buf, unsigned int in_len,
+ 
+ 	/* skip over gzip header */
+ 	stream->next_in = in_buf + GZIP_HEADER_LEN;
+-	stream->avail_in = out_buf_len - GZIP_HEADER_LEN;
+-	/* skip over asciz filename */
++    stream->avail_in = in_len - GZIP_HEADER_LEN;
++    /* skip over ascii filename */
+ 	if (in_buf[3] & 0x8) {
+ 		for (i = 0; i < GZIP_FILENAME_LIMIT && *stream->next_in++; i++) {
+ 			if (stream->avail_in == 0) {
+-- 
+cgit v1.1
+

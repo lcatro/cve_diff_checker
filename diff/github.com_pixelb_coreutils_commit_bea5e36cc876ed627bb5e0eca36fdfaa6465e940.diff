@@ -1,0 +1,83 @@
+From bea5e36cc876ed627bb5e0eca36fdfaa6465e940 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?P=C3=A1draig=20Brady?= <P@draigBrady.com>
+Date: Tue, 12 May 2015 12:58:40 +0100
+Subject: [PATCH] sort: fix buffer overflow with some case conversions
+
+* src/sort.c (keycompare_mb): Ensure the buffer is big enough
+to handle anything output from wctomb().  The current implementation
+is character based, so we allocate the worst case size for the
+conversion buffer, which is MB_CUR_MAX for each input byte.
+* tests/i18n/sort.sh: Add a test case causing seg fault.
+* tests/local.mk: Reference the new test case.
+Reported at https://bugzilla.suse.com/show_bug.cgi?id=928749
+---
+ src/sort.c         |  6 ++++--
+ tests/i18n/sort.sh | 29 +++++++++++++++++++++++++++++
+ tests/local.mk     |  1 +
+ 3 files changed, 34 insertions(+), 2 deletions(-)
+ create mode 100644 tests/i18n/sort.sh
+
+diff --git a/src/sort.c b/src/sort.c
+index 36038ac3f..444f60407 100644
+--- a/src/sort.c
++++ b/src/sort.c
+@@ -3244,8 +3244,10 @@ keycompare_mb (const struct line *a, const struct line *b)
+ 
+       if (ignore || translate)
+         {
+-          char *copy_a = (char *) xmalloc (lena + 1 + lenb + 1);
+-          char *copy_b = copy_a + lena + 1;
++          if (SIZE_MAX - lenb - 2 < lena)
++            xalloc_die ();
++          char *copy_a = (char *) xnmalloc (lena + lenb + 2, MB_CUR_MAX);
++          char *copy_b = copy_a + lena * MB_CUR_MAX + 1;
+           size_t new_len_a, new_len_b;
+           size_t i, j;
+ 
+diff --git a/tests/i18n/sort.sh b/tests/i18n/sort.sh
+new file mode 100644
+index 000000000..26c95de9a
+--- /dev/null
++++ b/tests/i18n/sort.sh
+@@ -0,0 +1,29 @@
++#!/bin/sh
++# Verify sort's multi-byte support.
++
++. "${srcdir=.}/tests/init.sh"; path_prepend_ ./src
++print_ver_ sort
++
++export LC_ALL=en_US.UTF-8
++locale -k LC_CTYPE | grep -q "charmap.*UTF-8" \
++  || skip_ "No UTF-8 locale available"
++
++# Enable heap consistency checkng on older systems
++export MALLOC_CHECK_=2
++
++
++# check buffer overflow issue due to
++# expanding multi-byte representation due to case conversion
++# https://bugzilla.suse.com/show_bug.cgi?id=928749
++cat <<EOF > exp
++.
++ɑ
++EOF
++cat <<EOF | sort -f > out || fail=1
++.
++ɑ
++EOF
++compare exp out || { fail=1; cat out; }
++
++
++Exit $fail
+diff --git a/tests/local.mk b/tests/local.mk
+index f48f809a8..174de4732 100644
+--- a/tests/local.mk
++++ b/tests/local.mk
+@@ -517,6 +517,7 @@ all_tests =					\
+   tests/du/threshold.sh				\
+   tests/du/trailing-slash.sh			\
+   tests/du/two-args.sh				\
++  tests/i18n/sort.sh				\
+   tests/id/gnu-zero-uids.sh			\
+   tests/id/no-context.sh			\
+   tests/id/context.sh				\

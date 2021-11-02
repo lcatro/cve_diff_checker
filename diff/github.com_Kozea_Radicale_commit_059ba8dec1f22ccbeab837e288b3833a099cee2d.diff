@@ -1,0 +1,35 @@
+From 059ba8dec1f22ccbeab837e288b3833a099cee2d Mon Sep 17 00:00:00 2001
+From: Guillaume Ayoub <guillaume.ayoub@kozea.fr>
+Date: Wed, 19 Apr 2017 13:48:30 +0200
+Subject: [PATCH] Random timer to avoid timing oracles and simple bruteforce
+ attacks
+
+Important note: this is a security fix.
+---
+ radicale/auth.py | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/radicale/auth.py b/radicale/auth.py
+index 2fa2807e..8ae493a7 100644
+--- a/radicale/auth.py
++++ b/radicale/auth.py
+@@ -57,6 +57,8 @@
+ import functools
+ import hashlib
+ import os
++import random
++import time
+ from importlib import import_module
+ 
+ 
+@@ -192,6 +194,8 @@ def is_authenticated(self, user, password):
+                 line = line.strip()
+                 if line:
+                     login, hash_value = line.split(":")
+-                    if login == user:
+-                        return self.verify(hash_value, password)
++                    if login == user and self.verify(hash_value, password):
++                        return True
++        # Random timer to avoid timing oracles and simple bruteforce attacks
++        time.sleep(1 + random.random())
+         return False

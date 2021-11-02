@@ -1,0 +1,147 @@
+From cad5a1050b7184d828aef9c1dd151c3ab649d37e Mon Sep 17 00:00:00 2001
+From: Nathan Kidd <nkidd@opentext.com>
+Date: Fri, 9 Jan 2015 09:57:23 -0500
+Subject: Unvalidated lengths
+
+v2: Add overflow check and remove unnecessary check (Julien Cristau)
+
+This addresses:
+CVE-2017-12184 in XINERAMA
+CVE-2017-12185 in MIT-SCREEN-SAVER
+CVE-2017-12186 in X-Resource
+CVE-2017-12187 in RENDER
+
+Reviewed-by: Jeremy Huddleston Sequoia <jeremyhu@apple.com>
+Reviewed-by: Julien Cristau <jcristau@debian.org>
+Signed-off-by: Nathan Kidd <nkidd@opentext.com>
+Signed-off-by: Julien Cristau <jcristau@debian.org>
+---
+ Xext/panoramiX.c          | 3 ++-
+ Xext/saver.c              | 2 ++
+ Xext/xres.c               | 4 +++-
+ Xext/xvdisp.c             | 4 +++-
+ hw/dmx/dmxpict.c          | 2 ++
+ pseudoramiX/pseudoramiX.c | 3 ++-
+ render/render.c           | 3 +++
+ 7 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/Xext/panoramiX.c b/Xext/panoramiX.c
+index 209df292c..844ea49ce 100644
+--- a/Xext/panoramiX.c
++++ b/Xext/panoramiX.c
+@@ -988,10 +988,11 @@ ProcPanoramiXGetScreenSize(ClientPtr client)
+     xPanoramiXGetScreenSizeReply rep;
+     int rc;
+ 
++    REQUEST_SIZE_MATCH(xPanoramiXGetScreenSizeReq);
++
+     if (stuff->screen >= PanoramiXNumScreens)
+         return BadMatch;
+ 
+-    REQUEST_SIZE_MATCH(xPanoramiXGetScreenSizeReq);
+     rc = dixLookupWindow(&pWin, stuff->window, client, DixGetAttrAccess);
+     if (rc != Success)
+         return rc;
+diff --git a/Xext/saver.c b/Xext/saver.c
+index 09497610a..f6090d8da 100644
+--- a/Xext/saver.c
++++ b/Xext/saver.c
+@@ -1186,6 +1186,8 @@ ProcScreenSaverUnsetAttributes(ClientPtr client)
+         PanoramiXRes *draw;
+         int rc, i;
+ 
++        REQUEST_SIZE_MATCH(xScreenSaverUnsetAttributesReq);
++
+         rc = dixLookupResourceByClass((void **) &draw, stuff->drawable,
+                                       XRC_DRAWABLE, client, DixWriteAccess);
+         if (rc != Success)
+diff --git a/Xext/xres.c b/Xext/xres.c
+index 21239f588..02421588a 100644
+--- a/Xext/xres.c
++++ b/Xext/xres.c
+@@ -947,6 +947,8 @@ ProcXResQueryResourceBytes (ClientPtr client)
+     ConstructResourceBytesCtx    ctx;
+ 
+     REQUEST_AT_LEAST_SIZE(xXResQueryResourceBytesReq);
++    if (stuff->numSpecs > UINT32_MAX / sizeof(ctx.specs[0]))
++        return BadLength;
+     REQUEST_FIXED_SIZE(xXResQueryResourceBytesReq,
+                        stuff->numSpecs * sizeof(ctx.specs[0]));
+ 
+@@ -1052,8 +1054,8 @@ SProcXResQueryResourceBytes (ClientPtr client)
+     int c;
+     xXResResourceIdSpec *specs = (void*) ((char*) stuff + sizeof(*stuff));
+ 
+-    swapl(&stuff->numSpecs);
+     REQUEST_AT_LEAST_SIZE(xXResQueryResourceBytesReq);
++    swapl(&stuff->numSpecs);
+     REQUEST_FIXED_SIZE(xXResQueryResourceBytesReq,
+                        stuff->numSpecs * sizeof(specs[0]));
+ 
+diff --git a/Xext/xvdisp.c b/Xext/xvdisp.c
+index d99d3d49d..5232b37d6 100644
+--- a/Xext/xvdisp.c
++++ b/Xext/xvdisp.c
+@@ -1493,12 +1493,14 @@ XineramaXvShmPutImage(ClientPtr client)
+ {
+     REQUEST(xvShmPutImageReq);
+     PanoramiXRes *draw, *gc, *port;
+-    Bool send_event = stuff->send_event;
++    Bool send_event;
+     Bool isRoot;
+     int result, i, x, y;
+ 
+     REQUEST_SIZE_MATCH(xvShmPutImageReq);
+ 
++    send_event = stuff->send_event;
++
+     result = dixLookupResourceByClass((void **) &draw, stuff->drawable,
+                                       XRC_DRAWABLE, client, DixWriteAccess);
+     if (result != Success)
+diff --git a/hw/dmx/dmxpict.c b/hw/dmx/dmxpict.c
+index 1f1022ee6..63caec94e 100644
+--- a/hw/dmx/dmxpict.c
++++ b/hw/dmx/dmxpict.c
+@@ -716,6 +716,8 @@ dmxProcRenderSetPictureFilter(ClientPtr client)
+         filter = (char *) (stuff + 1);
+         params = (XFixed *) (filter + ((stuff->nbytes + 3) & ~3));
+         nparams = ((XFixed *) stuff + client->req_len) - params;
++        if (nparams < 0)
++            return BadLength;
+ 
+         XRenderSetPictureFilter(dmxScreen->beDisplay,
+                                 pPictPriv->pict, filter, params, nparams);
+diff --git a/pseudoramiX/pseudoramiX.c b/pseudoramiX/pseudoramiX.c
+index d8b259341..95f6e10c8 100644
+--- a/pseudoramiX/pseudoramiX.c
++++ b/pseudoramiX/pseudoramiX.c
+@@ -297,10 +297,11 @@ ProcPseudoramiXGetScreenSize(ClientPtr client)
+ 
+     TRACE;
+ 
++    REQUEST_SIZE_MATCH(xPanoramiXGetScreenSizeReq);
++
+     if (stuff->screen >= pseudoramiXNumScreens)
+       return BadMatch;
+ 
+-    REQUEST_SIZE_MATCH(xPanoramiXGetScreenSizeReq);
+     rc = dixLookupWindow(&pWin, stuff->window, client, DixGetAttrAccess);
+     if (rc != Success)
+         return rc;
+diff --git a/render/render.c b/render/render.c
+index ccae49a41..7d94bd5ff 100644
+--- a/render/render.c
++++ b/render/render.c
+@@ -1757,6 +1757,9 @@ ProcRenderSetPictureFilter(ClientPtr client)
+     name = (char *) (stuff + 1);
+     params = (xFixed *) (name + pad_to_int32(stuff->nbytes));
+     nparams = ((xFixed *) stuff + client->req_len) - params;
++    if (nparams < 0)
++	return BadLength;
++
+     result = SetPictureFilter(pPicture, name, stuff->nbytes, params, nparams);
+     return result;
+ }
+-- 
+cgit v1.2.1
+

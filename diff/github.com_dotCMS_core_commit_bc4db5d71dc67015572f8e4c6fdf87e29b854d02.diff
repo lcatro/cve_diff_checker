@@ -1,0 +1,90 @@
+From bc4db5d71dc67015572f8e4c6fdf87e29b854d02 Mon Sep 17 00:00:00 2001
+From: Will Ezell <will@dotcms.com>
+Date: Thu, 7 Apr 2016 08:46:15 -0400
+Subject: [PATCH] fixes #8840 sort by sanitizing and email header injection
+
+---
+ .../webforms/action/SubmitWebFormAction.java    |  1 +
+ .../dotmarketing/factories/EmailFactory.java    | 17 +++++++++++++++++
+ .../workflows/model/WorkflowSearcher.java       |  7 ++++++-
+ 3 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/com/dotmarketing/cms/webforms/action/SubmitWebFormAction.java b/src/com/dotmarketing/cms/webforms/action/SubmitWebFormAction.java
+index 9487a604150..4bae24606de 100644
+--- a/src/com/dotmarketing/cms/webforms/action/SubmitWebFormAction.java
++++ b/src/com/dotmarketing/cms/webforms/action/SubmitWebFormAction.java
+@@ -109,6 +109,7 @@ public ActionForward unspecified(ActionMapping rMapping, ActionForm form,
+ 				if(!UtilMethods.isSet(invalidCaptchaURL)) {
+ 					invalidCaptchaURL = errorURL;
+ 				}
++				invalidCaptchaURL = invalidCaptchaURL.replaceAll("\\s", " ");
+ 				ActionForward af = new ActionForward();
+ 					af.setRedirect(true);
+ 					if (UtilMethods.isSet(queryString)) {
+diff --git a/src/com/dotmarketing/factories/EmailFactory.java b/src/com/dotmarketing/factories/EmailFactory.java
+index c18c2ba66b6..cb264e1579d 100644
+--- a/src/com/dotmarketing/factories/EmailFactory.java
++++ b/src/com/dotmarketing/factories/EmailFactory.java
+@@ -418,6 +418,23 @@ public static WebForm sendParameterizedEmail(Map<String,Object> parameters, Set<
+ 				String subject = (String)getMapValue("subject", parameters);
+ 				subject = (subject == null) ? "Mail from " + host.getHostname() + "" : subject;
+ 
++				
++				// strip line breaks from headers
++				from = from.replaceAll("\\s", " ");
++				to = to.replaceAll("\\s", " ");
++				cc = cc.replaceAll("\\s", " ");
++				bcc = bcc.replaceAll("\\s", " ");
++				fromName = fromName.replaceAll("\\s", " ");
++				subject = subject.replaceAll("\\s", " ");
++				
++				
++				
++				
++				
++				
++				
++				
++				
+ 				String emailFolder = (String)getMapValue("emailFolder", parameters);
+ 
+ 				boolean html = getMapValue("html", parameters) != null?Parameter.getBooleanFromString((String)getMapValue("html", parameters)):true;
+diff --git a/src/com/dotmarketing/portlets/workflows/model/WorkflowSearcher.java b/src/com/dotmarketing/portlets/workflows/model/WorkflowSearcher.java
+index bc050363432..a56d3b6ead7 100644
+--- a/src/com/dotmarketing/portlets/workflows/model/WorkflowSearcher.java
++++ b/src/com/dotmarketing/portlets/workflows/model/WorkflowSearcher.java
+@@ -5,6 +5,7 @@
+ import java.util.Map;
+ 
+ import com.dotmarketing.business.APILocator;
++import com.dotmarketing.common.util.SQLUtil;
+ import com.dotmarketing.exception.DotDataException;
+ import com.dotmarketing.util.UtilMethods;
+ import com.liferay.portal.model.User;
+@@ -100,6 +101,9 @@ public WorkflowSearcher(Map<String, Object> map, User user) {
+ 		stepId = getStringValue("stepId", map);
+ 		keywords = getStringValue("keywords", map);
+ 		orderBy = getStringValue("orderBy", map);
++		
++		
++		orderBy= SQLUtil.sanitizeSortBy(orderBy);
+ 		show4all = getBooleanValue("show4all", map);
+ 		open = getBooleanValue("open", map);
+ 		closed = getBooleanValue("closed", map);
+@@ -135,7 +139,7 @@ public void setUser(User user) {
+ 	}
+ 
+ 	public String getOrderBy() {
+-		return orderBy;
++		return SQLUtil.sanitizeSortBy(orderBy);
+ 	}
+ 
+ 	public List<WorkflowTask> findTasks() throws DotDataException {
+@@ -154,6 +158,7 @@ public String getOrderBy() {
+ 	}
+ 
+ 	public void setOrderBy(String orderBy) {
++		orderBy = SQLUtil.sanitizeSortBy(orderBy);
+ 		this.orderBy = orderBy;
+ 	}
+ 

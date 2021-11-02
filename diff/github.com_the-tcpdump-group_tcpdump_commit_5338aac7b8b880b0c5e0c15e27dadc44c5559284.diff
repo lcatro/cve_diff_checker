@@ -1,0 +1,77 @@
+From 5338aac7b8b880b0c5e0c15e27dadc44c5559284 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Wed, 22 Mar 2017 17:07:47 +0100
+Subject: [PATCH] CVE-2017-13025/IPv6 mobility: Add a bounds check before
+ fetching data
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't cause 'tcpdump: pcap_loop: truncated dump file'
+---
+ extract.h                      |   3 +++
+ print-mobility.c               |   1 +
+ tests/TESTLIST                 |   1 +
+ tests/mobility_opt_asan_3.out  |   2 ++
+ tests/mobility_opt_asan_3.pcap | Bin 0 -> 256 bytes
+ 5 files changed, 7 insertions(+)
+ create mode 100644 tests/mobility_opt_asan_3.out
+ create mode 100644 tests/mobility_opt_asan_3.pcap
+
+diff --git a/extract.h b/extract.h
+index 04367546c..5969c2257 100644
+--- a/extract.h
++++ b/extract.h
+@@ -281,3 +281,6 @@ EXTRACT_64BITS(const void *p)
+ 
+ #define ND_TTEST_64BITS(p) ND_TTEST2(*(p), 8)
+ #define ND_TCHECK_64BITS(p) ND_TCHECK2(*(p), 8)
++
++#define ND_TTEST_128BITS(p) ND_TTEST2(*(p), 16)
++#define ND_TCHECK_128BITS(p) ND_TCHECK2(*(p), 16)
+diff --git a/print-mobility.c b/print-mobility.c
+index 21a0fbade..44c9a77f4 100644
+--- a/print-mobility.c
++++ b/print-mobility.c
+@@ -159,6 +159,7 @@ mobility_opt_print(netdissect_options *ndo,
+ 				ND_PRINT((ndo, "(altcoa: trunc)"));
+ 				goto trunc;
+ 			}
++			ND_TCHECK_128BITS(&bp[i+2]);
+ 			ND_PRINT((ndo, "(alt-CoA: %s)", ip6addr_string(ndo, &bp[i+2])));
+ 			break;
+ 		case IP6MOPT_NONCEID:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index e0caaa34b..2f3ab1ab5 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -526,6 +526,7 @@ icmp6_mobileprefix_asan	icmp6_mobileprefix_asan.pcap	icmp6_mobileprefix_asan.out
+ ip_printroute_asan	ip_printroute_asan.pcap		ip_printroute_asan.out	-v
+ mobility_opt_asan	mobility_opt_asan.pcap		mobility_opt_asan.out	-v
+ mobility_opt_asan_2	mobility_opt_asan_2.pcap	mobility_opt_asan_2.out	-v
++mobility_opt_asan_3	mobility_opt_asan_3.pcap	mobility_opt_asan_3.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/mobility_opt_asan_3.out b/tests/mobility_opt_asan_3.out
+new file mode 100644
+index 000000000..7e2ce3a60
+--- /dev/null
++++ b/tests/mobility_opt_asan_3.out
+@@ -0,0 +1,2 @@
++IP6 (class 0x50, flowlabel 0x00004, hlim 0, next-header Mobile IP (old) (62) payload length: 7168) d400:7fa1:200:400::6238:2949 > 9675:86dd:7300:2c:1c7f:ffff:ffc3:b2a1: mobility: CoT nonce id=0x74 Care-of Init Cookie=80570f80:00000004[|MOBILITY]
++IP6 (class 0x50, flowlabel 0x00004, hlim 0, next-header Mobile IP (old) (62) payload length: 7168) ffc3:b2a1:200:400::6238:2949 > 9675:86dd:73f0:2c:1c7f:ffff:ebc3:b2a1: mobility: BU seq#=39837 lifetime=261452[|MOBILITY]
+diff --git a/tests/mobility_opt_asan_3.pcap b/tests/mobility_opt_asan_3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..3926ac9270ef8f0cf805efb5f1ce486c6fa16e16
+GIT binary patch
+literal 256
+zcmca|c+)~A1{Q{GDZvjN92u0{7#J8Bf%xru1}-sXCWaIsyP<)B;Xs4(0*3oZ7Pg+#
+zO55(HGBB{nFxW9%VW<b|1}b7mvd{#}6*DmC$khM;{~u(sFw1wK=8}eRejo+31_aIk
+z&Hn{PDLiZp-(r;Ffr4N=*EvTq^L8NYOjcgd@E_eyu(?p9;C6n1*!db{CqFC01cupj
+i+3o%ZGcyP<C~>f{u_*#E5WI&_K>L7Bsb~2Ap8){cRYm{+
+
+literal 0
+HcmV?d00001
+

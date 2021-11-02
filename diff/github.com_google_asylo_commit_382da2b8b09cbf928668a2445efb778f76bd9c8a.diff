@@ -1,0 +1,26 @@
+From 382da2b8b09cbf928668a2445efb778f76bd9c8a Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Mon, 28 Sep 2020 16:49:54 -0700
+Subject: [PATCH] Check output of ecall_restore is outside enclave
+
+PiperOrigin-RevId: 334265380
+Change-Id: Ifbaead6bce56f01b2a4d69f53ca508d0138f6f61
+---
+ asylo/platform/primitives/sgx/ecalls.cc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/asylo/platform/primitives/sgx/ecalls.cc b/asylo/platform/primitives/sgx/ecalls.cc
+index a15ff7bc4..f253fd414 100644
+--- a/asylo/platform/primitives/sgx/ecalls.cc
++++ b/asylo/platform/primitives/sgx/ecalls.cc
+@@ -64,7 +64,9 @@ int ecall_restore(const char *input, uint64_t input_len, char **output,
+   if (!asylo::primitives::TrustedPrimitives::IsOutsideEnclave(input,
+                                                               input_len) ||
+       !asylo::primitives::TrustedPrimitives::IsOutsideEnclave(
+-          output_len, sizeof(uint64_t))) {
++          output_len, sizeof(uint64_t)) ||
++      !asylo::primitives::TrustedPrimitives::IsOutsideEnclave(output,
++                                                              *output_len)) {
+     asylo::primitives::TrustedPrimitives::BestEffortAbort(
+         "ecall_restore: input/output found to not be in untrusted memory.");
+   }

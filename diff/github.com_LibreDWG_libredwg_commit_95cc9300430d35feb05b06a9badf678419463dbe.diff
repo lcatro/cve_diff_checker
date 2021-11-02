@@ -1,0 +1,32 @@
+From 95cc9300430d35feb05b06a9badf678419463dbe Mon Sep 17 00:00:00 2001
+From: Reini Urban <rurban@cpan.org>
+Date: Tue, 31 Dec 2019 08:49:07 +0100
+Subject: [PATCH] encode: protect from stack under-flow
+
+From GH #178 fuzzing
+---
+ src/bits.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/bits.c b/src/bits.c
+index 014b04fe4..b8ccb3220 100644
+--- a/src/bits.c
++++ b/src/bits.c
+@@ -883,7 +883,7 @@ bit_write_MC (Bit_Chain *dat, BITCODE_MC val)
+     if (byte[i] & 0x7f)
+       break;
+ 
+-  if (byte[i] & 0x40)
++  if (byte[i] & 0x40 && i > 0)
+     i--;
+   byte[i] &= 0x7f;
+   if (negative)
+@@ -953,7 +953,7 @@ bit_write_UMC (Bit_Chain *dat, BITCODE_UMC val)
+     if (byte[i] & 0x7f)
+       break;
+ 
+-  if (byte[i] & 0x40)
++  if (byte[i] & 0x40 && i > 0)
+     i--;
+   byte[i] &= 0x7f;
+   for (j = 4; j >= i; j--)

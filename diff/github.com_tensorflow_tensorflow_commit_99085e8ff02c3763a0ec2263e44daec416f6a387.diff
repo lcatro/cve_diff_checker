@@ -1,0 +1,34 @@
+From 99085e8ff02c3763a0ec2263e44daec416f6a387 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Mon, 26 Apr 2021 17:32:41 -0700
+Subject: [PATCH] Fix `tf.raw_ops.QuantizeAndDequantizeV3` array index failure.
+
+PiperOrigin-RevId: 370577691
+Change-Id: Ifeae64212f6bcd139435824fa2748d1329213c4c
+---
+ tensorflow/core/kernels/quantize_and_dequantize_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantize_and_dequantize_op.cc b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+index c2a7a90d8713d..f01a70114591b 100644
+--- a/tensorflow/core/kernels/quantize_and_dequantize_op.cc
++++ b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
+ limitations under the License.
+ ==============================================================================*/
+ 
++#include "tensorflow/core/framework/op_requires.h"
+ #define EIGEN_USE_THREADS
+ 
+ #if (defined(GOOGLE_CUDA) && GOOGLE_CUDA) || \
+@@ -234,6 +235,10 @@ class QuantizeAndDequantizeV3Op : public OpKernel {
+ 
+   void Compute(OpKernelContext* ctx) override {
+     const Tensor& input = ctx->input(0);
++    OP_REQUIRES(ctx, axis_ < input.dims(),
++                errors::InvalidArgument(
++                    "Axis requested is larger than input dimensions. Axis: ",
++                    axis_, " Input Dimensions: ", input.dims()));
+     const int depth = (axis_ == -1) ? 1 : input.dim_size(axis_);
+     Tensor* output = nullptr;
+     OP_REQUIRES_OK(ctx, ctx->allocate_output(0, input.shape(), &output));

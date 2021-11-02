@@ -1,0 +1,37 @@
+From 49a4cee2feef7deaf9d89e5e793a8824930284d7 Mon Sep 17 00:00:00 2001
+From: Ilan Schnell <ilanschnell@gmail.com>
+Date: Mon, 13 Jul 2020 21:40:37 -0500
+Subject: [PATCH] apply patch from Robert Scott to fix - shifting some bounds
+ checking
+
+---
+ bsdiff4/core.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/bsdiff4/core.c b/bsdiff4/core.c
+index 91be7f8..11b6806 100644
+--- a/bsdiff4/core.c
++++ b/bsdiff4/core.c
+@@ -431,8 +431,7 @@ static PyObject* patch(PyObject* self, PyObject* args)
+         y = PyLong_AsLong(PyTuple_GET_ITEM(tuple, 1));
+         z = PyLong_AsLong(PyTuple_GET_ITEM(tuple, 2));
+         if (newpos + x > newDataLength ||
+-                diffPtr + x > diffBlock + diffBlockLength ||
+-                extraPtr + y > extraBlock + extraBlockLength) {
++                diffPtr + x > diffBlock + diffBlockLength) {
+             PyMem_Free(newData);
+             PyErr_SetString(PyExc_ValueError, "corrupt patch (overflow)");
+             return NULL;
+@@ -444,6 +443,12 @@ static PyObject* patch(PyObject* self, PyObject* args)
+                 newData[newpos + j] += origData[oldpos + j];
+         newpos += x;
+         oldpos += x;
++        if (newpos + y > newDataLength ||
++                extraPtr + y > extraBlock + extraBlockLength) {
++            PyMem_Free(newData);
++            PyErr_SetString(PyExc_ValueError, "corrupt patch (overflow)");
++            return NULL;
++        }
+         memcpy(newData + newpos, extraPtr, y);
+         extraPtr += y;
+         newpos += y;

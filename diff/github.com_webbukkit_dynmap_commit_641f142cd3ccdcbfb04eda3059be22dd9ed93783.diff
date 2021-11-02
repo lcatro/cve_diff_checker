@@ -1,0 +1,26 @@
+From d5596944b0216e99f444070b40d2641ffe007e63 Mon Sep 17 00:00:00 2001
+From: R0taK <ryotak@wearehackerone.com>
+Date: Thu, 2 May 2019 18:08:56 +0900
+Subject: [PATCH] Fix required login vulnerability
+
+---
+ .../java/org/dynmap/servlet/MapStorageResourceHandler.java  | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/DynmapCore/src/main/java/org/dynmap/servlet/MapStorageResourceHandler.java b/DynmapCore/src/main/java/org/dynmap/servlet/MapStorageResourceHandler.java
+index 428911087..dccc7da4c 100644
+--- a/DynmapCore/src/main/java/org/dynmap/servlet/MapStorageResourceHandler.java
++++ b/DynmapCore/src/main/java/org/dynmap/servlet/MapStorageResourceHandler.java
+@@ -46,7 +46,11 @@ public void handle(String target, Request baseRequest, HttpServletRequest reques
+         int soff = 0, eoff;
+         // We're handling this request
+         baseRequest.setHandled(true);
+-
++        if(core.getLoginRequired()
++            && request.getSession(true).getAttribute(LoginServlet.USERID_ATTRIB) == null){
++            response.sendError(HttpStatus.UNAUTHORIZED_401);
++            return;
++        }
+         if (path.charAt(0) == '/') soff = 1;
+         eoff = path.indexOf('/', soff);
+         if (soff < 0) {

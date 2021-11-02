@@ -1,0 +1,66 @@
+From 4cd5081e58810d3394d27a67219e8e4e0445d851 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Janko=20Marohni=C4=87?= <janko.marohnic@gmail.com>
+Date: Sun, 26 May 2019 17:30:14 +0200
+Subject: [PATCH] Don't allow remote shell execution
+
+Kernel#open accepts a string of format "| <shell command>" which
+executes the specified shell command and otherwise presumably acts as
+IO.popen. The open-uri standard library overrides Kernel#open to also
+accept URLs.
+
+However, the overridden Kernel#open just delegates to URI#open, so we
+switch to using that directly and avoid the remote shell execution
+vulnerability. For files we just use File.open, which should have the
+same behaviour as Kernel#open.
+---
+ lib/mini_magick/image.rb           | 14 ++++++--------
+ spec/lib/mini_magick/image_spec.rb |  8 ++++++++
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/lib/mini_magick/image.rb b/lib/mini_magick/image.rb
+index a1f47c6..0ac4780 100644
+--- a/lib/mini_magick/image.rb
++++ b/lib/mini_magick/image.rb
+@@ -82,17 +82,15 @@ def self.import_pixels(blob, columns, rows, depth, map, format = 'png')
+     def self.open(path_or_url, ext = nil, options = {})
+       options, ext = ext, nil if ext.is_a?(Hash)
+ 
+-      ext ||=
+-        if File.exist?(path_or_url)
+-          File.extname(path_or_url)
+-        else
+-          File.extname(URI(path_or_url).path)
+-        end
++      uri = URI(path_or_url.to_s)
+ 
++      ext ||= File.extname(uri.path)
+       ext.sub!(/:.*/, '') # hack for filenames or URLs that include a colon
+ 
+-      Kernel.open(path_or_url, "rb", options) do |file|
+-        read(file, ext)
++      if uri.is_a?(URI::HTTP) || uri.is_a?(URI::FTP)
++        uri.open(options) { |file| read(file, ext) }
++      else
++        File.open(uri.to_s, "rb", options) { |file| read(file, ext) }
+       end
+     end
+ 
+diff --git a/spec/lib/mini_magick/image_spec.rb b/spec/lib/mini_magick/image_spec.rb
+index 192d834..00f9cb0 100644
+--- a/spec/lib/mini_magick/image_spec.rb
++++ b/spec/lib/mini_magick/image_spec.rb
+@@ -76,6 +76,14 @@
+           expect(File.extname(image.path)).to eq ".jpg"
+         end
+ 
++        it "doesn't allow remote shell execution" do
++          expect {
++            described_class.open("| touch file.txt") # Kernel#open accepts this
++          }.to raise_error(URI::InvalidURIError)
++
++          expect(File.exist?("file.txt")).to eq(false)
++        end
++
+         it "accepts open-uri options" do
+           stub_request(:get, "http://example.com/image.jpg")
+             .with(headers: {"Foo" => "Bar"})

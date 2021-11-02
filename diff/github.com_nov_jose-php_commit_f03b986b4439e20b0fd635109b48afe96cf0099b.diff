@@ -1,0 +1,41 @@
+From f03b986b4439e20b0fd635109b48afe96cf0099b Mon Sep 17 00:00:00 2001
+From: nov <nov@matake.jp>
+Date: Wed, 31 Aug 2016 01:03:07 +0900
+Subject: [PATCH] one more hash_equals, and better CEK decryption error
+ handling
+
+---
+ src/JOSE/JWE.php | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/JOSE/JWE.php b/src/JOSE/JWE.php
+index 4bc1923..964d8ce 100644
+--- a/src/JOSE/JWE.php
++++ b/src/JOSE/JWE.php
+@@ -168,6 +168,8 @@ private function encryptContentEncryptionKey($public_key_or_secret) {
+     }
+ 
+     private function decryptContentEncryptionKey($private_key_or_secret) {
++        $this->generateContentEncryptionKey(null); # NOTE: run this always not to make timing difference
++        $fake_content_encryption_key = $this->content_encryption_key;
+         switch ($this->header['alg']) {
+             case 'RSA1_5':
+                 $rsa = $this->rsa($private_key_or_secret, RSA::ENCRYPTION_PKCS1);
+@@ -194,7 +196,7 @@ private function decryptContentEncryptionKey($private_key_or_secret) {
+             #  Not to disclose timing difference between CEK decryption error and others.
+             #  Mitigating Bleichenbacher Attack on PKCS#1 v1.5
+             #  ref.) http://inaz2.hatenablog.com/entry/2016/01/26/222303
+-            $this->generateContentEncryptionKey(null);
++            $this->content_encryption_key = $fake_content_encryption_key;
+         }
+     }
+ 
+@@ -282,7 +284,7 @@ private function calculateAuthenticationTagCBC($sha_size) {
+     }
+ 
+     private function checkAuthenticationTag() {
+-        if ($this->authentication_tag === $this->calculateAuthenticationTag()) {
++        if (hash_equals($this->authentication_tag, $this->calculateAuthenticationTag())) {
+             return true;
+         } else {
+             throw new JOSE_Exception_UnexpectedAlgorithm('Invalid authentication tag');

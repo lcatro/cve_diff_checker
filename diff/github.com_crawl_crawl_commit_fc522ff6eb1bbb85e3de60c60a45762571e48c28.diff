@@ -1,0 +1,32 @@
+From fc522ff6eb1bbb85e3de60c60a45762571e48c28 Mon Sep 17 00:00:00 2001
+From: Aidan Holm <aidanholm@gmail.com>
+Date: Sun, 16 Feb 2020 13:34:42 +0800
+Subject: [PATCH] Disable lua load(), loadstring() bytcode loading
+
+---
+ crawl-ref/source/clua.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/crawl-ref/source/clua.cc b/crawl-ref/source/clua.cc
+index d336a278dc0..80976b68fd0 100644
+--- a/crawl-ref/source/clua.cc
++++ b/crawl-ref/source/clua.cc
+@@ -304,6 +304,9 @@ int CLua::loadfile(lua_State *ls, const char *filename, bool trusted,
+     while (!f.eof())
+         script += f.get_line() + "\n";
+ 
++    if (script[0] == 0x1b)
++        abort();
++
+     // prefixing with @ stops lua from adding [string "%s"]
+     return luaL_loadbuffer(ls, &script[0], script.length(),
+                            ("@" + file).c_str());
+@@ -796,6 +799,8 @@ void CLua::init_libraries()
+ 
+     lua_pushcfunction(_state, lua_loadstring);
+     lua_setglobal(_state, "loadstring");
++    lua_pushnil(_state);
++    lua_setglobal(_state, "load");
+ 
+     // Open Crawl bindings
+     cluaopen_kills(_state);

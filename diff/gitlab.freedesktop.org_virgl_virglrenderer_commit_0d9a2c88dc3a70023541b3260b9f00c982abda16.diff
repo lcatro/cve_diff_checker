@@ -1,0 +1,135 @@
+From 0d9a2c88dc3a70023541b3260b9f00c982abda16 Mon Sep 17 00:00:00 2001
+From: Gert Wollny <gert.wollny@collabora.com>
+Date: Thu, 10 Oct 2019 09:42:25 +0200
+Subject: [PATCH] vrend: Check resource creation more thoroughly
+
+While we are at it:
+  - free memory if texture allocation fails
+
+Closes #144
+Closes #145
+Closes #146
+
+v2: Move the error string creation to extra patch (Emil)
+v3: Fix whitespace errors (Emil) and one logic error
+
+Signed-off-by: Gert Wollny <gert.wollny@collabora.com>
+Reviewed-by: Emil Velikov <emil.velikov@collabora.com>
+---
+ src/vrend_renderer.c | 58 ++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/src/vrend_renderer.c b/src/vrend_renderer.c
+index 0c6b5efd..1fb657b7 100644
+--- a/src/vrend_renderer.c
++++ b/src/vrend_renderer.c
+@@ -6044,6 +6044,8 @@ static int check_resource_valid(struct vrend_renderer_resource_create_args *args
+ 
+    if (args->format >= VIRGL_FORMAT_MAX)
+       return -1;
++   bool format_can_texture_storage = has_feature(feat_texture_storage) &&
++         (tex_conv_table[args->format].flags & VIRGL_TEXTURE_CAN_TEXTURE_STORAGE);
+ 
+    /* only texture 2d and 2d array can have multiple samples */
+    if (args->nr_samples > 0) {
+@@ -6061,15 +6063,18 @@ static int check_resource_valid(struct vrend_renderer_resource_create_args *args
+       /* buffer and rect textures can't have mipmaps */
+       if (args->target == PIPE_BUFFER || args->target == PIPE_TEXTURE_RECT)
+          return -1;
++
+       if (args->last_level > (floor(log2(MAX2(args->width, args->height))) + 1))
+          return -1;
+    }
++
+    if (args->flags != 0 && args->flags != VIRGL_RESOURCE_Y_0_TOP)
+       return -1;
+ 
+-   if (args->flags & VIRGL_RESOURCE_Y_0_TOP)
++   if (args->flags & VIRGL_RESOURCE_Y_0_TOP) {
+       if (args->target != PIPE_TEXTURE_2D && args->target != PIPE_TEXTURE_RECT)
+          return -1;
++   }
+ 
+    /* array size for array textures only */
+    if (args->target == PIPE_TEXTURE_CUBE) {
+@@ -6088,6 +6093,9 @@ static int check_resource_valid(struct vrend_renderer_resource_create_args *args
+       if (!has_feature(feat_texture_array))
+          return -1;
+    }
++   if (format_can_texture_storage && !args->width) {
++      return -1;
++   }
+ 
+    if (args->bind == 0 ||
+        args->bind == VIRGL_BIND_CUSTOM ||
+@@ -6124,11 +6132,55 @@ static int check_resource_valid(struct vrend_renderer_resource_create_args *args
+           args->target == PIPE_TEXTURE_CUBE_ARRAY) {
+          if (args->depth != 1)
+             return -1;
++         if (format_can_texture_storage && !args->height) {
++            return -1;
++         }
+       }
+       if (args->target == PIPE_TEXTURE_1D ||
+           args->target == PIPE_TEXTURE_1D_ARRAY) {
+          if (args->height != 1 || args->depth != 1)
+             return -1;
++         if (args->width > vrend_state.max_texture_2d_size) {
++            return -1;
++         }
++      }
++
++      if (args->target == PIPE_TEXTURE_2D ||
++          args->target == PIPE_TEXTURE_RECT ||
++          args->target == PIPE_TEXTURE_2D_ARRAY) {
++         if (args->width > vrend_state.max_texture_2d_size ||
++             args->height > vrend_state.max_texture_2d_size) {
++            return -1;
++         }
++      }
++
++      if (args->target == PIPE_TEXTURE_3D) {
++         if (format_can_texture_storage &&
++             (!args->height || !args->depth)) {
++            return -1;
++         }
++         if (args->width > vrend_state.max_texture_3d_size ||
++             args->height > vrend_state.max_texture_3d_size ||
++             args->depth > vrend_state.max_texture_3d_size) {
++            return -1;
++         }
++      }
++      if (args->target == PIPE_TEXTURE_2D_ARRAY ||
++          args->target == PIPE_TEXTURE_CUBE_ARRAY ||
++          args->target == PIPE_TEXTURE_1D_ARRAY) {
++         if (format_can_texture_storage &&
++             !args->array_size) {
++            return -1;
++         }
++      }
++      if (args->target == PIPE_TEXTURE_CUBE ||
++          args->target == PIPE_TEXTURE_CUBE_ARRAY) {
++         if (args->width != args->height) {
++            return -1;
++         }
++         if (args->width > vrend_state.max_texture_cube_size) {
++            return -1;
++         }
+       }
+    }
+    return 0;
+@@ -6458,8 +6510,10 @@ int vrend_renderer_resource_create(struct vrend_renderer_resource_create_args *a
+       vrend_create_buffer(gr, args->width);
+    } else {
+       int r = vrend_renderer_resource_allocate_texture(gr, image_oes);
+-      if (r)
++      if (r) {
++         FREE(gr);
+          return r;
++      }
+    }
+ 
+    ret = vrend_resource_insert(gr, args->handle);
+-- 
+GitLab
+

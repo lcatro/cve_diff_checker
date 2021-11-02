@@ -1,0 +1,47 @@
+From 767e3a56144f676ca738ef8f700e0e56035bd05a Mon Sep 17 00:00:00 2001
+From: Even Rouault <even.rouault@spatialys.com>
+Date: Thu, 6 Jun 2019 21:56:17 +0200
+Subject: [PATCH] netCDF: avoid buffer overflow. master only. Fixes
+ https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=15143. Credit to OSS
+ Fuzz
+
+---
+ gdal/frmts/netcdf/netcdfsg.cpp | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/gdal/frmts/netcdf/netcdfsg.cpp b/gdal/frmts/netcdf/netcdfsg.cpp
+index 2da0e39dcdc..b5920b6cbf3 100644
+--- a/gdal/frmts/netcdf/netcdfsg.cpp
++++ b/gdal/frmts/netcdf/netcdfsg.cpp
+@@ -54,26 +54,21 @@ namespace nccfdriver
+      */
+     std::string& attrf(int ncid, int varId, const char * attrName, std::string& alloc)
+     {
+-        alloc = "";
+-
+         size_t len = 0;
+         nc_inq_attlen(ncid, varId, attrName, &len);
+-        
++
+         if(len < 1)
+         {
++            alloc.clear();
+             return alloc;
+         }
+ 
+-        char attr_vals[NC_MAX_NAME + 1];
+-        memset(attr_vals, 0, NC_MAX_NAME + 1);
++        alloc.resize(len);
++        memset(&alloc[0], 0, len);
+ 
+         // Now look through this variable for the attribute
+-        if(nc_get_att_text(ncid, varId, attrName, attr_vals) != NC_NOERR)
+-        {
+-            return alloc;
+-        }
++        nc_get_att_text(ncid, varId, attrName, &alloc[0]);
+ 
+-        alloc = std::string(attr_vals);
+         return alloc;
+     }
+ 

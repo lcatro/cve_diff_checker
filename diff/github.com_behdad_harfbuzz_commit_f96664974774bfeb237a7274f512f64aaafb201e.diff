@@ -1,0 +1,32 @@
+From f96664974774bfeb237a7274f512f64aaafb201e Mon Sep 17 00:00:00 2001
+From: Behdad Esfahbod <behdad@behdad.org>
+Date: Tue, 13 Oct 2015 00:30:50 -0400
+Subject: [PATCH] Fix another memory access issue discovered by libFuzzer
+
+Fixes https://github.com/behdad/harfbuzz/issues/139#issuecomment-146984679
+---
+ src/hb-ot-layout-gpos-table.hh | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/hb-ot-layout-gpos-table.hh b/src/hb-ot-layout-gpos-table.hh
+index ca98cb7a5c..568b5f63a9 100644
+--- a/src/hb-ot-layout-gpos-table.hh
++++ b/src/hb-ot-layout-gpos-table.hh
+@@ -704,6 +704,8 @@ struct PairPosFormat1
+   {
+     TRACE_SANITIZE (this);
+ 
++    if (!c->check_struct (this)) return_trace (false);
++
+     unsigned int len1 = valueFormat1.get_len ();
+     unsigned int len2 = valueFormat2.get_len ();
+     PairSet::sanitize_closure_t closure = {
+@@ -713,7 +715,7 @@ struct PairPosFormat1
+       1 + len1 + len2
+     };
+ 
+-    return_trace (c->check_struct (this) && coverage.sanitize (c, this) && pairSet.sanitize (c, this, &closure));
++    return_trace (coverage.sanitize (c, this) && pairSet.sanitize (c, this, &closure));
+   }
+ 
+   protected:

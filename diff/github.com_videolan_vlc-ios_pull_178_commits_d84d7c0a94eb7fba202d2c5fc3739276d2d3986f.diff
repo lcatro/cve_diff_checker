@@ -1,0 +1,102 @@
+From d84d7c0a94eb7fba202d2c5fc3739276d2d3986f Mon Sep 17 00:00:00 2001
+From: Carola Nitz <nitz.carola@googlemail.com>
+Date: Tue, 27 Nov 2018 18:25:47 +0100
+Subject: [PATCH] VLCAppDelegate: move openURLcalls behind passcode validation
+
+---
+ Sources/VLCAppDelegate.m | 47 ++++++++++++++++++++++++++--------------
+ 1 file changed, 31 insertions(+), 16 deletions(-)
+
+diff --git a/Sources/VLCAppDelegate.m b/Sources/VLCAppDelegate.m
+index c8bbd5778..fea29a601 100644
+--- a/Sources/VLCAppDelegate.m
++++ b/Sources/VLCAppDelegate.m
+@@ -110,22 +110,12 @@ - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(
+     // enable crash preventer
+     void (^setupBlock)() = ^{
+         __weak typeof(self) weakSelf = self;
+-        void (^setupLibraryBlock)() = ^{
+-            _libraryViewController = [[VLCLibraryViewController alloc] init];
+-            UINavigationController *navCon = [[UINavigationController alloc] initWithRootViewController:_libraryViewController];
+-
+-            VLCSidebarController *sidebarVC = [VLCSidebarController sharedInstance];
+-            sidebarVC.contentViewController = navCon;
+-
+-            VLCPlayerDisplayController *playerDisplayController = [VLCPlayerDisplayController sharedInstance];
+-            playerDisplayController.childViewController = sidebarVC.fullViewController;
+-
+-            weakSelf.window.rootViewController = playerDisplayController;
+-        };
+         UINavigationController *navCon = [[UINavigationController alloc] initWithRootViewController:[[UIViewController alloc] init]];
+         self.window.rootViewController = navCon;
+         [self.window makeKeyAndVisible];
+-        [self validatePasscodeIfNeededWithCompletion:setupLibraryBlock];
++        [self validatePasscodeIfNeededWithCompletion:^{
++            [weakSelf setupLibrary];
++        }];
+ 
+         BOOL spotlightEnabled = ![VLCKeychainCoordinator passcodeLockEnabled];
+         [[MLMediaLibrary sharedMediaLibrary] setSpotlightIndexingEnabled:spotlightEnabled];
+@@ -202,6 +192,20 @@ - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(
+     return YES;
+ }
+ 
++- (void)setupLibrary
++{
++    _libraryViewController = [[VLCLibraryViewController alloc] init];
++    UINavigationController *navCon = [[UINavigationController alloc] initWithRootViewController:_libraryViewController];
++
++    VLCSidebarController *sidebarVC = [VLCSidebarController sharedInstance];
++    sidebarVC.contentViewController = navCon;
++
++    VLCPlayerDisplayController *playerDisplayController = [VLCPlayerDisplayController sharedInstance];
++    playerDisplayController.childViewController = sidebarVC.fullViewController;
++
++    _window.rootViewController = playerDisplayController;
++}
++
+ - (void)setupAppearence
+ {
+     UIColor *vlcOrange = [UIColor VLCOrangeTintColor];
+@@ -294,6 +298,17 @@ - (void)application:(UIApplication *)application
+ 
+ - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options
+ {
++    __weak typeof(self) weakSelf = self;
++    [self validatePasscodeIfNeededWithCompletion:^{
++        if (!_libraryViewController) {
++            [weakSelf setupLibrary];
++        }
++        [weakSelf openURL:url options:options];
++    }];
++    return YES;
++}
++
++- (BOOL)openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
+     //Handles Dropbox Authorization flow.
+     DBOAuthResult *authResult = [DBClientsManager handleRedirectURL:url];
+     if (authResult != nil) {
+@@ -346,12 +361,12 @@ - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDiction
+                 [self playWithURL:movieURL completion:^(BOOL success) {
+                     NSURL *callback = success ? successCallback : errorCallback;
+                     if (@available(iOS 10, *)) {
+-                         [[UIApplication sharedApplication] openURL:callback options:@{} completionHandler:nil];
++                        [[UIApplication sharedApplication] openURL:callback options:@{} completionHandler:nil];
+                     } else {
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                         /* UIApplication's replacement calls require iOS 10 or later, which we can't enforce as of yet */
+-                       [[UIApplication sharedApplication] openURL:callback];
++                        [[UIApplication sharedApplication] openURL:callback];
+ #pragma clang diagnostic pop
+                     }
+                 }];
+@@ -369,7 +384,7 @@ - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDiction
+ 
+                     /* Safari & al mangle vlc://http:// so fix this */
+                     if (location != NSNotFound && [parsedString characterAtIndex:location - 1] != 0x3a) { // :
+-                            parsedString = [NSString stringWithFormat:@"%@://%@", [parsedString substringToIndex:location], [parsedString substringFromIndex:location+2]];
++                        parsedString = [NSString stringWithFormat:@"%@://%@", [parsedString substringToIndex:location], [parsedString substringFromIndex:location+2]];
+                     } else {
+                         parsedString = [receivedUrl substringFromIndex:6];
+                         if (![parsedString hasPrefix:@"http://"] && ![parsedString hasPrefix:@"https://"] && ![parsedString hasPrefix:@"ftp://"]) {

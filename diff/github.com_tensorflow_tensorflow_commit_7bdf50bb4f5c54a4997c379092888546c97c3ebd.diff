@@ -1,0 +1,28 @@
+From 7bdf50bb4f5c54a4997c379092888546c97c3ebd Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Fri, 9 Jul 2021 17:45:15 -0700
+Subject: [PATCH] Ensure non-empty compressed input in
+ tf.raw_ops.UncompressElement
+
+PiperOrigin-RevId: 383955815
+Change-Id: I072a84fd02738dd2f51b3f42836ed80067dba4a8
+---
+ tensorflow/core/kernels/data/experimental/compression_ops.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/data/experimental/compression_ops.cc b/tensorflow/core/kernels/data/experimental/compression_ops.cc
+index efa7018acb629..8cc214671bd74 100644
+--- a/tensorflow/core/kernels/data/experimental/compression_ops.cc
++++ b/tensorflow/core/kernels/data/experimental/compression_ops.cc
+@@ -48,6 +48,11 @@ void UncompressElementOp::Compute(OpKernelContext* ctx) {
+   Tensor tensor = ctx->input(0);
+   const Variant& variant = tensor.scalar<Variant>()();
+   const CompressedElement* compressed = variant.get<CompressedElement>();
++  OP_REQUIRES(
++      ctx, compressed != nullptr,
++      errors::InvalidArgument(
++          "Input does not contain a compressed element. Instead got tensor ",
++          tensor.DebugString()));
+ 
+   std::vector<Tensor> components;
+   OP_REQUIRES_OK(ctx, UncompressElement(*compressed, &components));

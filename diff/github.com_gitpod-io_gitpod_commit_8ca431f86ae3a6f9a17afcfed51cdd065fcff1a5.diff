@@ -1,0 +1,40 @@
+From 8ca431f86ae3a6f9a17afcfed51cdd065fcff1a5 Mon Sep 17 00:00:00 2001
+From: Alex Tugarev <alex.tugarev@typefox.io>
+Date: Wed, 13 Jan 2021 08:36:53 +0000
+Subject: [PATCH] [server/auth] ensure safe returnTo param
+
+---
+ components/server/src/user/user-controller.ts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/components/server/src/user/user-controller.ts b/components/server/src/user/user-controller.ts
+index c62964420..bd3b68596 100644
+--- a/components/server/src/user/user-controller.ts
++++ b/components/server/src/user/user-controller.ts
+@@ -81,6 +81,7 @@ export class UserController {
+             }
+ 
+             // Proceed with login
++            this.ensureSafeReturnToParam(req);
+             await this.authenticator.authenticate(req, res, next);
+         });
+         router.get("/authorize", (req: express.Request, res: express.Response, next: express.NextFunction) => {
+@@ -88,6 +89,7 @@ export class UserController {
+                 res.sendStatus(401);
+                 return;
+             }
++            this.ensureSafeReturnToParam(req);
+             this.authenticator.authorize(req, res, next);
+         });
+         const branding = this.env.brandingConfig;
+@@ -483,6 +485,10 @@ export class UserController {
+         }
+     }
+ 
++    protected ensureSafeReturnToParam(req: express.Request) {
++        req.query.returnTo = this.getSafeReturnToParam(req);
++    }
++
+     protected getSafeReturnToParam(req: express.Request) {
+         const returnToURL: string | undefined = req.query.redirect || req.query.returnTo;
+         if (returnToURL) {

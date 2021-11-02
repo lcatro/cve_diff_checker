@@ -1,0 +1,40 @@
+From 0f116d223826895a73b12492f17486e5d54ab7a7 Mon Sep 17 00:00:00 2001
+From: Josh Buker <buker.joshua@gmail.com>
+Date: Sat, 2 May 2020 20:56:58 +0000
+Subject: [PATCH] Fix brute force vuln due to callbacks not being ran (#235)
+
+The authenticate method previously would return before callbacks executed if an
+invalid password was provided, which causes the brute force protection to only
+work for the first lockout period, and only resets after a successful login.
+
+Fixes #231
+---
+ lib/sorcery/model.rb | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/lib/sorcery/model.rb b/lib/sorcery/model.rb
+index 395710cf..6a500fc4 100644
+--- a/lib/sorcery/model.rb
++++ b/lib/sorcery/model.rb
+@@ -102,10 +102,6 @@ def authenticate(*credentials, &block)
+ 
+         set_encryption_attributes
+ 
+-        unless user.valid_password?(credentials[1])
+-          return authentication_response(user: user, failure: :invalid_password, &block)
+-        end
+-
+         if user.respond_to?(:active_for_authentication?) && !user.active_for_authentication?
+           return authentication_response(user: user, failure: :inactive, &block)
+         end
+@@ -118,6 +114,10 @@ def authenticate(*credentials, &block)
+           end
+         end
+ 
++        unless user.valid_password?(credentials[1])
++          return authentication_response(user: user, failure: :invalid_password, &block)
++        end
++
+         authentication_response(user: user, return_value: user, &block)
+       end
+ 

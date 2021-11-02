@@ -1,0 +1,102 @@
+From dcb942d24db97162ad16a67c2a0cf30875342d55 Mon Sep 17 00:00:00 2001
+From: bcaller <bcaller@users.noreply.github.com>
+Date: Wed, 13 May 2020 06:37:32 +0100
+Subject: [PATCH] fix: prevent DoS (OOM) via massive packets (#95)
+
+When maxHttpBufferSize is large (1e8 bytes), a payload of length 100MB
+can be sent like so:
+
+99999991:422222222222222222222222222222222222222222222...
+
+This massive packet can cause OOM via building up many many
+`ConsOneByteString` objects due to concatenation:
+99999989 `ConsOneByteString`s and then converting the massive integer to
+a `Number`.
+
+The performance can be improved to avoid this by using `substring`
+rather than building the string via concatenation.
+
+Below I tried one payload of length 7e7 as the 1e8 payload took so
+long to process that it timed out before running out of memory.
+
+```
+==== JS stack trace =========================================
+
+    0: ExitFrame [pc: 0x13c5b79]
+Security context: 0x152fe7b808d1 <JSObject>
+    1: decodeString [0x2dd385fb5d1] [/node_modules/socket.io-parser/index.js:~276] [pc=0xf59746881be](this=0x175d34c42b69 <JSGlobal Object>,0x14eccff10fe1 <Very long string[69999990]>)
+    2: add [0x31fc2693da29] [/node_modules/socket.io-parser/index.js:242] [bytecode=0xa7ed6554889 offset=11](this=0x0a2881be5069 <Decoder map = 0x3ceaa8bf48c9>,0x14eccff10fe1 <Very...
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+ 1: 0xa09830 node::Abort() [node]
+ 2: 0xa09c55 node::OnFatalError(char const*, char const*) [node]
+ 3: 0xb7d71e v8::Utils::ReportOOMFailure(v8::internal::Isolate*, char const*, bool) [node]
+ 4: 0xb7da99 v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, bool) [node]
+ 5: 0xd2a1f5  [node]
+ 6: 0xd2a886 v8::internal::Heap::RecomputeLimits(v8::internal::GarbageCollector) [node]
+ 7: 0xd37105 v8::internal::Heap::PerformGarbageCollection(v8::internal::GarbageCollector, v8::GCCallbackFlags) [node]
+ 8: 0xd37fb5 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [node]
+ 9: 0xd3965f v8::internal::Heap::HandleGCRequest() [node]
+10: 0xce8395 v8::internal::StackGuard::HandleInterrupts() [node]
+11: 0x1042cb6 v8::internal::Runtime_StackGuard(int, unsigned long*, v8::internal::Isolate*) [node]
+12: 0x13c5b79  [node]
+```
+---
+ index.js | 17 +++++++----------
+ 1 file changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/index.js b/index.js
+index 102615a..ff613cc 100644
+--- a/index.js
++++ b/index.js
+@@ -286,11 +286,9 @@ function decodeString(str) {
+ 
+   // look up attachments if type binary
+   if (exports.BINARY_EVENT === p.type || exports.BINARY_ACK === p.type) {
+-    var buf = '';
+-    while (str.charAt(++i) !== '-') {
+-      buf += str.charAt(i);
+-      if (i == str.length) break;
+-    }
++    var start = i + 1;
++    while (str.charAt(++i) !== '-' && i != str.length) {}
++    var buf = str.substring(start, i);
+     if (buf != Number(buf) || str.charAt(i) !== '-') {
+       throw new Error('Illegal attachments');
+     }
+@@ -299,13 +297,13 @@ function decodeString(str) {
+ 
+   // look up namespace (if any)
+   if ('/' === str.charAt(i + 1)) {
+-    p.nsp = '';
++    var start = i + 1;
+     while (++i) {
+       var c = str.charAt(i);
+       if (',' === c) break;
+-      p.nsp += c;
+       if (i === str.length) break;
+     }
++    p.nsp = str.substring(start, i);
+   } else {
+     p.nsp = '/';
+   }
+@@ -313,17 +311,16 @@ function decodeString(str) {
+   // look up id
+   var next = str.charAt(i + 1);
+   if ('' !== next && Number(next) == next) {
+-    p.id = '';
++    var start = i + 1;
+     while (++i) {
+       var c = str.charAt(i);
+       if (null == c || Number(c) != c) {
+         --i;
+         break;
+       }
+-      p.id += str.charAt(i);
+       if (i === str.length) break;
+     }
+-    p.id = Number(p.id);
++    p.id = Number(str.substring(start, i + 1));
+   }
+ 
+   // look up json data

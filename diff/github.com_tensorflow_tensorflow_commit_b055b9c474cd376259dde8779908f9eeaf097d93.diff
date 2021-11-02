@@ -1,0 +1,27 @@
+From b055b9c474cd376259dde8779908f9eeaf097d93 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 13 Apr 2021 14:49:50 -0700
+Subject: [PATCH] Fix `tf.raw_ops.RaggedTensorToVariant` invalid resize.
+
+PiperOrigin-RevId: 368299574
+Change-Id: I751c186325aa0bab397928845e790e60c2d90918
+---
+ tensorflow/core/kernels/ragged_tensor_to_variant_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ragged_tensor_to_variant_op.cc b/tensorflow/core/kernels/ragged_tensor_to_variant_op.cc
+index 549dc68dfbf87..687289cd38077 100644
+--- a/tensorflow/core/kernels/ragged_tensor_to_variant_op.cc
++++ b/tensorflow/core/kernels/ragged_tensor_to_variant_op.cc
+@@ -159,6 +159,11 @@ class RaggedTensorToVariantOp : public OpKernel {
+ 
+     // Unbatch the Ragged Tensor and encode the components.
+     std::vector<RaggedTensorVariant> unbatched_ragged_input;
++    auto batched_splits_top_vec =
++        batched_ragged_input.splits(0).vec<SPLIT_TYPE>();
++    int num_components = batched_splits_top_vec.size() - 1;
++    OP_REQUIRES(context, num_components >= 0,
++                errors::Internal("Invalid split argument."));
+     OP_REQUIRES_OK(context, UnbatchRaggedZerothDim<VALUE_TYPE, SPLIT_TYPE>(
+                                 batched_ragged_input, &unbatched_ragged_input));
+ 

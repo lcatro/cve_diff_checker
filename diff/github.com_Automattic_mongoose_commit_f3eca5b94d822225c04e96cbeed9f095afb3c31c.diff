@@ -1,0 +1,28 @@
+From f3eca5b94d822225c04e96cbeed9f095afb3c31c Mon Sep 17 00:00:00 2001
+From: Valeri Karpov <val@karpov.io>
+Date: Wed, 9 Oct 2019 18:41:25 -0400
+Subject: [PATCH] fix(query): delete top-level `_bsontype` property in queries
+ to prevent silent empty queries
+
+Fix #8222
+---
+ lib/cast.js | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/lib/cast.js b/lib/cast.js
+index 928fe9d1ba..3dfd651acd 100644
+--- a/lib/cast.js
++++ b/lib/cast.js
+@@ -27,6 +27,12 @@ module.exports = function cast(schema, obj, options, context) {
+     throw new Error('Query filter must be an object, got an array ', util.inspect(obj));
+   }
+ 
++  // bson 1.x has the unfortunate tendency to remove filters that have a top-level
++  // `_bsontype` property. Should remove this when we upgrade to bson 4.x. See gh-8222
++  if (obj.hasOwnProperty('_bsontype')) {
++    delete obj._bsontype;
++  }
++
+   const paths = Object.keys(obj);
+   let i = paths.length;
+   let _keys;

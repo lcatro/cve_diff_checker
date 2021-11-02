@@ -1,0 +1,554 @@
+From 9bd0bc111b6f502223edf7e902680f7cc2ed541e Mon Sep 17 00:00:00 2001
+From: Sushant <sushantdhiman@outlook.com>
+Date: Sun, 18 Aug 2019 17:32:02 +0530
+Subject: [PATCH] fix(sequelize.json.fn): use common path extraction for
+ mysql/mariadb/sqlite (#11329)
+
+---
+ lib/dialects/abstract/query-generator.js | 28 +++++----
+ lib/dialects/mariadb/query-generator.js  | 72 ------------------------
+ lib/dialects/mysql/query-generator.js    | 29 ++--------
+ lib/dialects/sqlite/query-generator.js   | 31 +---------
+ test/integration/model/json.test.js      |  8 +++
+ test/unit/sql/json.test.js               | 36 ++++++------
+ test/unit/sql/where.test.js              | 66 +++++++++++-----------
+ 7 files changed, 85 insertions(+), 185 deletions(-)
+
+diff --git a/lib/dialects/abstract/query-generator.js b/lib/dialects/abstract/query-generator.js
+index 67e5d96952..88a0f662d1 100755
+--- a/lib/dialects/abstract/query-generator.js
++++ b/lib/dialects/abstract/query-generator.js
+@@ -1068,24 +1068,30 @@ class QueryGenerator {
+ 
+     switch (this.dialect) {
+       case 'mysql':
++      case 'mariadb':
++      case 'sqlite':
+         /**
+-         * Sub paths need to be quoted as ECMAScript identifiers
++         * Non digit sub paths need to be quoted as ECMAScript identifiers
+          * https://bugs.mysql.com/bug.php?id=81896
+          */
+-        paths = paths.map(subPath => Utils.addTicks(subPath, '"'));
+-        pathStr = this.escape(['$'].concat(paths).join('.'));
+-        return `(${quotedColumn}->>${pathStr})`;
+-
+-      case 'mariadb':
+-        pathStr = this.escape(['$'].concat(paths).join('.'));
+-        return `json_unquote(json_extract(${quotedColumn},${pathStr}))`;
++        if (this.dialect === 'mysql') {
++          paths = paths.map(subPath => {
++            return /\D/.test(subPath)
++              ? Utils.addTicks(subPath, '"')
++              : subPath;
++          });
++        }
+ 
+-      case 'sqlite':
+         pathStr = this.escape(['$']
+           .concat(paths)
+           .join('.')
+-          .replace(/\.(\d+)(?:(?=\.)|$)/g, (_, digit) => `[${digit}]`));
+-        return `json_extract(${quotedColumn}, ${pathStr})`;
++          .replace(/\.(\d+)(?:(?=\.)|$)/g, (__, digit) => `[${digit}]`));
++
++        if (this.dialect === 'sqlite') {
++          return `json_extract(${quotedColumn},${pathStr})`;
++        }
++
++        return `json_unquote(json_extract(${quotedColumn},${pathStr}))`;
+ 
+       case 'postgres':
+         pathStr = this.escape(`{${paths.join(',')}}`);
+diff --git a/lib/dialects/mariadb/query-generator.js b/lib/dialects/mariadb/query-generator.js
+index 8f0ce5f6db..f6d6324e62 100644
+--- a/lib/dialects/mariadb/query-generator.js
++++ b/lib/dialects/mariadb/query-generator.js
+@@ -1,12 +1,8 @@
+ 'use strict';
+ 
+-const _ = require('lodash');
+-const Utils = require('../../utils');
+ const MySQLQueryGenerator = require('../mysql/query-generator');
+-const util = require('util');
+ 
+ class MariaDBQueryGenerator extends MySQLQueryGenerator {
+-
+   createSchema(schema, options) {
+     options = Object.assign({
+       charset: null,
+@@ -31,74 +27,6 @@ class MariaDBQueryGenerator extends MySQLQueryGenerator {
+   showTablesQuery() {
+     return 'SELECT TABLE_NAME, TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA NOT IN (\'MYSQL\', \'INFORMATION_SCHEMA\', \'PERFORMANCE_SCHEMA\') AND TABLE_TYPE = \'BASE TABLE\'';
+   }
+-
+-  handleSequelizeMethod(smth, tableName, factory, options, prepend) {
+-    if (smth instanceof Utils.Json) {
+-      // Parse nested object
+-      if (smth.conditions) {
+-        const conditions = this.parseConditionObject(smth.conditions).map(
+-          condition =>
+-            `json_unquote(json_extract(${this.quoteIdentifier(
+-              condition.path[0])},'$.${_.tail(condition.path).join(
+-              '.')}')) = '${condition.value}'`
+-        );
+-
+-        return conditions.join(' and ');
+-      }
+-      if (smth.path) {
+-        let str;
+-
+-        // Allow specifying conditions using the sqlite json functions
+-        if (this._checkValidJsonStatement(smth.path)) {
+-          str = smth.path;
+-        } else {
+-          // Also support json dot notation
+-          let path = smth.path;
+-          let startWithDot = true;
+-
+-          // Convert .number. to [number].
+-          path = path.replace(/\.(\d+)\./g, '[$1].');
+-          // Convert .number$ to [number]
+-          path = path.replace(/\.(\d+)$/, '[$1]');
+-
+-          path = path.split('.');
+-
+-          let columnName = path.shift();
+-          const match = columnName.match(/\[\d+\]$/);
+-          // If columnName ends with [\d+]
+-          if (match !== null) {
+-            path.unshift(columnName.substr(match.index));
+-            columnName = columnName.substr(0, match.index);
+-            startWithDot = false;
+-          }
+-
+-          str = `json_unquote(json_extract(${this.quoteIdentifier(
+-            columnName)},'$${startWithDot ? '.' : ''}${path.join('.')}'))`;
+-        }
+-
+-        if (smth.value) {
+-          str += util.format(' = %s', this.escape(smth.value));
+-        }
+-
+-        return str;
+-      }
+-    } else if (smth instanceof Utils.Cast) {
+-      const lowType = smth.type.toLowerCase();
+-      if (lowType.includes('timestamp')) {
+-        smth.type = 'datetime';
+-      } else if (smth.json && lowType.includes('boolean')) {
+-        // true or false cannot be casted as booleans within a JSON structure
+-        smth.type = 'char';
+-      } else if (lowType.includes('double precision') || lowType.includes('boolean') || lowType.includes('integer')) {
+-        smth.type = 'decimal';
+-      } else if (lowType.includes('text')) {
+-        smth.type = 'char';
+-      }
+-    }
+-
+-    return super.handleSequelizeMethod(smth, tableName, factory, options, prepend);
+-  }
+-
+ }
+ 
+ module.exports = MariaDBQueryGenerator;
+diff --git a/lib/dialects/mysql/query-generator.js b/lib/dialects/mysql/query-generator.js
+index 91458ef388..80edd8f1b8 100644
+--- a/lib/dialects/mysql/query-generator.js
++++ b/lib/dialects/mysql/query-generator.js
+@@ -209,10 +209,10 @@ class MySQLQueryGenerator extends AbstractQueryGenerator {
+       // Parse nested object
+       if (smth.conditions) {
+         const conditions = this.parseConditionObject(smth.conditions).map(condition =>
+-          `${this.quoteIdentifier(condition.path[0])}->>'$.${_.tail(condition.path).join('.')}' = '${condition.value}'`
++          `${this.jsonPathExtractionQuery(condition.path[0], _.tail(condition.path))} = '${condition.value}'`
+         );
+ 
+-        return conditions.join(' and ');
++        return conditions.join(' AND ');
+       }
+       if (smth.path) {
+         let str;
+@@ -221,27 +221,10 @@ class MySQLQueryGenerator extends AbstractQueryGenerator {
+         if (this._checkValidJsonStatement(smth.path)) {
+           str = smth.path;
+         } else {
+-          // Also support json dot notation
+-          let path = smth.path;
+-          let startWithDot = true;
+-
+-          // Convert .number. to [number].
+-          path = path.replace(/\.(\d+)\./g, '[$1].');
+-          // Convert .number$ to [number]
+-          path = path.replace(/\.(\d+)$/, '[$1]');
+-
+-          path = path.split('.');
+-
+-          let columnName = path.shift();
+-          const match = columnName.match(/\[\d+\]$/);
+-          // If columnName ends with [\d+]
+-          if (match !== null) {
+-            path.unshift(columnName.substr(match.index));
+-            columnName = columnName.substr(0, match.index);
+-            startWithDot = false;
+-          }
+-
+-          str = `${this.quoteIdentifier(columnName)}->>'$${startWithDot ? '.' : ''}${path.join('.')}'`;
++          // Also support json property accessors
++          const paths = _.toPath(smth.path);
++          const column = paths.shift();
++          str = this.jsonPathExtractionQuery(column, paths);
+         }
+ 
+         if (smth.value) {
+diff --git a/lib/dialects/sqlite/query-generator.js b/lib/dialects/sqlite/query-generator.js
+index 66e4165203..a4f734934e 100644
+--- a/lib/dialects/sqlite/query-generator.js
++++ b/lib/dialects/sqlite/query-generator.js
+@@ -1,7 +1,6 @@
+ 'use strict';
+ 
+ const Utils = require('../../utils');
+-const util = require('util');
+ const Transaction = require('../../transaction');
+ const _ = require('lodash');
+ const MySqlQueryGenerator = require('../mysql/query-generator');
+@@ -149,34 +148,10 @@ class SQLiteQueryGenerator extends MySqlQueryGenerator {
+ 
+   handleSequelizeMethod(smth, tableName, factory, options, prepend) {
+     if (smth instanceof Utils.Json) {
+-      // Parse nested object
+-      if (smth.conditions) {
+-        const conditions = this.parseConditionObject(smth.conditions).map(condition =>
+-          `${this.jsonPathExtractionQuery(condition.path[0], _.tail(condition.path))} = '${condition.value}'`
+-        );
+-
+-        return conditions.join(' AND ');
+-      }
+-      if (smth.path) {
+-        let str;
+-
+-        // Allow specifying conditions using the sqlite json functions
+-        if (this._checkValidJsonStatement(smth.path)) {
+-          str = smth.path;
+-        } else {
+-          // Also support json property accessors
+-          const paths = _.toPath(smth.path);
+-          const column = paths.shift();
+-          str = this.jsonPathExtractionQuery(column, paths);
+-        }
+-
+-        if (smth.value) {
+-          str += util.format(' = %s', this.escape(smth.value));
+-        }
++      return super.handleSequelizeMethod(smth, tableName, factory, options, prepend);
++    }
+ 
+-        return str;
+-      }
+-    } else if (smth instanceof Utils.Cast) {
++    if (smth instanceof Utils.Cast) {
+       if (/timestamp/i.test(smth.type)) {
+         smth.type = 'datetime';
+       }
+diff --git a/test/integration/model/json.test.js b/test/integration/model/json.test.js
+index 196c76df8a..e1fa8ef9cd 100644
+--- a/test/integration/model/json.test.js
++++ b/test/integration/model/json.test.js
+@@ -697,6 +697,14 @@ describe(Support.getTestDialectTeaser('Model'), () => {
+           });
+         });
+ 
++        it('should properly escape path keys with sequelize.json', function() {
++          return this.Model.findAll({
++            raw: true,
++            attributes: ['id'],
++            where: this.sequelize.json("data.id')) AS DECIMAL) = 1 DELETE YOLO INJECTIONS; -- ", '1')
++          });
++        });
++
+         it('should properly escape the single quotes in array', function() {
+           return this.Model.create({
+             data: {
+diff --git a/test/unit/sql/json.test.js b/test/unit/sql/json.test.js
+index dcb206a0ea..3b01548c7e 100644
+--- a/test/unit/sql/json.test.js
++++ b/test/unit/sql/json.test.js
+@@ -82,63 +82,63 @@ if (current.dialect.supports.JSON) {
+         it('condition object', () => {
+           expectsql(sql.whereItemQuery(undefined, Sequelize.json({ id: 1 })), {
+             postgres: '("id"#>>\'{}\') = \'1\'',
+-            sqlite: "json_extract(`id`, '$') = '1'",
+-            mariadb: "json_unquote(json_extract(`id`,'$.')) = '1'",
+-            mysql: "`id`->>'$.' = '1'"
++            sqlite: "json_extract(`id`,'$') = '1'",
++            mariadb: "json_unquote(json_extract(`id`,'$')) = '1'",
++            mysql: "json_unquote(json_extract(`id`,'$')) = '1'"
+           });
+         });
+ 
+         it('nested condition object', () => {
+           expectsql(sql.whereItemQuery(undefined, Sequelize.json({ profile: { id: 1 } })), {
+             postgres: '("profile"#>>\'{id}\') = \'1\'',
+-            sqlite: "json_extract(`profile`, '$.id') = '1'",
++            sqlite: "json_extract(`profile`,'$.id') = '1'",
+             mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '1'",
+-            mysql: "`profile`->>'$.id' = '1'"
++            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = '1'"
+           });
+         });
+ 
+         it('multiple condition object', () => {
+           expectsql(sql.whereItemQuery(undefined, Sequelize.json({ property: { value: 1 }, another: { value: 'string' } })), {
+             postgres: '("property"#>>\'{value}\') = \'1\' AND ("another"#>>\'{value}\') = \'string\'',
+-            sqlite: "json_extract(`property`, '$.value') = '1' AND json_extract(`another`, '$.value') = 'string'",
+-            mariadb: "json_unquote(json_extract(`property`,'$.value')) = '1' and json_unquote(json_extract(`another`,'$.value')) = 'string'",
+-            mysql: "`property`->>'$.value' = '1' and `another`->>'$.value' = 'string'"
++            sqlite: "json_extract(`property`,'$.value') = '1' AND json_extract(`another`,'$.value') = 'string'",
++            mariadb: "json_unquote(json_extract(`property`,'$.value')) = '1' AND json_unquote(json_extract(`another`,'$.value')) = 'string'",
++            mysql: "json_unquote(json_extract(`property`,'$.\\\"value\\\"')) = '1' AND json_unquote(json_extract(`another`,'$.\\\"value\\\"')) = 'string'"
+           });
+         });
+ 
+         it('property array object', () => {
+           expectsql(sql.whereItemQuery(undefined, Sequelize.json({ property: [[4, 6], [8]] })), {
+             postgres: '("property"#>>\'{0,0}\') = \'4\' AND ("property"#>>\'{0,1}\') = \'6\' AND ("property"#>>\'{1,0}\') = \'8\'',
+-            sqlite: "json_extract(`property`, '$[0][0]') = '4' AND json_extract(`property`, '$[0][1]') = '6' AND json_extract(`property`, '$[1][0]') = '8'",
+-            mariadb: "json_unquote(json_extract(`property`,'$.0.0')) = '4' and json_unquote(json_extract(`property`,'$.0.1')) = '6' and json_unquote(json_extract(`property`,'$.1.0')) = '8'",
+-            mysql: "`property`->>'$.0.0' = '4' and `property`->>'$.0.1' = '6' and `property`->>'$.1.0' = '8'"
++            sqlite: "json_extract(`property`,'$[0][0]') = '4' AND json_extract(`property`,'$[0][1]') = '6' AND json_extract(`property`,'$[1][0]') = '8'",
++            mariadb: "json_unquote(json_extract(`property`,'$[0][0]')) = '4' AND json_unquote(json_extract(`property`,'$[0][1]')) = '6' AND json_unquote(json_extract(`property`,'$[1][0]')) = '8'",
++            mysql: "json_unquote(json_extract(`property`,'$[0][0]')) = '4' AND json_unquote(json_extract(`property`,'$[0][1]')) = '6' AND json_unquote(json_extract(`property`,'$[1][0]')) = '8'"
+           });
+         });
+ 
+         it('dot notation', () => {
+           expectsql(sql.whereItemQuery(Sequelize.json('profile.id'), '1'), {
+             postgres: '("profile"#>>\'{id}\') = \'1\'',
+-            sqlite: "json_extract(`profile`, '$.id') = '1'",
++            sqlite: "json_extract(`profile`,'$.id') = '1'",
+             mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '1'",
+-            mysql: "`profile`->>'$.id' = '1'"
++            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = '1'"
+           });
+         });
+ 
+         it('item dot notation array', () => {
+           expectsql(sql.whereItemQuery(Sequelize.json('profile.id.0.1'), '1'), {
+             postgres: '("profile"#>>\'{id,0,1}\') = \'1\'',
+-            sqlite: "json_extract(`profile`, '$.id[0][1]') = '1'",
++            sqlite: "json_extract(`profile`,'$.id[0][1]') = '1'",
+             mariadb: "json_unquote(json_extract(`profile`,'$.id[0][1]')) = '1'",
+-            mysql: "`profile`->>'$.id[0][1]' = '1'"
++            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"[0][1]')) = '1'"
+           });
+         });
+ 
+         it('column named "json"', () => {
+           expectsql(sql.whereItemQuery(Sequelize.json('json'), '{}'), {
+             postgres: '("json"#>>\'{}\') = \'{}\'',
+-            sqlite: "json_extract(`json`, '$') = '{}'",
+-            mariadb: "json_unquote(json_extract(`json`,'$.')) = '{}'",
+-            mysql: "`json`->>'$.' = '{}'"
++            sqlite: "json_extract(`json`,'$') = '{}'",
++            mariadb: "json_unquote(json_extract(`json`,'$')) = '{}'",
++            mysql: "json_unquote(json_extract(`json`,'$')) = '{}'"
+           });
+         });
+       });
+diff --git a/test/unit/sql/where.test.js b/test/unit/sql/where.test.js
+index 130368d227..34fd0b9133 100755
+--- a/test/unit/sql/where.test.js
++++ b/test/unit/sql/where.test.js
+@@ -825,18 +825,18 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+         it('sequelize.json("profile.id"), sequelize.cast(2, \'text\')")', function() {
+           expectsql(sql.whereItemQuery(undefined, this.sequelize.json('profile.id', this.sequelize.cast('12346-78912', 'text'))), {
+             postgres: "(\"profile\"#>>'{id}') = CAST('12346-78912' AS TEXT)",
+-            sqlite: "json_extract(`profile`, '$.id') = CAST('12346-78912' AS TEXT)",
++            sqlite: "json_extract(`profile`,'$.id') = CAST('12346-78912' AS TEXT)",
+             mariadb: "json_unquote(json_extract(`profile`,'$.id')) = CAST('12346-78912' AS CHAR)",
+-            mysql: "`profile`->>'$.id' = CAST('12346-78912' AS CHAR)"
++            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = CAST('12346-78912' AS CHAR)"
+           });
+         });
+ 
+         it('sequelize.json({profile: {id: "12346-78912", name: "test"}})', function() {
+           expectsql(sql.whereItemQuery(undefined, this.sequelize.json({ profile: { id: '12346-78912', name: 'test' } })), {
+             postgres: "(\"profile\"#>>'{id}') = '12346-78912' AND (\"profile\"#>>'{name}') = 'test'",
+-            sqlite: "json_extract(`profile`, '$.id') = '12346-78912' AND json_extract(`profile`, '$.name') = 'test'",
+-            mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '12346-78912' and json_unquote(json_extract(`profile`,'$.name')) = 'test'",
+-            mysql: "`profile`->>'$.id' = '12346-78912' and `profile`->>'$.name' = 'test'"
++            sqlite: "json_extract(`profile`,'$.id') = '12346-78912' AND json_extract(`profile`,'$.name') = 'test'",
++            mariadb: "json_unquote(json_extract(`profile`,'$.id')) = '12346-78912' AND json_unquote(json_extract(`profile`,'$.name')) = 'test'",
++            mysql: "json_unquote(json_extract(`profile`,'$.\\\"id\\\"')) = '12346-78912' AND json_unquote(json_extract(`profile`,'$.\\\"name\\\"')) = 'test'"
+           });
+         });
+ 
+@@ -851,9 +851,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           prefix: 'User'
+         }, {
+           mariadb: "json_unquote(json_extract(`User`.`data`,'$.nested.attribute')) = 'value'",
+-          mysql: "(`User`.`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') = 'value'",
++          mysql: "json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
+           postgres: "(\"User\".\"data\"#>>'{nested,attribute}') = 'value'",
+-          sqlite: "json_extract(`User`.`data`, '$.nested.attribute') = 'value'"
++          sqlite: "json_extract(`User`.`data`,'$.nested.attribute') = 'value'"
+         });
+ 
+         testsql('data', {
+@@ -866,9 +866,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested')) AS DECIMAL) IN (1, 2)",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\"') AS DECIMAL) IN (1, 2)",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\"')) AS DECIMAL) IN (1, 2)",
+           postgres: "CAST((\"data\"#>>'{nested}') AS DOUBLE PRECISION) IN (1, 2)",
+-          sqlite: "CAST(json_extract(`data`, '$.nested') AS DOUBLE PRECISION) IN (1, 2)"
++          sqlite: "CAST(json_extract(`data`,'$.nested') AS DOUBLE PRECISION) IN (1, 2)"
+         });
+ 
+         testsql('data', {
+@@ -881,9 +881,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested')) AS DECIMAL) BETWEEN 1 AND 2",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\"') AS DECIMAL) BETWEEN 1 AND 2",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\"')) AS DECIMAL) BETWEEN 1 AND 2",
+           postgres: "CAST((\"data\"#>>'{nested}') AS DOUBLE PRECISION) BETWEEN 1 AND 2",
+-          sqlite: "CAST(json_extract(`data`, '$.nested') AS DOUBLE PRECISION) BETWEEN 1 AND 2"
++          sqlite: "CAST(json_extract(`data`,'$.nested') AS DOUBLE PRECISION) BETWEEN 1 AND 2"
+         });
+ 
+         testsql('data', {
+@@ -900,9 +900,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           prefix: current.literal(sql.quoteTable.call(current.dialect.QueryGenerator, { tableName: 'User' }))
+         }, {
+           mariadb: "(json_unquote(json_extract(`User`.`data`,'$.nested.attribute')) = 'value' AND json_unquote(json_extract(`User`.`data`,'$.nested.prop')) != 'None')",
+-          mysql: "((`User`.`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') = 'value' AND (`User`.`data`->>'$.\\\"nested\\\".\\\"prop\\\"') != 'None')",
++          mysql: "(json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value' AND json_unquote(json_extract(`User`.`data`,'$.\\\"nested\\\".\\\"prop\\\"')) != 'None')",
+           postgres: "((\"User\".\"data\"#>>'{nested,attribute}') = 'value' AND (\"User\".\"data\"#>>'{nested,prop}') != 'None')",
+-          sqlite: "(json_extract(`User`.`data`, '$.nested.attribute') = 'value' AND json_extract(`User`.`data`, '$.nested.prop') != 'None')"
++          sqlite: "(json_extract(`User`.`data`,'$.nested.attribute') = 'value' AND json_extract(`User`.`data`,'$.nested.prop') != 'None')"
+         });
+ 
+         testsql('data', {
+@@ -919,9 +919,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           prefix: 'User'
+         }, {
+           mariadb: "(json_unquote(json_extract(`User`.`data`,'$.name.last')) = 'Simpson' AND json_unquote(json_extract(`User`.`data`,'$.employment')) != 'None')",
+-          mysql: "((`User`.`data`->>'$.\\\"name\\\".\\\"last\\\"') = 'Simpson' AND (`User`.`data`->>'$.\\\"employment\\\"') != 'None')",
++          mysql: "(json_unquote(json_extract(`User`.`data`,'$.\\\"name\\\".\\\"last\\\"')) = 'Simpson' AND json_unquote(json_extract(`User`.`data`,'$.\\\"employment\\\"')) != 'None')",
+           postgres: "((\"User\".\"data\"#>>'{name,last}') = 'Simpson' AND (\"User\".\"data\"#>>'{employment}') != 'None')",
+-          sqlite: "(json_extract(`User`.`data`, '$.name.last') = 'Simpson' AND json_extract(`User`.`data`, '$.employment') != 'None')"
++          sqlite: "(json_extract(`User`.`data`,'$.name.last') = 'Simpson' AND json_extract(`User`.`data`,'$.employment') != 'None')"
+         });
+ 
+         testsql('data', {
+@@ -933,9 +933,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "(CAST(json_unquote(json_extract(`data`,'$.price')) AS DECIMAL) = 5 AND json_unquote(json_extract(`data`,'$.name')) = 'Product')",
+-          mysql: "(CAST((`data`->>'$.\\\"price\\\"') AS DECIMAL) = 5 AND (`data`->>'$.\\\"name\\\"') = 'Product')",
++          mysql: "(CAST(json_unquote(json_extract(`data`,'$.\\\"price\\\"')) AS DECIMAL) = 5 AND json_unquote(json_extract(`data`,'$.\\\"name\\\"')) = 'Product')",
+           postgres: "(CAST((\"data\"#>>'{price}') AS DOUBLE PRECISION) = 5 AND (\"data\"#>>'{name}') = 'Product')",
+-          sqlite: "(CAST(json_extract(`data`, '$.price') AS DOUBLE PRECISION) = 5 AND json_extract(`data`, '$.name') = 'Product')"
++          sqlite: "(CAST(json_extract(`data`,'$.price') AS DOUBLE PRECISION) = 5 AND json_extract(`data`,'$.name') = 'Product')"
+         });
+ 
+         testsql('data.nested.attribute', 'value', {
+@@ -948,9 +948,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "json_unquote(json_extract(`data`,'$.nested.attribute')) = 'value'",
+-          mysql: "(`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') = 'value'",
++          mysql: "json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
+           postgres: "(\"data\"#>>'{nested,attribute}') = 'value'",
+-          sqlite: "json_extract(`data`, '$.nested.attribute') = 'value'"
++          sqlite: "json_extract(`data`,'$.nested.attribute') = 'value'"
+         });
+ 
+         testsql('data.nested.attribute', 4, {
+@@ -963,9 +963,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) = 4",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') AS DECIMAL) = 4",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) = 4",
+           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) = 4",
+-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) = 4"
++          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) = 4"
+         });
+ 
+         testsql('data.nested.attribute', {
+@@ -980,9 +980,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) IN (3, 7)",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') AS DECIMAL) IN (3, 7)",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) IN (3, 7)",
+           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) IN (3, 7)",
+-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) IN (3, 7)"
++          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) IN (3, 7)"
+         });
+ 
+         testsql('data', {
+@@ -997,9 +997,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) > 2",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') AS DECIMAL) > 2",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) > 2",
+           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS DOUBLE PRECISION) > 2",
+-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS DOUBLE PRECISION) > 2"
++          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS DOUBLE PRECISION) > 2"
+         });
+ 
+         testsql('data', {
+@@ -1014,9 +1014,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "CAST(json_unquote(json_extract(`data`,'$.nested.attribute')) AS DECIMAL) > 2",
+-          mysql: "CAST((`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') AS DECIMAL) > 2",
++          mysql: "CAST(json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) AS DECIMAL) > 2",
+           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS INTEGER) > 2",
+-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS INTEGER) > 2"
++          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS INTEGER) > 2"
+         });
+ 
+         const dt = new Date();
+@@ -1032,9 +1032,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: `CAST(json_unquote(json_extract(\`data\`,'$.nested.attribute')) AS DATETIME) > ${sql.escape(dt)}`,
+-          mysql: `CAST((\`data\`->>'$.\\"nested\\".\\"attribute\\"') AS DATETIME) > ${sql.escape(dt)}`,
++          mysql: `CAST(json_unquote(json_extract(\`data\`,'$.\\"nested\\".\\"attribute\\"')) AS DATETIME) > ${sql.escape(dt)}`,
+           postgres: `CAST(("data"#>>'{nested,attribute}') AS TIMESTAMPTZ) > ${sql.escape(dt)}`,
+-          sqlite: `json_extract(\`data\`, '$.nested.attribute') > ${sql.escape(dt.toISOString())}`
++          sqlite: `json_extract(\`data\`,'$.nested.attribute') > ${sql.escape(dt.toISOString())}`
+         });
+ 
+         testsql('data', {
+@@ -1047,9 +1047,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "json_unquote(json_extract(`data`,'$.nested.attribute')) = 'true'",
+-          mysql: "(`data`->>'$.\\\"nested\\\".\\\"attribute\\\"') = 'true'",
++          mysql: "json_unquote(json_extract(`data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'true'",
+           postgres: "CAST((\"data\"#>>'{nested,attribute}') AS BOOLEAN) = true",
+-          sqlite: "CAST(json_extract(`data`, '$.nested.attribute') AS BOOLEAN) = 1"
++          sqlite: "CAST(json_extract(`data`,'$.nested.attribute') AS BOOLEAN) = 1"
+         });
+ 
+         testsql('metaData.nested.attribute', 'value', {
+@@ -1064,9 +1064,9 @@ describe(Support.getTestDialectTeaser('SQL'), () => {
+           }
+         }, {
+           mariadb: "json_unquote(json_extract(`meta_data`,'$.nested.attribute')) = 'value'",
+-          mysql: "(`meta_data`->>'$.\\\"nested\\\".\\\"attribute\\\"') = 'value'",
++          mysql: "json_unquote(json_extract(`meta_data`,'$.\\\"nested\\\".\\\"attribute\\\"')) = 'value'",
+           postgres: "(\"meta_data\"#>>'{nested,attribute}') = 'value'",
+-          sqlite: "json_extract(`meta_data`, '$.nested.attribute') = 'value'"
++          sqlite: "json_extract(`meta_data`,'$.nested.attribute') = 'value'"
+         });
+       });
+     }

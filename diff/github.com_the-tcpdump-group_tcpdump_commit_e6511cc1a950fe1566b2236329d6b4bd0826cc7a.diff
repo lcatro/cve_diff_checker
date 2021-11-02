@@ -1,0 +1,70 @@
+From e6511cc1a950fe1566b2236329d6b4bd0826cc7a Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Thu, 10 Aug 2017 00:01:55 +0100
+Subject: [PATCH] CVE-2017-13054/LLDP: add a missing length check
+
+In lldp_private_8023_print() the case block for subtype 4 (Maximum Frame
+Size TLV, IEEE 802.3bc-2009 Section 79.3.4) did not include the length
+check and could over-read the input buffer, put it right.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-lldp.c                  |   3 +++
+ tests/TESTLIST                |   1 +
+ tests/lldp_8023_mtu-oobr.out  |   4 ++++
+ tests/lldp_8023_mtu-oobr.pcap | Bin 0 -> 147 bytes
+ 4 files changed, 8 insertions(+)
+ create mode 100644 tests/lldp_8023_mtu-oobr.out
+ create mode 100644 tests/lldp_8023_mtu-oobr.pcap
+
+diff --git a/print-lldp.c b/print-lldp.c
+index add7e6a5f..e87b16bd0 100644
+--- a/print-lldp.c
++++ b/print-lldp.c
+@@ -898,6 +898,9 @@ lldp_private_8023_print(netdissect_options *ndo,
+         break;
+ 
+     case LLDP_PRIVATE_8023_SUBTYPE_MTU:
++        if (tlv_len < 6) {
++            return hexdump;
++        }
+         ND_PRINT((ndo, "\n\t    MTU size %u", EXTRACT_16BITS(tptr + 4)));
+         break;
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index a3e038b3f..eb0839e0c 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -571,6 +571,7 @@ rsvp_uni-oobr-1	rsvp_uni-oobr-1.pcap	rsvp_uni-oobr-1.out	-v -c1
+ rsvp_uni-oobr-2	rsvp_uni-oobr-2.pcap	rsvp_uni-oobr-2.out	-v -c1
+ rsvp_uni-oobr-3	rsvp_uni-oobr-3.pcap	rsvp_uni-oobr-3.out	-v -c3
+ rpki-rtr-oob		rpki-rtr-oob.pcap	rpki-rtr-oob.out	-v -c1
++lldp_8023_mtu-oobr	lldp_8023_mtu-oobr.pcap	lldp_8023_mtu-oobr.out	-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/lldp_8023_mtu-oobr.out b/tests/lldp_8023_mtu-oobr.out
+new file mode 100644
+index 000000000..518558396
+--- /dev/null
++++ b/tests/lldp_8023_mtu-oobr.out
+@@ -0,0 +1,4 @@
++LLDP, length 4293194266
++	Organization specific TLV (127), length 4: OUI IEEE 802.3 Private (0x00120f)
++	  Max frame size Subtype (4)
++	[|LLDP]
+diff --git a/tests/lldp_8023_mtu-oobr.pcap b/tests/lldp_8023_mtu-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc6d3df398cd55030b733b8c3a2419e5ea6f28ed
+GIT binary patch
+literal 147
+zcmca|c+)~A1{Q_}(R=^?|7U0rVPIfj1Y!r47t9O{4Giu;w#KI?|Mwp}uwYu<Z6G;&
+zZpWE_EDS>YEE<9g46;mpqQ8J@fS_LRmn?(@BISU%A%%hAKPQk84&o^DS^+6(km*1m
+T2BEfX+xGmwf+7@%0%=A7u!$s1
+
+literal 0
+HcmV?d00001
+

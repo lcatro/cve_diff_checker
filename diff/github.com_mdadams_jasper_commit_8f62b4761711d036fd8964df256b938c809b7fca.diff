@@ -1,0 +1,121 @@
+From 8f62b4761711d036fd8964df256b938c809b7fca Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Sat, 15 Oct 2016 20:32:23 -0700
+Subject: [PATCH] Fixed a sanitizer failure in the BMP codec. Also, added a
+ --debug-level command line option to the imginfo command for debugging
+ purposes.
+
+---
+ src/appl/imginfo.c          | 12 +++++++++++-
+ src/libjasper/bmp/bmp_dec.c | 13 ++++++++++++-
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/src/appl/imginfo.c b/src/appl/imginfo.c
+index 8af19e98..f458a977 100644
+--- a/src/appl/imginfo.c
++++ b/src/appl/imginfo.c
+@@ -85,7 +85,8 @@ typedef enum {
+ 	OPT_HELP,
+ 	OPT_VERSION,
+ 	OPT_VERBOSE,
+-	OPT_INFILE
++	OPT_INFILE,
++	OPT_DEBUG
+ } optid_t;
+ 
+ /******************************************************************************\
+@@ -104,6 +105,7 @@ static jas_opt_t opts[] = {
+ 	{OPT_VERSION, "version", 0},
+ 	{OPT_VERBOSE, "verbose", 0},
+ 	{OPT_INFILE, "f", JAS_OPT_HASARG},
++	{OPT_DEBUG, "debug-level", JAS_OPT_HASARG},
+ 	{-1, 0, 0}
+ };
+ 
+@@ -126,6 +128,7 @@ int main(int argc, char **argv)
+ 	int numcmpts;
+ 	int verbose;
+ 	char *fmtname;
++	int debug;
+ 
+ 	if (jas_init()) {
+ 		abort();
+@@ -135,6 +138,7 @@ int main(int argc, char **argv)
+ 
+ 	infile = 0;
+ 	verbose = 0;
++	debug = 0;
+ 
+ 	/* Parse the command line options. */
+ 	while ((id = jas_getopt(argc, argv, opts)) >= 0) {
+@@ -146,6 +150,9 @@ int main(int argc, char **argv)
+ 			printf("%s\n", JAS_VERSION);
+ 			exit(EXIT_SUCCESS);
+ 			break;
++		case OPT_DEBUG:
++			debug = atoi(jas_optarg);
++			break;
+ 		case OPT_INFILE:
+ 			infile = jas_optarg;
+ 			break;
+@@ -156,6 +163,8 @@ int main(int argc, char **argv)
+ 		}
+ 	}
+ 
++	jas_setdbglevel(debug);
++
+ 	/* Open the image file. */
+ 	if (infile) {
+ 		/* The image is to be read from a file. */
+@@ -177,6 +186,7 @@ int main(int argc, char **argv)
+ 
+ 	/* Decode the image. */
+ 	if (!(image = jas_image_decode(instream, fmtid, 0))) {
++		jas_stream_close(instream);
+ 		fprintf(stderr, "cannot load image\n");
+ 		return EXIT_FAILURE;
+ 	}
+diff --git a/src/libjasper/bmp/bmp_dec.c b/src/libjasper/bmp/bmp_dec.c
+index 7a6dcb15..6e7d8802 100644
+--- a/src/libjasper/bmp/bmp_dec.c
++++ b/src/libjasper/bmp/bmp_dec.c
+@@ -77,6 +77,7 @@
+ #include "jasper/jas_stream.h"
+ #include "jasper/jas_image.h"
+ #include "jasper/jas_malloc.h"
++#include "jasper/jas_debug.h"
+ 
+ #include "bmp_cod.h"
+ 
+@@ -122,12 +123,22 @@ jas_image_t *bmp_decode(jas_stream_t *in, char *optstr)
+ 		jas_eprintf("cannot get header\n");
+ 		return 0;
+ 	}
++	JAS_DBGLOG(1, (
++	  "BMP header: magic 0x%x; siz %d; res1 %d; res2 %d; off %d\n",
++	  hdr.magic, hdr.siz, hdr.reserved1, hdr.reserved2, hdr.off
++	  ));
+ 
+ 	/* Read the bitmap information. */
+ 	if (!(info = bmp_getinfo(in))) {
+ 		jas_eprintf("cannot get info\n");
+ 		return 0;
+ 	}
++	JAS_DBGLOG(1,
++	  ("BMP information: len %d; width %d; height %d; numplanes %d; "
++	  "depth %d; enctype %d; siz %d; hres %d; vres %d; numcolors %d; "
++	  "mincolors %d\n", info->len, info->width, info->height, info->numplanes,
++	  info->depth, info->enctype, info->siz, info->hres, info->vres,
++	  info->numcolors, info->mincolors));
+ 
+ 	/* Ensure that we support this type of BMP file. */
+ 	if (!bmp_issupported(&hdr, info)) {
+@@ -440,7 +451,7 @@ static int bmp_getint32(jas_stream_t *in, int_fast32_t *val)
+ 		if ((c = jas_stream_getc(in)) == EOF) {
+ 			return -1;
+ 		}
+-		v |= (c << 24);
++		v |= (JAS_CAST(uint_fast32_t, c) << 24);
+ 		if (--n <= 0) {
+ 			break;
+ 		}

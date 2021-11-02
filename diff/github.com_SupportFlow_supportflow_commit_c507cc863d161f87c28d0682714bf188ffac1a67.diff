@@ -1,0 +1,31 @@
+From c507cc863d161f87c28d0682714bf188ffac1a67 Mon Sep 17 00:00:00 2001
+From: Ian Dunn <ian@iandunn.name>
+Date: Mon, 20 Jun 2016 16:34:45 +0000
+Subject: [PATCH] Admin: Escape ticket excerpt on Tickets screen to avoid XSS.
+
+An attacker could submit the following payload via `[supportflow_submissionform]` to perform cross-site-scripting:
+
+`<script>alert('XSS');</script>`
+
+That attack has a CVSS score of 6.1 - https://www.first.org/cvss/calculator/3.0#CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N
+
+Props https://hackerone.com/whitehatter for discovering and disclosing responsibly.
+
+Fixes https://hackerone.com/reports/145091
+---
+ classes/class-supportflow-admin.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/classes/class-supportflow-admin.php b/classes/class-supportflow-admin.php
+index e4ff6b4..c6dac90 100644
+--- a/classes/class-supportflow-admin.php
++++ b/classes/class-supportflow-admin.php
+@@ -1185,7 +1185,7 @@ function action_manage_posts_custom_column( $column_name, $ticket_id ) {
+ 				if ( strlen( $first_reply ) > 50 ) {
+ 					$first_reply = substr( $first_reply, 0, 50 );
+ 				}
+-				echo $first_reply;
++				echo esc_html( $first_reply );
+ 				break;
+ 			case 'customers':
+ 				$customers = SupportFlow()->get_ticket_customers( $ticket_id, array( 'fields' => 'emails' ) );

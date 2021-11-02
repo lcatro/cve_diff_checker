@@ -1,0 +1,56 @@
+From 524d2e60cfe910406ec6109e4286d7edd545ab36 Mon Sep 17 00:00:00 2001
+From: Dhaval Kapil <dhavalkapil@fb.com>
+Date: Mon, 28 Oct 2019 23:06:25 -0700
+Subject: [PATCH] ext_mbstring: Fix invalid free() in php_mb_parse_encoding
+
+Summary:
+A chunk of memory allocated by 'req::calloc_noptrs' was being freed by 'free'. The former internally calls 'calloc' and returns a pointer at an index sizeof(MallocNode) inside the allocated buffer. This led to freeing invalid memory.
+
+CVE-2019-11930
+
+Reviewed By: jjergus
+
+Differential Revision: D18179908
+
+fbshipit-source-id: 0e3fe77628e0b9dee8361e712b8abac59ae5ed22
+---
+ hphp/runtime/ext/mbstring/ext_mbstring.cpp                 | 2 +-
+ hphp/test/slow/ext_mb/mb_detect_order_t54638796.php        | 7 +++++++
+ hphp/test/slow/ext_mb/mb_detect_order_t54638796.php.expect | 1 +
+ 3 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 hphp/test/slow/ext_mb/mb_detect_order_t54638796.php
+ create mode 100644 hphp/test/slow/ext_mb/mb_detect_order_t54638796.php.expect
+
+diff --git a/hphp/runtime/ext/mbstring/ext_mbstring.cpp b/hphp/runtime/ext/mbstring/ext_mbstring.cpp
+index 0766bfd210e7..7a8d15ed2f35 100644
+--- a/hphp/runtime/ext/mbstring/ext_mbstring.cpp
++++ b/hphp/runtime/ext/mbstring/ext_mbstring.cpp
+@@ -908,7 +908,7 @@ static bool php_mb_parse_encoding(const Variant& encoding,
+   }
+   if (!ret) {
+     if (return_list && *return_list) {
+-      free(*return_list);
++      req::free(*return_list);
+       *return_list = nullptr;
+     }
+     return_size = 0;
+diff --git a/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php b/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php
+new file mode 100644
+index 000000000000..15bea3e341e0
+--- /dev/null
++++ b/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php
+@@ -0,0 +1,7 @@
++<?hh
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++<<__EntryPoint>>
++function main() {
++  var_dump(mb_detect_order("UTF-8,\x2c"));
++}
+diff --git a/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php.expect b/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php.expect
+new file mode 100644
+index 000000000000..5c0c0681d9c1
+--- /dev/null
++++ b/hphp/test/slow/ext_mb/mb_detect_order_t54638796.php.expect
+@@ -0,0 +1 @@
++bool(false)

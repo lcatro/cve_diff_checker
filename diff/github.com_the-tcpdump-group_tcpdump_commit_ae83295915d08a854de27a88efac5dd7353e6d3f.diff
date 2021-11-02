@@ -1,0 +1,265 @@
+From ae83295915d08a854de27a88efac5dd7353e6d3f Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Thu, 23 Mar 2017 13:30:56 -0700
+Subject: [PATCH] CVE-2017-13033/VTP: Add more bound and length checks.
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+
+Update another VTP test's .out file for this change.
+
+Don't treate a TLV type or length of 0 as invalid; a type of 0 should
+just be reported as illegal if that type isn't used, and the length is
+the length of the *value*, not the length of the entire TLV, so if it's
+zero there won't be an infinite loop.  (It's still not *legal*, as the
+values of all the TLVs we handle are 1 16-bit word long; we added a
+check for that.)
+
+Update some comments while we're at it, to give a new URL for one Cisco
+page and a non-Cisco URL for another former Cisco page (Cisco's UniverCD
+pages don't seem to be available any more, and Cisco's robots.txt file
+didn't allow the Wayback Machine to archive it).
+---
+ print-vtp.c           | 142 ++++++++++++++++++++++++------------------
+ tests/TESTLIST        |   1 +
+ tests/vtp_asan-2.out  |   3 +-
+ tests/vtp_asan-3.out  |   2 +
+ tests/vtp_asan-3.pcap | Bin 0 -> 185 bytes
+ 5 files changed, 84 insertions(+), 64 deletions(-)
+ create mode 100644 tests/vtp_asan-3.out
+ create mode 100644 tests/vtp_asan-3.pcap
+
+diff --git a/print-vtp.c b/print-vtp.c
+index 18c1356ef..d153cc19a 100644
+--- a/print-vtp.c
++++ b/print-vtp.c
+@@ -13,9 +13,8 @@
+  * FOR A PARTICULAR PURPOSE.
+  *
+  * Reference documentation:
+- *  http://www.cisco.com/en/US/tech/tk389/tk689/technologies_tech_note09186a0080094c52.shtml
+- *  http://www.cisco.com/warp/public/473/21.html
+- *  http://www.cisco.com/univercd/cc/td/doc/product/lan/trsrb/frames.htm
++ *  http://www.cisco.com/c/en/us/support/docs/lan-switching/vtp/10558-21.html
++ *  http://docstore.mik.ua/univercd/cc/td/doc/product/lan/trsrb/frames.htm
+  *
+  * Original code ode by Carles Kishimoto <carles.kishimoto@gmail.com>
+  */
+@@ -36,7 +35,7 @@
+ #define	VTP_DOMAIN_NAME_LEN		32
+ #define	VTP_MD5_DIGEST_LEN		16
+ #define VTP_UPDATE_TIMESTAMP_LEN	12
+-#define VTP_VLAN_INFO_OFFSET		12
++#define VTP_VLAN_INFO_FIXED_PART_LEN	12	/* length of VLAN info before VLAN name */
+ 
+ #define VTP_SUMMARY_ADV			0x01
+ #define VTP_SUBSET_ADV			0x02
+@@ -252,6 +251,8 @@ vtp_print (netdissect_options *ndo,
+ 	    ND_TCHECK2(*tptr, len);
+ 
+ 	    vtp_vlan = (const struct vtp_vlan_*)tptr;
++	    if (len < VTP_VLAN_INFO_FIXED_PART_LEN)
++		goto trunc;
+ 	    ND_TCHECK(*vtp_vlan);
+ 	    ND_PRINT((ndo, "\n\tVLAN info status %s, type %s, VLAN-id %u, MTU %u, SAID 0x%08x, Name ",
+ 		   tok2str(vtp_vlan_status,"Unknown",vtp_vlan->status),
+@@ -259,22 +260,33 @@ vtp_print (netdissect_options *ndo,
+ 		   EXTRACT_16BITS(&vtp_vlan->vlanid),
+ 		   EXTRACT_16BITS(&vtp_vlan->mtu),
+ 		   EXTRACT_32BITS(&vtp_vlan->index)));
+-	    fn_printzp(ndo, tptr + VTP_VLAN_INFO_OFFSET, vtp_vlan->name_len, NULL);
+-
+-            /*
+-             * Vlan names are aligned to 32-bit boundaries.
+-             */
+-            len  -= VTP_VLAN_INFO_OFFSET + 4*((vtp_vlan->name_len + 3)/4);
+-            tptr += VTP_VLAN_INFO_OFFSET + 4*((vtp_vlan->name_len + 3)/4);
++	    len  -= VTP_VLAN_INFO_FIXED_PART_LEN;
++	    tptr += VTP_VLAN_INFO_FIXED_PART_LEN;
++	    if (len < 4*((vtp_vlan->name_len + 3)/4))
++		goto trunc;
++	    ND_TCHECK2(*tptr, vtp_vlan->name_len);
++	    fn_printzp(ndo, tptr, vtp_vlan->name_len, NULL);
++
++	    /*
++	     * Vlan names are aligned to 32-bit boundaries.
++	     */
++	    len  -= 4*((vtp_vlan->name_len + 3)/4);
++	    tptr += 4*((vtp_vlan->name_len + 3)/4);
+ 
+             /* TLV information follows */
+ 
+             while (len > 0) {
+ 
+                 /*
+-                 * Cisco specs says 2 bytes for type + 2 bytes for length, take only 1
+-                 * See: http://www.cisco.com/univercd/cc/td/doc/product/lan/trsrb/frames.htm
++                 * Cisco specs say 2 bytes for type + 2 bytes for length;
++                 * see http://docstore.mik.ua/univercd/cc/td/doc/product/lan/trsrb/frames.htm
++                 * However, actual packets on the wire appear to use 1
++                 * byte for the type and 1 byte for the length, so that's
++                 * what we do.
+                  */
++                if (len < 2)
++                    goto trunc;
++                ND_TCHECK2(*tptr, 2);
+                 type = *tptr;
+                 tlv_len = *(tptr+1);
+ 
+@@ -282,59 +294,65 @@ vtp_print (netdissect_options *ndo,
+                        tok2str(vtp_vlan_tlv_values, "Unknown", type),
+                        type));
+ 
+-                /*
+-                 * infinite loop check
+-                 */
+-                if (type == 0 || tlv_len == 0) {
++                if (len < tlv_len * 2 + 2) {
++                    ND_PRINT((ndo, " (TLV goes past the end of the packet)"));
+                     return;
+                 }
+-
+                 ND_TCHECK2(*tptr, tlv_len * 2 +2);
+ 
+-                tlv_value = EXTRACT_16BITS(tptr+2);
+-
+-                switch (type) {
+-                case VTP_VLAN_STE_HOP_COUNT:
+-                    ND_PRINT((ndo, ", %u", tlv_value));
+-                    break;
+-
+-                case VTP_VLAN_PRUNING:
+-                    ND_PRINT((ndo, ", %s (%u)",
+-                           tlv_value == 1 ? "Enabled" : "Disabled",
+-                           tlv_value));
+-                    break;
+-
+-                case VTP_VLAN_STP_TYPE:
+-                    ND_PRINT((ndo, ", %s (%u)",
+-                           tok2str(vtp_stp_type_values, "Unknown", tlv_value),
+-                           tlv_value));
+-                    break;
+-
+-                case VTP_VLAN_BRIDGE_TYPE:
+-                    ND_PRINT((ndo, ", %s (%u)",
+-                           tlv_value == 1 ? "SRB" : "SRT",
+-                           tlv_value));
+-                    break;
+-
+-                case VTP_VLAN_BACKUP_CRF_MODE:
+-                    ND_PRINT((ndo, ", %s (%u)",
+-                           tlv_value == 1 ? "Backup" : "Not backup",
+-                           tlv_value));
+-                    break;
+-
+-                    /*
+-                     * FIXME those are the defined TLVs that lack a decoder
+-                     * you are welcome to contribute code ;-)
+-                     */
+-
+-                case VTP_VLAN_SOURCE_ROUTING_RING_NUMBER:
+-                case VTP_VLAN_SOURCE_ROUTING_BRIDGE_NUMBER:
+-                case VTP_VLAN_PARENT_VLAN:
+-                case VTP_VLAN_TRANS_BRIDGED_VLAN:
+-                case VTP_VLAN_ARP_HOP_COUNT:
+-                default:
+-		    print_unknown_data(ndo, tptr, "\n\t\t  ", 2 + tlv_len*2);
+-                    break;
++                /*
++                 * We assume the value is a 2-byte integer; the length is
++                 * in units of 16-bit words.
++                 */
++                if (tlv_len != 1) {
++                    ND_PRINT((ndo, " (invalid TLV length %u != 1)", tlv_len));
++                    return;
++                } else {
++                    tlv_value = EXTRACT_16BITS(tptr+2);
++
++                    switch (type) {
++                    case VTP_VLAN_STE_HOP_COUNT:
++                        ND_PRINT((ndo, ", %u", tlv_value));
++                        break;
++
++                    case VTP_VLAN_PRUNING:
++                        ND_PRINT((ndo, ", %s (%u)",
++                               tlv_value == 1 ? "Enabled" : "Disabled",
++                               tlv_value));
++                        break;
++
++                    case VTP_VLAN_STP_TYPE:
++                        ND_PRINT((ndo, ", %s (%u)",
++                               tok2str(vtp_stp_type_values, "Unknown", tlv_value),
++                               tlv_value));
++                        break;
++
++                    case VTP_VLAN_BRIDGE_TYPE:
++                        ND_PRINT((ndo, ", %s (%u)",
++                               tlv_value == 1 ? "SRB" : "SRT",
++                               tlv_value));
++                        break;
++
++                    case VTP_VLAN_BACKUP_CRF_MODE:
++                        ND_PRINT((ndo, ", %s (%u)",
++                               tlv_value == 1 ? "Backup" : "Not backup",
++                               tlv_value));
++                        break;
++
++                        /*
++                         * FIXME those are the defined TLVs that lack a decoder
++                         * you are welcome to contribute code ;-)
++                         */
++
++                    case VTP_VLAN_SOURCE_ROUTING_RING_NUMBER:
++                    case VTP_VLAN_SOURCE_ROUTING_BRIDGE_NUMBER:
++                    case VTP_VLAN_PARENT_VLAN:
++                    case VTP_VLAN_TRANS_BRIDGED_VLAN:
++                    case VTP_VLAN_ARP_HOP_COUNT:
++                    default:
++                        print_unknown_data(ndo, tptr, "\n\t\t  ", 2 + tlv_len*2);
++                        break;
++                    }
+                 }
+                 len -= 2 + tlv_len*2;
+                 tptr += 2 + tlv_len*2;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index a2cb1f81f..f1fd6ae12 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -524,6 +524,7 @@ pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
+ pgm_opts_asan_3		pgm_opts_asan_3.pcap		pgm_opts_asan_3.out	-v
+ vtp_asan		vtp_asan.pcap			vtp_asan.out	-v
+ vtp_asan-2		vtp_asan-2.pcap			vtp_asan-2.out	-v
++vtp_asan-3		vtp_asan-3.pcap			vtp_asan-3.out	-v
+ icmp6_mobileprefix_asan	icmp6_mobileprefix_asan.pcap	icmp6_mobileprefix_asan.out	-v
+ ip_printroute_asan	ip_printroute_asan.pcap		ip_printroute_asan.out	-v
+ mobility_opt_asan	mobility_opt_asan.pcap		mobility_opt_asan.out	-v
+diff --git a/tests/vtp_asan-2.out b/tests/vtp_asan-2.out
+index 32c319da7..0a83b0983 100644
+--- a/tests/vtp_asan-2.out
++++ b/tests/vtp_asan-2.out
+@@ -1,3 +1,2 @@
+ FRF.16 Frag, seq 193, Flags [Begin, End], UI 08! VTPv69, Message Subset advertisement (0x02), length 2126400013
+-	Domain name: , Seq number: 0, Config Rev fb499603
+-	VLAN info status Unknown, type TrCRF, VLAN-id 256, MTU 771, SAID 0x03030303, Name ^C^I^C[|vtp]
++	Domain name: , Seq number: 0, Config Rev fb499603[|vtp]
+diff --git a/tests/vtp_asan-3.out b/tests/vtp_asan-3.out
+new file mode 100644
+index 000000000..695a9e90f
+--- /dev/null
++++ b/tests/vtp_asan-3.out
+@@ -0,0 +1,2 @@
++FRF.16 Frag, seq 193, Flags [Begin, End], UI 08! VTPv69, Message Subset advertisement (0x02), length 2126400013
++	Domain name: , Seq number: 0, Config Rev 4040404[|vtp]
+diff --git a/tests/vtp_asan-3.pcap b/tests/vtp_asan-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..98ad48bd6b81fbe27ebc624c4f4a1c870549dbfe
+GIT binary patch
+literal 185
+zcmca|c+)~A1{MYe2L>>ZVPs&~24tnoiAZH;5NMbPWJ`JNt2=P;Kwn!tM*{-`j{>tR
+n6N3c9T>b}d*9Zay7{aE_Sab6L3mt&0=d`%{2M;WmJ%<ATB~Kgo
+
+literal 0
+HcmV?d00001
+

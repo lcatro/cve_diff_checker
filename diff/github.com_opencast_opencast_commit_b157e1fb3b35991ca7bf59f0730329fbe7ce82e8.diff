@@ -1,0 +1,85 @@
+From b157e1fb3b35991ca7bf59f0730329fbe7ce82e8 Mon Sep 17 00:00:00 2001
+From: Lars Kiesow <lkiesow@uos.de>
+Date: Mon, 13 Jan 2020 23:55:50 +0100
+Subject: [PATCH] Authentication Bypass For Endpoints With Anonymous Access
+
+Using a remember-me cookie with an arbitrary username can cause Opencast
+to assume proper authentication for that user even if the remember-me
+cookie was incorrect given that the attacked endpoint also allows
+anonymous access.
+
+This way, an attacker can, for example, fake a remember-me token, assume
+the identity of the global system administrator and request non-public
+content from the search service without ever providing any proper
+authentication.
+
+The reason for this problem is that using a remember-me cookie will
+always cause the user in the request context to be populated, even if
+the cookie is invalid by now. This is usually no problem, except in
+combination with anonymous access where anonymous authentication is
+granted and the request may continue.
+
+In such a case, Opencast's security service would just check that a user
+existed in the request context and assume proper authentication of this
+user, never checking if it's actually anonymous authentication.
+
+This patch adds this additional check, falling back to the anonymous
+user in case of anonymous authentication.
+---
+ .../security/SecurityServiceSpringImpl.java      | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/modules/kernel/src/main/java/org/opencastproject/kernel/security/SecurityServiceSpringImpl.java b/modules/kernel/src/main/java/org/opencastproject/kernel/security/SecurityServiceSpringImpl.java
+index d6b9dbc5f31..3b643d4f5e4 100644
+--- a/modules/kernel/src/main/java/org/opencastproject/kernel/security/SecurityServiceSpringImpl.java
++++ b/modules/kernel/src/main/java/org/opencastproject/kernel/security/SecurityServiceSpringImpl.java
+@@ -32,6 +32,7 @@
+ 
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
++import org.springframework.security.authentication.AnonymousAuthenticationToken;
+ import org.springframework.security.core.Authentication;
+ import org.springframework.security.core.GrantedAuthority;
+ import org.springframework.security.core.context.SecurityContextHolder;
+@@ -94,15 +95,19 @@ public User getUser() throws IllegalStateException {
+ 
+     User delegatedUser = delegatedUserHolder.get();
+ 
++    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
++    if (auth instanceof AnonymousAuthenticationToken) {
++      return SecurityUtil.createAnonymousUser(org);
++    }
++
+     if (delegatedUser != null) {
+       return delegatedUser;
+     }
+ 
+-    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+     JaxbOrganization jaxbOrganization = JaxbOrganization.fromOrganization(org);
+     if (auth != null) {
+       Object principal = auth.getPrincipal();
+-      if ((principal != null) && (principal instanceof UserDetails)) {
++      if ((principal instanceof UserDetails)) {
+         UserDetails userDetails = (UserDetails) principal;
+ 
+         User user = null;
+@@ -111,16 +116,15 @@ public User getUser() throws IllegalStateException {
+         if (userDirectory != null) {
+           user = userDirectory.loadUser(userDetails.getUsername());
+           if (user == null) {
+-            logger.debug(
+-                    "Authenticated user '{}' could not be found in any of the current UserProviders. Continuing anyway...",
+-                    userDetails.getUsername());
++            logger.debug("Authenticated user '{}' could not be found in any of the current UserProviders. "
++                + "Continuing anyway...", userDetails.getUsername());
+           }
+         } else {
+           logger.debug("No UserDirectory was found when trying to search for user '{}'", userDetails.getUsername());
+         }
+ 
+         // Add the roles (authorities) in the security context
+-        Set<JaxbRole> roles = new HashSet<JaxbRole>();
++        Set<JaxbRole> roles = new HashSet<>();
+         Collection<? extends GrantedAuthority> authorities = auth.getAuthorities();
+         if (authorities != null) {
+           for (GrantedAuthority ga : authorities) {

@@ -1,0 +1,114 @@
+From 99818486c5b1d8aa445cee232825418d6834f249 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Tue, 4 Jun 2019 13:27:44 -0500
+Subject: [PATCH] security: CSV Formula Injection
+
+This addresses a security issue discovered by Aishwarya Iyer where a User
+can change their Full Name to a windows formula and when an Agent exports a
+list of Users containing said User and opens the export file, the formula
+will be executed on their computer (if it's windows of course). This adds a
+new validator called `is_formula()` to all text fields disallowing the use
+of the following characters `= + - @` at the beginning of text. This should
+mitigate CSV Formula injections for any text field that allows user-input in
+the system. To further prevent CSV Formula injections this adds an escape
+mechanism to the Exporter that will escape any content matching the formula
+regex with a single quote (as mentioned in many posts about this subject).
+---
+ include/class.export.php    |  8 +++++++-
+ include/class.forms.php     | 26 +++++++++++++++++++++++++-
+ include/class.user.php      |  2 +-
+ include/class.validator.php |  5 +++++
+ 4 files changed, 38 insertions(+), 3 deletions(-)
+
+diff --git a/include/class.export.php b/include/class.export.php
+index 7721862600..e93335cb06 100644
+--- a/include/class.export.php
++++ b/include/class.export.php
+@@ -356,7 +356,13 @@ function dump() {
+         fputs($this->output, chr(0xEF) . chr(0xBB) . chr(0xBF));
+         fputcsv($this->output, $this->getHeaders(), $delimiter);
+         while ($row=$this->next())
+-            fputcsv($this->output, $row, $delimiter);
++            fputcsv($this->output, array_map(
++                function($v){
++                    if (preg_match('/^[=\-+@].*/', $v))
++                        return "'".$v;
++                    return $v;
++                }, $row),
++            $delimiter);
+ 
+         fclose($this->output);
+     }
+diff --git a/include/class.forms.php b/include/class.forms.php
+index e806d00b07..122d2602ab 100644
+--- a/include/class.forms.php
++++ b/include/class.forms.php
+@@ -1300,7 +1300,8 @@ function validateEntry($value) {
+         parent::validateEntry($value);
+         $config = $this->getConfiguration();
+         $validators = array(
+-            '' =>       null,
++            '' =>       array(array('Validator', 'is_formula'),
++                __('Content cannot start with the following characters: = - + @')),
+             'email' =>  array(array('Validator', 'is_valid_email'),
+                 __('Enter a valid email address')),
+             'phone' =>  array(array('Validator', 'is_phone'),
+@@ -1379,6 +1380,29 @@ function getConfigurationOptions() {
+         );
+     }
+ 
++    function validateEntry($value) {
++        parent::validateEntry($value);
++        if (!$value)
++            return;
++        $config = $this->getConfiguration();
++        $validators = array(
++            '' =>       array(array('Validator', 'is_formula'),
++                __('Content cannot start with the following characters: = - + @')),
++        );
++        // Support configuration forms, as well as GUI-based form fields
++        if (!($valid = $this->get('validator')) && isset($config['validator']))
++            $valid = $config['validator'];
++        if (!isset($validators[$valid]))
++            return;
++        $func = $validators[$valid];
++        $error = $func[1];
++        if ($config['validator-error'])
++            $error = $this->getLocal('validator-error', $config['validator-error']);
++        if (is_array($func) && is_callable($func[0]))
++            if (!call_user_func($func[0], $value))
++                $this->_errors[] = $error;
++    }
++
+     function hasSpecialSearch() {
+         return false;
+     }
+diff --git a/include/class.user.php b/include/class.user.php
+index f991e10ad5..6f5238d5a2 100644
+--- a/include/class.user.php
++++ b/include/class.user.php
+@@ -248,7 +248,7 @@ static function fromForm($form, $create=true) {
+         //Validate the form
+         $valid = true;
+         $filter = function($f) use ($thisstaff) {
+-            return !isset($thisstaff) || $f->isRequiredForStaff();
++            return !isset($thisstaff) || $f->isRequiredForStaff() || $f->isVisibleToStaff();
+         };
+         if (!$form->isValid($filter))
+             $valid  = false;
+diff --git a/include/class.validator.php b/include/class.validator.php
+index 388d00ac92..b6b05ddcb8 100644
+--- a/include/class.validator.php
++++ b/include/class.validator.php
+@@ -204,6 +204,11 @@ static function is_username($username, &$error='') {
+         return $error == '';
+     }
+ 
++    static function is_formula($text, &$error='') {
++        if (!preg_match('/^[^=\+@-].*$/', $text))
++            $error = __('Content cannot start with the following characters: = - + @');
++        return $error == '';
++    }
+ 
+     /*
+      * check_ip

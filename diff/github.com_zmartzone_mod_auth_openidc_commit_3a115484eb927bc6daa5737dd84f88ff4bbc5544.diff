@@ -1,0 +1,49 @@
+From 69cb206225c749b51db980d44dc268eee5623f2b Mon Sep 17 00:00:00 2001
+From: Hans Zandbelt <hans.zandbelt@zmartzone.eu>
+Date: Thu, 22 Jul 2021 15:32:12 +0200
+Subject: [PATCH] replace potentially harmful backslashes with forward slashes
+ when validating redirection URLs
+
+---
+ ChangeLog              |  3 +++
+ src/mod_auth_openidc.c | 11 ++++++++++-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 93e0b79e..7f38c5d1 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,6 @@
++07/22/2021
++- replace potentially harmful backslashes with forward slashes when validating redirection URLs; thanks @thomas-chauchefoin-sonarsource
++
+ 07/15/2021
+ - verify that "alg" is not none in logout_token explicitly
+ - make session not found on backchannel logout produce a log warning instead of error
+diff --git a/src/mod_auth_openidc.c b/src/mod_auth_openidc.c
+index 518441e9..00b275e4 100644
+--- a/src/mod_auth_openidc.c
++++ b/src/mod_auth_openidc.c
+@@ -2920,12 +2920,21 @@ static int oidc_handle_logout_backchannel(request_rec *r, oidc_cfg *cfg) {
+ 	return rc;
+ }
+ 
++#define OIDC_MAX_URL_LENGTH DEFAULT_LIMIT_REQUEST_LINE * 2
++
+ static apr_byte_t oidc_validate_redirect_url(request_rec *r, oidc_cfg *c,
+-		const char *url, apr_byte_t restrict_to_host, char **err_str,
++		const char *redirect_to_url, apr_byte_t restrict_to_host, char **err_str,
+ 		char **err_desc) {
+ 	apr_uri_t uri;
+ 	const char *c_host = NULL;
+ 	apr_hash_index_t *hi = NULL;
++	size_t i = 0;
++	char *url = apr_pstrndup(r->pool, redirect_to_url, OIDC_MAX_URL_LENGTH);
++
++	// replace potentially harmful backslashes with forward slashes
++	for (i = 0; i < strlen(url); i++)
++		if (url[i] == '\\')
++			url[i] = '/';
+ 
+ 	if (apr_uri_parse(r->pool, url, &uri) != APR_SUCCESS) {
+ 		*err_str = apr_pstrdup(r->pool, "Malformed URL");

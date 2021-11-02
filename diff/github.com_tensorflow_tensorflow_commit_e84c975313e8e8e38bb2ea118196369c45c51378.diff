@@ -1,0 +1,31 @@
+From e84c975313e8e8e38bb2ea118196369c45c51378 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Tue, 27 Jul 2021 12:35:03 -0700
+Subject: [PATCH] In tf.raw_ops.BoostedTreesSparseCalculateBestFeatureSplit,
+ limit stat_dim in stats_summary_indices to under stats_dims in
+ stats_summary_shape
+
+PiperOrigin-RevId: 387171191
+Change-Id: I83ca8a75b22aa78c037e8b98779da6cced16bfaa
+---
+ tensorflow/core/kernels/boosted_trees/stats_ops.cc | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tensorflow/core/kernels/boosted_trees/stats_ops.cc b/tensorflow/core/kernels/boosted_trees/stats_ops.cc
+index 014c2ec22c9cf..2636909855a38 100644
+--- a/tensorflow/core/kernels/boosted_trees/stats_ops.cc
++++ b/tensorflow/core/kernels/boosted_trees/stats_ops.cc
+@@ -1050,6 +1050,13 @@ class BoostedTreesSparseCalculateBestFeatureSplitOp : public OpKernel {
+       const int32_t feature_dim = stats_summary_indices(idx, 1);
+       const int32_t bucket_id = stats_summary_indices(idx, 2);
+       const int32_t stat_dim = stats_summary_indices(idx, 3);
++      OP_REQUIRES(context, stat_dim < stats_dims,
++                  errors::InvalidArgument(
++                      "Stat dim, the sum of logits dim and hessian dim in "
++                      "stats_summary_indices, cannot be greater than stats "
++                      "dims, the last value in stats_summary_shape, which was ",
++                      stats_dims, ". At index (", idx,
++                      ", 4), stats_summary_indices contains value ", stat_dim));
+       std::pair<FeatureMapIterator, bool> const& f_insert_result = f_map.insert(
+           FeatureMapIterator::value_type(feature_dim, BucketMap()));
+       auto& b_map = f_insert_result.first->second;

@@ -1,0 +1,55 @@
+From 0789e21284c33d89ebc4ab4ca6f759b9375ac9d3 Mon Sep 17 00:00:00 2001
+From: Josh Junon <junon@wavetilt.com>
+Date: Fri, 5 Mar 2021 18:48:41 +0100
+Subject: [PATCH] fix ReDos in hwb() parser (low-severity)
+
+Discovered by Yeting Li, c/o Colin Ife via Snyk.io.
+
+A ReDos (Regular Expression Denial of Service) vulnerability
+was responsibly disclosed to me via email by Colin on
+Mar 5 2021 regarding an exponential time complexity for
+linearly increasing input lengths for `hwb()` color strings.
+
+Strings reaching more than 5000 characters would see several
+milliseconds of processing time; strings reaching more than
+50,000 characters began seeing 1500ms (1.5s) of processing time.
+
+The cause was due to a the regular expression that parses
+hwb() strings - specifically, the hue value - where
+the integer portion of the hue value used a 0-or-more quantifier
+shortly thereafter followed by a 1-or-more quantifier.
+
+This caused excessive backtracking and a cartesian scan,
+resulting in exponential time complexity given a linear
+increase in input length.
+
+Thank you Yeting Li and Colin Ife for bringing this to my
+attention in a secure, responsible and professional manner.
+
+A CVE will not be assigned for this vulnerability.
+---
+ index.js | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/index.js b/index.js
+index 7098c4c..25fba85 100644
+--- a/index.js
++++ b/index.js
+@@ -129,7 +129,7 @@ cs.get.hsl = function (string) {
+ 		return null;
+ 	}
+ 
+-	var hsl = /^hsla?\(\s*([+-]?(?:\d*\.)?\d+)(?:deg)?\s*,\s*([+-]?[\d\.]+)%\s*,\s*([+-]?[\d\.]+)%\s*(?:,\s*([+-]?[\d\.]+)\s*)?\)$/;
++	var hsl = /^hsla?\(\s*([+-]?(?:\d{0,3}\.)?\d+)(?:deg)?\s*,\s*([+-]?[\d\.]+)%\s*,\s*([+-]?[\d\.]+)%\s*(?:,\s*([+-]?[\d\.]+)\s*)?\)$/;
+ 	var match = string.match(hsl);
+ 
+ 	if (match) {
+@@ -150,7 +150,7 @@ cs.get.hwb = function (string) {
+ 		return null;
+ 	}
+ 
+-	var hwb = /^hwb\(\s*([+-]?\d*[\.]?\d+)(?:deg)?\s*,\s*([+-]?[\d\.]+)%\s*,\s*([+-]?[\d\.]+)%\s*(?:,\s*([+-]?[\d\.]+)\s*)?\)$/;
++	var hwb = /^hwb\(\s*([+-]?\d{0,3}(?:\.\d+)?)(?:deg)?\s*,\s*([+-]?[\d\.]+)%\s*,\s*([+-]?[\d\.]+)%\s*(?:,\s*([+-]?[\d\.]+)\s*)?\)$/;
+ 	var match = string.match(hwb);
+ 
+ 	if (match) {

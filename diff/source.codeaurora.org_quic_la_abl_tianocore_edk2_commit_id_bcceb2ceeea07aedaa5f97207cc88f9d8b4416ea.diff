@@ -1,0 +1,38 @@
+From bcceb2ceeea07aedaa5f97207cc88f9d8b4416ea Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Thu, 7 Sep 2017 15:22:51 +0800
+Subject: QcomModulePkg: Fix the array index out of bounds issue
+
+The length of platform hw string maybe is smaller than the chip
+id's length, it will cause the array index out of bounds issue.
+
+Change-Id: I97ff3e7eec4cf7b8cfa37cbe65ef1ce293fcc034
+---
+ QcomModulePkg/Library/BootLib/Board.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/Board.c b/QcomModulePkg/Library/BootLib/Board.c
+index f830e72..c4933f2 100644
+--- a/QcomModulePkg/Library/BootLib/Board.c
++++ b/QcomModulePkg/Library/BootLib/Board.c
+@@ -504,10 +504,15 @@ VOID BoardHwPlatformName(CHAR8 *StrHwPlatform, UINT32 Len)
+ 		return;
+ 	}
+ 
+-	Status = pChipInfoProtocol->GetChipIdString(pChipInfoProtocol, StrHwPlatform, EFICHIPINFO_MAX_ID_LENGTH);
++	Status = pChipInfoProtocol->GetChipIdString(pChipInfoProtocol, StrHwPlatform,
++		EFICHIPINFO_MAX_ID_LENGTH > Len ? Len : EFICHIPINFO_MAX_ID_LENGTH);
+ 	if (EFI_ERROR(Status)) {
+ 		DEBUG((EFI_D_ERROR, "Failed to Get the ChipIdString\n"));
+ 		return;
+ 	}
+-	StrHwPlatform[ChipIdValidLen-1] = '\0';
++
++	if (Len < ChipIdValidLen)
++		StrHwPlatform[Len - 1] = '\0';
++	else
++		StrHwPlatform[ChipIdValidLen - 1] = '\0';
+ }
+-- 
+cgit v1.1
+

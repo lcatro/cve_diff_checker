@@ -1,0 +1,112 @@
+From 03a8329b89c0d196ecdb54227a8113f24555ffc0 Mon Sep 17 00:00:00 2001
+From: flop25 <flop25@planete-flop.fr>
+Date: Wed, 28 Jun 2017 23:44:26 +0200
+Subject: [PATCH] adding pwg_token on permalink & cat_options
+
+and therefor solving issue:721
+---
+ admin/cat_options.php                         |  6 +++---
+ admin/permalinks.php                          | 13 ++++++++++---
+ admin/themes/default/template/cat_options.tpl |  1 +
+ admin/themes/default/template/permalinks.tpl  |  1 +
+ 4 files changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/admin/cat_options.php b/admin/cat_options.php
+index 41d5cd732b..042adfe960 100644
+--- a/admin/cat_options.php
++++ b/admin/cat_options.php
+@@ -38,13 +38,12 @@
+ // |                       modification registration                       |
+ // +-----------------------------------------------------------------------+
+ 
+-// print '<pre>';
+-// print_r($_POST);
+-// print '</pre>';
++
+ if (isset($_POST['falsify'])
+     and isset($_POST['cat_true'])
+     and count($_POST['cat_true']) > 0)
+ {
++  check_pwg_token();
+   switch ($_GET['section'])
+   {
+     case 'comments' :
+@@ -246,6 +245,7 @@
+ }
+ display_select_cat_wrapper($query_true,array(),'category_option_true');
+ display_select_cat_wrapper($query_false,array(),'category_option_false');
++$template->assign('PWG_TOKEN',get_pwg_token());
+ 
+ // +-----------------------------------------------------------------------+
+ // |                           sending html code                           |
+diff --git a/admin/permalinks.php b/admin/permalinks.php
+index e09a2130b5..d39faf9b5e 100644
+--- a/admin/permalinks.php
++++ b/admin/permalinks.php
+@@ -85,6 +85,7 @@ function parse_sort_variables(
+ $selected_cat = array();
+ if ( isset($_POST['set_permalink']) and $_POST['cat_id']>0 )
+ {
++  check_pwg_token();
+   $permalink = $_POST['permalink'];
+   if ( empty($permalink) )
+     delete_cat_permalink($_POST['cat_id'], isset($_POST['save']) );
+@@ -94,6 +95,7 @@ function parse_sort_variables(
+ }
+ elseif ( isset($_GET['delete_permanent']) )
+ {
++  check_pwg_token();
+   $query = '
+ DELETE FROM '.OLD_PERMALINKS_TABLE.'
+   WHERE permalink=\''.$_GET['delete_permanent'].'\'
+@@ -125,6 +127,7 @@ function parse_sort_variables(
+ 
+ display_select_cat_wrapper( $query, $selected_cat, 'categories', false );
+ 
++$pwg_token = get_pwg_token();
+ 
+ // --- generate display of active permalinks -----------------------------------
+ $sort_by = parse_sort_variables(
+@@ -178,12 +181,16 @@ function parse_sort_variables(
+   $row['U_DELETE'] =
+       add_url_params(
+         $url_del_base,
+-        array( 'delete_permanent'=> $row['permalink'] )
++        array('delete_permanent'=> $row['permalink'],'pwg_token'=>$pwg_token)
+       );
+   $deleted_permalinks[] = $row;
+ }
+-$template->assign('deleted_permalinks', $deleted_permalinks);
+-$template->assign('U_HELP', get_root_url().'admin/popuphelp.php?page=permalinks');
++
++$template->assign(array(
++  'PWG_TOKEN' => $pwg_token,
++  'U_HELP' => get_root_url().'admin/popuphelp.php?page=permalinks',
++  'deleted_permalinks' => $deleted_permalinks,
++  ));
+ 
+ $template->assign_var_from_handle('ADMIN_CONTENT', 'permalinks');
+ ?>
+diff --git a/admin/themes/default/template/cat_options.tpl b/admin/themes/default/template/cat_options.tpl
+index 9c25c1ef0f..ef66cbe13a 100644
+--- a/admin/themes/default/template/cat_options.tpl
++++ b/admin/themes/default/template/cat_options.tpl
+@@ -7,5 +7,6 @@
+     <legend>{$L_SECTION}</legend>
+     {$DOUBLE_SELECT}
+   </fieldset>
++<input type="hidden" name="pwg_token" value="{$PWG_TOKEN}">
+ </form>
+ 
+diff --git a/admin/themes/default/template/permalinks.tpl b/admin/themes/default/template/permalinks.tpl
+index 15857e3ea5..6480489497 100644
+--- a/admin/themes/default/template/permalinks.tpl
++++ b/admin/themes/default/template/permalinks.tpl
+@@ -59,6 +59,7 @@ form fieldset p.actionButtons {margin-bottom:0}
+     <a href="#" id="addPermalinkClose">{'Cancel'|@translate}</a>
+   </p>
+ </fieldset>
++<input type="hidden" name="pwg_token" value="{$PWG_TOKEN}">
+ </form>
+ 
+ <fieldset>

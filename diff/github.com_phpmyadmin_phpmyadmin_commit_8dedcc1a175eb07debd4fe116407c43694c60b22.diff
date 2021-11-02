@@ -1,0 +1,50 @@
+From 8dedcc1a175eb07debd4fe116407c43694c60b22 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 25 Jan 2016 12:43:03 +0100
+Subject: [PATCH] Use secure RNG if available
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Recent browsers come with better RNG, so let's use it for generating
+password instead of Math.random if available.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ js/functions.js | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/js/functions.js b/js/functions.js
+index 2f30de41633..d47b014558c 100644
+--- a/js/functions.js
++++ b/js/functions.js
+@@ -322,11 +322,28 @@ function suggestPassword(passwd_form)
+     var pwchars = "abcdefhjmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWYXZ";
+     var passwordlength = 16;    // do we want that to be dynamic?  no, keep it simple :)
+     var passwd = passwd_form.generated_pw;
++    var randomWords = new Int32Array(passwordlength);
++
+     passwd.value = '';
+ 
++    // First we're going to try to use a built-in CSPRNG
++    if (window.crypto && window.crypto.getRandomValues) {
++        window.crypto.getRandomValues(randomWords);
++    }
++    // Because of course IE calls it msCrypto instead of being standard
++    else if (window.msCrypto && window.msCrypto.getRandomValues) {
++        window.msCrypto.getRandomValues(randomWords);
++    } else {
++        // Fallback to Math.random
++        for (var i = 0; i < passwordlength; i++) {
++            randomWords[i] = Math.floor(Math.random() * pwchars.length);
++        }
++    }
++
+     for (var i = 0; i < passwordlength; i++) {
+-        passwd.value += pwchars.charAt(Math.floor(Math.random() * pwchars.length));
++        passwd.value += pwchars.charAt(Math.abs(randomWords[i]) % pwchars.length);
+     }
++
+     passwd_form.text_pma_pw.value = passwd.value;
+     passwd_form.text_pma_pw2.value = passwd.value;
+     return true;

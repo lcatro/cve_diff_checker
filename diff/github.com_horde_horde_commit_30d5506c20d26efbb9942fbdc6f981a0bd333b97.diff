@@ -1,0 +1,57 @@
+From 30d5506c20d26efbb9942fbdc6f981a0bd333b97 Mon Sep 17 00:00:00 2001
+From: Jan Schneider <jan@horde.org>
+Date: Tue, 16 Aug 2016 14:46:21 +0200
+Subject: [PATCH] Fix XSS with data:html links and form actions.
+
+The academically correct way to filter out xlink hrefs should have been to use hasAttributeNS/getAttributeNS with the XLink namespace. But from my testing browsers don't care about that namespace at all, and only use the xlink: prefix. This means that even if you correctly specify a different prefix for the XLink NS, the links won't be detected by the browser. xlink: prefixes OTOH even work without specifying the XLink namespace in the XML document.
+
+Reported By: Liuzhu <fantasy7082@hotmail.com>
+---
+ .../Text_Filter/lib/Horde/Text/Filter/Xss.php    | 16 ++++++++++++----
+ .../test/Horde/Text/Filter/XssTest.php           |  5 ++++-
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/framework/Text_Filter/lib/Horde/Text/Filter/Xss.php b/framework/Text_Filter/lib/Horde/Text/Filter/Xss.php
+index e8556783d85..419283e06fc 100644
+--- a/framework/Text_Filter/lib/Horde/Text/Filter/Xss.php
++++ b/framework/Text_Filter/lib/Horde/Text/Filter/Xss.php
+@@ -109,11 +109,19 @@ protected function _node($node)
+ 
+             switch (Horde_String::lower($node->tagName)) {
+             case 'a':
+-                /* Strip out data URLs living in an A HREF element
++            case 'form':
++                /* Strip out data URLs living in link-like elements
+                  * (Bug #8715). */
+-                if ($node->hasAttribute('href') &&
+-                    preg_match("/\s*data:/i", $node->getAttribute('href'))) {
+-                    $remove[] = 'href';
++                if (Horde_String::lower($node->tagName) == 'form') {
++                    $attributes = array('action');
++                } else {
++                    $attributes = array('href', 'xlink:href');
++                }
++                foreach ($attributes as $attribute) {
++                    if ($node->hasAttribute($attribute) &&
++                        preg_match("/\s*data:/i", $node->getAttribute($attribute))) {
++                        $remove[] = $attribute;
++                    }
+                 }
+                 break;
+ 
+diff --git a/framework/Text_Filter/test/Horde/Text/Filter/XssTest.php b/framework/Text_Filter/test/Horde/Text/Filter/XssTest.php
+index 088ead9ea05..5093952c2d1 100644
+--- a/framework/Text_Filter/test/Horde/Text/Filter/XssTest.php
++++ b/framework/Text_Filter/test/Horde/Text/Filter/XssTest.php
+@@ -139,7 +139,10 @@ public function xssProvider()
+             array('<body/onload=alert(/xss/)>', ''),
+             array('<img src=""> <BODY ONLOAD="a();"><SCRIPT>function a(){alert(\'XSS\');}</SCRIPT><"" />', '<img src=""/>'),
+             array('<img src=\'blank.jpg\'style=\'width:expression(alert("xssed"))\'>', '<img src="blank.jpg"/>'),
+-            array($framedata, '')
++            array($framedata, ''),
++            array('<svg><a xlink:href="data:text/html,<script>alert(/XSS/)</script>"><rect width="1000" height="1000" fill="white"/></a></svg>', '<svg><a><rect width="1000" height="1000" fill="white"/></a></svg>'),
++            array('<math><a xlink:href="data:text/html,<script>alert(/XSS/)</script>">click</a></math>', '<math><a>click</a></math>'),
++            array('<form action="data:text/html,<script>alert(/XSS/)</script>"><button></form>', '<form><button/></form>'),
+         );
+     }
+ 

@@ -1,0 +1,38 @@
+From 3ea2a5a026e73d81cd9a3e9bbd4300c433004bfa Mon Sep 17 00:00:00 2001
+From: Mathy Vanhoef <mathy.vanhoef@nyu.edu>
+Date: Wed, 5 Jun 2019 19:21:06 +0000
+Subject: [PATCH] EAP-pwd: fix side-channel leak where 1 in 2018 handshakes
+ fail
+
+Previously the Hunting and Pecking algorithm of EAP-pwd aborted when
+more than 10 iterations are needed. Every iteration has a 50% chance
+of finding the password element. This means one in every 2048 handshakes
+will fail, in which case an error frame is sent to the client. This
+event leaks information that can be abused in an offline password
+brute-force attack. More precisely, the adversary learns that all 10
+iterations failed for the given random EAP-pwd token. Using the same
+techniques as in the Dragonblood attack, this can be used to brute-force
+the password.
+
+This patch fixes the above issue by executing enough iterations such that
+the password element is always found eventually.
+
+Note that timing and cache leaks remain a risk against the current
+implementation of EAP-pwd.
+---
+ src/modules/rlm_eap/types/rlm_eap_pwd/eap_pwd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/modules/rlm_eap/types/rlm_eap_pwd/eap_pwd.c b/src/modules/rlm_eap/types/rlm_eap_pwd/eap_pwd.c
+index c54f08c0308..d94851c3aa0 100644
+--- a/src/modules/rlm_eap/types/rlm_eap_pwd/eap_pwd.c
++++ b/src/modules/rlm_eap/types/rlm_eap_pwd/eap_pwd.c
+@@ -192,7 +192,7 @@ int compute_password_element (pwd_session_t *session, uint16_t grp_num,
+ 	}
+ 	ctr = 0;
+ 	while (1) {
+-		if (ctr > 10) {
++		if (ctr > 100) {
+ 			DEBUG("unable to find random point on curve for group %d, something's fishy", grp_num);
+ 			goto fail;
+ 		}

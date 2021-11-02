@@ -1,0 +1,32 @@
+From bbb4af56003c1afdad67af0c4339267ca38b1017 Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Mon, 11 Jun 2018 03:03:25 +0200
+Subject: [PATCH] Fix #10294 - crash in r2_hoobr__6502_op
+
+---
+ libr/anal/p/anal_6502.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/libr/anal/p/anal_6502.c b/libr/anal/p/anal_6502.c
+index 6d002447722..770980f2f2b 100644
+--- a/libr/anal/p/anal_6502.c
++++ b/libr/anal/p/anal_6502.c
+@@ -682,9 +682,15 @@ static int _6502_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int le
+ 		op->cycles = 2;
+ 		op->failcycles = 3;
+ 		op->type = R_ANAL_OP_TYPE_CJMP;
+-		if (data[1] <= 127)
+-			op->jump = addr + data[1] + op->size;
+-		else	op->jump = addr - (256 - data[1]) + op->size;
++		if (len > 1) {
++			if (data[1] <= 127) {
++				op->jump = addr + data[1] + op->size;
++			} else {
++				op->jump = addr - (256 - data[1]) + op->size;
++			}
++		} else {
++			op->jump = addr;
++		}
+ 		op->fail = addr + op->size;
+ 		// FIXME: add a type of conditional
+ 		// op->cond = R_ANAL_COND_LE;

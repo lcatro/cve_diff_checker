@@ -1,0 +1,37 @@
+From 2cc35d8625b7ea5cbd1d1ebb116aff86c5280162 Mon Sep 17 00:00:00 2001
+From: Peter Powell <petpow@saberuk.com>
+Date: Tue, 20 Aug 2019 16:17:18 +0100
+Subject: [PATCH] Initialise and deallocate the MySQL library correctly.
+
+---
+ src/modules/extra/m_mysql.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/modules/extra/m_mysql.cpp b/src/modules/extra/m_mysql.cpp
+index 159a0b8b23..e268505d91 100644
+--- a/src/modules/extra/m_mysql.cpp
++++ b/src/modules/extra/m_mysql.cpp
+@@ -380,6 +380,9 @@ ModuleSQL::ModuleSQL()
+ 
+ void ModuleSQL::init()
+ {
++	if (mysql_library_init(0, NULL, NULL))
++		throw ModuleException("Unable to initialise the MySQL library!");
++
+ 	Dispatcher = new DispatcherThread(this);
+ 	ServerInstance->Threads->Start(Dispatcher);
+ 
+@@ -397,10 +400,13 @@ ModuleSQL::~ModuleSQL()
+ 		Dispatcher->OnNotify();
+ 		delete Dispatcher;
+ 	}
++
+ 	for(ConnMap::iterator i = connections.begin(); i != connections.end(); i++)
+ 	{
+ 		delete i->second;
+ 	}
++
++	mysql_library_end();
+ }
+ 
+ void ModuleSQL::OnRehash(User* user)

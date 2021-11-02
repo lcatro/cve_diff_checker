@@ -1,0 +1,86 @@
+From c0f13e56a20f9bde5a67d873a7f9564487160762 Mon Sep 17 00:00:00 2001
+From: Evan Lucas <evanlucas@me.com>
+Date: Tue, 27 Sep 2016 10:42:32 -0500
+Subject: [PATCH] http: check reason chars in writeHead
+
+Previously, the reason argument passed to ServerResponse#writeHead was
+not being properly validated.  One could pass CRLFs which could lead to
+http response splitting. This commit changes the behavior to throw an
+error in the event any invalid characters are included in the reason.
+
+CVE-2016-5325
+
+PR-URL: https://github.com/nodejs/node-private/pull/60
+Reviewed-By: Fedor Indutny <fedor.indutny@gmail.com>
+---
+ lib/_http_server.js                           |  3 ++
+ .../test-http-status-reason-invalid-chars.js  | 46 +++++++++++++++++++
+ 2 files changed, 49 insertions(+)
+ create mode 100644 test/parallel/test-http-status-reason-invalid-chars.js
+
+diff --git a/lib/_http_server.js b/lib/_http_server.js
+index d0f0fbe5d5bb..731c95bb44a5 100644
+--- a/lib/_http_server.js
++++ b/lib/_http_server.js
+@@ -191,6 +191,9 @@ ServerResponse.prototype.writeHead = function(statusCode, reason, obj) {
+   if (statusCode < 100 || statusCode > 999)
+     throw new RangeError(`Invalid status code: ${statusCode}`);
+ 
++  if (common._checkInvalidHeaderChar(this.statusMessage))
++    throw new Error('Invalid character in statusMessage.');
++
+   var statusLine = 'HTTP/1.1 ' + statusCode.toString() + ' ' +
+                    this.statusMessage + CRLF;
+ 
+diff --git a/test/parallel/test-http-status-reason-invalid-chars.js b/test/parallel/test-http-status-reason-invalid-chars.js
+new file mode 100644
+index 000000000000..7a8564a90613
+--- /dev/null
++++ b/test/parallel/test-http-status-reason-invalid-chars.js
+@@ -0,0 +1,46 @@
++'use strict';
++
++const common = require('../common');
++const assert = require('assert');
++const http = require('http');
++
++function explicit(req, res) {
++  assert.throws(() => {
++    res.writeHead(200, `OK\r\nContent-Type: text/html\r\n`);
++  }, /Invalid character in statusMessage/);
++
++  assert.throws(() => {
++    res.writeHead(200, 'OK\u010D\u010AContent-Type: gotcha\r\n');
++  }, /Invalid character in statusMessage/);
++
++  res.statusMessage = 'OK';
++  res.end();
++}
++
++function implicit(req, res) {
++  assert.throws(() => {
++    res.statusMessage = `OK\r\nContent-Type: text/html\r\n`;
++    res.writeHead(200);
++  }, /Invalid character in statusMessage/);
++  res.statusMessage = 'OK';
++  res.end();
++}
++
++const server = http.createServer((req, res) => {
++  if (req.url === '/explicit') {
++    explicit(req, res);
++  } else {
++    implicit(req, res);
++  }
++}).listen(common.PORT, common.mustCall(() => {
++  const url = `http://localhost:${common.PORT}`;
++  let left = 2;
++  const check = common.mustCall((res) => {
++    left--;
++    assert.notEqual(res.headers['content-type'], 'text/html');
++    assert.notEqual(res.headers['content-type'], 'gotcha');
++    if (left === 0) server.close();
++  }, 2);
++  http.get(`${url}/explicit`, check).end();
++  http.get(`${url}/implicit`, check).end();
++}));

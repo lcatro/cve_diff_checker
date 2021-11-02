@@ -1,0 +1,87 @@
+From f76d3beb46abd121892a2e2e5c78376354c214e3 Mon Sep 17 00:00:00 2001
+From: Vitaly Puzrin <vitaly@rcdesign.ru>
+Date: Tue, 31 Mar 2015 00:04:25 +0300
+Subject: [PATCH] Disabled data URIs (allow only some whitelisted images)
+
+---
+ lib/index.js                      | 31 ++++++++++++++++++++++++++-----
+ test/fixtures/markdown-it/xss.txt | 15 +++++++++++++++
+ 2 files changed, 41 insertions(+), 5 deletions(-)
+
+diff --git a/lib/index.js b/lib/index.js
+index abc15256..320b9835 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -20,20 +20,41 @@ var config = {
+   commonmark: require('./presets/commonmark')
+ };
+ 
+-
+-var BAD_PROTOCOLS    = [ 'vbscript', 'javascript', 'file' ];
++////////////////////////////////////////////////////////////////////////////////
++//
++// This validator does not pretent to functionality of full weight sanitizers.
++// It's a tradeoff between default security, simplicity and usability.
++// If you need different setup - override validator method as you wish. Or
++// replace it with dummy function and use external sanitizer.
++//
++
++var BAD_PROTOCOLS      = [ 'vbscript', 'javascript', 'file', 'data' ];
++var ALLOWED_DATA_MIMES = [
++  'data:image/gif',
++  'data:image/png',
++  'data:image/jpeg',
++  'data:image/webp'
++];
+ 
+ function validateLink(url) {
+   // url should be normalized at this point, and existing entities are decoded
+-  //
+-  var str = url.trim().toLowerCase();
+ 
+-  if (str.indexOf(':') >= 0 && BAD_PROTOCOLS.indexOf(str.split(':')[0]) >= 0) {
++  var str      = url.trim().toLowerCase(),
++      protocol = str.split(':')[0];
++
++  if (str.indexOf(':') >= 0 && BAD_PROTOCOLS.indexOf(protocol) >= 0) {
++    if (protocol === 'data' && ALLOWED_DATA_MIMES.indexOf(str.split(';')[0]) >= 0) {
++      return true;
++    }
+     return false;
+   }
++
+   return true;
+ }
+ 
++////////////////////////////////////////////////////////////////////////////////
++
++
+ var RECODE_HOSTNAME_FOR = [ 'http:', 'https:', 'mailto:' ];
+ 
+ function normalizeLink(url) {
+diff --git a/test/fixtures/markdown-it/xss.txt b/test/fixtures/markdown-it/xss.txt
+index 25eb3615..99bfa42a 100644
+--- a/test/fixtures/markdown-it/xss.txt
++++ b/test/fixtures/markdown-it/xss.txt
+@@ -53,6 +53,21 @@ Should not allow some protocols in links and images
+ .
+ 
+ 
++Should not allow data-uri except some whitelisted mimes
++.
++![](data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7)
++.
++<p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt=""></p>
++.
++
++.
++[xss link](data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4K)
++.
++<p>[xss link](data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4K)</p>
++.
++
++
++
+ Image parser use the same code base.
+ .
+ ![xss link](javascript:alert(1))

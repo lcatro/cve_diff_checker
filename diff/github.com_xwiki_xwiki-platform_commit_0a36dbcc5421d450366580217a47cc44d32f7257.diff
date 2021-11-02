@@ -1,0 +1,174 @@
+From 0a36dbcc5421d450366580217a47cc44d32f7257 Mon Sep 17 00:00:00 2001
+From: Simon Urli <simon.urli@xwiki.com>
+Date: Wed, 3 Mar 2021 15:51:46 +0100
+Subject: [PATCH] XWIKI-18315: Bad check in reset password form.
+
+---
+ .../resources/ApplicationResources.properties |   1 +
+ .../main/webapp/templates/register_macros.vm  | 126 +++++++++---------
+ 2 files changed, 67 insertions(+), 60 deletions(-)
+
+diff --git a/xwiki-platform-core/xwiki-platform-oldcore/src/main/resources/ApplicationResources.properties b/xwiki-platform-core/xwiki-platform-oldcore/src/main/resources/ApplicationResources.properties
+index bb79124e637..b53165e1555 100644
+--- a/xwiki-platform-core/xwiki-platform-oldcore/src/main/resources/ApplicationResources.properties
++++ b/xwiki-platform-core/xwiki-platform-oldcore/src/main/resources/ApplicationResources.properties
+@@ -1629,6 +1629,7 @@ core.register.password=Password
+ core.register.passwordRepeat=Confirm Password
+ core.register.email=Email Address
+ core.register.submit=Register
++core.register.badCSRF=Bad CSRF token.
+ 
+ # User account validation
+ core.users.activation.validationKey.label=Validation key:
+diff --git a/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/register_macros.vm b/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/register_macros.vm
+index 0667667f902..6e8ada698a2 100644
+--- a/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/register_macros.vm
++++ b/xwiki-platform-core/xwiki-platform-web/src/main/webapp/templates/register_macros.vm
+@@ -172,6 +172,7 @@ $xwiki.get('ssfx').use('uicomponents/widgets/validation/livevalidation.css', tru
+     #end
+   #end
+   </dl>
++  <input type="hidden" name="form_token" value="$services.csrf.getToken()" ∕>
+   #generateJavascript($fields)
+ #end
+ ##
+@@ -311,74 +312,79 @@ $xwiki.get('ssfx').use('uicomponents/widgets/validation/livevalidation.css', tru
+ #macro(validateFields, $fields, $request)
+   #set ($allFieldsValid = true)
+   #set ($allFieldsErrors = [])
+-  #foreach($field in $fields)
+-    #if($field.get('validate') && $field.get('name'))
+-      #set($fieldName = $field.get('name'))
+-      #set($validate = $field.get('validate'))
+-      #set($error = '')
+-      #set($value = $request.get($fieldName))
+-      #if("$!value" != '' || $field.get('type') == 'html')
+-      ##
+-      ## mustMatch validation
+-        #if($error == '' && $validate.get('mustMatch'))
+-          #set($mustMatch = $validate.get('mustMatch'))
+-          #if($mustMatch.get('name') && $mustMatch.get('failureMessage'))
+-            #if($request.get($fieldName) != $request.get($mustMatch.get('name')))
+-              #set($error = $mustMatch.get('failureMessage'))
++  #if (!$services.csrf.isTokenValid($request.form_token))
++    #set ($allFieldsValid = false)
++    #set ($discard = $allFieldsErrors.add($services.localization.render('core.register.badCSRF')))
++  #else
++    #foreach($field in $fields)
++      #if($field.get('validate') && $field.get('name'))
++        #set($fieldName = $field.get('name'))
++        #set($validate = $field.get('validate'))
++        #set($error = '')
++        #set($value = $request.get($fieldName))
++        #if("$!value" != '' || $field.get('type') == 'html')
++        ##
++        ## mustMatch validation
++          #if($error == '' && $validate.get('mustMatch'))
++            #set($mustMatch = $validate.get('mustMatch'))
++            #if($mustMatch.get('name') && $mustMatch.get('failureMessage'))
++              #if($request.get($fieldName) != $request.get($mustMatch.get('name')))
++                #set($error = $mustMatch.get('failureMessage'))
++              #end
++            #else
++            ERROR: In field: ${fieldName}: mustMatch validation required both name
++            (of field which this field must match) and failureMessage.
+             #end
+-          #else
+-          ERROR: In field: ${fieldName}: mustMatch validation required both name
+-          (of field which this field must match) and failureMessage.
+           #end
+-        #end
+-      ##
+-      ## Regex validation
+-      ## We won't bother with regex validation if there is no entry, that would defeat the purpose of 'mandatory'
+-        #if($error == '' && $validate.get('regex') && $value && $value != '')
+-          #set($regex = $validate.get('regex'))
+-          #validateRegex($value, $fieldName, $regex, $error)
+-        #end
+-      ## List of regex validation
+-        #if($error == '' && $validate.get('regexes') && $value && $value != '')
+-          #set($regexes = $validate.get('regexes'))
+-          #foreach ($regex in $regexes)
++        ##
++        ## Regex validation
++        ## We won't bother with regex validation if there is no entry, that would defeat the purpose of 'mandatory'
++          #if($error == '' && $validate.get('regex') && $value && $value != '')
++            #set($regex = $validate.get('regex'))
+             #validateRegex($value, $fieldName, $regex, $error)
+           #end
+-        #end
+-      ##
+-      ## If regex and mustMatch validation passed, try programmatic validation
+-        #if($error == '' && $validate.get('programmaticValidation'))
+-          #set($pv = $validate.get('programmaticValidation'))
+-          #if($pv.get('code') && $pv.get('failureMessage'))
+-            #set($pvReturn = "#evaluate($pv.get('code'))")
+-            #if($pvReturn.indexOf('failed') != -1)
+-              #set($error = $pv.get('failureMessage'))
++        ## List of regex validation
++          #if($error == '' && $validate.get('regexes') && $value && $value != '')
++            #set($regexes = $validate.get('regexes'))
++            #foreach ($regex in $regexes)
++              #validateRegex($value, $fieldName, $regex, $error)
+             #end
+-          #else
+-          ERROR: In field: ${fieldName}: programmaticValidation requires code and failureMessage
+           #end
+-        #end
+-      #else
+-      ##
+-      ## If no content, check if content is mandatory
+-        #if($validate.get('mandatory'))
+-          #set($mandatory = $validate.get('mandatory'))
+-          #if($mandatory.get('failureMessage'))
+-            #set($error = $mandatory.get('failureMessage'))
+-          #else
+-          ERROR: In field: ${fieldName}: mandatory validation requires a failureMessage
++        ##
++        ## If regex and mustMatch validation passed, try programmatic validation
++          #if($error == '' && $validate.get('programmaticValidation'))
++            #set($pv = $validate.get('programmaticValidation'))
++            #if($pv.get('code') && $pv.get('failureMessage'))
++              #set($pvReturn = "#evaluate($pv.get('code'))")
++              #if($pvReturn.indexOf('failed') != -1)
++                #set($error = $pv.get('failureMessage'))
++              #end
++            #else
++            ERROR: In field: ${fieldName}: programmaticValidation requires code and failureMessage
++            #end
++          #end
++        #else
++        ##
++        ## If no content, check if content is mandatory
++          #if($validate.get('mandatory'))
++            #set($mandatory = $validate.get('mandatory'))
++            #if($mandatory.get('failureMessage'))
++              #set($error = $mandatory.get('failureMessage'))
++            #else
++            ERROR: In field: ${fieldName}: mandatory validation requires a failureMessage
++            #end
+           #end
+         #end
+-      #end
+-      #if($error != '')
+-        #set($discard = $field.put('error', $error))
+-        #set ($discard = $allFieldsErrors.add($error))
+-        #set($allFieldsValid = false)
+-      #end
+-    #elseif(!$field.get('name'))
+-    ERROR: Field with no name.
+-    #end##if(validate)
+-  #end##loop
++        #if($error != '')
++          #set($discard = $field.put('error', $error))
++          #set ($discard = $allFieldsErrors.add($error))
++          #set($allFieldsValid = false)
++        #end
++      #elseif(!$field.get('name'))
++      ERROR: Field with no name.
++      #end##if(validate)
++    #end##loop
++  #end ## CSRF check
+ #end##macro
+ 
+ #*

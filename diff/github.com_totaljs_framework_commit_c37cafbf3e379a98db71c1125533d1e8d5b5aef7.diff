@@ -1,0 +1,56 @@
+From c37cafbf3e379a98db71c1125533d1e8d5b5aef7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Peter=20S=CC=8Cirka?= <petersirka@gmail.com>
+Date: Thu, 14 Feb 2019 00:17:23 +0100
+Subject: [PATCH] Improved security.
+
+---
+ index.js     | 15 +++++++++++++--
+ package.json |  2 +-
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/index.js b/index.js
+index 1d947f00..798c4be9 100755
+--- a/index.js
++++ b/index.js
+@@ -68,7 +68,6 @@ const REG_ENCODINGCLEANER = /[;\s]charset=utf-8/g;
+ const REG_SKIPERROR = /epipe|invalid\sdistance/i;
+ const REG_OLDCONF = /-/g;
+ const REG_UTF8 = /[^\x20-\x7E]+/;
+-const REG_TRAVEL = /(\/)?\.\.\//g;
+ const FLAGS_INSTALL = ['get'];
+ const FLAGS_DOWNLOAD = ['get', 'dnscache'];
+ const QUERYPARSEROPTIONS = { maxKeys: 33 };
+@@ -7327,7 +7326,19 @@ F.listener = function(req, res) {
+ 	var headers = req.headers;
+ 	req.$protocol = ((req.connection && req.connection.encrypted) || ((headers['x-forwarded-proto'] || ['x-forwarded-protocol']) === 'https')) ? 'https' : 'http';
+ 
+-	req.url = req.url.replace(REG_TRAVEL, '');
++	var beg = 0;
++
++	// Removes directory browsing
++	for (var i = 0; i < req.url.length; i++) {
++		if (req.url[i] === '.' && req.url[i + 1] === '/')
++			beg = i + 1;
++		else if (req.url[i] === '?')
++			break;
++	}
++
++	if (beg)
++		req.url = req.url.substring(beg);
++
+ 	req.uri = framework_internal.parseURI(req);
+ 
+ 	F.stats.request.request++;
+diff --git a/package.json b/package.json
+index 0c891412..a3577e22 100755
+--- a/package.json
++++ b/package.json
+@@ -99,7 +99,7 @@
+         "name": "Sarp Aykent",
+         "email": "shackhers@gmail.com"
+     }],
+-    "version": "3.2.0",
++    "version": "3.2.1",
+     "homepage": "http://www.totaljs.com",
+     "bugs": {
+         "url": "https://github.com/totaljs/framework/issues",

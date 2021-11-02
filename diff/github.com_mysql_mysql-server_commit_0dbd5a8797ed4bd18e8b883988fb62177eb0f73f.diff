@@ -1,0 +1,246 @@
+From 0dbd5a8797ed4bd18e8b883988fb62177eb0f73f Mon Sep 17 00:00:00 2001
+From: Harin Vadodaria <harin.vadodaria@oracle.com>
+Date: Fri, 6 Nov 2015 16:41:55 +0530
+Subject: [PATCH] Bug#21973610: BUFFER OVERFLOW ISSUES
+
+Description : Incorrect usage of sprintf/strcpy caused
+              possible buffer overflow issues at various
+              places.
+
+Solution : - Fixed mysql_plugin and mysqlshow
+           - Fixed regex library issues
+
+Reviewed-By : Georgi Kodinov <georgi.kodinov@oracle.com>
+Reviewed-By : Venkata S Murthy Sidagam <venkata.sidagam@oracle.com>
+---
+ client/mysql_plugin.c  | 10 ++++++++--
+ client/mysqlshow.c     | 35 +++++++++++++++++++++--------------
+ libmysql/conf_to_src.c |  4 ++--
+ regex/main.c           | 17 +++++++++++------
+ 4 files changed, 42 insertions(+), 24 deletions(-)
+
+diff --git a/client/mysql_plugin.c b/client/mysql_plugin.c
+index cf212b16f244..293bd6727cfb 100644
+--- a/client/mysql_plugin.c
++++ b/client/mysql_plugin.c
+@@ -1,5 +1,5 @@
+ /*
+-   Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
++   Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ 
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -406,7 +406,7 @@ static int get_default_values()
+ static void usage(void)
+ {
+   PRINT_VERSION;
+-  puts("Copyright (c) 2011, Oracle and/or its affiliates. "
++  puts("Copyright (c) 2011, 2015, Oracle and/or its affiliates. "
+        "All rights reserved.\n");
+   puts("Enable or disable plugins.");
+   printf("\nUsage: %s [options] <plugin> ENABLE|DISABLE\n\nOptions:\n",
+@@ -757,6 +757,11 @@ static int check_options(int argc, char **argv, char *operation)
+     /* read the plugin config file and check for match against argument */
+     else
+     {
++      if (strlen(argv[i]) + 4 + 1 > FN_REFLEN)
++      {
++        fprintf(stderr, "ERROR: argument is too long.\n");
++        return 1;
++      }
+       strcpy(plugin_name, argv[i]);
+       strcpy(config_file, argv[i]);
+       strcat(config_file, ".ini");
+@@ -848,6 +853,7 @@ static int process_options(int argc, char *argv[], char *operation)
+     if (opt_basedir[i-1] != FN_LIBCHAR || opt_basedir[i-1] != FN_LIBCHAR2)
+     {
+       char buff[FN_REFLEN];
++      memset(buff, 0, sizeof(buff));
+       
+       strncpy(buff, opt_basedir, sizeof(buff) - 1);
+ #ifdef __WIN__
+diff --git a/client/mysqlshow.c b/client/mysqlshow.c
+index a6705548bcba..6cbbc5e2463b 100644
+--- a/client/mysqlshow.c
++++ b/client/mysqlshow.c
+@@ -377,7 +377,7 @@ list_dbs(MYSQL *mysql,const char *wild)
+   uint length, counter = 0;
+   ulong rowcount = 0L;
+   char tables[NAME_LEN+1], rows[NAME_LEN+1];
+-  char query[255];
++  char query[NAME_LEN + 100];
+   MYSQL_FIELD *field;
+   MYSQL_RES *result;
+   MYSQL_ROW row= NULL, rrow;
+@@ -444,7 +444,8 @@ list_dbs(MYSQL *mysql,const char *wild)
+             MYSQL_ROW trow;
+ 	    while ((trow = mysql_fetch_row(tresult)))
+ 	    {
+-	      sprintf(query,"SELECT COUNT(*) FROM `%s`",trow[0]);
++              my_snprintf(query, sizeof(query),
++                          "SELECT COUNT(*) FROM `%s`", trow[0]);
+ 	      if (!(mysql_query(mysql,query)))
+ 	      {
+ 		MYSQL_RES *rresult;
+@@ -500,7 +501,7 @@ list_tables(MYSQL *mysql,const char *db,const char *table)
+ {
+   const char *header;
+   uint head_length, counter = 0;
+-  char query[255], rows[NAME_LEN], fields[16];
++  char query[NAME_LEN + 100], rows[NAME_LEN], fields[16];
+   MYSQL_FIELD *field;
+   MYSQL_RES *result;
+   MYSQL_ROW row, rrow;
+@@ -585,7 +586,8 @@ list_tables(MYSQL *mysql,const char *db,const char *table)
+ 	  if (opt_verbose > 1)
+ 	  {
+             /* Print the count of rows for each table */
+-	    sprintf(query,"SELECT COUNT(*) FROM `%s`",row[0]);
++            my_snprintf(query, sizeof(query), "SELECT COUNT(*) FROM `%s`",
++                        row[0]);
+ 	    if (!(mysql_query(mysql,query)))
+ 	    {
+ 	      if ((rresult = mysql_store_result(mysql)))
+@@ -645,13 +647,15 @@ list_tables(MYSQL *mysql,const char *db,const char *table)
+ static int
+ list_table_status(MYSQL *mysql,const char *db,const char *wild)
+ {
+-  char query[1024],*end;
++  char query[NAME_LEN + 100];
++  int len;
+   MYSQL_RES *result;
+   MYSQL_ROW row;
+ 
+-  end=strxmov(query,"show table status from `",db,"`",NullS);
+-  if (wild && wild[0])
+-    strxmov(end," like '",wild,"'",NullS);
++  len= sizeof(query);
++  len-= my_snprintf(query, len, "show table status from `%s`", db);
++  if (wild && wild[0] && len)
++    strxnmov(query + strlen(query), len, " like '", wild, "'", NullS);
+   if (mysql_query(mysql,query) || !(result=mysql_store_result(mysql)))
+   {
+     fprintf(stderr,"%s: Cannot get status for db: %s, table: %s: %s\n",
+@@ -683,7 +687,8 @@ static int
+ list_fields(MYSQL *mysql,const char *db,const char *table,
+ 	    const char *wild)
+ {
+-  char query[1024],*end;
++  char query[NAME_LEN + 100];
++  int len;
+   MYSQL_RES *result;
+   MYSQL_ROW row;
+   ulong UNINIT_VAR(rows);
+@@ -697,7 +702,7 @@ list_fields(MYSQL *mysql,const char *db,const char *table,
+ 
+   if (opt_count)
+   {
+-    sprintf(query,"select count(*) from `%s`", table);
++    my_snprintf(query, sizeof(query), "select count(*) from `%s`", table);
+     if (mysql_query(mysql,query) || !(result=mysql_store_result(mysql)))
+     {
+       fprintf(stderr,"%s: Cannot get record count for db: %s, table: %s: %s\n",
+@@ -709,9 +714,11 @@ list_fields(MYSQL *mysql,const char *db,const char *table,
+     mysql_free_result(result);
+   }
+ 
+-  end=strmov(strmov(strmov(query,"show /*!32332 FULL */ columns from `"),table),"`");
+-  if (wild && wild[0])
+-    strxmov(end," like '",wild,"'",NullS);
++  len= sizeof(query);
++  len-= my_snprintf(query, len, "show /*!32332 FULL */ columns from `%s`",
++                    table);
++  if (wild && wild[0] && len)
++    strxnmov(query + strlen(query), len, " like '", wild, "'", NullS);
+   if (mysql_query(mysql,query) || !(result=mysql_store_result(mysql)))
+   {
+     fprintf(stderr,"%s: Cannot list columns in db: %s, table: %s: %s\n",
+@@ -732,7 +739,7 @@ list_fields(MYSQL *mysql,const char *db,const char *table,
+   print_res_top(result);
+   if (opt_show_keys)
+   {
+-    end=strmov(strmov(strmov(query,"show keys from `"),table),"`");
++    my_snprintf(query, sizeof(query), "show keys from `%s`", table);
+     if (mysql_query(mysql,query) || !(result=mysql_store_result(mysql)))
+     {
+       fprintf(stderr,"%s: Cannot list keys in db: %s, table: %s: %s\n",
+diff --git a/libmysql/conf_to_src.c b/libmysql/conf_to_src.c
+index a5a7d23db0b5..0e92388c93c1 100644
+--- a/libmysql/conf_to_src.c
++++ b/libmysql/conf_to_src.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
++/* Copyright (c) 2000, 2015, Oracle and/or its affiliates. All rights reserved.
+ 
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -118,7 +118,7 @@ print_arrays_for(char *set)
+ {
+   FILE *f;
+ 
+-  sprintf(buf, "%s.conf", set);
++  snprintf(buf, sizeof(buf), "%s.conf", set);
+ 
+   if ((f = fopen(buf, "r")) == NULL) {
+     fprintf(stderr, "%s: can't read conf file for charset %s\n", prog, set);
+diff --git a/regex/main.c b/regex/main.c
+index f5b591907cf0..d35d5a937344 100644
+--- a/regex/main.c
++++ b/regex/main.c
+@@ -425,7 +425,8 @@ char *should;
+ 				(sub.rm_so != -1 && sub.rm_eo == -1) ||
+ 				(sub.rm_so != -1 && sub.rm_so < 0) ||
+ 				(sub.rm_eo != -1 && sub.rm_eo < 0) ) {
+-		sprintf(grump, "start %ld end %ld", (long)sub.rm_so,
++		snprintf(grump, sizeof(grump),
++			 "start %ld end %ld", (long)sub.rm_so,
+ 							(long)sub.rm_eo);
+ 		return(grump);
+ 	}
+@@ -438,7 +439,8 @@ char *should;
+ 
+ 	/* check for in range */
+ 	if ((int) sub.rm_eo > (int) strlen(str)) {
+-		sprintf(grump, "start %ld end %ld, past end of string",
++		snprintf(grump, sizeof(grump),
++			 "start %ld end %ld, past end of string",
+ 					(long)sub.rm_so, (long)sub.rm_eo);
+ 		return(grump);
+ 	}
+@@ -449,13 +451,15 @@ char *should;
+ 
+ 	/* check for not supposed to match */
+ 	if (should == NULL) {
+-		sprintf(grump, "matched `%.*s'", len, p);
++		snprintf(grump, sizeof(grump),
++			 "matched `%.*s'", len, p);
+ 		return(grump);
+ 	}
+ 
+ 	/* check for wrong match */
+ 	if (len != shlen || strncmp(p, should, (size_t)shlen) != 0) {
+-		sprintf(grump, "matched `%.*s' instead", len, p);
++		snprintf(grump, sizeof(grump),
++			 "matched `%.*s' instead", len, p);
+ 		return(grump);
+ 	}
+ 	if (shlen > 0)
+@@ -468,7 +472,8 @@ char *should;
+ 	if (shlen == 0)
+ 		shlen = 1;	/* force check for end-of-string */
+ 	if (strncmp(p, at, shlen) != 0) {
+-		sprintf(grump, "matched null at `%.20s'", p);
++		snprintf(grump, sizeof(grump),
++			 "matched null at `%.20s'", p);
+ 		return(grump);
+ 	}
+ 	return(NULL);
+@@ -501,7 +506,7 @@ char *name;
+ 	static char efbuf[100];
+ 	my_regex_t re;
+ 
+-	sprintf(efbuf, "REG_%s", name);
++	snprintf(efbuf, sizeof(efbuf), "REG_%s", name);
+ 	assert(strlen(efbuf) < sizeof(efbuf));
+ 	re.re_endp = efbuf;
+ 	(void) my_regerror(REG_ATOI, &re, efbuf, sizeof(efbuf));

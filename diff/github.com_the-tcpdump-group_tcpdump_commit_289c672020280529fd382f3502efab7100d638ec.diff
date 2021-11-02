@@ -1,0 +1,159 @@
+From 289c672020280529fd382f3502efab7100d638ec Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Mon, 7 Aug 2017 22:43:20 +0100
+Subject: [PATCH] CVE-2017-13051/RSVP: fix bounds checks for UNI
+
+Fixup the part of rsvp_obj_print() that decodes the GENERALIZED_UNI
+object from RFC 3476 Section 3.1 to check the sub-objects inside that
+object more thoroughly.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-rsvp.c               |  19 ++++++++++++++++++-
+ tests/TESTLIST             |   3 +++
+ tests/rsvp_uni-oobr-1.out  |   5 +++++
+ tests/rsvp_uni-oobr-1.pcap | Bin 0 -> 112 bytes
+ tests/rsvp_uni-oobr-2.out  |   5 +++++
+ tests/rsvp_uni-oobr-2.pcap | Bin 0 -> 112 bytes
+ tests/rsvp_uni-oobr-3.out  |  12 ++++++++++++
+ tests/rsvp_uni-oobr-3.pcap | Bin 0 -> 321 bytes
+ 8 files changed, 43 insertions(+), 1 deletion(-)
+ create mode 100644 tests/rsvp_uni-oobr-1.out
+ create mode 100644 tests/rsvp_uni-oobr-1.pcap
+ create mode 100644 tests/rsvp_uni-oobr-2.out
+ create mode 100644 tests/rsvp_uni-oobr-2.pcap
+ create mode 100644 tests/rsvp_uni-oobr-3.out
+ create mode 100644 tests/rsvp_uni-oobr-3.pcap
+
+diff --git a/print-rsvp.c b/print-rsvp.c
+index bc599796a..b0fb34469 100644
+--- a/print-rsvp.c
++++ b/print-rsvp.c
+@@ -1205,6 +1205,17 @@ rsvp_obj_print(netdissect_options *ndo,
+ 		/* read variable length subobjects */
+ 		total_subobj_len = obj_tlen;
+                 while(total_subobj_len > 0) {
++                    /* If RFC 3476 Section 3.1 defined that a sub-object of the
++                     * GENERALIZED_UNI RSVP object must have the Length field as
++                     * a multiple of 4, instead of the check below it would be
++                     * better to test total_subobj_len only once before the loop.
++                     * So long as it does not define it and this while loop does
++                     * not implement such a requirement, let's accept that within
++                     * each iteration subobj_len may happen to be a multiple of 1
++                     * and test it and total_subobj_len respectively.
++                     */
++                    if (total_subobj_len < 4)
++                        goto invalid;
+                     subobj_len  = EXTRACT_16BITS(obj_tptr);
+                     subobj_type = (EXTRACT_16BITS(obj_tptr+2))>>8;
+                     af = (EXTRACT_16BITS(obj_tptr+2))&0x00FF;
+@@ -1216,7 +1227,13 @@ rsvp_obj_print(netdissect_options *ndo,
+                            tok2str(af_values, "Unknown", af), af,
+                            subobj_len));
+ 
+-                    if(subobj_len == 0)
++                    /* In addition to what is explained above, the same spec does not
++                     * explicitly say that the same Length field includes the 4-octet
++                     * sub-object header, but as long as this while loop implements it
++                     * as it does include, let's keep the check below consistent with
++                     * the rest of the code.
++                     */
++                    if(subobj_len < 4 || subobj_len > total_subobj_len)
+                         goto invalid;
+ 
+                     switch(subobj_type) {
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 62e705bf3..1681849a0 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -567,6 +567,9 @@ bgp_pmsi_tunnel-oobr	bgp_pmsi_tunnel-oobr.pcap	bgp_pmsi_tunnel-oobr.out -v -c1
+ bgp_mvpn_6_and_7	bgp_mvpn_6_and_7.pcap		bgp_mvpn_6_and_7.out	-v -c1
+ rsvp_fast_reroute-oobr	rsvp_fast_reroute-oobr.pcap	rsvp_fast_reroute-oobr.out -v -c1
+ esis_opt_prot-oobr	esis_opt_prot-oobr.pcap		esis_opt_prot-oobr.out	-v -c1
++rsvp_uni-oobr-1	rsvp_uni-oobr-1.pcap	rsvp_uni-oobr-1.out	-v -c1
++rsvp_uni-oobr-2	rsvp_uni-oobr-2.pcap	rsvp_uni-oobr-2.out	-v -c1
++rsvp_uni-oobr-3	rsvp_uni-oobr-3.pcap	rsvp_uni-oobr-3.out	-v -c3
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/rsvp_uni-oobr-1.out b/tests/rsvp_uni-oobr-1.out
+new file mode 100644
+index 000000000..f5da6e7e9
+--- /dev/null
++++ b/tests/rsvp_uni-oobr-1.out
+@@ -0,0 +1,5 @@
++IP (tos 0x2,ECT(0), ttl 248, id 0, offset 0, flags [none], proto RSVP (46), length 54312, bad cksum 3743 (->7e72)!)
++    54.35.0.0 > 58.16.0.0: 
++	RSVPv1 Hello Message (20), Flags: [Refresh reduction capable], length: 65527, ttl: 15, checksum: 0x0902
++	  Generalized UNI Object (229) Flags: [ignore and forward if unknown], Class-Type: 1 (1), length: 12
++	    Subobject Type: Unknown (127), AF: HDLC (4), length: 2 (invalid)
+diff --git a/tests/rsvp_uni-oobr-1.pcap b/tests/rsvp_uni-oobr-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..16d20240f619bba2bd27bb6dfb87a4d46db36e76
+GIT binary patch
+literal 112
+zcmca|c+)~A1{MZR2?mDZw!55W3=9m63=9su+ZY&Fm>u4N_)JoAObjo7H}Ek{J%3=q
+z?718au1r@nfD#Np^vs>jlo=ST1Q-~kML3!G>;Hde;Caf(z*Nt|$OzH|5|-r`fC@7(
+F0RR^w8%h8G
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/rsvp_uni-oobr-2.out b/tests/rsvp_uni-oobr-2.out
+new file mode 100644
+index 000000000..cc41acd13
+--- /dev/null
++++ b/tests/rsvp_uni-oobr-2.out
+@@ -0,0 +1,5 @@
++IP (tos 0x2,ECT(0), ttl 248, id 0, offset 0, flags [none], proto RSVP (46), length 54312, bad cksum 3743 (->3051)!)
++    54.35.78.33 > 58.16.0.0: 
++	RSVPv1 Hello Message (20), Flags: [Refresh reduction capable], length: 65527, ttl: 15, checksum: 0x0902
++	  Generalized UNI Object (229) Flags: [ignore and forward if unknown], Class-Type: 1 (1), length: 12
++	    Subobject Type: Unknown (0), AF: HDLC (4), length: 2 (invalid)
+diff --git a/tests/rsvp_uni-oobr-2.pcap b/tests/rsvp_uni-oobr-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9265ce93fee20e0ee3e503ab0c1e639535f83c2
+GIT binary patch
+literal 112
+zcmca|c+)~A1{MZR2?mDZw!55W3=9m63=9su+ZY&Fm>u4N_)JoAObjo7H}Ek{J%3=q
+z?718au1r@nfD#Np^vs>jl>HQ~1Q-~kML3!G>;Hde;Caf(05p>E6(dj+L|EWEM3{jI
+E057T={{R30
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/rsvp_uni-oobr-3.out b/tests/rsvp_uni-oobr-3.out
+new file mode 100644
+index 000000000..3afa86e7c
+--- /dev/null
++++ b/tests/rsvp_uni-oobr-3.out
+@@ -0,0 +1,12 @@
++IP (tos 0x0, ttl 48, id 25615, offset 0, flags [+, DF, rsvd], proto UDP (17), length 61735, bad cksum 8ef1 (->10e1)!)
++    1.2.3.3.1812 > 64.112.0.96.4567:  wb-29!
++IP (tos 0x2,ECT(0), ttl 248, id 0, offset 0, flags [none], proto RSVP (46), length 54312, bad cksum 3701 (->8972)!)
++    54.35.0.0 > 47.16.0.0: 
++	RSVPv1 Hello Message (20), Flags: [Refresh reduction capable], length: 65527, ttl: 15, checksum: 0x0902
++	  Generalized UNI Object (229) Flags: [ignore and forward if unknown], Class-Type: 1 (1), length: 12
++	    Subobject Type: Unknown (0), AF: HDLC (4), length: 1 (invalid)
++IP (tos 0x2,ECT(0), ttl 248, id 0, offset 0, flags [none], proto RSVP (46), length 54312, bad cksum 3701 (->7e72)!)
++    54.35.0.0 > 58.16.0.0: 
++	RSVPv1 Hello Message (20), Flags: [Refresh reduction capable], length: 65527, ttl: 15, checksum: 0x0902
++	  Generalized UNI Object (229) Flags: [ignore and forward if unknown], Class-Type: 1 (1), length: 12
++	    Subobject Type: Unknown (225), AF: HDLC (4), length: 1 (invalid)
+diff --git a/tests/rsvp_uni-oobr-3.pcap b/tests/rsvp_uni-oobr-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..0006a4f9a98d088f32e4330a467e878aadf4f180
+GIT binary patch
+literal 321
+zcmca|c+)~A1{MZR2?mDZw!0i=3=9m63=9sl>i=_zF*7mL0{Mpjf4=?C{YbK&kzxHW
+z28Lf846Y0x)l>K%Fc=8-ePm=}W_BoGNMIKcyzY3ALC6HC<G-K!R{<_rhW`u<PZ?PM
+z|7Qh?Spo60P$0p;CBXlmfs6k?P?mwgMjA-yF)*5m0F?+ZFi4AVGV#~{|IWbkl#zjn
+zK@R8`2A~uJ3$w#pkmH!77?~Je{%+u7ntJ}gg4uI{j$yi@0hD0)p=Zu$rp&;gk8TPh
+a0}JV<V7P_xAq&uw=Su(UL6!jl#FYRP>P&C|
+
+literal 0
+HcmV?d00001
+

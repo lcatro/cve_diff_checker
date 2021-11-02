@@ -1,0 +1,294 @@
+From 74e149da6efe6ed89477faa81fef08eee7999ad0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Kat=20March=C3=A1n?= <kzm@sykosomatic.org>
+Date: Thu, 22 Feb 2018 09:00:45 -0800
+Subject: [PATCH] Revert "*: Switch from mkdirp to correctMkdir to preserve
+ perms and owners"
+
+This reverts commit 94227e15eeced836b3d7b3d2b5e5cc41d4959cff.
+
+Fixes: #19883
+---
+ lib/config/core.js                      |  8 ++++----
+ lib/config/set-user.js                  |  4 ++--
+ lib/install.js                          |  6 +++---
+ lib/install/action/extract.js           |  4 ++--
+ lib/install/action/finalize.js          |  6 +++---
+ lib/install/action/move.js              |  6 +++---
+ lib/install/action/remove.js            |  4 ++--
+ lib/utils/completion/file-completion.js |  4 ++--
+ lib/utils/correct-mkdir.js              | 14 +++++++-------
+ 9 files changed, 28 insertions(+), 28 deletions(-)
+
+diff --git a/lib/config/core.js b/lib/config/core.js
+index c2fe1d17fb..50cf4772e7 100644
+--- a/lib/config/core.js
++++ b/lib/config/core.js
+@@ -8,7 +8,7 @@ var path = require('path')
+ var nopt = require('nopt')
+ var ini = require('ini')
+ var Umask = configDefs.Umask
+-var correctMkdir = require('../utils/correct-mkdir.js')
++var mkdirp = require('mkdirp')
+ var umask = require('../utils/umask')
+ var isWindows = require('../utils/is-windows.js')
+ 
+@@ -153,7 +153,7 @@ function load_ (builtin, rc, cli, cb) {
+     // annoying humans and their expectations!
+     if (conf.get('prefix')) {
+       var etc = path.resolve(conf.get('prefix'), 'etc')
+-      correctMkdir(etc, function () {
++      mkdirp(etc, function () {
+         defaults.globalconfig = path.resolve(etc, 'npmrc')
+         defaults.globalignorefile = path.resolve(etc, 'npmignore')
+         afterUserContinuation()
+@@ -235,7 +235,7 @@ Conf.prototype.loadExtras = function (cb) {
+     this.loadUid(function (er) {
+       if (er) return cb(er)
+       // Without prefix, nothing will ever work
+-      correctMkdir(this.prefix, cb)
++      mkdirp(this.prefix, cb)
+     }.bind(this))
+   }.bind(this))
+ }
+@@ -292,7 +292,7 @@ Conf.prototype.save = function (where, cb) {
+       done(null)
+     })
+   } else {
+-    correctMkdir(path.dirname(target.path), function (er) {
++    mkdirp(path.dirname(target.path), function (er) {
+       if (er) return then(er)
+       fs.writeFile(target.path, data, 'utf8', function (er) {
+         if (er) return then(er)
+diff --git a/lib/config/set-user.js b/lib/config/set-user.js
+index 987e552d9c..14cc21d2eb 100644
+--- a/lib/config/set-user.js
++++ b/lib/config/set-user.js
+@@ -3,7 +3,7 @@ module.exports = setUser
+ var assert = require('assert')
+ var path = require('path')
+ var fs = require('fs')
+-var correctMkdir = require('../utils/correct-mkdir.js')
++var mkdirp = require('mkdirp')
+ 
+ function setUser (cb) {
+   var defaultConf = this.root
+@@ -19,7 +19,7 @@ function setUser (cb) {
+   }
+ 
+   var prefix = path.resolve(this.get('prefix'))
+-  correctMkdir(prefix, function (er) {
++  mkdirp(prefix, function (er) {
+     if (er) return cb(er)
+     fs.stat(prefix, function (er, st) {
+       defaultConf.user = st && st.uid
+diff --git a/lib/install.js b/lib/install.js
+index 0e37ba3d26..7a7d75c908 100644
+--- a/lib/install.js
++++ b/lib/install.js
+@@ -102,7 +102,7 @@ var readPackageJson = require('read-package-json')
+ var chain = require('slide').chain
+ var asyncMap = require('slide').asyncMap
+ var archy = require('archy')
+-var correctMkdir = require('./utils/correct-mkdir.js')
++var mkdirp = require('mkdirp')
+ var rimraf = require('rimraf')
+ var iferr = require('iferr')
+ var validate = require('aproba')
+@@ -648,7 +648,7 @@ Installer.prototype.readGlobalPackageData = function (cb) {
+   log.silly('install', 'readGlobalPackageData')
+   var self = this
+   this.loadArgMetadata(iferr(cb, function () {
+-    correctMkdir(self.where, iferr(cb, function () {
++    mkdirp(self.where, iferr(cb, function () {
+       var pkgs = {}
+       self.args.forEach(function (pkg) {
+         pkgs[pkg.name] = true
+@@ -665,7 +665,7 @@ Installer.prototype.readLocalPackageData = function (cb) {
+   validate('F', arguments)
+   log.silly('install', 'readLocalPackageData')
+   var self = this
+-  correctMkdir(this.where, iferr(cb, function () {
++  mkdirp(this.where, iferr(cb, function () {
+     readPackageTree(self.where, iferr(cb, function (currentTree) {
+       self.currentTree = currentTree
+       self.currentTree.warnings = []
+diff --git a/lib/install/action/extract.js b/lib/install/action/extract.js
+index a9260cc50c..e8d7a6c4f6 100644
+--- a/lib/install/action/extract.js
++++ b/lib/install/action/extract.js
+@@ -4,7 +4,7 @@ const BB = require('bluebird')
+ 
+ const stat = BB.promisify(require('graceful-fs').stat)
+ const gentlyRm = BB.promisify(require('../../utils/gently-rm.js'))
+-const correctMkdir = BB.promisify(require('../../utils/correct-mkdir'))
++const mkdirp = BB.promisify(require('mkdirp'))
+ const moduleStagingPath = require('../module-staging-path.js')
+ const move = require('../../utils/move.js')
+ const npa = require('npm-package-arg')
+@@ -127,7 +127,7 @@ function stageBundledModule (bundler, child, staging, parentPath) {
+ function finishModule (bundler, child, stageTo, stageFrom) {
+   // If we were the one's who bundled this module…
+   if (child.fromBundle === bundler) {
+-    return correctMkdir(path.dirname(stageTo)).then(() => {
++    return mkdirp(path.dirname(stageTo)).then(() => {
+       return move(stageFrom, stageTo)
+     })
+   } else {
+diff --git a/lib/install/action/finalize.js b/lib/install/action/finalize.js
+index dc08ec06f1..e46f1b9d83 100644
+--- a/lib/install/action/finalize.js
++++ b/lib/install/action/finalize.js
+@@ -3,6 +3,7 @@ const path = require('path')
+ const fs = require('graceful-fs')
+ const Bluebird = require('bluebird')
+ const rimraf = Bluebird.promisify(require('rimraf'))
++const mkdirp = Bluebird.promisify(require('mkdirp'))
+ const lstat = Bluebird.promisify(fs.lstat)
+ const readdir = Bluebird.promisify(fs.readdir)
+ const symlink = Bluebird.promisify(fs.symlink)
+@@ -13,7 +14,6 @@ const moveOpts = {fs: fs, Promise: Bluebird, maxConcurrency: 4}
+ const getRequested = require('../get-requested.js')
+ const log = require('npmlog')
+ const packageId = require('../../utils/package-id.js')
+-const correctMkdir = Bluebird.promisify(require('../../utils/correct-mkdir.js'))
+ 
+ module.exports = function (staging, pkg, log) {
+   log.silly('finalize', pkg.realpath)
+@@ -48,7 +48,7 @@ module.exports = function (staging, pkg, log) {
+   }
+ 
+   function makeParentPath (dir) {
+-    return correctMkdir(path.dirname(dir))
++    return mkdirp(path.dirname(dir))
+   }
+ 
+   function moveStagingToDestination () {
+@@ -81,7 +81,7 @@ module.exports = function (staging, pkg, log) {
+     if (!movedDestAway) return
+     return readdir(path.join(delpath, 'node_modules')).catch(() => []).then((modules) => {
+       if (!modules.length) return
+-      return correctMkdir(path.join(pkg.realpath, 'node_modules')).then(() => Bluebird.map(modules, (file) => {
++      return mkdirp(path.join(pkg.realpath, 'node_modules')).then(() => Bluebird.map(modules, (file) => {
+         const from = path.join(delpath, 'node_modules', file)
+         const to = path.join(pkg.realpath, 'node_modules', file)
+         return move(from, to, moveOpts)
+diff --git a/lib/install/action/move.js b/lib/install/action/move.js
+index 084ab61277..00d58a1592 100644
+--- a/lib/install/action/move.js
++++ b/lib/install/action/move.js
+@@ -4,7 +4,7 @@ var path = require('path')
+ var chain = require('slide').chain
+ var iferr = require('iferr')
+ var rimraf = require('rimraf')
+-var correctMkdir = require('../../utils/correct-mkdir')
++var mkdirp = require('mkdirp')
+ var rmStuff = require('../../unbuild.js').rmStuff
+ var lifecycle = require('../../utils/lifecycle.js')
+ var move = require('../../utils/move.js')
+@@ -67,7 +67,7 @@ function moveModuleOnly (from, to, log, done) {
+   function makeDestination (next) {
+     return function () {
+       log.silly('move', 'make sure destination parent exists', path.resolve(to, '..'))
+-      correctMkdir(path.resolve(to, '..'), iferr(done, moveNodeModules(next)))
++      mkdirp(path.resolve(to, '..'), iferr(done, moveNodeModules(next)))
+     }
+   }
+ 
+@@ -87,7 +87,7 @@ function moveModuleOnly (from, to, log, done) {
+ 
+   function moveNodeModulesBack (next) {
+     return function () {
+-      correctMkdir(from, iferr(done, function () {
++      mkdirp(from, iferr(done, function () {
+         log.silly('move', 'put source node_modules back', fromModules)
+         move(tempFromModules, fromModules).then(next, done)
+       }))
+diff --git a/lib/install/action/remove.js b/lib/install/action/remove.js
+index 2e2f378d21..a852d10c5f 100644
+--- a/lib/install/action/remove.js
++++ b/lib/install/action/remove.js
+@@ -3,7 +3,7 @@ var path = require('path')
+ var fs = require('graceful-fs')
+ var rimraf = require('rimraf')
+ var asyncMap = require('slide').asyncMap
+-var correctMkdir = require('../../utils/correct-mkdir')
++var mkdirp = require('mkdirp')
+ var npm = require('../../npm.js')
+ var andIgnoreErrors = require('../and-ignore-errors.js')
+ var move = require('../../utils/move.js')
+@@ -52,7 +52,7 @@ function removeDir (pkg, log, next) {
+   function makeTarget (readdirEr, files) {
+     if (readdirEr) return cleanup()
+     if (!files.length) return cleanup()
+-    correctMkdir(path.join(pkg.path, 'node_modules'), function (mkdirEr) { moveModules(mkdirEr, files) })
++    mkdirp(path.join(pkg.path, 'node_modules'), function (mkdirEr) { moveModules(mkdirEr, files) })
+   }
+ 
+   function moveModules (mkdirEr, files) {
+diff --git a/lib/utils/completion/file-completion.js b/lib/utils/completion/file-completion.js
+index fdbb5a0bf4..e16b636a68 100644
+--- a/lib/utils/completion/file-completion.js
++++ b/lib/utils/completion/file-completion.js
+@@ -1,6 +1,6 @@
+ module.exports = fileCompletion
+ 
+-var correctMkdir = require('../correct-mkdir.js')
++var mkdir = require('mkdirp')
+ var glob = require('glob')
+ 
+ function fileCompletion (root, req, depth, cb) {
+@@ -8,7 +8,7 @@ function fileCompletion (root, req, depth, cb) {
+     cb = depth
+     depth = Infinity
+   }
+-  correctMkdir(root, function (er) {
++  mkdir(root, function (er) {
+     if (er) return cb(er)
+ 
+     // can be either exactly the req, or a descendent
+diff --git a/lib/utils/correct-mkdir.js b/lib/utils/correct-mkdir.js
+index a0139d6f92..68c4a4ad79 100644
+--- a/lib/utils/correct-mkdir.js
++++ b/lib/utils/correct-mkdir.js
+@@ -6,21 +6,21 @@ var log = require('npmlog')
+ var mkdirp = require('mkdirp')
+ 
+ // memoize the directories created by this step
++var stats = {}
+ var effectiveOwner
+ module.exports = function correctMkdir (path, cb) {
+   cb = dezalgo(cb)
+   cb = inflight('correctMkdir:' + path, cb)
+   if (!cb) {
+-    return log.silly('correctMkdir', path, 'correctMkdir already in flight; waiting')
++    return log.verbose('correctMkdir', path, 'correctMkdir already in flight; waiting')
+   } else {
+-    log.silly('correctMkdir', path, 'correctMkdir not in flight; initializing')
++    log.verbose('correctMkdir', path, 'correctMkdir not in flight; initializing')
+   }
+-  var stats = {}
+ 
+   if (stats[path]) return cb(null, stats[path])
+ 
+   fs.stat(path, function (er, st) {
+-    if (er) return makeDirectory(path, stats, cb)
++    if (er) return makeDirectory(path, cb)
+ 
+     if (!st.isDirectory()) {
+       log.error('correctMkdir', 'invalid dir %s', path)
+@@ -60,12 +60,12 @@ function calculateOwner () {
+   return effectiveOwner
+ }
+ 
+-function makeDirectory (path, stats, cb) {
++function makeDirectory (path, cb) {
+   cb = inflight('makeDirectory:' + path, cb)
+   if (!cb) {
+-    return log.silly('makeDirectory', path, 'creation already in flight; waiting')
++    return log.verbose('makeDirectory', path, 'creation already in flight; waiting')
+   } else {
+-    log.silly('makeDirectory', path, 'creation not in flight; initializing')
++    log.verbose('makeDirectory', path, 'creation not in flight; initializing')
+   }
+ 
+   var owner = calculateOwner()

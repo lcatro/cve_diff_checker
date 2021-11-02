@@ -1,0 +1,38 @@
+From c42c5fe92783dd306b7600db1f6a25324445b40c Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Sun, 16 Jun 2019 19:11:35 +0200
+Subject: [PATCH] fix: [security] Fixed an RCE vulnerability with user
+ controled entries being fed to file_exists
+
+- phar protocol paths for php file instructions can lead to RCE via meta-data deserialization
+- mitigated by the functionalities enabling this being only accessible to site admins
+
+- Reported by Dawid Czarnecki
+---
+ app/Model/Server.php | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/app/Model/Server.php b/app/Model/Server.php
+index 072505b1ec..ffffea83d3 100644
+--- a/app/Model/Server.php
++++ b/app/Model/Server.php
+@@ -3076,6 +3076,9 @@ public function beforeHookBinExec($setting, $value)
+ 
+     public function testForBinExec($value)
+     {
++        if (substr($value, 0, 7) === "phar://") {
++            return 'Phar protocol not allowed.';
++        }
+         $finfo = finfo_open(FILEINFO_MIME_TYPE);
+         if ($value === '') {
+             return true;
+@@ -3094,6 +3097,9 @@ public function testForBinExec($value)
+ 
+     public function testForWritableDir($value)
+     {
++        if (substr($value, 0, 7) === "phar://") {
++            return 'Phar protocol not allowed.';
++        }
+         if (!is_dir($value)) {
+             return 'Not a valid directory.';
+         }

@@ -1,0 +1,26 @@
+From 8a84f7a2b5a2b27ecf88d25bad9ac777cd2f7992 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Wed, 28 Jul 2021 15:34:04 -0700
+Subject: [PATCH] Ensure num_streams >= 0 in
+ tf.raw_ops.BoostedTreesCreateQuantileStreamResource
+
+PiperOrigin-RevId: 387452765
+Change-Id: I9990c760e177fabca6a3b9b4612ceeaeeba51495
+---
+ tensorflow/core/kernels/boosted_trees/quantile_ops.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/boosted_trees/quantile_ops.cc b/tensorflow/core/kernels/boosted_trees/quantile_ops.cc
+index c245b25aab0fb..13a0056060e92 100644
+--- a/tensorflow/core/kernels/boosted_trees/quantile_ops.cc
++++ b/tensorflow/core/kernels/boosted_trees/quantile_ops.cc
+@@ -116,6 +116,9 @@ class BoostedTreesCreateQuantileStreamResourceOp : public OpKernel {
+     const Tensor* num_streams_t;
+     OP_REQUIRES_OK(context, context->input(kNumStreamsName, &num_streams_t));
+     int64_t num_streams = num_streams_t->scalar<int64>()();
++    OP_REQUIRES(context, num_streams >= 0,
++                errors::InvalidArgument(
++                    "Num_streams input cannot be a negative integer"));
+ 
+     auto result =
+         new QuantileStreamResource(epsilon, max_elements_, num_streams);

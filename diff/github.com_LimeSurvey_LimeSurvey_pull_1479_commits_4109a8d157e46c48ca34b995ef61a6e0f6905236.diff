@@ -1,0 +1,111 @@
+From 4109a8d157e46c48ca34b995ef61a6e0f6905236 Mon Sep 17 00:00:00 2001
+From: Denis Chenu <denis@sondages.pro>
+Date: Thu, 9 Jul 2020 14:40:45 +0200
+Subject: [PATCH] Fixed issue #16469: Any admin user can see any question
+ (without read right on survey) Fixed issue #16467: Reflected XSS
+ vulnerabilities Dev: add a function to validate int parameters Dev: throw
+ 400/403 or 404 error
+
+---
+ application/controllers/LSBaseController.php  | 67 +++++++++++++++++++
+ .../controllers/QuestionEditorController.php  |  2 -
+ 2 files changed, 67 insertions(+), 2 deletions(-)
+
+diff --git a/application/controllers/LSBaseController.php b/application/controllers/LSBaseController.php
+index 1303191390..2199fcf302 100644
+--- a/application/controllers/LSBaseController.php
++++ b/application/controllers/LSBaseController.php
+@@ -55,6 +55,72 @@ protected function _init()
+         Yii::setPathOfAlias('lsadminmodules', Yii::app()->getConfig('lsadminmodulesrootdir'));
+     }
+ 
++    /**
++     * Validate params validity and read access on survey
++     * @Throw CHttpException
++     * @return void
++     */
++    protected function checkParams()
++    {
++        /* qid and iQuestionId */
++        $qid = $iQuestionId = null;
++        $qid = App()->getRequest()->getParam('qid');
++        $iQuestionId = App()->getRequest()->getParam('iQuestionId');
++        if ($qid && $iQuestionId && $qid != $iQuestionId) {
++            throw new CHttpException(400);
++        }
++        $qid = $qid ? $qid : $iQuestionId;
++        if($qid) {
++            $oQuestion = Question::model()->findByPk($qid);
++            if(!$oQuestion) {
++                throw new CHttpException(404);
++            }
++        }
++        /* gid */
++        $gid = null;
++        $gid = App()->getRequest()->getQuery('gid');
++        if ($gid && $oQuestion && $gid != $oQuestion->gid) {
++            throw new CHttpException(400);
++        }
++        if ($gid) {
++            $oGroup = QuestionGroup::model()->findByPk($gid);
++            if(!$oGroup) {
++                throw new CHttpException(404);
++            }
++        }
++        /* sid, iSurveyId, $surveyid , $surveyID … why use different param name each time */
++        $currentSid = $sid = $iSurveyId = $surveyid = $surveyID = null;
++        $sid = App()->getRequest()->getParam('sid');
++        if ($sid)  {
++            $currentSid = $sid;
++        }
++        $iSurveyId = App()->getRequest()->getParam('iSurveyId');
++        if ($currentSid && $iSurveyId && $currentSid != $iSurveyId) {
++            throw new CHttpException(400);
++        }
++        $currentSid = $currentSid ? $currentSid : $iSurveyId;
++        $surveyid = App()->getRequest()->getParam('surveyid');
++        if ($currentSid && $surveyid && $currentSid != $surveyid) {
++            throw new CHttpException(400);
++        }
++        $currentSid = $currentSid ? $currentSid : $surveyid;
++        $surveyID = App()->getRequest()->getParam('surveyID');
++        if ($currentSid && $surveyID && $currentSid != $surveyID) {
++            throw new CHttpException(400);
++        }
++        $currentSid = $currentSid ? $currentSid : $surveyID;
++        /* Concordence of sid */
++        if ($currentSid && $oQuestion && $currentSid != $oQuestion->sid) {
++            throw new CHttpException(400);
++        }
++        if ($currentSid && $oGroup && $currentSid != $oGroup->sid) {
++            throw new CHttpException(400);
++        }
++        /* Minimal access */
++        if ($currentSid && !Permission::model()->hasSurveyPermission($currentSid, 'survey', 'read')) {
++            throw new CHttpException(403);
++        }
++    }
+     /**
+      * This part comes from _renderWrappedTemplate (not the best way to refactoring, but a temporary solution)
+      *
+@@ -136,6 +202,7 @@ public function run($action)
+                 }
+             }
+         }
++        $this->checkParams();
+ 
+         parent::run($action);
+     }
+diff --git a/application/controllers/QuestionEditorController.php b/application/controllers/QuestionEditorController.php
+index d9413e04c9..98be2c5985 100644
+--- a/application/controllers/QuestionEditorController.php
++++ b/application/controllers/QuestionEditorController.php
+@@ -3,8 +3,6 @@
+ 
+ class QuestionEditorController extends LSBaseController
+ {
+-
+-
+     public function accessRules()
+     {
+         return array(

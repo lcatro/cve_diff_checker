@@ -1,0 +1,26 @@
+From 1cc7e83c3bdfaafbc5919c95025592d8de3a170e Mon Sep 17 00:00:00 2001
+From: Brad House <brad@brad-house.com>
+Date: Thu, 7 May 2020 07:02:31 -0400
+Subject: [PATCH] Prevent possible double-free in ares_getaddrinfo() if
+ ares_destroy() is called
+
+In the event that ares_destroy() is called prior to ares_getaddrinfo() completing,
+it would result in an invalid read and double-free due to calling end_hquery() twice.
+
+Reported By: Jann Horn @ Google Project Zero
+---
+ ares_getaddrinfo.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/ares_getaddrinfo.c b/ares_getaddrinfo.c
+index 316fa5a6..be168068 100644
+--- a/ares_getaddrinfo.c
++++ b/ares_getaddrinfo.c
+@@ -548,6 +548,7 @@ static void host_callback(void *arg, int status, int timeouts,
+   else if (status == ARES_EDESTRUCTION)
+     {
+       end_hquery(hquery, status);
++      return;
+     }
+ 
+   if (!hquery->remaining)

@@ -1,0 +1,1386 @@
+From a71c44e0366fb8ffbd19a4d69493a392a5f9d8ea Mon Sep 17 00:00:00 2001
+From: Chris Graham <chris@ocproducts.com>
+Date: Thu, 1 Apr 2021 21:32:25 -0500
+Subject: [PATCH] Security fix for MANTIS-4632 (Upload and execution of PHP
+ files)
+
+---
+ _tests/tests/unit_tests/file_security.php     |  63 ++++++++++++++++++
+ .../tests/unit_tests/standard_dir_files.php   |   8 +--
+ .../pages/modules/admin_cns_emoticons.php     |  14 ++++
+ .../modules/admin_cns_multi_moderations.php   |  14 ++++
+ .../modules/admin_cns_post_templates.php      |  14 ++++
+ cms/pages/modules/cms_galleries.php           |  22 ++++++
+ data_custom/functions.bin                     | Bin 8650687 -> 8651136 bytes
+ sources/attachments2.php                      |   2 +-
+ sources/files2.php                            |  29 ++++++--
+ sources/images.php                            |   3 +-
+ sources/resource_fs.php                       |   5 +-
+ sources/uploads.php                           |   6 +-
+ .../addon_registry/testing_platform.php       |   1 +
+ themes/admin/images/.htaccess                 |  17 +++++
+ themes/admin/images_custom/.htaccess          |  17 +++++
+ themes/admin/templates_cached/.htaccess       |  17 +++++
+ themes/default/images/.htaccess               |  17 +++++
+ themes/default/images_custom/.htaccess        |  17 +++++
+ themes/default/templates_cached/.htaccess     |  17 +++++
+ uploads/attachments/.htaccess                 |  17 +++++
+ uploads/attachments_thumbs/.htaccess          |  17 +++++
+ uploads/auto_thumbs/.htaccess                 |  17 +++++
+ uploads/banners/.htaccess                     |  17 +++++
+ uploads/catalogues/.htaccess                  |  17 +++++
+ uploads/cns_avatars/.htaccess                 |  17 +++++
+ uploads/cns_cpf_upload/.htaccess              |  17 +++++
+ uploads/cns_photos/.htaccess                  |  17 +++++
+ uploads/cns_photos_thumbs/.htaccess           |  17 +++++
+ uploads/downloads/.htaccess                   |  17 +++++
+ uploads/filedump/.htaccess                    |  17 +++++
+ uploads/galleries/.htaccess                   |  17 +++++
+ uploads/galleries_thumbs/.htaccess            |  17 +++++
+ uploads/incoming/.htaccess                    |  17 +++++
+ uploads/personal_sound_effects/.htaccess      |  17 +++++
+ uploads/repimages/.htaccess                   |  17 +++++
+ uploads/watermarks/.htaccess                  |  17 +++++
+ .../compo.sr/demonstratr/template.tar         | Bin 3836416 -> 3870720 bytes
+ .../compo.sr/upgrades/full/.htaccess          |  17 +++++
+ .../compo.sr/upgrades/tar_build/.htaccess     |  17 +++++
+ .../compo.sr/upgrades/tars/.htaccess          |  17 +++++
+ 40 files changed, 609 insertions(+), 14 deletions(-)
+ create mode 100644 _tests/tests/unit_tests/file_security.php
+
+diff --git a/_tests/tests/unit_tests/file_security.php b/_tests/tests/unit_tests/file_security.php
+new file mode 100644
+index 000000000..048e5db01
+--- /dev/null
++++ b/_tests/tests/unit_tests/file_security.php
+@@ -0,0 +1,63 @@
++<?php /*
++
++ Composr
++ Copyright (c) ocProducts, 2004-2016
++
++ See text/EN/licence.txt for full licencing information.
++
++*/
++
++/**
++ * @license    http://opensource.org/licenses/cpal_1.0 Common Public Attribution License
++ * @copyright  ocProducts Ltd
++ * @package    testing_platform
++ */
++
++/**
++ * Composr test case class (unit testing).
++ */
++class file_security_test_set extends cms_test_case
++{
++    public function setUp()
++    {
++        require_code('files2');
++
++        parent::setUp();
++    }
++
++    public function testFilenameFixup()
++    {
++        $tests = array(
++            // Not whitelisted
++            'foo.example' => ['foo.example', false],
++
++            // Files should be altered to remove double-file-extension
++            'foo.php.php.gif' => ['foo-php-php.gif', true],
++            'foo.php.bar.gif' => ['foo-php.bar.gif', true],
++            'foo.bar.php.gif' => ['foo.bar-php.gif', true],
++            'foo.php.gif' => ['foo-php.gif', true],
++            'foo.php' => ['foo.php', false], // Blacklisted
++
++            // Files inside directories should be altered to remove double-file-extension
++            'x/foo.php.php.gif' => ['x/foo-php-php.gif', true],
++            'x/foo.php.bar.gif' => ['x/foo-php.bar.gif', true],
++            'x/foo.bar.php.gif' => ['x/foo.bar-php.gif', true],
++            'x/foo.php.gif' => ['x/foo-php.gif', true],
++            'x/foo.php' => ['x/foo.php', false], // Blacklisted
++
++            // Directories should not be altered to remove double-file-extension
++            'foo.php.bar/foo.php.php.gif' => ['foo.php.bar/foo-php-php.gif', true],
++            'foo.php.bar/foo.php.bar.gif' => ['foo.php.bar/foo-php.bar.gif', true],
++            'foo.php.bar/foo.bar.php.gif' => ['foo.php.bar/foo.bar-php.gif', true],
++            'foo.php.bar/foo.php.gif' => ['foo.php.bar/foo-php.gif', true],
++            'foo.php.bar/foo.php' => ['foo.php.bar/foo.php', false], // Blacklisted
++        );
++
++        foreach ($tests as $from => $_) {
++            list($to, $result) = $_;
++            $name = $from;
++            $this->assertTrue(check_extension($name/*changed by reference*/, false, null, true) == $result, 'Unexpected return result for ' . $from);
++            $this->assertTrue($name == $to, 'Failed $to result for ' . $from . ', got ' . $name . ' but expected ' . $to);
++        }
++    }
++}
+diff --git a/_tests/tests/unit_tests/standard_dir_files.php b/_tests/tests/unit_tests/standard_dir_files.php
+index 38b4a80fd..437e1a6fa 100644
+--- a/_tests/tests/unit_tests/standard_dir_files.php
++++ b/_tests/tests/unit_tests/standard_dir_files.php
+@@ -61,17 +61,17 @@ class standard_dir_files_test_set extends cms_test_case
+         }*/
+ 
+         $valid_hashes = array(
+-            '040f254836ecefb94bebc44d91e391eb', // uploads/incoming/.htaccess
+-            '0e665ce3d0ae5f44e1a6affe3c7f5303', // uploads/*/.htaccess
++            'de3253ec2280f4da1a3bc966c113f369', // uploads/incoming/.htaccess
++            'e239621b461039678b9096251869efb4', // uploads/*/.htaccess
+             '8fbbec6b8fd8a4999a5b07f5ddcf5ea8', // */pages/modules*/.htaccess
+             '3c3283f2b3f7d57a8bdf38ca126ff678', // data*/images/.htaccess, uploads/.htaccess
+             '44c2cb384e8efd1ab789978e00d6ea19', // */pages/html*/EN/.htaccess
+             '45c31898af89e12147cf987481cae64b', // sources/.htaccess
+             '61b32927345080611fa4772255f4a70b', // adminzone/.htaccess
+-            'b4af30b08914c4a8240106cf7c614034', // themes/*/templates_cached/.htaccess
++            'e0cc4033fbb4bf22b3f001bbcae33bfd', // themes/*/templates_cached/.htaccess
+             'c1bfa4b9b62eff28d2c697aff749bd76', // Many
+             'd565e2958abd06bfac42906ea7b4ea9d', // exports/static/.htaccess
+-            'd90c4471fc2a552580896dd6dae99df7', // themes/*/images*/.htaccess
++            '1be57737eab0844f0d01a6a0adcb4b0f', // themes/*/images*/.htaccess
+             'e584f07661e5fee9170ba1df153359ad', // uploads/website_specific/compo.sr/.htaccess
+             'ede82ed9879b9d6d011638ca5736bddd', // data_custom/.htaccess
+         );
+diff --git a/adminzone/pages/modules/admin_cns_emoticons.php b/adminzone/pages/modules/admin_cns_emoticons.php
+index 0e912e8eb..cca051ab7 100644
+--- a/adminzone/pages/modules/admin_cns_emoticons.php
++++ b/adminzone/pages/modules/admin_cns_emoticons.php
+@@ -212,6 +212,8 @@ class Module_admin_cns_emoticons extends Standard_crud_module
+     {
+         post_param_string('test'); // To pick up on max file size exceeded errors
+ 
++        require_code('files2');
++
+         require_code('images');
+         is_plupload(true);
+ 
+@@ -239,6 +241,10 @@ class Module_admin_cns_emoticons extends Standard_crud_module
+ 
+                             $_file = zip_entry_name($entry);
+ 
++                            if (!check_extension($_file, false, null, true)) {
++                                continue;
++                            }
++
+                             if (is_image($_file)) {
+                                 if (file_exists(get_file_base() . '/themes/default/images/emoticons/index.html')) {
+                                     $path = get_custom_file_base() . '/themes/default/images_custom/emoticons__' . basename($_file);
+@@ -286,6 +292,10 @@ class Module_admin_cns_emoticons extends Standard_crud_module
+                             // Load in file
+                             $_file = $entry['path'];
+ 
++                            if (!check_extension($_file, false, null, true)) {
++                                continue;
++                            }
++
+                             if (is_image($_file)) {
+                                 if (file_exists(get_file_base() . '/themes/default/images/emoticons/index.html')) {
+                                     $path = get_custom_file_base() . '/themes/default/images_custom/emoticons__' . basename($_file);
+@@ -303,6 +313,10 @@ class Module_admin_cns_emoticons extends Standard_crud_module
+                     }
+                     break;
+                 default:
++                    if (!check_extension($file, false, null, true)) {
++                        break;
++                    }
++
+                     if (is_image($file)) {
+                         $urls = get_url('', $attach_name, 'themes/default/images_custom');
+                         $path = $urls[0];
+diff --git a/adminzone/pages/modules/admin_cns_multi_moderations.php b/adminzone/pages/modules/admin_cns_multi_moderations.php
+index 27063d27b..76605381a 100644
+--- a/adminzone/pages/modules/admin_cns_multi_moderations.php
++++ b/adminzone/pages/modules/admin_cns_multi_moderations.php
+@@ -189,6 +189,8 @@ class Module_admin_cns_multi_moderations extends Standard_crud_module
+     {
+         require_lang('dearchive');
+ 
++        require_code('files2');
++
+         require_code('uploads');
+         is_plupload(true);
+ 
+@@ -224,6 +226,10 @@ class Module_admin_cns_multi_moderations extends Standard_crud_module
+ 
+                             $filename = zip_entry_name($entry);
+ 
++                            if (!check_extension($filename, false, null, true)) {
++                                continue;
++                            }
++
+                             if ((strtolower(substr($filename, -4)) == '.txt') && (!should_ignore_file($filename))) {
+                                 $data = '';
+                                 do {
+@@ -253,6 +259,10 @@ class Module_admin_cns_multi_moderations extends Standard_crud_module
+                         foreach ($directory as $entry) {
+                             $filename = $entry['path'];
+ 
++                            if (!check_extension($filename, false, null, true)) {
++                                continue;
++                            }
++
+                             if ((strtolower(substr($filename, -4)) == '.txt') && (!should_ignore_file($filename))) {
+                                 // Load in file
+                                 $_in = tar_get_file($myfile, $entry['path'], false);
+@@ -265,6 +275,10 @@ class Module_admin_cns_multi_moderations extends Standard_crud_module
+                     }
+                     break;
+                 default:
++                    if (!check_extension($file, false, null, true)) {
++                        break;
++                    }
++
+                     if (strtolower(substr($file, -4)) == '.txt') {
+                         $this->_import_stock_response($file, file_get_contents($tmp_name), $target_forum);
+                     } else {
+diff --git a/adminzone/pages/modules/admin_cns_post_templates.php b/adminzone/pages/modules/admin_cns_post_templates.php
+index 013fc2dc3..e4b3ceadc 100644
+--- a/adminzone/pages/modules/admin_cns_post_templates.php
++++ b/adminzone/pages/modules/admin_cns_post_templates.php
+@@ -189,6 +189,8 @@ class Module_admin_cns_post_templates extends Standard_crud_module
+     {
+         require_lang('dearchive');
+ 
++        require_code('files2');
++
+         require_code('uploads');
+         is_plupload(true);
+ 
+@@ -224,6 +226,10 @@ class Module_admin_cns_post_templates extends Standard_crud_module
+ 
+                             $filename = zip_entry_name($entry);
+ 
++                            if (!check_extension($filename, false, null, true)) {
++                                continue;
++                            }
++
+                             if ((strtolower(substr($filename, -4)) == '.txt') && (!should_ignore_file($filename))) {
+                                 $data = '';
+                                 do {
+@@ -253,6 +259,10 @@ class Module_admin_cns_post_templates extends Standard_crud_module
+                         foreach ($directory as $entry) {
+                             $filename = $entry['path'];
+ 
++                            if (!check_extension($filename, false, null, true)) {
++                                continue;
++                            }
++
+                             if ((strtolower(substr($filename, -4)) == '.txt') && (!should_ignore_file($filename))) {
+                                 // Load in file
+                                 $_in = tar_get_file($myfile, $entry['path'], false);
+@@ -265,6 +275,10 @@ class Module_admin_cns_post_templates extends Standard_crud_module
+                     }
+                     break;
+                 default:
++                    if (!check_extension($file, false, null, true)) {
++                        break;
++                    }
++
+                     if (strtolower(substr($file, -4)) == '.txt') {
+                         $this->_import_stock_response($file, file_get_contents($tmp_name), $target_forum);
+                     } else {
+diff --git a/cms/pages/modules/cms_galleries.php b/cms/pages/modules/cms_galleries.php
+index 8d03d0cb3..8282f3739 100644
+--- a/cms/pages/modules/cms_galleries.php
++++ b/cms/pages/modules/cms_galleries.php
+@@ -478,6 +478,7 @@ class Module_cms_galleries extends Standard_crud_module
+ 
+         require_code('images');
+         require_code('files');
++        require_code('files2');
+ 
+         check_privilege('mass_import'/*Not currently scoped to categories, array('galleries', $cat)*/);
+ 
+@@ -538,6 +539,13 @@ class Module_cms_galleries extends Standard_crud_module
+                                 continue;
+                             }
+ 
++                            if (!check_extension($_file, false, null, true)) {
++                                continue;
++                            }
++                            if (strtolower(substr($_file, -5)) == '.phar') { // TODO: Remove in v11, as check_extension now covers this (only added in case of partial patching of v10)
++                                continue;
++                            }
++
+                             // Load in file
+                             zip_entry_open($myfile, $entry);
+                             $tmp_name_2 = cms_tempnam();
+@@ -581,6 +589,13 @@ class Module_cms_galleries extends Standard_crud_module
+                                 continue;
+                             }
+ 
++                            if (!check_extension($entry['path'], false, null, true)) {
++                                continue;
++                            }
++                            if (strtolower(substr($entry['path'], -5)) == '.phar') { // TODO: Remove in v11, as check_extension now covers this (only added in case of partial patching of v10)
++                                continue;
++                            }
++
+                             $tmp_name_2 = cms_tempnam();
+ 
+                             // Load in file
+@@ -609,6 +624,13 @@ class Module_cms_galleries extends Standard_crud_module
+                     }
+                     break;
+                 default:
++                    if (!check_extension($file, false, null, true)) {
++                        break;
++                    }
++                    if (strtolower(substr($file, -5)) == '.phar') { // TODO: Remove in v11, as check_extension now covers this (only added in case of partial patching of v10)
++                        break;
++                    }
++
+                     if ((is_image($file)) || (is_video($file, has_privilege(get_member(), 'comcode_dangerous')))) {
+                         $tmp_name_2 = cms_tempnam();
+ 
+diff --git a/data_custom/functions.bin b/data_custom/functions.bin
+index b32c3d184e7e1d1f4d88e7b6b9b857b42f14f3be..9765acf315f0b7795a66cfa36b8fac85e4129b4e 100644
+GIT binary patch
+delta 534
+zcmYk!%}>&C0LSrJR0u{YWg1vNpXfQo%F?tXA1Kq((xS42hyp4>G|kMUcyF9socjI&
+zZf&0G(8jI)fX>}Ib!lVcFX&L8b?WfCz4!k5=bbH^E7-DBu!XJI*v58tV5brXPO8|6
+zi(OPxLoIH0vxhqNQcnZ>@ZhD9{T#reiDp`8r41hkImBU(aFk;l=LGF^;HQ(5oZ>WH
+zoZ&3p^l*+|`Z&)8`U!B60R|ajm>`$9%m`N)WsIv_W1I=DbA!pxQ;Bj#cRpF3lACf%
+zLULQ~$X%J1dvd>+EYExknQ?nnt+8B=c4PhSvzu^BgUxQGBMWgWl`%C-4$FkUge<ce
+z47ZuhY44f|uPnIosbE+l@<5{UP-5~(9!p#jl9VU%RG!JKq$DkKl972?kms@}OY%aN
+z<)y61t70m+x-nek@9b%g%||2Y*i6(EK4co-|5$dK>e57)`4ox!jOBB;nvtI#pXu1B
+zt9Sli`xA>E(;us}xrhD@tjMet8XL6+1_P4;^YNFr*A#N~P5ILLs=Ssp$;umfTP&^T
+HzR&#yCG6Bg
+
+delta 401
+zcmWN=$1)=T0LS4$^cKDC>b-Z?YEhzhA$o7o+hSJ;els~Hw;atrfSZ{d-Q(ybT=ES3
+zznRbR<Tkv0xeN{h2qXvt!GsV>7~w<^Nfgn<5Q~vG;z=NpB$7!Xl{C`H;0Hg+B#Ufv
+z$R&?_3MizAVoE5bjB+Zdq>5^4sHKj28fc`6W`5DaZ(3=ioenxN(M2~s^kSxueg+t1
+zh+#$;WsGqqm}H9SSIeG1pxJ5jTXaTe)v9wkuM4`UOS<f}`B&bpo|BFQlgItpS>&ny
+zziRY6o2*8s&%CN@x~?0#sav|OJG!fTYSVo^&_g}aV?EJRJ=1f&&`bTJS9+~C`d9zy
+bt=DI^Tl$<IF1z08y*l(kAH5&0r<c=jM%uAs
+
+diff --git a/sources/attachments2.php b/sources/attachments2.php
+index 3b6aa59ba..a64e49179 100755
+--- a/sources/attachments2.php
++++ b/sources/attachments2.php
+@@ -306,7 +306,7 @@ function _handle_attachment_extraction(&$comcode, $key, $type, $id, $matches_ext
+                     continue; // Ignore folders
+                 }
+ 
+-                $_file = preg_replace('#\..*\.#', '.', basename($entry['path']));
++                $_file = basename($entry['path']);
+ 
+                 if (!check_extension($_file, false, null, true)) {
+                     continue;
+diff --git a/sources/files2.php b/sources/files2.php
+index bba1694d2..3e79ffed8 100644
+--- a/sources/files2.php
++++ b/sources/files2.php
+@@ -781,15 +781,36 @@ function get_max_file_size($source_member = null, $connection = null, $consider_
+ /**
+  * Check uploaded file extensions for possible malicious intent, and if some is found, an error is put out, and the hackattack logged.
+  *
+- * @param  string $name The filename
++ * @param  string $path The file path or filename
+  * @param  boolean $skip_server_side_security_check Whether to skip the server side security check
+  * @param  ?string $file_to_delete Delete this file if we have to exit (null: no file to delete)
+  * @param  boolean $accept_errors Whether to allow errors without dying
+  * @return boolean Success status
+  */
+-function check_extension($name, $skip_server_side_security_check = false, $file_to_delete = null, $accept_errors = false)
++function check_extension(&$path, $skip_server_side_security_check = false, $file_to_delete = null, $accept_errors = false)
+ {
+-    $ext = get_file_extension($name);
++    $bad_file_extensions = array(
++        // Also see .htaccess files that use these same lists
++        'phtml', 'php', 'php3', 'php4', 'php5', 'phar', 'phps', // PHP
++        'py', // Python
++        'rhtml', 'rb', // Ruby
++        'pl', // Perl
++        'jsp', // JavaServer Pages
++        'dll', 'aspx', 'ashx', 'asmx', 'asx', 'axd', 'asp', // ASP / .net
++        'vbs', // Server-side VBScript
++        'cgi', 'fcgi', 'sh', // CGI
++    );
++
++    $filename = basename($path);
++    $dir = dirname($path);
++    $filename = preg_replace('#\.(' . implode('|', $bad_file_extensions) . ')(?=\.)#', '-$1', $filename);
++    if (($dir != '') && ($dir != '.')) {
++        $path = $dir . '/' . $filename;
++    } else {
++        $path = $filename;
++    }
++
++    $ext = get_file_extension($filename);
+     $_types = get_option('valid_types');
+     $types = array_flip(explode(',', $_types));
+     $_types = '';
+@@ -810,7 +831,7 @@ function check_extension($name, $skip_server_side_security_check = false, $file_
+     }
+     $_types = substr($_types, 0, strlen($_types) - 1);
+     if (!$skip_server_side_security_check) {
+-        if (($ext == 'py') || ($ext == 'fcgi') || ($ext == 'yaws') || ($ext == 'dll') || ($ext == 'cgi') || ($ext == 'cfm') || ($ext == 'vbs') || ($ext == 'rhtml') || ($ext == 'rb') || ($ext == 'pl') || ($ext == 'phtml') || ($ext == 'php') || ($ext == 'php3') || ($ext == 'php4') || ($ext == 'php5') || ($ext == 'php6') || ($ext == 'phtml') || ($ext == 'aspx') || ($ext == 'ashx') || ($ext == 'asmx') || ($ext == 'asx') || ($ext == 'axd') || ($ext == 'asp') || ($ext == 'aspx') || ($ext == 'jsp') || ($ext == 'sh') || ($ext == 'cgi') || (strtolower($name) == '.htaccess')) {
++        if ((in_array($ext, $bad_file_extensions)) || (strtolower($filename) == '.htaccess')) {
+             if (!is_null($file_to_delete)) {
+                 unlink($file_to_delete);
+             }
+diff --git a/sources/images.php b/sources/images.php
+index 163a5700e..9e1c4cddc 100644
+--- a/sources/images.php
++++ b/sources/images.php
+@@ -685,7 +685,8 @@ function is_video($name, $as_admin, $must_be_true_video = false)
+     require_code('media_renderer');
+     $acceptable_media = $allow_audio ? (MEDIA_TYPE_VIDEO | MEDIA_TYPE_AUDIO | MEDIA_TYPE_OTHER /* but not images */) : MEDIA_TYPE_VIDEO;
+     $hooks = find_media_renderers($name, array(), $as_admin, null, $acceptable_media);
+-    return !is_null($hooks);
++    $hooks = array_diff($hooks, array('hyperlink', 'code'));
++    return !empty($hooks);
+ }
+ 
+ /**
+diff --git a/sources/resource_fs.php b/sources/resource_fs.php
+index 9b31a2e93..c7d05bd39 100644
+--- a/sources/resource_fs.php
++++ b/sources/resource_fs.php
+@@ -890,6 +890,8 @@ function remap_portable_as_urlpath($portable_data, $ignore_conflicts = false)
+         return $portable_data;
+     }
+ 
++    require_code('files2');
++
+     $binary = base64_decode($portable_data[1]);
+ 
+     $urlpath = $portable_data[0];
+@@ -905,7 +907,8 @@ function remap_portable_as_urlpath($portable_data, $ignore_conflicts = false)
+             }
+ 
+             $ext = '.' . get_file_extension($urlpath);
+-            $filename = basename(preg_replace('#\..*\.#', '.', urldecode($urlpath)), $ext) . '_' . strval($i) . $ext;
++            $filename = basename(urldecode($urlpath), $ext) . '_' . strval($i) . $ext;
++            check_extension($filename, false, null, true);
+             $place = get_custom_file_base() . '/' . dirname(urldecode($urlpath)) . '/' . $filename;
+             $urlpath = dirname($urlpath) . '/' . urlencode($filename);
+             $i++;
+diff --git a/sources/uploads.php b/sources/uploads.php
+index ca11a44e2..76c4cb22f 100644
+--- a/sources/uploads.php
++++ b/sources/uploads.php
+@@ -455,7 +455,7 @@ function get_url($specify_name, $attach_name, $upload_folder, $obfuscate = 0, $e
+                 if (($obfuscate != 0) && ($obfuscate != 3)) {
+                     $ext = (($obfuscate == 2) && (!is_image($HTTP_FILENAME))) ? 'bin' : get_file_extension($HTTP_FILENAME);
+ 
+-                    $filename = preg_replace('#\..*\.#', '.', $HTTP_FILENAME) . ((substr($HTTP_FILENAME, -strlen($ext) - 1) == '.' . $ext) ? '' : ('.' . $ext));
++                    $filename = $HTTP_FILENAME . ((substr($HTTP_FILENAME, -strlen($ext) - 1) == '.' . $ext) ? '' : ('.' . $ext));
+                     $place = $upload_folder_full . '/' . $filename;
+                     while (file_exists($place)) {
+                         $filename = uniqid('', true) . '.' . $ext;
+@@ -869,13 +869,13 @@ function _get_upload_url($member_id, $attach_name, $upload_folder, $upload_folde
+     if (is_null($filename)) {
+         // If we are not obfuscating then we will need to search for an available filename
+         if (($obfuscate == 0) || ($obfuscate == 3) || (strlen($file) > 150)) {
+-            $filename = preg_replace('#\..*\.#', '.', $file);
++            $filename = $file;
+             $place = $upload_folder_full . '/' . $filename;
+             // Hunt with sensible names until we don't get a conflict
+             $i = 2;
+             while (file_exists($place)) {
+                 $ext = '.' . get_file_extension($file);
+-                $filename = basename(preg_replace('#\..*\.#', '.', $file), $ext) . '_' . strval($i) . $ext;
++                $filename = basename($file, $ext) . '_' . strval($i) . $ext;
+                 $place = $upload_folder_full . '/' . $filename;
+                 $i++;
+             }
+diff --git a/sources_custom/hooks/systems/addon_registry/testing_platform.php b/sources_custom/hooks/systems/addon_registry/testing_platform.php
+index f15efac13..447730f32 100644
+--- a/sources_custom/hooks/systems/addon_registry/testing_platform.php
++++ b/sources_custom/hooks/systems/addon_registry/testing_platform.php
+@@ -470,6 +470,7 @@ class Hook_addon_registry_testing_platform
+             '_tests/tests/unit_tests/images.php',
+             '_tests/tests/unit_tests/downloads.php',
+             '_tests/tests/unit_tests/downloads_category.php',
++            '_tests/tests/unit_tests/file_security.php',
+             '_tests/tests/unit_tests/antispam.php',
+             '_tests/tests/unit_tests/_critical_error_display.php',
+             '_tests/tests/unit_tests/downloads_http_cycle.php',
+diff --git a/themes/admin/images/.htaccess b/themes/admin/images/.htaccess
+index feab814f8..59b9734f8 100644
+--- a/themes/admin/images/.htaccess
++++ b/themes/admin/images/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/themes/admin/images_custom/.htaccess b/themes/admin/images_custom/.htaccess
+index feab814f8..59b9734f8 100644
+--- a/themes/admin/images_custom/.htaccess
++++ b/themes/admin/images_custom/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/themes/admin/templates_cached/.htaccess b/themes/admin/templates_cached/.htaccess
+index a4c992cf5..94e178dda 100644
+--- a/themes/admin/templates_cached/.htaccess
++++ b/themes/admin/templates_cached/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ </IfModule>
+diff --git a/themes/default/images/.htaccess b/themes/default/images/.htaccess
+index feab814f8..59b9734f8 100644
+--- a/themes/default/images/.htaccess
++++ b/themes/default/images/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/themes/default/images_custom/.htaccess b/themes/default/images_custom/.htaccess
+index feab814f8..59b9734f8 100644
+--- a/themes/default/images_custom/.htaccess
++++ b/themes/default/images_custom/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/themes/default/templates_cached/.htaccess b/themes/default/templates_cached/.htaccess
+index a4c992cf5..94e178dda 100644
+--- a/themes/default/templates_cached/.htaccess
++++ b/themes/default/templates_cached/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ </IfModule>
+diff --git a/uploads/attachments/.htaccess b/uploads/attachments/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/attachments/.htaccess
++++ b/uploads/attachments/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/attachments_thumbs/.htaccess b/uploads/attachments_thumbs/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/attachments_thumbs/.htaccess
++++ b/uploads/attachments_thumbs/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/auto_thumbs/.htaccess b/uploads/auto_thumbs/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/auto_thumbs/.htaccess
++++ b/uploads/auto_thumbs/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/banners/.htaccess b/uploads/banners/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/banners/.htaccess
++++ b/uploads/banners/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/catalogues/.htaccess b/uploads/catalogues/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/catalogues/.htaccess
++++ b/uploads/catalogues/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/cns_avatars/.htaccess b/uploads/cns_avatars/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/cns_avatars/.htaccess
++++ b/uploads/cns_avatars/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/cns_cpf_upload/.htaccess b/uploads/cns_cpf_upload/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/cns_cpf_upload/.htaccess
++++ b/uploads/cns_cpf_upload/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/cns_photos/.htaccess b/uploads/cns_photos/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/cns_photos/.htaccess
++++ b/uploads/cns_photos/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/cns_photos_thumbs/.htaccess b/uploads/cns_photos_thumbs/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/cns_photos_thumbs/.htaccess
++++ b/uploads/cns_photos_thumbs/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/downloads/.htaccess b/uploads/downloads/.htaccess
+index 74dd3ece9..9a98bb96b 100755
+--- a/uploads/downloads/.htaccess
++++ b/uploads/downloads/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/filedump/.htaccess b/uploads/filedump/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/filedump/.htaccess
++++ b/uploads/filedump/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/galleries/.htaccess b/uploads/galleries/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/galleries/.htaccess
++++ b/uploads/galleries/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/galleries_thumbs/.htaccess b/uploads/galleries_thumbs/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/galleries_thumbs/.htaccess
++++ b/uploads/galleries_thumbs/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/incoming/.htaccess b/uploads/incoming/.htaccess
+index 634009140..4aaf62b28 100755
+--- a/uploads/incoming/.htaccess
++++ b/uploads/incoming/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/personal_sound_effects/.htaccess b/uploads/personal_sound_effects/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/personal_sound_effects/.htaccess
++++ b/uploads/personal_sound_effects/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/repimages/.htaccess b/uploads/repimages/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/repimages/.htaccess
++++ b/uploads/repimages/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/watermarks/.htaccess b/uploads/watermarks/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/watermarks/.htaccess
++++ b/uploads/watermarks/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/website_specific/compo.sr/demonstratr/template.tar b/uploads/website_specific/compo.sr/demonstratr/template.tar
+index 0731ff9603a6692e78e457fe93beba600df5b69a..4c471e8287a9595da90d44ae616639faa7f78b54 100644
+GIT binary patch
+delta 32621
+zcmeHQZD?E98Md{wb3_P<<9s=;duDs76JqCn-_C@zNu4ZB+cb^cF0@%wMY^`-D3Z{X
+zo!Cq3Qi?YAV>C*++K)2I7^CdR*xaIYW0X)zDPxTO7-K)mRzfJHlrhGBlrhGhb0x+4
+zu-<cz)<1<CNMbwpzIxAjzn=HwoV@tzXWcKp{(1K+vzB6;W|yKUs%<Luf8$5~uP#;5
+zbyK%Z!#27U)i6}Mi<#HIVI_JN+<Yv@Sl9K9-OT^3ST~9h36iFbk5o-l)k%^Yf{@fz
+zMKcU=iPdO|h~y5Cv<xh$-NFr}OKl*j=?b`1+Ae%`*K8!fW;W1Nv3PRjgYs-z3P=)c
+zGR`KsbOlT2GS^hw!Zs+HW<&G@&EkNF%~q0zt&t?}mY2C=Smb8*h`4N#xoYVkNo;0R
+zUgnApJEII}i!_^>3eG7udpnT1uEEaRFTJ=~#Ad6^6^&HQ;)txwRoyaa*RfZ`WwXpx
+z(=cc|Ke{P$ebe|elD4iICO0C&aXu)`DzuZd%hjXO>ZzKFO<U0kc{VMJwxW}P)Kjxe
+zQ`1codWB%6n6!Ex7qQ9Jvw<YY)9R^!q%c_4`*#(-m{!jT5tl9M371T(=OO9M)D%T0
+z^{A-HuiUWcl^e1v*Wf+qm0KOG+yDlkyxe~Im8+IY+W9Hjm8-UGf@FJNyn4EWm8%9F
+zfDee+Y%w6y5~$I1kj-pBo4O_dNKZ+Sv@PyA3|+;-2|s)`2+0OBw{?{k`MhW^o6THP
+z0S!r!r?|-Fype4QaCT0fO+x^R^MN$80d1<L02*dRY_=c|RYRgd7*O$PX_;FbLQ`sV
+zPQ+!4%oT&SpVenOkhv-V#R+*fZ2>5r=|JYH02*EpvDqSX#nQ-dQM?jF<_+G+)C56o
+zS%PFG_qBA6V+e0_H3-Q&-pE3>22e~V7(Wv2WrJpNk~&}^Wk0L0$Z4j}re)E7*pp||
+zFv*y<`eS*`1jHtnUVK%=W{YO(I&DD37o=sb*aFx7qKL~DnQNxNwZGJX%thh+2hwcn
+zilE-{!wzJw+O+E^h}dkAxn|j9JTJZ$MCRNZ8K`dY!j)>+DxInQG$_ehp+~h$g9b7`
+z4??oh8<_$J_l9UMTQpPG4Knvz{Y3{NH+4Gs`<aN%7LhBaM&}l<2ieSeXoPZ<poXv-
+zgrsU(s)Afv;aVibuD=RGvYty#u@&00m!<bovn*OXzm(<@0GrnJx8=DM)k)uyCW&ex
+zsq4j`$dXhoTcJt*R(3B{!-sDKius*1N#1cFfzf-?3kPncL-{-MT>3R5V&U(~a|sVm
+zVXfj#X_6MQNs{FIK^K0f4WuL4C&lwYaFVE!`SA<|IFjV=gOIEbKImTvpzuecy=)0S
+zsN<4*x%yXmSfr=|D12L<O<MqkKar1-qBcYEmWa)k7%6J76#pPEb0k2d8vRkkWvk3l
+zAf@bQ^+RcyquVN|Z2eiDO<e$m{~|AQpiFY<#XpJIY?ZkxfWn^zk$FAhK>QIv;m@T>
+znmTV<5T5<-vI|FDn6Bv+{}F`C1_y_pJPl(0DdMtO*^vY2WTvwEFL`AL5~gkP-_mT_
+zPyo^<|0AvJs;z0{(u-e+*lbpIfGs{Q(Y|#5YIhKsb7e>9trW2FB_dFJ&GaIHXg25(
+zgih1!<21>sfo4V06kQ`DWqC)pye2{HWNzUNbik;kk!7RupwB3|`ewmvuyu0vUcZph
+z7MhBwkd0JtLkE&qXdvg^E#$LV@_=1*r>@-7f#lKbCgGvCS(;Ie&mK|MS>Dot<k3te
+zJ(IUd$Y`tN74GNTyAf|FkmRd=q%z5+>o!~y;YUU!Xx1=1ic%!ay@6;p_$HgPOYwQX
+za6g+hR72;Vtj&}sI?zztrbj2d2RmTYq-Q6}M?26^fKPJu-eDo5EgFivh;*XfXa|y4
+z_zV)Eq5Fk=wn$#F=zv^4(23-Aj+qEXHF-u=l?EeaqZ7&NbnVAegp9UIUQmJej>}6P
+zLq4?4pAhodEO`K1dWx}pvIEHjH<4+AcUqoN)aS@BUp^x*d0<=G<9Vlqj5bRi;Fi}d
+zh^X{bAj$KnWK`#mRUHVAG^M8{XjVHVrp_zzgn6C|M$<sfj$Z(FsMx3+G!itQ4MY?3
+z6RKt?HXI%LIv8sc(7fmR?)h(jiw|aF0HNLVGSA_<FcVrwn$HkXqFNbdQ<+N+JCcpX
+z=N#rb`Gu^@E+<ndmda!<vRIxaG7A?{4s)*LowS?Gq+J$EC-AKkU&uT7dWq%d@R<L2
+zGM#sFj+;-WXIVbOl6f}9F2oXSCX)m0_(Cq3Um9l*WiDkiZjQ|)Q!9Ah1%Zs~@IM!3
+z=f<PaDJOpdpOJEMEaA+=7E<}Kxytv^BZ<WHQWnpGorBp_ESYB6xok9g=;4{iGKmH7
+zc`1`Pj~|)i@xxL4eSR^PS^)Ry*<{*bnVFgBp@X$&4@aXbEic-^UTk^q{!ZSTTXA9u
+z>;QlFg#RTM0XsYPPzF1h&X4iMjy;~u`};nW&baC1%*;^zv$ZFus@pquI+IGqm)KBk
+z>)c$N-Iva!o%<TzJ3DrEYHDodbS{&3;+#GkQimEhr)gK6E7>H3%XvLk`SJ)}Ty)su
+z>DmvDF8R_)UW&~+2WOKrY$z6wJFd&JsRfs*5KcNj=MJqszEb!6e0Em&e8c08)bm;B
+zWD7ehP5ji+UrZ;)FD2u-jGLLsk0;}NhXkvsd;7{*pf|L-SMWl+PpH>foJ4riyAa6B
+z)Z=Ni=LD!K!D*7&ZgXtaG*f`8X5>Q_jvdhTOz*isi*N9QfPZwnehx=jdM74DE>=U|
+zw8_P41`XIk7hChUHQ)S|aIy6!*BoE!JmI0^$&}+h7R$%y*wDH0(YWhgop<+*4Bc^(
+zEA6~wESrU=j&a|6a6YyebK|*WHqYSYFSqrVzPs>)A3kW^M-Lrb<LEH==PT97h-eo@
+zw0Cmw*x8&j7Dp6@J9nJ~duVFv;K?Z-j~$o6Yv<>jB}Dk7oA+ZqzGd-L67h&}2bj&f
+zY<4-B1vNH3mvq^s*b+-;^6YXZcM+sBStplTV(^#WNv0E-mCG(mAOr&sR8hu-g;{qT
+zuR83Ea~Y7pIpYUzP{}z7gqV1qKMaSP=kc9?`pg0V31^RGWBIuQK3B1noALkgQU-kD
+zEzaNC+QGlSyyQwI9UX2A*SX5a@<`V7FHU-KouAIFMd{%tfzP|6=f-E3_dPH=a`oH;
+z`ylq=<C$FC@df2ec%?<e(c!vSUyI+z((z0JxM`xgx79~L!U5cRDwbQCU`PDjAFDkY
+z9R^Z5mR`i>k5vTHDEtbqD{I;boguibsnwUv-im;~HTFj5-K$`+elM#Ef=x=WZ+`E@
+z^z`Y8>LxhV{d&H-UyV<mIrhYp$EK#wAAk7K#IaLH9y|6tml7Luqr>$&H#)w59~)8m
+zKRxrr)R6;^eisVSU_kh`=DxVHwEO1T*89BqKw(L#WD~qdj+srB*UE`(A}x%`&Dj}-
+zHhB(BWM?UPnwrH&dkC6m1Fc=f2&8VJX~+Bim?WSxscdkX7>?t!aX8UJ5BGSRA|i~#
+z_Y-^~(ZazKUq&cvlWWg)z^6fX8NC;28DTmIgVUT()FEseO&kpCLP!*!<(Il=4^aTm
+zFch2(X(Flv^AUnC-|U_}NfE7{C2rVJ$comcMfn{?)r_tgUZHn%JwA28JgArNfKOGW
+zYZA-BX__!5UqcOn7kQzBwd?e04DV_OG%+DaDU-LETc_}FOT~-eaG^gv<Tuv|52^*C
+zSxpuURN(kj4xjZQX>Pl|?bI~%o+!pBu*zC7#-|JKMC*N+DbzykS1MCj2h4R=j2WPc
+zF>iju`djxkw$ZykcnHH;6I4JE7LllvhGzsa65sHup%$)@PY4l4V#)KVq99E2*&m3{
+zMq?JtPJ8{4J{a?9QRa`U5nAk7rJHo2J%{$(wzzu7o(FdYhNO4w86cXplfe$`MB}F`
+z2zwrkbQ<(XUPB`ZjYMoD{T&#IMxVp+dS#4+M<(>?_$VG_B)yS62qq6p1rwh%PRP-N
+z6rr7jb|SWu*BBX0fZBAsQs2O}Rvgg)8lqxE1(UMEHnP&jMfNO}=kviwG@p5%ucL6{
+zS7Sh!rhJACj+6%9VGmQ3F%^Mm=a(fgZe#J&Yv7rm!f#)XD&J(YTcn8^^ynst?%7h>
+zbBjGnQs$L}%0}R>nhO3_Z94JuMrB-4B}oNIY%US6-|wYW0XK0~sy&z&z$g#jR+N?K
+zZT+BkcR&2wBU1jYlKi4TLykv={w?%xV*hrFR%(6*wQ78rc=NAX&<t2B=__vcZXGK1
+z?%H)`f)Ccv9q=0UHPhDVp)Kz=>nrtbiA)73Y*q7C?xInI5{>DC@b!^59=yi3NLiy#
+zosS%mt~s>E&>F?oIKP()F=%x0;lnB>sG<$UqR&wlhISQ(c9)0xd!|c0x7qpjp;pxu
+z#FPp$Si>9&AJ8C>L1DSSu)L?RJWyD^r?5O&UcR^I<x<av{lo|1L<^2^RThGVOBI4(
+zA;_28Ly*E`q%irl!sLd+<Xwfyy9<+FFHH6nCO4KRqdkX9JvT>*PXubfI%;qV$K23_
+zK@|_zG!UQoo9{>79la5GcVGX}(!iwlNc){ze?hoMl?>2=1-(2$Er>hT7T<||MK;xb
+z3%!93V38syV+=%gV$kO?DW6#_-&^!yjL>I>K2z*72jnXm{Dx!FPWH;%iKPH#Q0YU@
+zHp;j2Y6Y){`}tlieZVnFvaef?ZtMLB>BAFMpe55h!{IX8v4_?dTA$eZJ|VRlEiDW4
+z@>RrA%^!4)F3c4^-B$jzujh+W&)wVPLm=*RB29aTylL|*en`{a5!u46@K9G*CE<~?
+zL;oJl_CY(e!_W@JcKF|Wsp!JXQ82p7J<S+P0@CK^gy<_N-eR+x+GE}d0BtJFp)N-s
+zkMa6s%#U}Pk+=)~rv%WHZ#es;(Z{C?s-f+LwkNi|@xVO-4Oa(qoz`rO22x=PJ%T<~
+z>KkAva}g&<EPgqHA6;vdF}_Hb#><1OZ*!^dG)=j#`v6`|q?O<qgOMc9XV}J((#Fkn
+zUjw)K)oKiDJfq1$Qr^P)HkEe2*Zasdc2_0Q<o%F#|K-R!c`?now@bz=RoVrXXg-pW
+zc}aaOr?wBgy+h*tJGGo`)4&@YjLU`IE<C%~{_J9~ak(q~1kz}zA>Q#En0Y2U2J6=l
+z7yISWKliRw0c<Fcq1PYtLv_-k6Z>1+i4EaSinoOu23PsTE~KG{xFf_JV%+iZ4odNG
+z?33TzUacsp{OU@Sym3DOWgvxHJIc3q&f=^FfjZFNwkmY*bnO&eEKAUR`$l))uC0+$
+z?<d=zBuHbL0>cwkK!b|`cpeRmZjiIK<xjWwesO)<nOYG{4jK4WyY|Vqrv!2sjRUg$
+zT4|~hs6=}IkD?v5&o@HH5jqaB<Cx$|O&Rz)ttF(&gn{4i_6IVQhRBL>0=lktSimQI
+z8yr!C@u2__M%M6tj<)x6Oi@QdZ~*&g&WT-g8IDa??_9~GT$V~+#EmYCNt_vu4rg+>
+zU<CK5q?ZoFQmM@4=<u6cqrdL<UWyV%wSI>fQIia9M2C3i;nL2dk<;zXxXmZx942MP
+z#3yb&e0}@<k6&XO<P&g?cgc_S#shhedP_(5UT|^Hc;w#7JWsV`AXAmcJS5#m2m@^x
+zXvKjRDp<PrP~=2=GhMfgj?-m=f)$gtmukP4m~UkfK8kv>gFz1b7kK2POK2>iv51Xj
+z7g;c^7)n#x$%`{oIP*s2?Zo6AYbt#kiEPEdQ*F3aCaR!1#cN6J)6LLOLPHT7%Ey9&
+jBR7>sLlG7ny#s<&YaN<6InoxrzNuIrc7M5l-01!v>79vk
+
+delta 23948
+zcmbVUU1(g#8MW3wU8}01Km4n%HpUoPgfKIA?!BoRgd2=;mEhX08bS!ES`y0*ekf_1
+zhG2pzW(%bhXXW07VuA^Ma7_teV{S|+r4&<2DJ6tH1Y=q#Mwk#nD1C7IV0z}RR?+U2
+z?%eaq50b(1*)wy#-}z=PT>WI=!sU+#E-giI7}mEarQ)db9Y1D&$M@{3u2m3(K^)rH
+z)|IxQ3bxe4<%er8RDbk?AAaX${O<D3f%>)|pMCMg<<VP{53T;1`#<qj$G^PRtPnV1
+ztbh}Sam?dvD}xhgWvm6Cu&#^};Y{#2Ixsw+T}x49ZNdInRo6XybZmg5xczDGS*nx}
+zLJyF#f#nGu@DYMyGQk-gM<Az+(OT1lnv*`9+`<`Sz=vJ98Wyg2hw_B1h6Ry8%^f_U
+zAc6&vIPEI01g#Zzh;<2LK0^703&V&e)Ex5R<dqP`yyDu!yb=NxDW1?l*7xWj4g|jR
+z5W8^j*+!ta6XTU%?ie`r6$A@^EL!h^bYyJE3-7d#mlK|eKqd%7{ES!>8^J!!(EDT~
+zrw7)MW@(%Vir{gc;BgRRd7PuZ{mB_D5)^^%j+HXl^+G_h5D0|uI7>*!vBZ$(1cbCi
+z*^khKBBYJ9r)xh-$08lVDe#he%tt8a5)kzH7|}F7oPKF*WMzVM&eBTIv9^M&<SCYr
+zQ7VAXX0wtLG$Dh`QIIVxlyP!B1yK+vLH6@BffGkA2-zS8A2v8VQwFCes3KPo1l6-N
+zP82&|%JO-M7hEWCaqV-w>xqq|!h6L>$hjUTxV3^v#fp!1&F}kg`dyDfl`L>QFPE~^
+z9zq%=9_<pE&+>$HByc^?36u~?dKYJWgmOyILCBY^%|#zhUI|uGNq$$Lgh*21y;{ci
+z^!V&BkR+zB5jdSD7CHlhX4&~NIBPyTLXSjSE9k}ioW@bHMA*Ne1n2meP$IZXoTX+9
+zCko!b@)62eszGJTySU3foE}Scd;%qDT_n7v1|}2)q1Smr#&sFlbn${f39%KVS3mO+
+z$|)hRf~eZO=)=h?Aq@ERx7`pZAr|yan^(&C9_O<yTJ-3EqY0ywpt8H^Te$uWLd6ve
+z3Zd&|`E=7b9a%}U=S?0bGJ<^m8oO>rMVc@1n^(*5>5X-fB&NRQ<C8Za8}K@4|5{)`
+zkrAZ7?J^73n`WcE$`@R3(>ORu6nN6#mch{>M25z!at=XOsHQ$4^g9ISet01?-=T4k
+zBM5YGgT|4aI=o+If7a_w+pMf(3;f^FIH8RM4VXXhI9bb&<#UVOA06qKPkEYuq;X;#
+zpU|mQ^Y=VXR-BM2T=P$5_h)S~A&4YJ-Ji?jL@LZCAYv=f+h5AytPgZJ1dtSUw|N{R
+zDeCU{bdU?ET1kq!f6%Es1_zX2gYNkV<pP5?lA`WkKAil*1(KrfE}x0Gp&Q;K{FNt!
+z{tJ!M{u`|XoB>FRx{rK>@=A~l-84V+;pCKHl%%NpJFf)MFii8~GQOuTN01bCpU^m=
+zb;oFI?EciZLH$BN>=v|`o1c~8(-Rv)B`NCu?c>ugI2}cr?_0J1LtCm219#%hZqNfC
+zq1*<=IDe#FPxHPHC%161*1Rii|Btp*R6&a0q00kh6z41z*;VKGF^DvLHn~Abr4&$)
+zv>`bG(3k*73-ZNe0zkzBe|arr<5y$?obDRntq5ZleCCtXy_EXR$SCAKv>7G)yg>bH
+z=OQ>5v1>Q!)~<M$@|3J#<|f%Dpkx)F{iHhta)1-!J2A<Kmr{Q1Fd;|pQZncT%F7{E
+zd{;Xi639U-K^2}H044tr<Emrr4AciULPTO6>p=pjTepU;Tw#F@l>+MV;BhGEY$uTb
+zNV`dDmeFGXD)tQ<$&Sw&(pibgT9<IKl#Y5S<xCd(<{fJ?=LO2G9VQI<P>~*ym@MX;
+zc`r0ApcDwE8PgeF4w#k`j58+IODQi0$#G%ws23<Nhe$Bcm@0uB(75Lhq>^Kx<oDn`
+z{w~Bs7H_l1>9s>OCb%z<&hxrMIpzX7>xLG*l=^k2W92$DWPX>N@B;Pg4)d+fl1QNR
+zB(FPEWCHJyJY7n6E_1Lr`U>4dC<a3LnmIXN3P=a|3Xwl%NAFlXUJcKb0_rg8p7C3E
+zhRn+D*>XUrjgSF_+AUp#<7yu0xpF{Qxb7)G>K94Ubxr^j3+`nmFO&jW@9i)aDoMJ|
+z0EkSwOeAR4q-S}HH8=nf<U+5MT07N|U0@(PgIq|^+jz~pcKvP@qwnqvp7eIft2|Hu
+z56%O<UTWzwAB6cIH~xc6NHD#S{6qkR`2yZGOjOFG4Lyt?27$915dZ}e*Dwa4VvBXE
+z10&?9@N!PxqM^WKS9wMuTx(`Wp~Q~%2^eX?gmtn<0AvM|&&kDNgALG@39~)I%m>EW
+zvONmisWRyq(#F8j<3(z)=xLdLBrBLNNN)`+%@-kc9u?@-oe2e3eUb~si?<<=a{X0u
+z@sdeG;PBhoj6rseL?%L)x3WIS4Iv6TC`ZZ@`rLgBuIeUlPw|X!G{(E{ga<;COW?k1
+zb)J!AJ|lUA-Xn;?IXhBx$@NK^QLF`reMux>Bso<~?#%Lx&}!$GZrgMjp!L}|4wyrM
+z!QPu4T^^e~J)6Dr;(hOBeU^f|?~(%M1}};zJ27R|ceAp$weQaCyo4I6Xu+l(pP@Gm
+zN2mhB`V2BGnSkN8k#S)I7yAYA=|fuY1|2Vfmpw8whL;{rmwV}<M}?7gxdbbYdS!fh
+ze14%sKd%=IIV}%1&AX@Ax_K*>)ifl(ccyZJ6o<PcCMeYofflDi3@Hijb0)`NS1b^Q
+z!TEITHf>j~oEDrc%zGK-yOg1z-gv88NiG#VE#St+G-l>q){HM5;b&CT7?`D3udy=N
+zSovaOWvH?8rN+u|W96a7%1C2nG+i01&b6v1XTH7pCT{jI1Ua?mV|*}M@G-K)eyw)x
+zx=xfw{Awgw__@0pen|CdE9giAvCvE~(_%V>7_3lb1Is259UHt~*}Jc`_ja+Lae-j9
+z3xKPK*`-&ETndH((mR#W1Iy#-sjqHvNea1?3RGz+CpRX?T4U+tw>DR-dxj2oDm!hC
+zwe>{5kZ-P~Hz&vLw8qaLIF+R;n-jz#CIZ$fWOq$rwLE0w%9qnCwd(y=^;3~O@QBF{
+zWVD-8bCwsx>mIDbl~s(n3+%sHoqG4-+CK+c559Kzdj*I%j4>wYET%yc;fiaxAwiau
+z9z8sEzcn^AT_hK$j4m94ARb0@a8@uA+8CZrhYv5QJU1kIt4}LpF?H18hF1);3=rHl
+z9^u}Ory9?kd1G|{2G2A8=DmR<hes>R<0pOE?6}T;NNohc@h%^QaW#`a!b|3g9cD(U
+zpAk%*cPDMsJjL4Yy2`cPath&rtbmafyt<Rr(X7~<5e_z-J!P#p=pMJ0TniYtFK9-M
+z!L5zKZRz0l>O!kpnPy`*4%r0f;z_MO?)>q><`gwv2f!t^E=9CxvkodkEKhN9dt-4&
+zWAO`(#cE@5XSz68z1XV0IaSQnjjgY~MTg`)jGeoTHa76W_gB-aQ%gge^X!;)x0}C~
+z5#h2W%`+J;)C@9`bqm_jOrWfr_$9ll=}3KIs5SA?)He%x;VRH7udYOqrwF>m>FueB
+z;nv;<l_%e*Z+8Xk=612Mlgt{eB*!F0Te1KM(anWZWc8}c&cs%5AeYWpcGg=v?@c{l
+z1eYECcHvfyA&v!=QF^XYJJ_ndRQY;IIPeRzQ$UkFPDL)`D%|m6xOIz(^D_K_H-kIl
+z3rs9#t=_6#Du#3KEq6T2=M|aB8V@WxJgz)aw2m7hVfK_axn^bmNNfL%%2S1KPX8U1
+zti?I!p=r3}`RxVj@A1uR`oM4kzhRA>Z{B^ewY$3YWC6|f!Ea42N>W3v1;0HDtvv_F
+zzfk~cED%<+*+9c<X6a?jw{@=nv~p<ty~?49eNVI|?+!k>Ip!ucdn~vTUr@8}o@?zs
+vJ5jLS8-EOBPy8jDf{!sV*P6ICSsYL{P&Xb3;EX9NUEWo-4+fT1?Z5vA<_?1)
+
+diff --git a/uploads/website_specific/compo.sr/upgrades/full/.htaccess b/uploads/website_specific/compo.sr/upgrades/full/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/website_specific/compo.sr/upgrades/full/.htaccess
++++ b/uploads/website_specific/compo.sr/upgrades/full/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/website_specific/compo.sr/upgrades/tar_build/.htaccess b/uploads/website_specific/compo.sr/upgrades/tar_build/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/website_specific/compo.sr/upgrades/tar_build/.htaccess
++++ b/uploads/website_specific/compo.sr/upgrades/tar_build/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+diff --git a/uploads/website_specific/compo.sr/upgrades/tars/.htaccess b/uploads/website_specific/compo.sr/upgrades/tars/.htaccess
+index 74dd3ece9..9a98bb96b 100644
+--- a/uploads/website_specific/compo.sr/upgrades/tars/.htaccess
++++ b/uploads/website_specific/compo.sr/upgrades/tars/.htaccess
+@@ -11,6 +11,23 @@ php_value engine off
+ php_value engine off
+ </IfModule>
+ 
++<IfModule mod_php8.c>
++php_value engine off
++</IfModule>
++
++<FilesMatch ".*\.(phtml|php|php3|php4|php5|phar|phps|py|rhtml|rb|pl|jsp|dll|aspx|ashx|asmx|asx|axd|asp|vbs|cgi|fcgi|sh)$">
++    # < Apache 2.4
++    <IfModule !mod_authz_core.c>
++    order deny,allow
++    deny from all
++    </IfModule>
++
++    # >= Apache 2.4
++    <IfModule mod_authz_core.c>
++    Require all denied
++    </IfModule>
++</FilesMatch>
++
+ <IfModule mod_headers.c>
+ Header set X-Content-Type-Options "nosniff"
+ Header set Content-Security-Policy "default-src 'none'"
+-- 
+GitLab
+

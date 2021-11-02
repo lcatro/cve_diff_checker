@@ -1,0 +1,214 @@
+From 2249c93a35006d016bfc9f5dd77d45fbbaaf38e7 Mon Sep 17 00:00:00 2001
+From: Jeremy Barlow <jeremy.barlow@puppetlabs.com>
+Date: Thu, 31 Mar 2016 13:46:59 -0700
+Subject: [PATCH 1/3] (PUP-6086) Remove URI unescape for indirector key
+
+This commit removes the unescape that was done for the indirector key in
+uri2indirection().  The previous logic to unescape was problematic for 2
+reasons:
+
+1) The unescape was done after a check_authorization() call was made.
+   Because of that, it would be possible for the result of the
+   check_authorization() call to be an allow but that the unescaped key
+   would produce a value that would have been denied if it had
+   previously been evaluated by check_authorization().
+
+2) Web server handlers already percent-decode the URI path component
+   at a higher-level before it is passed via a request into
+   uri2indirection().  For cases where the original URI had
+   percent-encoded a percent character, the extra unescape at this
+   level could corrupt the original value in the request.  For example,
+   if the original URI at the client were to include "%61bcd" and were
+   percent-encoded for HTTP transmission as "%2561bcd", the first decode
+   done by the web server would produce "%61bcd".  The second decode
+   previously done by uri2indirection() here would produce a value of
+   "abcd" whereas the value that the client intended to be used was
+   "%61bcd".
+---
+ .../network/http/api/indirected_routes.rb     |  2 --
+ .../http/api/indirected_routes_spec.rb        | 34 ++++++++++++-------
+ 2 files changed, 21 insertions(+), 15 deletions(-)
+
+diff --git a/lib/puppet/network/http/api/indirected_routes.rb b/lib/puppet/network/http/api/indirected_routes.rb
+index 23b6e8bc103..4b693272d5e 100644
+--- a/lib/puppet/network/http/api/indirected_routes.rb
++++ b/lib/puppet/network/http/api/indirected_routes.rb
+@@ -104,8 +104,6 @@ def uri2indirection(http_method, uri, params)
+       raise ArgumentError, "No request key specified in #{uri}"
+     end
+ 
+-    key = URI.unescape(key)
+-
+     [indirection, method, key, params]
+   end
+ 
+diff --git a/spec/unit/network/http/api/indirected_routes_spec.rb b/spec/unit/network/http/api/indirected_routes_spec.rb
+index 2936d52c685..e577db02309 100644
+--- a/spec/unit/network/http/api/indirected_routes_spec.rb
++++ b/spec/unit/network/http/api/indirected_routes_spec.rb
+@@ -127,22 +127,17 @@
+       expect(lambda { handler.uri2indirection("UPDATE", "#{master_url_prefix}/node/bar", params) }).to raise_error(ArgumentError)
+     end
+ 
+-    it "should URI unescape the indirection key" do
++    it "should not URI unescape the indirection key" do
+       escaped = URI.escape("foo bar")
+-      indirection, method, key, final_params = handler.uri2indirection("GET", "#{master_url_prefix}/node/#{escaped}", params)
+-      expect(key).to eq("foo bar")
++      indirection, _, key, _ = handler.uri2indirection("GET", "#{master_url_prefix}/node/#{escaped}", params)
++      expect(key).to eq(escaped)
+     end
+ 
+-    it "should pass through a proper environment param in a call to check_authorization" do
+-      handler.expects(:check_authorization).with(anything,
+-                                                 anything,
+-                                                 all_of(
+-                                                   has_entry(:environment,
+-                                                             is_a(Puppet::Node::Environment)),
+-                                                   has_entry(:environment,
+-                                                             responds_with(:name,
+-                                                                           :env))))
+-      handler.uri2indirection("GET", "#{master_url_prefix}/node/bar", params)
++    it "should not unescape the URI passed through in a call to check_authorization" do
++      key_escaped = URI.escape("foo bar")
++      uri_escaped = "#{master_url_prefix}/node/#{key_escaped}"
++      handler.expects(:check_authorization).with(anything, uri_escaped, anything)
++      indirection, _, _, _ = handler.uri2indirection("GET", uri_escaped, params)
+     end
+ 
+     it "should not pass through an environment to check_authorization and fail if the environment is unknown" do
+@@ -153,6 +148,19 @@
+                                               "#{master_url_prefix}/node/bar",
+                                               {:environment => 'bogus'}) }).to raise_error(ArgumentError)
+     end
++
++    it "should not URI unescape the indirection key as passed through to a call to check_authorization" do
++      handler.expects(:check_authorization).with(anything,
++                                                 anything,
++                                                 all_of(
++                                                     has_entry(:environment,
++                                                               is_a(Puppet::Node::Environment)),
++                                                     has_entry(:environment,
++                                                               responds_with(:name,
++                                                                             :env))))
++      handler.uri2indirection("GET", "#{master_url_prefix}/node/bar", params)
++    end
++
+   end
+ 
+   describe "when converting a request into a URI" do
+
+From 2af179b96e8a7145ddc7b959fed00fb3ded626dc Mon Sep 17 00:00:00 2001
+From: Jeremy Barlow <jeremy.barlow@puppetlabs.com>
+Date: Fri, 1 Apr 2016 08:44:53 -0700
+Subject: [PATCH 2/3] (PUP-6086) Avoid interpolation error for percent in node
+ catalog name
+
+This commit changes the profiler message formatted for a catalog
+compile to concatenate in the node name rather than inserting it into a
+formatted string.  The previous implementation would cause a catalog
+compilation error to be thrown because the percent character from the
+node name was being interpolated.
+---
+ lib/puppet/indirector/catalog/compiler.rb     | 3 ++-
+ spec/unit/indirector/catalog/compiler_spec.rb | 7 +++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/lib/puppet/indirector/catalog/compiler.rb b/lib/puppet/indirector/catalog/compiler.rb
+index 5b86050f6ab..278fb154234 100644
+--- a/lib/puppet/indirector/catalog/compiler.rb
++++ b/lib/puppet/indirector/catalog/compiler.rb
+@@ -254,7 +254,8 @@ def compile(node, options)
+       raise Puppet::Error, "Unable to find a common checksum type between agent '#{options[:checksum_type]}' and master '#{known_checksum_types}'." unless checksum_type
+     end
+ 
+-    str = "Compiled %s for #{node.name}" % [checksum_type ? 'static catalog' : 'catalog']
++    str = "Compiled %s for " % [checksum_type ? 'static catalog' : 'catalog']
++    str += node.name
+     str += " in environment #{node.environment}" if node.environment
+     config = nil
+ 
+diff --git a/spec/unit/indirector/catalog/compiler_spec.rb b/spec/unit/indirector/catalog/compiler_spec.rb
+index 1e650d8958d..b134c90949b 100644
+--- a/spec/unit/indirector/catalog/compiler_spec.rb
++++ b/spec/unit/indirector/catalog/compiler_spec.rb
+@@ -94,6 +94,13 @@
+       @compiler.find(@request)
+     end
+ 
++    it "should pass node containing percent character to the compiler" do
++      node_with_percent_character = Puppet::Node.new "%6de"
++      Puppet::Node.indirection.stubs(:find).returns(node_with_percent_character)
++      Puppet::Parser::Compiler.expects(:compile).with(node_with_percent_character, anything)
++      @compiler.find(@request)
++    end
++
+     it "should extract and save any facts from the request" do
+       Puppet::Node.indirection.expects(:find).with(@name, anything).returns @node
+       @compiler.expects(:extract_facts_from_request).with(@request)
+
+From 3c36398bc4122ab426f28fc34ec0d7730cc73dd7 Mon Sep 17 00:00:00 2001
+From: Jeremy Barlow <jeremy.barlow@puppetlabs.com>
+Date: Fri, 1 Apr 2016 11:08:08 -0700
+Subject: [PATCH 3/3] (PUP-6086) Restore uri unescaping to rack handler
+
+This commit unescapes the URI path as returned from the Rack HTTP
+handler.  Other web server handlers - including the WEBrick one -
+return an unescaped URI path and a prior commit removed the
+second unescape that was previously done in indirected_routes.rb.
+Requests received from Passenger, however, have an escaped path.  This
+commit ensures that downstream code - e.g., in the indirector HTTP layer
+- receives an unescaped path as is done for the other web server
+handlers.
+---
+ lib/puppet/network/http/rack/rest.rb     | 11 ++++++++++-
+ spec/unit/network/http/rack/rest_spec.rb |  7 +++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/lib/puppet/network/http/rack/rest.rb b/lib/puppet/network/http/rack/rest.rb
+index a054049b3f0..9a27e116853 100644
+--- a/lib/puppet/network/http/rack/rest.rb
++++ b/lib/puppet/network/http/rack/rest.rb
+@@ -2,6 +2,7 @@
+ require 'cgi'
+ require 'puppet/network/http/handler'
+ require 'puppet/util/ssl'
++require 'uri'
+ 
+ class Puppet::Network::HTTP::RackREST
+   include Puppet::Network::HTTP::Handler
+@@ -79,7 +80,15 @@ def params(request)
+ 
+   # what path was requested? (this is, without any query parameters)
+   def path(request)
+-    request.path
++    # The value that Passenger provides for 'path' is escaped
++    # (URL percent-encoded), see
++    # https://github.com/phusion/passenger/blob/release-5.0.26/src/apache2_module/Hooks.cpp#L885
++    # for the implementation as hooked up to an Apache web server.  Code
++    # in the indirector / HTTP layer which consumes this path, however, assumes
++    # that it has already been unescaped, so it is unescaped here.
++    if request.path
++      URI.unescape(request.path)
++    end
+   end
+ 
+   # return the request body
+diff --git a/spec/unit/network/http/rack/rest_spec.rb b/spec/unit/network/http/rack/rest_spec.rb
+index d0306e0e451..a593ea262cb 100644
+--- a/spec/unit/network/http/rack/rest_spec.rb
++++ b/spec/unit/network/http/rack/rest_spec.rb
+@@ -65,6 +65,13 @@ def mk_req(uri, opts = {})
+         expect(@handler.path(req)).to eq("/foo/bar")
+       end
+ 
++      it "should return the unescaped path for an escaped request path" do
++        unescaped_path = '/foo/bar baz'
++        escaped_path = URI.escape(unescaped_path)
++        req = mk_req(escaped_path)
++        expect(@handler.path(req)).to eq(unescaped_path)
++      end
++
+       it "should return the request body as the body" do
+         req = mk_req('/foo/bar', :input => 'mybody')
+         expect(@handler.body(req)).to eq("mybody")

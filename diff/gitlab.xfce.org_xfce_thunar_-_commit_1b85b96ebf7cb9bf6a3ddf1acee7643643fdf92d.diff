@@ -1,0 +1,234 @@
+From 1b85b96ebf7cb9bf6a3ddf1acee7643643fdf92d Mon Sep 17 00:00:00 2001
+From: Alexander Schwinn <alexxcons@xfce.org>
+Date: Tue, 11 May 2021 23:35:11 +0200
+Subject: [PATCH] Dont execute files, passed via command line due to security
+ risks
+
+Instead just the containing folder is opened
+
+CVE: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-32563
+
+See as well: Issue #575
+---
+ docs/Thunar.xml              |  6 +--
+ thunar/thunar-application.c  | 84 +++++++++++++++++++++++-------------
+ thunar/thunar-application.h  |  9 +++-
+ thunar/thunar-dbus-service.c |  2 +-
+ 4 files changed, 67 insertions(+), 34 deletions(-)
+
+diff --git a/docs/Thunar.xml b/docs/Thunar.xml
+index 3b5723c2..531e1a5e 100644
+--- a/docs/Thunar.xml
++++ b/docs/Thunar.xml
+@@ -48,9 +48,9 @@
+   <refsect1>
+     <title>Invocation</title>
+     <para>
+-      <command>Thunar</command> takes a list of <replaceable>URI</replaceable>s for folders that should be
+-      opened in new file manager windows or files that should be run using the default application for their
+-      types. The <replaceable>URI</replaceable>s may be specified as either <emphasis role="bold">file:</emphasis>
++      <command>Thunar</command> takes a list of <replaceable>URI</replaceable>s for files/folders that should be
++      opened in new file manager windows.
++      The <replaceable>URI</replaceable>s may be specified as either <emphasis role="bold">file:</emphasis>
+       or <emphasis role="bold">trash:</emphasis> URIs, absolute paths or paths relative to the current directory
+       from which <command>Thunar</command> is being invoked. If no <replaceable>URI</replaceable>s are specified,
+       the current folder will be opened in a new file manager window.
+diff --git a/thunar/thunar-application.c b/thunar/thunar-application.c
+index 3ac2f866..c0ca694d 100644
+--- a/thunar/thunar-application.c
++++ b/thunar/thunar-application.c
+@@ -179,37 +179,38 @@ struct _ThunarApplicationClass
+ 
+ struct _ThunarApplication
+ {
+-  GtkApplication         __parent__;
++  GtkApplication                 __parent__;
+ 
+-  ThunarSessionClient   *session_client;
++  ThunarSessionClient            *session_client;
+ 
+-  ThunarPreferences     *preferences;
+-  GtkWidget             *progress_dialog;
++  ThunarPreferences              *preferences;
++  GtkWidget                      *progress_dialog;
+ 
+-  ThunarThumbnailCache  *thumbnail_cache;
+-  ThunarThumbnailer     *thumbnailer;
++  ThunarThumbnailCache           *thumbnail_cache;
++  ThunarThumbnailer              *thumbnailer;
+ 
+-  ThunarDBusService     *dbus_service;
++  ThunarDBusService              *dbus_service;
+ 
+-  gboolean               daemon;
++  gboolean                        daemon;
+ 
+-  guint                  accel_map_save_id;
+-  GtkAccelMap           *accel_map;
++  guint                           accel_map_save_id;
++  GtkAccelMap                    *accel_map;
+ 
+-  guint                  show_dialogs_timer_id;
++  guint                           show_dialogs_timer_id;
+ 
+ #ifdef HAVE_GUDEV
+-  GUdevClient           *udev_client;
++  GUdevClient                    *udev_client;
+ 
+-  GSList                *volman_udis;
+-  guint                  volman_idle_id;
+-  guint                  volman_watch_id;
++  GSList                         *volman_udis;
++  guint                           volman_idle_id;
++  guint                           volman_watch_id;
+ #endif
+ 
+-  GList                 *files_to_launch;
++  GList                          *files_to_launch;
++  ThunarApplicationProcessAction  process_file_action;
+ 
+-  guint                  dbus_owner_id_xfce;
+-  guint                  dbus_owner_id_fdo;
++  guint                           dbus_owner_id_xfce;
++  guint                           dbus_owner_id_fdo;
+ };
+ 
+ 
+@@ -276,6 +277,7 @@ thunar_application_init (ThunarApplication *application)
+    * in the primary instance anyways */
+ 
+   application->files_to_launch = NULL;
++  application->process_file_action = THUNAR_APPLICATION_SELECT_FILES;
+   application->progress_dialog = NULL;
+   application->preferences     = NULL;
+ 
+@@ -529,7 +531,7 @@ thunar_application_command_line (GApplication            *gapp,
+     }
+   else if (filenames != NULL)
+     {
+-      if (!thunar_application_process_filenames (application, cwd, filenames, NULL, NULL, &error))
++      if (!thunar_application_process_filenames (application, cwd, filenames, NULL, NULL, &error, THUNAR_APPLICATION_SELECT_FILES))
+         {
+           /* we failed to process the filenames or the bulk rename failed */
+           g_application_command_line_printerr (command_line, "Thunar: %s\n", error->message);
+@@ -537,7 +539,7 @@ thunar_application_command_line (GApplication            *gapp,
+     }
+   else if (!daemon)
+     {
+-      if (!thunar_application_process_filenames (application, cwd, cwd_list, NULL, NULL, &error))
++      if (!thunar_application_process_filenames (application, cwd, cwd_list, NULL, NULL, &error, THUNAR_APPLICATION_SELECT_FILES))
+         {
+           /* we failed to process the filenames or the bulk rename failed */
+           g_application_command_line_printerr (command_line, "Thunar: %s\n", error->message);
+@@ -1507,8 +1509,27 @@ thunar_application_process_files_finish (ThunarBrowser *browser,
+     }
+   else
+     {
+-      /* try to open the file or directory */
+-      thunar_file_launch (target_file, screen, startup_id, &error);
++      if (application->process_file_action == THUNAR_APPLICATION_LAUNCH_FILES)
++        {
++          /* try to launch the file / open the directory */
++          thunar_file_launch (target_file, screen, startup_id, &error);
++        }
++      else if (thunar_file_is_directory (file))
++        {
++          thunar_application_open_window (application, file, screen, startup_id, FALSE);
++        }
++      else
++        {
++          /* Note that for security reasons we do not execute files passed via command line */
++          /* Lets rather open the containing directory */
++          ThunarFile *parent = thunar_file_get_parent (file, NULL);
++
++          if (G_LIKELY (parent != NULL))
++            {
++              thunar_application_open_window (application, parent, screen, startup_id, FALSE);
++              g_object_unref (parent);
++            }
++        }
+ 
+       /* remove the file from the list */
+       application->files_to_launch = g_list_delete_link (application->files_to_launch,
+@@ -1577,18 +1598,20 @@ thunar_application_process_files (ThunarApplication *application)
+  * @startup_id        : startup id to finish startup notification and properly focus the
+  *                      window when focus stealing is enabled or %NULL.
+  * @error             : return location for errors or %NULL.
++ * @action            : action to invoke on the files
+  *
+  * Tells @application to process the given @filenames and launch them appropriately.
+  *
+  * Return value: %TRUE on success, %FALSE if @error is set.
+  **/
+ gboolean
+-thunar_application_process_filenames (ThunarApplication *application,
+-                                      const gchar       *working_directory,
+-                                      gchar            **filenames,
+-                                      GdkScreen         *screen,
+-                                      const gchar       *startup_id,
+-                                      GError           **error)
++thunar_application_process_filenames (ThunarApplication               *application,
++                                      const gchar                     *working_directory,
++                                      gchar                          **filenames,
++                                      GdkScreen                       *screen,
++                                      const gchar                     *startup_id,
++                                      GError                         **error,
++                                      ThunarApplicationProcessAction   action)
+ {
+   ThunarFile *file;
+   GError     *derror = NULL;
+@@ -1660,7 +1683,10 @@ thunar_application_process_filenames (ThunarApplication *application,
+ 
+   /* start processing files if we have any to launch */
+   if (application->files_to_launch != NULL)
+-    thunar_application_process_files (application);
++    {
++      application->process_file_action = action;
++      thunar_application_process_files (application);
++    }
+ 
+   /* free the file list */
+   g_list_free (file_list);
+diff --git a/thunar/thunar-application.h b/thunar/thunar-application.h
+index 547cb701..8c180e8c 100644
+--- a/thunar/thunar-application.h
++++ b/thunar/thunar-application.h
+@@ -31,6 +31,12 @@ G_BEGIN_DECLS;
+ typedef struct _ThunarApplicationClass ThunarApplicationClass;
+ typedef struct _ThunarApplication      ThunarApplication;
+ 
++typedef enum
++{
++  THUNAR_APPLICATION_LAUNCH_FILES,
++  THUNAR_APPLICATION_SELECT_FILES
++} ThunarApplicationProcessAction;
++
+ #define THUNAR_TYPE_APPLICATION             (thunar_application_get_type ())
+ #define THUNAR_APPLICATION(obj)             (G_TYPE_CHECK_INSTANCE_CAST ((obj), THUNAR_TYPE_APPLICATION, ThunarApplication))
+ #define THUNAR_APPLICATION_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), THUNAR_TYPE_APPLICATION, ThunarApplicationClass))
+@@ -74,7 +80,8 @@ gboolean              thunar_application_process_filenames          (ThunarAppli
+                                                                      gchar            **filenames,
+                                                                      GdkScreen         *screen,
+                                                                      const gchar       *startup_id,
+-                                                                     GError           **error);
++                                                                     GError           **error,
++                                                                     ThunarApplicationProcessAction action);
+ 
+ void                  thunar_application_rename_file                (ThunarApplication *application,
+                                                                      ThunarFile        *file,
+diff --git a/thunar/thunar-dbus-service.c b/thunar/thunar-dbus-service.c
+index 2d27642d..4205a2b2 100644
+--- a/thunar/thunar-dbus-service.c
++++ b/thunar/thunar-dbus-service.c
+@@ -991,7 +991,7 @@ thunar_dbus_service_launch_files (ThunarDBusFileManager  *object,
+     {
+       /* let the application process the filenames */
+       application = thunar_application_get ();
+-      thunar_application_process_filenames (application, working_directory, filenames, screen, startup_id, &error);
++      thunar_application_process_filenames (application, working_directory, filenames, screen, startup_id, &error, THUNAR_APPLICATION_LAUNCH_FILES);
+       g_object_unref (G_OBJECT (application));
+ 
+       /* release the screen */
+-- 
+GitLab
+

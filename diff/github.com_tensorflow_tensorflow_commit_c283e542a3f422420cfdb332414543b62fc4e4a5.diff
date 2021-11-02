@@ -1,0 +1,29 @@
+From c283e542a3f422420cfdb332414543b62fc4e4a5 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Tue, 27 Jul 2021 10:55:35 -0700
+Subject: [PATCH] Disallow negative ngram_widths values in
+ tf.raw_ops.StringNGrams
+
+PiperOrigin-RevId: 387148179
+Change-Id: I641395a09a208be72ef9b3ceb128cf8a83a0775b
+---
+ tensorflow/core/kernels/string_ngrams_op.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tensorflow/core/kernels/string_ngrams_op.cc b/tensorflow/core/kernels/string_ngrams_op.cc
+index 7008a1d766af2..97af9abc4454a 100644
+--- a/tensorflow/core/kernels/string_ngrams_op.cc
++++ b/tensorflow/core/kernels/string_ngrams_op.cc
+@@ -53,6 +53,12 @@ class StringNGramsOp : public tensorflow::OpKernel {
+   }
+ 
+   void Compute(tensorflow::OpKernelContext* context) override {
++    for (int ngram_width : ngram_widths_) {
++      OP_REQUIRES(
++          context, ngram_width > 0,
++          errors::InvalidArgument("ngram_widths must contain positive values"));
++    }
++
+     const tensorflow::Tensor* data;
+     OP_REQUIRES_OK(context, context->input("data", &data));
+     const auto& input_data = data->flat<tstring>().data();

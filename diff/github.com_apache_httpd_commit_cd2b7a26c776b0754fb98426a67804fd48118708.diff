@@ -1,0 +1,216 @@
+From cd2b7a26c776b0754fb98426a67804fd48118708 Mon Sep 17 00:00:00 2001
+From: "William A. Rowe Jr" <wrowe@apache.org>
+Date: Tue, 9 Jun 2015 20:41:28 +0000
+Subject: [PATCH] SECURITY: CVE-2015-3183 (cve.mitre.org)
+
+Replacement of ap_some_auth_required (unusable in Apache httpd 2.4)
+with new ap_some_authn_required and ap_force_authn hook.
+
+Submitted by: breser
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/trunk@1684524 13f79535-47bb-0310-9956-ffa450edef68
+---
+ include/ap_mmn.h       |  4 ++-
+ include/http_request.h | 24 ++++++++++++++
+ server/request.c       | 74 ++++++++++++++++++++++++++++++++----------
+ 3 files changed, 83 insertions(+), 19 deletions(-)
+
+diff --git a/include/ap_mmn.h b/include/ap_mmn.h
+index 2821f97cfca..b8d7da88bba 100644
+--- a/include/ap_mmn.h
++++ b/include/ap_mmn.h
+@@ -482,6 +482,8 @@
+  * 20150222.0 (2.5.0-dev)  ssl pre_handshake hook now indicates proxy|client
+  * 20150222.1 (2.5.0-dev)  Add keep_alive_timeout_set to server_rec
+  * 20150222.2 (2.5.0-dev)  Add response code 418 as per RFC2324/RFC7168
++ * 20150222.3 (2.5.0-dev)  Add ap_some_authn_required, ap_force_authn hook.
++ *                         Deprecate broken ap_some_auth_required.
+  */
+ 
+ #define MODULE_MAGIC_COOKIE 0x41503235UL /* "AP25" */
+@@ -489,7 +491,7 @@
+ #ifndef MODULE_MAGIC_NUMBER_MAJOR
+ #define MODULE_MAGIC_NUMBER_MAJOR 20150222
+ #endif
+-#define MODULE_MAGIC_NUMBER_MINOR 2                 /* 0...n */
++#define MODULE_MAGIC_NUMBER_MINOR 3                 /* 0...n */
+ 
+ /**
+  * Determine if the server's current MODULE_MAGIC_NUMBER is at least a
+diff --git a/include/http_request.h b/include/http_request.h
+index 2317826f3a0..97591e3e3ee 100644
+--- a/include/http_request.h
++++ b/include/http_request.h
+@@ -185,6 +185,9 @@ AP_DECLARE(void) ap_internal_fast_redirect(request_rec *sub_req, request_rec *r)
+  * is required for the current request
+  * @param r The current request
+  * @return 1 if authentication is required, 0 otherwise
++ * @bug Behavior changed in 2.4.x refactoring, API no longer usable
++ * @deprecated @see ap_some_authn_required()
++ *
+  */
+ AP_DECLARE(int) ap_some_auth_required(request_rec *r);
+ 
+@@ -541,6 +544,16 @@ AP_DECLARE_HOOK(void,insert_filter,(request_rec *r))
+  */
+ AP_DECLARE_HOOK(int,post_perdir_config,(request_rec *r))
+ 
++/**
++ * This hook allows a module to force authn to be required when
++ * processing a request.
++ * This hook should be registered with ap_hook_force_authn().
++ * @param r The current request
++ * @return OK (force authn), DECLINED (let later modules decide)
++ * @ingroup hooks
++ */
++AP_DECLARE_HOOK(int,force_authn,(request_rec *r))
++
+ /**
+  * This hook allows modules to handle/emulate the apr_stat() calls
+  * needed for directory walk.
+@@ -587,6 +600,17 @@ AP_DECLARE(apr_bucket *) ap_bucket_eor_make(apr_bucket *b, request_rec *r);
+ AP_DECLARE(apr_bucket *) ap_bucket_eor_create(apr_bucket_alloc_t *list,
+                                               request_rec *r);
+ 
++/**
++ * Can be used within any handler to determine if any authentication
++ * is required for the current request.  Note that if used with an
++ * access_checker hook, an access_checker_ex hook or an authz provider; the
++ * caller should take steps to avoid a loop since this function is
++ * implemented by calling these hooks.
++ * @param r The current request
++ * @return TRUE if authentication is required, FALSE otherwise
++ */
++AP_DECLARE(int) ap_some_authn_required(request_rec *r);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/server/request.c b/server/request.c
+index 736c4c444ee..fa84c1ab325 100644
+--- a/server/request.c
++++ b/server/request.c
+@@ -71,6 +71,7 @@ APR_HOOK_STRUCT(
+     APR_HOOK_LINK(create_request)
+     APR_HOOK_LINK(post_perdir_config)
+     APR_HOOK_LINK(dirwalk_stat)
++    APR_HOOK_LINK(force_authn)
+ )
+ 
+ AP_IMPLEMENT_HOOK_RUN_FIRST(int,translate_name,
+@@ -97,6 +98,8 @@ AP_IMPLEMENT_HOOK_RUN_ALL(int, post_perdir_config,
+ AP_IMPLEMENT_HOOK_RUN_FIRST(apr_status_t,dirwalk_stat,
+                             (apr_finfo_t *finfo, request_rec *r, apr_int32_t wanted),
+                             (finfo, r, wanted), AP_DECLINED)
++AP_IMPLEMENT_HOOK_RUN_FIRST(int,force_authn,
++                            (request_rec *r), (r), DECLINED)
+ 
+ static int auth_internal_per_conf = 0;
+ static int auth_internal_per_conf_hooks = 0;
+@@ -118,6 +121,39 @@ static int decl_die(int status, const char *phase, request_rec *r)
+     }
+ }
+ 
++AP_DECLARE(int) ap_some_authn_required(request_rec *r)
++{
++    int access_status;
++
++    switch (ap_satisfies(r)) {
++    case SATISFY_ALL:
++    case SATISFY_NOSPEC:
++        if ((access_status = ap_run_access_checker(r)) != OK) {
++            break;
++        }
++
++        access_status = ap_run_access_checker_ex(r);
++        if (access_status == DECLINED) {
++            return TRUE;
++        }
++
++        break;
++    case SATISFY_ANY:
++        if ((access_status = ap_run_access_checker(r)) == OK) {
++            break;
++        }
++
++        access_status = ap_run_access_checker_ex(r);
++        if (access_status == DECLINED) {
++            return TRUE;
++        }
++
++        break;
++    }
++
++    return FALSE;
++}
++
+ /* This is the master logic for processing requests.  Do NOT duplicate
+  * this logic elsewhere, or the security model will be broken by future
+  * API changes.  Each phase must be individually optimized to pick up
+@@ -236,15 +272,8 @@ AP_DECLARE(int) ap_process_request_internal(request_rec *r)
+             }
+ 
+             access_status = ap_run_access_checker_ex(r);
+-            if (access_status == OK) {
+-                ap_log_rerror(APLOG_MARK, APLOG_TRACE3, 0, r,
+-                              "request authorized without authentication by "
+-                              "access_checker_ex hook: %s", r->uri);
+-            }
+-            else if (access_status != DECLINED) {
+-                return decl_die(access_status, "check access", r);
+-            }
+-            else {
++            if (access_status == DECLINED
++                || (access_status == OK && ap_run_force_authn(r) == OK)) {
+                 if ((access_status = ap_run_check_user_id(r)) != OK) {
+                     return decl_die(access_status, "check user", r);
+                 }
+@@ -262,6 +291,14 @@ AP_DECLARE(int) ap_process_request_internal(request_rec *r)
+                     return decl_die(access_status, "check authorization", r);
+                 }
+             }
++            else if (access_status == OK) {
++                ap_log_rerror(APLOG_MARK, APLOG_TRACE3, 0, r,
++                              "request authorized without authentication by "
++                              "access_checker_ex hook: %s", r->uri);
++            }
++            else {
++                return decl_die(access_status, "check access", r);
++            }
+             break;
+         case SATISFY_ANY:
+             if ((access_status = ap_run_access_checker(r)) == OK) {
+@@ -273,15 +310,8 @@ AP_DECLARE(int) ap_process_request_internal(request_rec *r)
+             }
+ 
+             access_status = ap_run_access_checker_ex(r);
+-            if (access_status == OK) {
+-                ap_log_rerror(APLOG_MARK, APLOG_TRACE3, 0, r,
+-                              "request authorized without authentication by "
+-                              "access_checker_ex hook: %s", r->uri);
+-            }
+-            else if (access_status != DECLINED) {
+-                return decl_die(access_status, "check access", r);
+-            }
+-            else {
++            if (access_status == DECLINED
++                || (access_status == OK && ap_run_force_authn(r) == OK)) {
+                 if ((access_status = ap_run_check_user_id(r)) != OK) {
+                     return decl_die(access_status, "check user", r);
+                 }
+@@ -299,6 +329,14 @@ AP_DECLARE(int) ap_process_request_internal(request_rec *r)
+                     return decl_die(access_status, "check authorization", r);
+                 }
+             }
++            else if (access_status == OK) {
++                ap_log_rerror(APLOG_MARK, APLOG_TRACE3, 0, r,
++                              "request authorized without authentication by "
++                              "access_checker_ex hook: %s", r->uri);
++            }
++            else {
++                return decl_die(access_status, "check access", r);
++            }
+             break;
+         }
+     }

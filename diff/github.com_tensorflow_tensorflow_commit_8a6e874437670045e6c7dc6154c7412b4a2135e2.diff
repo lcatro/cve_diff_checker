@@ -1,0 +1,26 @@
+From 8a6e874437670045e6c7dc6154c7412b4a2135e2 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Fri, 9 Jul 2021 17:32:55 -0700
+Subject: [PATCH] Validate num_elements input in tf.raw_ops.TensorListReserve
+
+PiperOrigin-RevId: 383954564
+Change-Id: I454bd78eff85bc4f16ddb7e608596971cca47f8f
+---
+ tensorflow/core/kernels/list_kernels.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/kernels/list_kernels.cc b/tensorflow/core/kernels/list_kernels.cc
+index 9a2f373f5ce0c..488e02337f707 100644
+--- a/tensorflow/core/kernels/list_kernels.cc
++++ b/tensorflow/core/kernels/list_kernels.cc
+@@ -302,6 +302,10 @@ class TensorListReserve : public OpKernel {
+     PartialTensorShape element_shape;
+     OP_REQUIRES_OK(c, TensorShapeFromTensor(c->input(0), &element_shape));
+     int32 num_elements = c->input(1).scalar<int32>()();
++    OP_REQUIRES(c, num_elements >= 0,
++                errors::InvalidArgument("The num_elements to reserve must be a "
++                                        "non negative number, but got ",
++                                        num_elements));
+     TensorList output;
+     output.element_shape = element_shape;
+     output.element_dtype = element_dtype_;

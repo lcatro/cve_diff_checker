@@ -1,0 +1,27 @@
+From 6e158d558abd3c29a0208e30c97c9a8c5bd4230f Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Wed, 23 Sep 2020 16:39:58 -0700
+Subject: [PATCH] Check for result of recvfrom
+
+PiperOrigin-RevId: 333399155
+Change-Id: I3d79e1e3f45f75d4c4360d42499e511d84b9aff7
+---
+ asylo/platform/host_call/trusted/host_calls.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/asylo/platform/host_call/trusted/host_calls.cc b/asylo/platform/host_call/trusted/host_calls.cc
+index 6e37ebf00..adf4c48a6 100644
+--- a/asylo/platform/host_call/trusted/host_calls.cc
++++ b/asylo/platform/host_call/trusted/host_calls.cc
+@@ -981,6 +981,11 @@ ssize_t enc_untrusted_recvfrom(int sockfd, void *buf, size_t len, int flags,
+     return result;
+   }
+ 
++  if (result > len) {
++    ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
++        "enc_untrusted_recvfrom: result exceeds requested");
++  }
++
+   auto buffer_received = output.next();
+   memcpy(buf, buffer_received.data(), std::min(len, buffer_received.size()));
+ 

@@ -1,0 +1,451 @@
+From 33ccaf61e34ef32ffc9d6b2be5dd218f6bb55f51 Mon Sep 17 00:00:00 2001
+From: George Nachman <gnachman@gmail.com>
+Date: Wed, 20 Sep 2017 10:05:38 -0700
+Subject: [PATCH] Fist swipe at removing DNS code
+
+---
+ iTerm2.xcodeproj/project.pbxproj     |  10 ---
+ sources/AsyncHostLookupController.h  |  25 ------
+ sources/AsyncHostLookupController.m  | 119 ---------------------------
+ sources/PTYTextView.m                |  66 +--------------
+ sources/iTermAdvancedSettingsModel.h |   1 -
+ sources/iTermAdvancedSettingsModel.m |   1 -
+ sources/iTermTextDrawingHelper.h     |   3 -
+ sources/iTermTextDrawingHelper.m     |   4 +-
+ 8 files changed, 3 insertions(+), 226 deletions(-)
+ delete mode 100644 sources/AsyncHostLookupController.h
+ delete mode 100644 sources/AsyncHostLookupController.m
+
+diff --git a/iTerm2.xcodeproj/project.pbxproj b/iTerm2.xcodeproj/project.pbxproj
+index 63a5a29032..c7328a892c 100644
+--- a/iTerm2.xcodeproj/project.pbxproj
++++ b/iTerm2.xcodeproj/project.pbxproj
+@@ -630,7 +630,6 @@
+ 		1D6C4D5A122329F000E0AA3E /* ColorPresets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1D6C4D59122329F000E0AA3E /* ColorPresets.plist */; };
+ 		1D6C50A71226EEFB00E0AA3E /* ProfileListView.h in Headers */ = {isa = PBXBuildFile; fileRef = 1D6C50A51226EEFB00E0AA3E /* ProfileListView.h */; };
+ 		1D6ED85619AEA20D005A7799 /* URLAction.h in Headers */ = {isa = PBXBuildFile; fileRef = A6CFDAD0185D2587005DC94B /* URLAction.h */; };
+-		1D6ED85719AEA20D005A7799 /* AsyncHostLookupController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6CFDAD5185D53C2005DC94B /* AsyncHostLookupController.h */; };
+ 		1D6ED85819AEA20D005A7799 /* LineBufferPosition.h in Headers */ = {isa = PBXBuildFile; fileRef = 1D78B55C183EE1C000014D49 /* LineBufferPosition.h */; };
+ 		1D6ED85919AEA20D005A7799 /* FindContext.h in Headers */ = {isa = PBXBuildFile; fileRef = 1D53FD13181C4B4B00524D4F /* FindContext.h */; };
+ 		1D6ED85A19AEA20D005A7799 /* ProfilesTerminalPreferencesViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6A2698D1900F95D00437DA9 /* ProfilesTerminalPreferencesViewController.h */; };
+@@ -2017,7 +2016,6 @@
+ 		A6C763011B45C52B00E3C992 /* TransferrableFileMenuItemViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = A68A30D9186D1429007F550F /* TransferrableFileMenuItemViewController.m */; };
+ 		A6C763021B45C52B00E3C992 /* VT100RemoteHost.m in Sources */ = {isa = PBXBuildFile; fileRef = A68A30DA186D1429007F550F /* VT100RemoteHost.m */; };
+ 		A6C763031B45C52B00E3C992 /* VT100WorkingDirectory.m in Sources */ = {isa = PBXBuildFile; fileRef = A68A30DB186D1429007F550F /* VT100WorkingDirectory.m */; };
+-		A6C763051B45C52B00E3C992 /* AsyncHostLookupController.m in Sources */ = {isa = PBXBuildFile; fileRef = A6CFDAD6185D53C2005DC94B /* AsyncHostLookupController.m */; };
+ 		A6C763061B45C52B00E3C992 /* BackgroundThread.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DA26ABF15007507004B5792 /* BackgroundThread.m */; };
+ 		A6C763071B45C52B00E3C992 /* CapturedOutput.m in Sources */ = {isa = PBXBuildFile; fileRef = A67F57D31B11882900B4F135 /* CapturedOutput.m */; };
+ 		A6C763091B45C52B00E3C992 /* iTermCommandHistoryCommandUseMO+Addtions.m in Sources */ = {isa = PBXBuildFile; fileRef = A6E7474C188C6394005355CF /* iTermCommandHistoryCommandUseMO+Addtions.m */; };
+@@ -2317,7 +2315,6 @@
+ 		A6CEDA6119988A7300BB57EC /* LogoShadow.png in Resources */ = {isa = PBXBuildFile; fileRef = A6CEDA5E19988A7300BB57EC /* LogoShadow.png */; };
+ 		A6CEDA6219988A7300BB57EC /* LogoShadow.png in Resources */ = {isa = PBXBuildFile; fileRef = A6CEDA5E19988A7300BB57EC /* LogoShadow.png */; };
+ 		A6CFDAD2185D2587005DC94B /* URLAction.h in Headers */ = {isa = PBXBuildFile; fileRef = A6CFDAD0185D2587005DC94B /* URLAction.h */; };
+-		A6CFDAD7185D53C2005DC94B /* AsyncHostLookupController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6CFDAD5185D53C2005DC94B /* AsyncHostLookupController.h */; };
+ 		A6D22A431BC8BE6B004084E0 /* Model.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A6D22A411BC8BE6B004084E0 /* Model.xcdatamodeld */; };
+ 		A6D22A441BC8BE6B004084E0 /* Model.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A6D22A411BC8BE6B004084E0 /* Model.xcdatamodeld */; };
+ 		A6D22A451BC8BE6B004084E0 /* Model.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = A6D22A411BC8BE6B004084E0 /* Model.xcdatamodeld */; };
+@@ -3837,8 +3834,6 @@
+ 		A6CEDA5E19988A7300BB57EC /* LogoShadow.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = LogoShadow.png; path = images/LogoParts/LogoShadow.png; sourceTree = "<group>"; };
+ 		A6CFDAD0185D2587005DC94B /* URLAction.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = URLAction.h; sourceTree = "<group>"; tabWidth = 4; };
+ 		A6CFDAD1185D2587005DC94B /* URLAction.m */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.objc; path = URLAction.m; sourceTree = "<group>"; tabWidth = 4; };
+-		A6CFDAD5185D53C2005DC94B /* AsyncHostLookupController.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = AsyncHostLookupController.h; sourceTree = "<group>"; tabWidth = 4; };
+-		A6CFDAD6185D53C2005DC94B /* AsyncHostLookupController.m */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.objc; path = AsyncHostLookupController.m; sourceTree = "<group>"; tabWidth = 4; };
+ 		A6D22A421BC8BE6B004084E0 /* Model.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = Model.xcdatamodel; sourceTree = "<group>"; };
+ 		A6D22B431BC9D368004084E0 /* iTermShellHistoryTest.m */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.objc; path = iTermShellHistoryTest.m; sourceTree = "<group>"; };
+ 		A6DF401A1897607E00F05947 /* NSTextField+iTerm.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = "NSTextField+iTerm.h"; sourceTree = "<group>"; tabWidth = 4; };
+@@ -4202,7 +4197,6 @@
+ 				A66DB8341C8E4CBB00233E88 /* iTermOpenQuicklyCommands.h */,
+ 				A6E7138C18F26A91008D94DD /* AppearancePreferencesViewController.h */,
+ 				1D2560A813EE60E4006B35CD /* ArrangementPreviewView.h */,
+-				A6CFDAD5185D53C2005DC94B /* AsyncHostLookupController.h */,
+ 				1DE214DF128212EE004E3ADF /* Autocomplete.h */,
+ 				1DA26ABE15007507004B5792 /* BackgroundThread.h */,
+ 				1D9DCC0C142D7F5F0016228A /* BellTrigger.h */,
+@@ -5630,7 +5624,6 @@
+ 				A6E761631D39D216005C0E5C /* iTermMutableAttributedStringBuilder.m */,
+ 				539325EE1DD66EF100CABCEF /* iTermPreciseTimer.h */,
+ 				539325EF1DD66EF100CABCEF /* iTermPreciseTimer.m */,
+-				A6CFDAD6185D53C2005DC94B /* AsyncHostLookupController.m */,
+ 				1DA26ABF15007507004B5792 /* BackgroundThread.m */,
+ 				A67F57D31B11882900B4F135 /* CapturedOutput.m */,
+ 				1D53FD14181C4B4B00524D4F /* FindContext.m */,
+@@ -6134,7 +6127,6 @@
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				1D6ED85619AEA20D005A7799 /* URLAction.h in Headers */,
+-				1D6ED85719AEA20D005A7799 /* AsyncHostLookupController.h in Headers */,
+ 				1D6ED85819AEA20D005A7799 /* LineBufferPosition.h in Headers */,
+ 				1D6ED85919AEA20D005A7799 /* FindContext.h in Headers */,
+ 				1D6ED85A19AEA20D005A7799 /* ProfilesTerminalPreferencesViewController.h in Headers */,
+@@ -6478,7 +6470,6 @@
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				A6CFDAD2185D2587005DC94B /* URLAction.h in Headers */,
+-				A6CFDAD7185D53C2005DC94B /* AsyncHostLookupController.h in Headers */,
+ 				1D78B55E183EE1C000014D49 /* LineBufferPosition.h in Headers */,
+ 				A65B72781B2BF2D200F947A7 /* iTermProfilesPanel.h in Headers */,
+ 				1D53FD15181C4B4B00524D4F /* FindContext.h in Headers */,
+@@ -8485,7 +8476,6 @@
+ 				A6C7637C1B45C52B00E3C992 /* ProfilesColorsPreferencesViewController.m in Sources */,
+ 				A6C763E21B45C6DD00E3C992 /* PSMTabDragWindow.m in Sources */,
+ 				A6936B5A1D2F5D1A00521B04 /* iTermHotkeyPreferencesModel.m in Sources */,
+-				A6C763051B45C52B00E3C992 /* AsyncHostLookupController.m in Sources */,
+ 				A6C763DA1B45C6DD00E3C992 /* NSWindow+PSM.m in Sources */,
+ 				A6C763121B45C52B00E3C992 /* iTermImageInfo.m in Sources */,
+ 				A6C7636E1B45C52B00E3C992 /* iTermPreferences.m in Sources */,
+diff --git a/sources/AsyncHostLookupController.h b/sources/AsyncHostLookupController.h
+deleted file mode 100644
+index 0e022f2a44..0000000000
+--- a/sources/AsyncHostLookupController.h
++++ /dev/null
+@@ -1,25 +0,0 @@
+-//
+-//  AsyncHostLookupController.h
+-//  iTerm
+-//
+-//  Created by George Nachman on 12/14/13.
+-//
+-//
+-
+-#import <Foundation/Foundation.h>
+-
+-// Verify whether host names are valid. Runs in a separate thread and provides asynchronous results.
+-// Caches very aggressively.
+-@interface AsyncHostLookupController : NSObject
+-
+-+ (instancetype)sharedInstance;
+-
+-// Calls back to completion indicating whether |host| is an extant hostname. The BOOL is YES if the
+-// hostname resolves. |host| is passed as the second argument to completion. Does not block.
+-- (void)getAddressForHost:(NSString *)host
+-               completion:(void (^)(BOOL, NSString*))completion;
+-
+-// Cancels the lookup for |hostname|.
+-- (void)cancelRequestForHostname:(NSString *)hostname;
+-
+-@end
+diff --git a/sources/AsyncHostLookupController.m b/sources/AsyncHostLookupController.m
+deleted file mode 100644
+index a82675de1f..0000000000
+--- a/sources/AsyncHostLookupController.m
++++ /dev/null
+@@ -1,119 +0,0 @@
+-//
+-//  AsyncHostLookupController.m
+-//  iTerm
+-//
+-//  Created by George Nachman on 12/14/13.
+-//
+-//
+-
+-#import "AsyncHostLookupController.h"
+-#import "DebugLogging.h"
+-#import "iTermAdvancedSettingsModel.h"
+-#include <netdb.h>
+-
+-@implementation AsyncHostLookupController {
+-    // Created at initialization and used to perform blocking gethostbyname calls.
+-    dispatch_queue_t _queue;
+-
+-    // Set of hostnames waiting to be looked up. If a hostname is removed from
+-    // this set then it won't be looked up when its turn comes around.
+-    NSMutableSet *_pending;
+-
+-    // Maps hostname -> @YES or @NO, indicating if it resolved.
+-    NSMutableDictionary *_cache;
+-}
+-
+-+ (instancetype)sharedInstance {
+-    static AsyncHostLookupController *instance;
+-    static dispatch_once_t once;
+-    dispatch_once(&once, ^{
+-        instance = [[self alloc] init];
+-    });
+-    return instance;
+-}
+-
+-- (instancetype)init {
+-    self = [super init];
+-    if (self) {
+-        _queue = dispatch_queue_create("AsyncHostLookupControllerQueue", NULL);
+-        _pending = [[NSMutableSet alloc] init];
+-        _cache = [[NSMutableDictionary alloc] init];
+-    }
+-    return self;
+-}
+-
+-- (void)dealloc {
+-    // The logic for cleaning up the dispatch queue isn't written, so just make sure the singleton
+-    // never gets dealloced.
+-    assert(false);
+-    [super dealloc];
+-}
+-
+-- (void)getAddressForHost:(NSString *)hostname
+-               completion:(void (^)(BOOL, NSString *))completion {
+-    if (![iTermAdvancedSettingsModel performDNSLookups]) {
+-        completion(YES, hostname);
+-        return;
+-    }
+-
+-    NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
+-    @synchronized(self) {
+-        if ([_pending containsObject:hostname]) {
+-            DLog(@"Already pending %@", hostname);
+-            return;
+-        }
+-        NSNumber *okNumber = _cache[hostname];
+-        if (okNumber) {
+-            completion([okNumber boolValue], hostname);
+-            return;
+-        }
+-        [_pending addObject:hostname];
+-    }
+-    dispatch_async(_queue, ^() {
+-        @synchronized(self) {
+-            if (![_pending containsObject:hostname]) {
+-                DLog(@"Abort nslookup for %@", hostname);
+-                return;
+-            }
+-        }
+-
+-        BOOL shouldCache;
+-        BOOL ok = [self hostnameHasAddress:[hostname UTF8String] shouldCache:&shouldCache];
+-        if (shouldCache) {
+-            @synchronized(self) {
+-                _cache[hostname] = @(ok);
+-            }
+-        }
+-        dispatch_async(dispatch_get_main_queue(), ^() {
+-            @synchronized(self) {
+-                if (![_pending containsObject:hostname]) {
+-                    DLog(@"Finished nslookup but don't call block for %@", hostname);
+-                    return;
+-                }
+-                [_pending removeObject:hostname];
+-            }
+-            DLog(@"Host %@: %@", hostname, ok ? @"OK" : @"Unknown");
+-            completion(ok, hostname);
+-        });
+-    });
+-    DLog(@"Blocked main thread for %f sec", [NSDate timeIntervalSinceReferenceDate] - start);
+-}
+-
+-- (void)cancelRequestForHostname:(NSString *)hostname {
+-    @synchronized(self) {
+-        [_pending removeObject:hostname];
+-    }
+-}
+-
+-- (BOOL)hostnameHasAddress:(const char *)hostname shouldCache:(BOOL *)shouldCache {
+-    struct addrinfo *servinfo;
+-    int status = getaddrinfo(hostname, NULL, NULL, &servinfo);
+-    if (status == 0) {
+-        freeaddrinfo(servinfo);
+-    }
+-    // Don't cache temporary failures
+-    *shouldCache = (status != EAI_AGAIN);
+-    return status == 0;
+-}
+-
+-@end
+diff --git a/sources/PTYTextView.m b/sources/PTYTextView.m
+index ded180f123..48f85b481c 100644
+--- a/sources/PTYTextView.m
++++ b/sources/PTYTextView.m
+@@ -1,6 +1,5 @@
+ #import "PTYTextView.h"
+ 
+-#import "AsyncHostLookupController.h"
+ #import "charmaps.h"
+ #import "FileTransferManager.h"
+ #import "FontSizeEstimator.h"
+@@ -96,10 +95,6 @@
+ static const NSUInteger kRectangularSelectionModifiers = (NSCommandKeyMask | NSAlternateKeyMask);
+ static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelectionModifiers | NSControlKeyMask);
+ 
+-// Notifications posted when hostname lookups finish. Notifications are used to
+-// avoid dangling references.
+-static NSString *const kHostnameLookupFailed = @"kHostnameLookupFailed";
+-static NSString *const kHostnameLookupSucceeded = @"kHostnameLookupSucceeded";
+ static PTYTextView *gCurrentKeyEventTextView;  // See comment in -keyDown:
+ 
+ // Minimum distance that the mouse must move before a cmd+drag will be
+@@ -119,9 +114,6 @@ @interface PTYTextView () <
+     NSMenuDelegate,
+     NSPopoverDelegate>
+ 
+-// Set the hostname this view is currently waiting for AsyncHostLookupController to finish looking
+-// up.
+-@property(nonatomic, copy) NSString *currentUnderlineHostname;
+ @property(nonatomic, retain) iTermSelection *selection;
+ @property(nonatomic, retain) iTermSemanticHistoryController *semanticHistoryController;
+ @property(nonatomic, retain) iTermFindCursorView *findCursorView;
+@@ -309,14 +301,6 @@ - (instancetype)initWithFrame:(NSRect)aRect colorMap:(iTermColorMap *)colorMap {
+                                                  selector:@selector(_pointerSettingsChanged:)
+                                                      name:kPointerPrefsChangedNotification
+                                                    object:nil];
+-        [[NSNotificationCenter defaultCenter] addObserver:self
+-                                                 selector:@selector(hostnameLookupFailed:)
+-                                                     name:kHostnameLookupFailed
+-                                                   object:nil];
+-        [[NSNotificationCenter defaultCenter] addObserver:self
+-                                                 selector:@selector(hostnameLookupSucceeded:)
+-                                                     name:kHostnameLookupSucceeded
+-                                                   object:nil];
+         [[NSNotificationCenter defaultCenter] addObserver:self
+                                                  selector:@selector(imageDidLoad:)
+                                                      name:iTermImageDidLoad
+@@ -400,10 +384,6 @@ - (void)dealloc {
+     [threeFingerTapGestureRecognizer_ disconnectTarget];
+     [threeFingerTapGestureRecognizer_ release];
+ 
+-    if (self.currentUnderlineHostname) {
+-        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
+-    }
+-    [_currentUnderlineHostname release];
+     _indicatorsHelper.delegate = nil;
+     [_indicatorsHelper release];
+     _selectionScrollHelper.delegate = nil;
+@@ -1115,7 +1095,6 @@ - (void)drawRect:(NSRect)rect {
+     // Draw the cursor filled in when we're inactive if there's a popup open or key focus was stolen.
+     _drawingHelper.shouldDrawFilledInCursor = ([self.delegate textViewShouldDrawFilledInCursor] || _keyFocusStolenCount);
+     _drawingHelper.isFrontTextView = (self == [[iTermController sharedInstance] frontTextView]);
+-    _drawingHelper.haveUnderlinedHostname = (self.currentUnderlineHostname != nil);
+     _drawingHelper.transparencyAlpha = [self transparencyAlpha];
+     _drawingHelper.now = [NSDate timeIntervalSinceReferenceDate];
+     _drawingHelper.drawMarkIndicators = [_delegate textViewShouldShowMarkIndicators];
+@@ -1772,10 +1751,6 @@ - (void)removeUnderline {
+     }
+     _drawingHelper.underlinedRange =
+         VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
+-    if (self.currentUnderlineHostname) {
+-        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
+-    }
+-    self.currentUnderlineHostname = nil;
+     [self setNeedsDisplay:YES];  // It would be better to just display the underlined/formerly underlined area.
+ }
+ 
+@@ -1809,29 +1784,9 @@ - (URLAction *)updateUnderlinedURLs:(NSEvent *)event {
+ 
+                 if (action.actionType == kURLActionOpenURL) {
+                     NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
+-                    if (![url.host isEqualToString:self.currentUnderlineHostname]) {
+-                        if (self.currentUnderlineHostname) {
+-                            [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
+-                        }
+-                        if (url && url.host) {
+-                            self.currentUnderlineHostname = url.host;
+-                            [[AsyncHostLookupController sharedInstance] getAddressForHost:url.host
+-                                                                               completion:^(BOOL ok, NSString *hostname) {
+-                                                                                   if (!ok) {
+-                                                                                       [[NSNotificationCenter defaultCenter] postNotificationName:kHostnameLookupFailed
+-                                                                                                                                           object:hostname];
+-                                                                                   } else {
+-                                                                                       [[NSNotificationCenter defaultCenter] postNotificationName:kHostnameLookupSucceeded
+-                                                                                                                                           object:hostname];
+-                                                                                   }
+-                                                                               }];
+-                        }
++                    if (url && url.host) {
++                        [self setNeedsDisplay:YES];
+                     }
+-                } else {
+-                    if (self.currentUnderlineHostname) {
+-                        [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
+-                    }
+-                    self.currentUnderlineHostname = nil;
+                 }
+             } else {
+                 [self removeUnderline];
+@@ -6188,23 +6143,6 @@ - (URLAction *)urlActionForClickAtX:(int)x
+                                        }];
+ }
+ 
+-- (void)hostnameLookupFailed:(NSNotification *)notification {
+-    if ([[notification object] isEqualToString:self.currentUnderlineHostname]) {
+-        self.currentUnderlineHostname = nil;
+-        [self removeUnderline];
+-        _drawingHelper.underlinedRange =
+-            VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
+-        [self setNeedsDisplay:YES];
+-    }
+-}
+-
+-- (void)hostnameLookupSucceeded:(NSNotification *)notification {
+-    if ([[notification object] isEqualToString:self.currentUnderlineHostname]) {
+-        self.currentUnderlineHostname = nil;
+-        [self setNeedsDisplay:YES];
+-    }
+-}
+-
+ - (void)imageDidLoad:(NSNotification *)notification {
+     if ([self imageIsVisible:notification.object]) {
+         [self setNeedsDisplay:YES];
+diff --git a/sources/iTermAdvancedSettingsModel.h b/sources/iTermAdvancedSettingsModel.h
+index 8651407141..98f1e9af87 100644
+--- a/sources/iTermAdvancedSettingsModel.h
++++ b/sources/iTermAdvancedSettingsModel.h
+@@ -161,7 +161,6 @@
+ + (BOOL)useColorfgbgFallback;
+ + (BOOL)promptForPasteWhenNotAtPrompt;
+ + (void)setPromptForPasteWhenNotAtPrompt:(BOOL)value;
+-+ (BOOL)performDNSLookups;
+ + (BOOL)zeroWidthSpaceAdvancesCursor;
+ + (BOOL)darkThemeHasBlackTitlebar;
+ + (BOOL)fontChangeAffectsBroadcastingSessions;
+diff --git a/sources/iTermAdvancedSettingsModel.m b/sources/iTermAdvancedSettingsModel.m
+index 91a948ba7a..1b23bf5d7f 100644
+--- a/sources/iTermAdvancedSettingsModel.m
++++ b/sources/iTermAdvancedSettingsModel.m
+@@ -182,7 +182,6 @@ + (NSString *)name { \
+ DEFINE_STRING(URLCharacterSet, @".?\\/:;%=&_-,+~#@!*'(（)）|[]", @"Semantic History: Non-alphanumeric characters considered part of a URL for Semantic History.\nLetters and numbers are always considered part of the URL. These non-alphanumeric characters are used in addition for the purposes of figuring out where a URL begins and ends.");
+ DEFINE_INT(maxSemanticHistoryPrefixOrSuffix, 2000, @"Semantic History: Maximum number of bytes of text before and after click location to take into account.\nThis also limits the size of the \\3 and \\4 substitutions.");
+ DEFINE_STRING(pathsToIgnore, @"", @"Semantic History: Paths to ignore for Semantic History.\nSeparate paths with a comma. Any file under one of these paths will not be openable with Semantic History.");
+-DEFINE_BOOL(performDNSLookups, NO, @"Semantic History: Perform DNS lookups to check if URLs are valid?\nWhen enabled, the name under the mouse will be resolved with DNS to determine if it is a clickable link.");
+ DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, YES, @"Semantic History: Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
+ 
+ #pragma mark - Debugging
+diff --git a/sources/iTermTextDrawingHelper.h b/sources/iTermTextDrawingHelper.h
+index eaa34cfea5..d477506844 100644
+--- a/sources/iTermTextDrawingHelper.h
++++ b/sources/iTermTextDrawingHelper.h
+@@ -159,9 +159,6 @@
+ // TODO: This might be the same as textViewIsActiveSession.
+ @property(nonatomic, assign) BOOL isFrontTextView;
+ 
+-// Is there an underlined hostname?
+-@property(nonatomic, assign) BOOL haveUnderlinedHostname;
+-
+ // Background transparency level. Should be 1 if transparency is off for this view.
+ @property(nonatomic, assign) double transparencyAlpha;
+ 
+diff --git a/sources/iTermTextDrawingHelper.m b/sources/iTermTextDrawingHelper.m
+index ce49fa83dd..0bee107317 100644
+--- a/sources/iTermTextDrawingHelper.m
++++ b/sources/iTermTextDrawingHelper.m
+@@ -110,7 +110,6 @@ @interface iTermTextDrawingHelper() <iTermCursorDelegate>
+     NSColor *backgroundColor;
+     NSColor *previousBackgroundColor;
+     CGFloat minimumContrast;
+-    BOOL haveUnderlinedHostname;
+     NSColor *previousForegroundColor;
+ } iTermTextColorContext;
+ 
+@@ -1555,7 +1554,7 @@ - (CGContextRef)newGrayscaleContextOfSize:(NSSize)size {
+         // Black-on-yellow search result.
+         rawColor = [NSColor colorWithCalibratedRed:0 green:0 blue:0 alpha:1];
+         context->havePreviousCharacterAttributes = NO;
+-    } else if (inUnderlinedRange && !context->haveUnderlinedHostname) {
++    } else if (inUnderlinedRange) {
+         // Blue link text.
+         rawColor = [context->colorMap colorForKey:kColorMapLink];
+         context->havePreviousCharacterAttributes = NO;
+@@ -1865,7 +1864,6 @@ - (BOOL)zippy {
+         .havePreviousCharacterAttributes = NO,
+         .backgroundColor = backgroundColor,
+         .minimumContrast = _minimumContrast,
+-        .haveUnderlinedHostname = _haveUnderlinedHostname,
+         .previousForegroundColor = nil,
+     };
+     NSDictionary *previousImageAttributes = nil;

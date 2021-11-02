@@ -1,0 +1,60 @@
+From 49ab94d0052672d4fb642505d44b94a18abea332 Mon Sep 17 00:00:00 2001
+From: Junling Bu <linlinjavaer@gmail.com>
+Date: Tue, 16 Oct 2018 13:46:54 +0800
+Subject: [PATCH] =?UTF-8?q?fix[litemall-wx-api]:=20=E4=BF=AE=E5=A4=8D?=
+ =?UTF-8?q?=E6=96=87=E4=BB=B6=E8=B7=AF=E5=BE=84=E4=B8=AD=E5=8C=85=E5=90=AB?=
+ =?UTF-8?q?"../"=E5=B8=A6=E6=9D=A5=E7=9A=84=E5=AE=89=E5=85=A8=E9=97=AE?=
+ =?UTF-8?q?=E9=A2=98?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../litemall/wx/web/WxStorageController.java      | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/litemall-wx-api/src/main/java/org/linlinjava/litemall/wx/web/WxStorageController.java b/litemall-wx-api/src/main/java/org/linlinjava/litemall/wx/web/WxStorageController.java
+index ddb3701c1..538a70efb 100644
+--- a/litemall-wx-api/src/main/java/org/linlinjava/litemall/wx/web/WxStorageController.java
++++ b/litemall-wx-api/src/main/java/org/linlinjava/litemall/wx/web/WxStorageController.java
+@@ -58,14 +58,17 @@ public Object upload(@RequestParam("file") MultipartFile file) throws IOExceptio
+     public ResponseEntity<Resource> fetch(@PathVariable String key) {
+         LitemallStorage litemallStorage = litemallStorageService.findByKey(key);
+         if (key == null) {
+-            ResponseEntity.notFound();
++            return ResponseEntity.notFound().build();
++        }
++        if(key.contains("../")){
++            return ResponseEntity.badRequest().build();
+         }
+         String type = litemallStorage.getType();
+         MediaType mediaType = MediaType.parseMediaType(type);
+ 
+         Resource file = storageService.loadAsResource(key);
+         if (file == null) {
+-            ResponseEntity.notFound();
++            return ResponseEntity.notFound().build();
+         }
+         return ResponseEntity.ok().contentType(mediaType).body(file);
+     }
+@@ -74,14 +77,18 @@ public Object upload(@RequestParam("file") MultipartFile file) throws IOExceptio
+     public ResponseEntity<Resource> download(@PathVariable String key) {
+         LitemallStorage litemallStorage = litemallStorageService.findByKey(key);
+         if (key == null) {
+-            ResponseEntity.notFound();
++            return ResponseEntity.notFound().build();
++        }
++        if(key.contains("../")){
++            return ResponseEntity.badRequest().build();
+         }
++
+         String type = litemallStorage.getType();
+         MediaType mediaType = MediaType.parseMediaType(type);
+ 
+         Resource file = storageService.loadAsResource(key);
+         if (file == null) {
+-            ResponseEntity.notFound();
++            return ResponseEntity.notFound().build();
+         }
+         return ResponseEntity.ok().contentType(mediaType).header(HttpHeaders.CONTENT_DISPOSITION,
+                 "attachment; filename=\"" + file.getFilename() + "\"").body(file);

@@ -1,0 +1,25 @@
+From 14607c0707040d775e06b6817325640cb4b5864c Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 5 May 2021 21:09:21 -0700
+Subject: [PATCH] Fix nullptr deref in `tf.raw_ops.CTCLoss`.
+
+PiperOrigin-RevId: 372266334
+Change-Id: Ic52c3e9f13a38f54482d670907eda1688450862b
+---
+ tensorflow/core/kernels/ctc_loss_op.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ctc_loss_op.cc b/tensorflow/core/kernels/ctc_loss_op.cc
+index b0e298a0f329f..ca505e1db9314 100644
+--- a/tensorflow/core/kernels/ctc_loss_op.cc
++++ b/tensorflow/core/kernels/ctc_loss_op.cc
+@@ -109,6 +109,9 @@ class CTCLossOp : public OpKernel {
+ 
+     const TensorShape& inputs_shape = inputs->shape();
+     const int64 max_time = inputs_shape.dim_size(0);
++    OP_REQUIRES(ctx, max_time != 0,
++                errors::InvalidArgument(
++                    "Max time or first dimension of input cannot be 0."));
+     const int64 batch_size = inputs_shape.dim_size(1);
+     const int64 num_classes_raw = inputs_shape.dim_size(2);
+     OP_REQUIRES(

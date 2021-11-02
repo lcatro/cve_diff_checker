@@ -1,0 +1,44 @@
+From 4bcc606225f15bac0b07780e74f667f6ac283da7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 20 Jun 2016 11:35:27 +0200
+Subject: [PATCH] Always use delimiter not present in search expression
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This avoids need to figure out correct escaping in case delimiter is
+present in the expression.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ .../controllers/table/TableSearchController.php   | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/libraries/controllers/table/TableSearchController.php b/libraries/controllers/table/TableSearchController.php
+index 666dea84092..a89a654b22f 100644
+--- a/libraries/controllers/table/TableSearchController.php
++++ b/libraries/controllers/table/TableSearchController.php
+@@ -726,9 +726,22 @@ private function _getRegexReplaceRows(
+         $result = $this->dbi->fetchResult($sql_query, 0);
+ 
+         if (is_array($result)) {
++            /* Iterate over possible delimiters to get one */
++            $delimiters = array('/', '@', '#', '~', '!', '$', '%', '^', '&', '_');
++            $found = false;
++            for ($i = 0; $i < count($delimiters); $i++) {
++                if (strpos($find, $delimiters[$i]) === false) {
++                    $found = true;
++                    break;
++                }
++            }
++            if (! $found) {
++                return false;
++            }
++            $find = $delimiters[$i] . $find . $delimiters[$i];
+             foreach ($result as $index=>$row) {
+                 $result[$index][1] = preg_replace(
+-                    "/" . $find . "/",
++                    $find,
+                     $replaceWith,
+                     $row[0]
+                 );

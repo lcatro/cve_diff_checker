@@ -1,0 +1,24 @@
+From 8a6d9a02fa991a91ff90ccdc73b5ceabaa6cb9ec Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Alexandre-Xavier=20Labont=C3=A9-Lamoureux?=
+ <alexandrexavier@live.ca>
+Date: Thu, 11 Jun 2020 01:57:07 -0400
+Subject: [PATCH] Fix buffer overflow in M_LoadDefaults
+
+Too much data will most likely result in a crash or freeze, but you can overwrite the stack which can be used to do an arbitrary code execution. (https://twitter.com/notrevenant/status/1268654123903340544)
+---
+ m_misc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/m_misc.c b/m_misc.c
+index 7e49a51..01629ad 100644
+--- a/m_misc.c
++++ b/m_misc.c
+@@ -479,7 +479,7 @@ void M_LoadDefaults (void)
+ 	while (!feof(f))
+ 	{
+ 	    isstring = false;
+-	    if (fscanf (f, "%79s %[^\n]\n", def, strparm) == 2)
++	    if (fscanf (f, "%79s %99[^\n]\n", def, strparm) == 2)
+ 	    {
+ 		if (strparm[0] == '"')
+ 		{

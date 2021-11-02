@@ -1,0 +1,33 @@
+From d08d4a8c7387e758d439b0592782e4cfa2b4d6a4 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Thu, 28 Jun 2018 23:46:32 +0200
+Subject: [PATCH] avcodec/vc1_block: Fix mqaunt check for negative values
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: out of array access
+Fixes: ffmpeg_bof_4.avi
+Fixes: ffmpeg_bof_5.avi
+Fixes: ffmpeg_bof_6.avi
+
+Found-by: Thuan Pham, Marcel Böhme, Andrew Santosa and Alexandru Razvan Caciulescu with AFLSmart
+Reviewed-by: Jerome Borsboom <jerome.borsboom@carpalis.nl>
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavcodec/vc1_block.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libavcodec/vc1_block.c b/libavcodec/vc1_block.c
+index dfaaab700b79..86320db959a3 100644
+--- a/libavcodec/vc1_block.c
++++ b/libavcodec/vc1_block.c
+@@ -207,7 +207,7 @@ static void vc1_put_blocks_clamped(VC1Context *v, int put_signed)
+         if ((edges&8) &&                                       \
+             s->mb_y == ((s->mb_height >> v->field_mode) - 1))  \
+             mquant = -v->altpq;                                \
+-        if (!mquant || mquant > 31) {                          \
++        if (!mquant || mquant > 31 || mquant < -31) {                          \
+             av_log(v->s.avctx, AV_LOG_ERROR,                   \
+                    "Overriding invalid mquant %d\n", mquant);  \
+             mquant = 1;                                        \

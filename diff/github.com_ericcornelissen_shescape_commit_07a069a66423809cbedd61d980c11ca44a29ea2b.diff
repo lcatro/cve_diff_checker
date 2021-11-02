@@ -1,0 +1,108 @@
+From 07a069a66423809cbedd61d980c11ca44a29ea2b Mon Sep 17 00:00:00 2001
+From: Eric Cornelissen <ericornelissen@gmail.com>
+Date: Sat, 13 Mar 2021 18:14:10 +0100
+Subject: [PATCH] Strip null characters from arguments
+
+Update both the Unix and Windows `escapeShellArg` implementation to
+strip null characters from input. Null characters can be used to at
+least cause errors and potentially execute arbitrary commands (depending
+on the shell).
+
+This bug was found due to the new fuzzing logic.
+---
+ CHANGELOG.md      |  2 +-
+ src/unix.js       |  2 +-
+ src/win.js        |  2 +-
+ test/unix.test.js | 16 ++++++++++++++++
+ test/win.test.js  | 16 ++++++++++++++++
+ 5 files changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index dc59581..8597237 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,7 +7,7 @@ Versioning].
+ 
+ ## [Unreleased]
+ 
+-- _No changes yet_
++- Strip null characters from arguments.
+ 
+ ## [1.1.2] - 2021-01-07
+ 
+diff --git a/src/unix.js b/src/unix.js
+index 89fc3bd..d0671b5 100644
+--- a/src/unix.js
++++ b/src/unix.js
+@@ -11,7 +11,7 @@
+  * @returns {string} The escaped argument.
+  */
+ function escapeShellArg(arg) {
+-  return arg.replace(/'/g, `'\\''`);
++  return arg.replace(/\u{0}/gu, "").replace(/'/g, `'\\''`);
+ }
+ 
+ module.exports.escapeShellArg = escapeShellArg;
+diff --git a/src/win.js b/src/win.js
+index 0283eda..4e4009a 100644
+--- a/src/win.js
++++ b/src/win.js
+@@ -11,7 +11,7 @@
+  * @returns {string} The escaped argument.
+  */
+ function escapeShellArg(arg) {
+-  return arg.replace(/"/g, `""`);
++  return arg.replace(/\u{0}/gu, "").replace(/"/g, `""`);
+ }
+ 
+ module.exports.escapeShellArg = escapeShellArg;
+diff --git a/test/unix.test.js b/test/unix.test.js
+index 94e6be2..d33a3ff 100644
+--- a/test/unix.test.js
++++ b/test/unix.test.js
+@@ -22,4 +22,20 @@ describe("unix.js", function () {
+       assert.strictEqual(output, `'\\'' & echo '\\''Hello world!'\\''`);
+     });
+   });
++
++  describe("null characters", function () {
++    const nullChar = String.fromCharCode(0);
++
++    it("removes one null character", function () {
++      const input = `foo' && ls${nullChar} -al ; echo 'bar`;
++      const output = escapeShellArg(input);
++      assert.strictEqual(output, `foo'\\'' && ls -al ; echo '\\''bar`);
++    });
++
++    it("removes multiple null character", function () {
++      const input = `foo'${nullChar}&&ls -al${nullChar};echo 'bar`;
++      const output = escapeShellArg(input);
++      assert.strictEqual(output, `foo'\\''&&ls -al;echo '\\''bar`);
++    });
++  });
+ });
+diff --git a/test/win.test.js b/test/win.test.js
+index ce24a85..1970e25 100644
+--- a/test/win.test.js
++++ b/test/win.test.js
+@@ -22,4 +22,20 @@ describe("win.js", function () {
+       assert.strictEqual(output, `"" & echo ""Hello world!`);
+     });
+   });
++
++  describe("null characters", function () {
++    const nullChar = String.fromCharCode(0);
++
++    it("removes one null character", function () {
++      const input = `foo" && ls${nullChar} -al ; echo "bar`;
++      const output = escapeShellArg(input);
++      assert.strictEqual(output, `foo"" && ls -al ; echo ""bar`);
++    });
++
++    it("removes multiple null character", function () {
++      const input = `foo"${nullChar}&&ls -al${nullChar};echo "bar`;
++      const output = escapeShellArg(input);
++      assert.strictEqual(output, `foo""&&ls -al;echo ""bar`);
++    });
++  });
+ });

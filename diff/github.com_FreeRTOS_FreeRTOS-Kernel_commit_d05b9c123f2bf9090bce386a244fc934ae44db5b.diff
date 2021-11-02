@@ -1,0 +1,32 @@
+From d05b9c123f2bf9090bce386a244fc934ae44db5b Mon Sep 17 00:00:00 2001
+From: Cobus van Eeden <35851496+cobusve@users.noreply.github.com>
+Date: Mon, 7 Dec 2020 11:07:31 -0800
+Subject: [PATCH] Add addition overflow check for stream buffer (#226)
+
+---
+ stream_buffer.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/stream_buffer.c b/stream_buffer.c
+index 03cfc06156..fec03a7816 100644
+--- a/stream_buffer.c
++++ b/stream_buffer.c
+@@ -258,8 +258,16 @@ static void prvInitialiseNewStreamBuffer( StreamBuffer_t * const pxStreamBuffer,
+          * this is a quirk of the implementation that means otherwise the free
+          * space would be reported as one byte smaller than would be logically
+          * expected. */
+-        xBufferSizeBytes++;
+-        pucAllocatedMemory = ( uint8_t * ) pvPortMalloc( xBufferSizeBytes + sizeof( StreamBuffer_t ) ); /*lint !e9079 malloc() only returns void*. */
++        if( xBufferSizeBytes < ( xBufferSizeBytes + 1 + sizeof( StreamBuffer_t ) ) )
++        {
++            xBufferSizeBytes++;
++            pucAllocatedMemory = ( uint8_t * ) pvPortMalloc( xBufferSizeBytes + sizeof( StreamBuffer_t ) ); /*lint !e9079 malloc() only returns void*. */
++        }
++        else
++        {
++            pucAllocatedMemory = NULL;
++        }
++        
+ 
+         if( pucAllocatedMemory != NULL )
+         {

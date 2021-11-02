@@ -1,0 +1,33 @@
+From 33441d90a506d5f3ae9388f2752901227e430553 Mon Sep 17 00:00:00 2001
+From: Christian Beier <dontmind@freeshell.org>
+Date: Fri, 6 Mar 2020 17:37:57 +0100
+Subject: [PATCH] libvncclient/tls_openssl: do not deref a NULL pointer
+
+Happens in anonTLS mode where cred is NULL.
+
+re #347
+---
+ libvncclient/tls_openssl.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/libvncclient/tls_openssl.c b/libvncclient/tls_openssl.c
+index c9b2647c5..fcef1bc3e 100644
+--- a/libvncclient/tls_openssl.c
++++ b/libvncclient/tls_openssl.c
+@@ -268,7 +268,7 @@ open_ssl_connection (rfbClient *client, int sockfd, rfbBool anonTLS, rfbCredenti
+   SSL *ssl = NULL;
+   int n, finished = 0;
+   X509_VERIFY_PARAM *param;
+-  uint8_t verify_crls = cred->x509Credential.x509CrlVerifyMode;
++  uint8_t verify_crls;
+ 
+   if (!(ssl_ctx = SSL_CTX_new(SSLv23_client_method())))
+   {
+@@ -281,6 +281,7 @@ open_ssl_connection (rfbClient *client, int sockfd, rfbBool anonTLS, rfbCredenti
+   /* Setup verification if not anonymous */
+   if (!anonTLS)
+   {
++    verify_crls = cred->x509Credential.x509CrlVerifyMode;
+     if (cred->x509Credential.x509CACertFile)
+     {
+       if (!SSL_CTX_load_verify_locations(ssl_ctx, cred->x509Credential.x509CACertFile, NULL))

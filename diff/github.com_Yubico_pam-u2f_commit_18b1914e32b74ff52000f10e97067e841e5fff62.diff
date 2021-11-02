@@ -1,0 +1,160 @@
+From 18b1914e32b74ff52000f10e97067e841e5fff62 Mon Sep 17 00:00:00 2001
+From: Gabriel Kihlman <g.kihlman@yubico.com>
+Date: Tue, 4 Jun 2019 09:59:50 +0200
+Subject: [PATCH] Do not leak file descriptor when doing exec
+
+When opening a custom debug file, the descriptor would stay
+open when calling exec and leak to the child process.
+
+Make sure all files are opened with close-on-exec.
+
+This fixes CVE-2019-12210.
+
+Thanks to Matthias Gerstner of the SUSE Security Team for reporting
+the issue.
+---
+ pam-u2f.c | 35 +++++++++++++++++++++++++----------
+ util.c    | 10 +++++++---
+ util.h    |  3 ++-
+ 3 files changed, 34 insertions(+), 14 deletions(-)
+
+diff --git a/pam-u2f.c b/pam-u2f.c
+index 55d5708..071d005 100644
+--- a/pam-u2f.c
++++ b/pam-u2f.c
+@@ -1,5 +1,5 @@
+ /*
+- *  Copyright (C) 2014-2018 Yubico AB - See COPYING
++ *  Copyright (C) 2014-2019 Yubico AB - See COPYING
+  */
+ 
+ /* Define which PAM interfaces we provide */
+@@ -31,7 +31,11 @@ char *secure_getenv(const char *name) {
+ #endif
+ 
+ static void parse_cfg(int flags, int argc, const char **argv, cfg_t *cfg) {
++  struct stat st;
++  FILE *file = NULL;
++  int fd = -1;
+   int i;
++
+   memset(cfg, 0, sizeof(cfg_t));
+   cfg->debug_file = stderr;
+ 
+@@ -76,14 +80,14 @@ static void parse_cfg(int flags, int argc, const char **argv, cfg_t *cfg) {
+         cfg->debug_file = (FILE *)-1;
+       }
+       else {
+-        struct stat st;
+-        FILE *file;
+-        if(lstat(filename, &st) == 0) {
+-          if(S_ISREG(st.st_mode)) {
+-            file = fopen(filename, "a");
+-            if(file != NULL) {
+-              cfg->debug_file = file;
+-            }
++        fd = open(filename, O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY);
++        if (fd >= 0 && (fstat(fd, &st) == 0) && S_ISREG(st.st_mode)) {
++          file = fdopen(fd, "a");
++          if(file != NULL) {
++            cfg->debug_file = file;
++            cfg->is_custom_debug_file = 1;
++            file = NULL;
++            fd = -1;
+           }
+         }
+       }
+@@ -111,6 +115,12 @@ static void parse_cfg(int flags, int argc, const char **argv, cfg_t *cfg) {
+     D(cfg->debug_file, "appid=%s", cfg->appid ? cfg->appid : "(null)");
+     D(cfg->debug_file, "prompt=%s", cfg->prompt ? cfg->prompt : "(null)");
+   }
++
++  if (fd != -1)
++    close(fd);
++
++  if (file != NULL)
++    fclose(file);
+ }
+ 
+ #ifdef DBG
+@@ -317,7 +327,8 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+     DBG("Using file '%s' for emitting touch request notifications", cfg->authpending_file);
+ 
+     // Open (or create) the authpending_file to indicate that we start waiting for a touch
+-    authpending_file_descriptor = open(cfg->authpending_file, O_RDONLY | O_CREAT, 0664);
++    authpending_file_descriptor =
++      open(cfg->authpending_file, O_RDONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY, 0664);
+     if (authpending_file_descriptor < 0) {
+       DBG("Unable to emit 'authentication started' notification by opening the file '%s', (%s)",
+           cfg->authpending_file, strerror(errno));
+@@ -385,6 +396,10 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc,
+   }
+   DBG("done. [%s]", pam_strerror(pamh, retval));
+ 
++  if (cfg->is_custom_debug_file) {
++    fclose(cfg->debug_file);
++  }
++
+   return retval;
+ }
+ 
+diff --git a/util.c b/util.c
+index 6bf73b9..d6651f6 100644
+--- a/util.c
++++ b/util.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2014-2018 Yubico AB - See COPYING
++ * Copyright (C) 2014-2019 Yubico AB - See COPYING
+  */
+ 
+ #include "util.h"
+@@ -36,7 +36,7 @@ int get_devices_from_authfile(const char *authfile, const char *username,
+   /* Ensure we never return uninitialized count. */
+   *n_devs = 0;
+ 
+-  fd = open(authfile, O_RDONLY, 0);
++  fd = open(authfile, O_RDONLY | O_CLOEXEC | O_NOCTTY);
+   if (fd < 0) {
+     if (verbose)
+       D(debug_file, "Cannot open file: %s (%s)", authfile, strerror(errno));
+@@ -83,6 +83,8 @@ int get_devices_from_authfile(const char *authfile, const char *username,
+     if (verbose)
+       D(debug_file, "fdopen: %s", strerror(errno));
+     goto err;
++  } else {
++    fd = -1; /* fd belongs to opwfile */
+   }
+ 
+   buf = malloc(sizeof(char) * (DEVSIZE * max_devs));
+@@ -211,8 +213,10 @@ int get_devices_from_authfile(const char *authfile, const char *username,
+ 
+   if (opwfile)
+     fclose(opwfile);
+-  else if (fd >= 0)
++
++  if (fd != -1)
+     close(fd);
++
+   return retval;
+ }
+ 
+diff --git a/util.h b/util.h
+index 82c3542..d2e7a4d 100644
+--- a/util.h
++++ b/util.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2014-2018 Yubico AB - See COPYING
++ * Copyright (C) 2014-2019 Yubico AB - See COPYING
+  */
+ 
+ #ifndef UTIL_H
+@@ -45,6 +45,7 @@ typedef struct {
+   const char *appid;
+   const char *prompt;
+   FILE *debug_file;
++  int is_custom_debug_file;
+ } cfg_t;
+ 
+ typedef struct {

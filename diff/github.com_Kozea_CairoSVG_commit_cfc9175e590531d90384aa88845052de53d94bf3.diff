@@ -1,0 +1,54 @@
+From 063185b60588a41d4df661ad70f9f7b699901abc Mon Sep 17 00:00:00 2001
+From: Guillaume Ayoub <guillaume@courtbouillon.org>
+Date: Fri, 1 Jan 2021 00:05:55 +0100
+Subject: [PATCH] =?UTF-8?q?Don=E2=80=99t=20use=20overlapping=20groups=20fo?=
+ =?UTF-8?q?r=20regular=20expressions?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The section between 'rgb(' and the final ')' contains multiple overlapping
+groups.
+
+Since all three infinitely repeating groups accept spaces, a long string of
+spaces causes catastrophic backtracking when it is not followed by a closing
+parenthesis.
+
+The complexity is cubic, so doubling the length of the malicious string of
+spaces makes processing take 8 times as long.
+---
+ cairosvg/colors.py | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/cairosvg/colors.py b/cairosvg/colors.py
+index 96d94e1a..68eed88d 100644
+--- a/cairosvg/colors.py
++++ b/cairosvg/colors.py
+@@ -187,8 +187,8 @@
+     'transparent': (0, 0, 0, 0),
+ }
+ 
+-RGBA = re.compile(r'rgba\([ \n\r\t]*(.+?)[ \n\r\t]*\)')
+-RGB = re.compile(r'rgb\([ \n\r\t]*(.+?)[ \n\r\t]*\)')
++RGBA = re.compile(r'rgba\((.+?)\)')
++RGB = re.compile(r'rgb\((.+?)\)')
+ HEX_RRGGBB = re.compile('#[0-9a-f]{6}')
+ HEX_RGB = re.compile('#[0-9a-f]{3}')
+ 
+@@ -212,14 +212,14 @@ def color(string, opacity=1):
+     if match:
+         r, g, b, a = tuple(
+             float(i.strip(' %')) / 100 if '%' in i else float(i) / 255
+-            for i in match.group(1).split(','))
++            for i in match.group(1).strip().split(','))
+         return (r, g, b, a * 255 * opacity)
+ 
+     match = RGB.search(string)
+     if match:
+         r, g, b = tuple(
+             float(i.strip(' %')) / 100 if '%' in i else float(i) / 255
+-            for i in match.group(1).split(','))
++            for i in match.group(1).strip().split(','))
+         return (r, g, b, opacity)
+ 
+     match = HEX_RRGGBB.search(string)

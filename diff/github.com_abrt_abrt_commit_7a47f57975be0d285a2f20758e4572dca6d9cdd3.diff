@@ -1,0 +1,66 @@
+From 7a47f57975be0d285a2f20758e4572dca6d9cdd3 Mon Sep 17 00:00:00 2001
+From: Jakub Filak <jfilak@redhat.com>
+Date: Wed, 13 May 2015 11:10:23 +0200
+Subject: [PATCH] dbus: validate parameters of all calls
+
+SetElement and DeleteElement were missing check for valid dump directory
+path.
+
+FindProblemByElementInTimeRange was not reporting invalid element names.
+
+Related: #1214451
+
+Signed-off-by: Jakub Filak <jfilak@redhat.com>
+---
+ src/dbus/abrt-dbus.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/src/dbus/abrt-dbus.c b/src/dbus/abrt-dbus.c
+index bef95bd8d..f2f742b24 100644
+--- a/src/dbus/abrt-dbus.c
++++ b/src/dbus/abrt-dbus.c
+@@ -607,6 +607,12 @@ static void handle_method_call(GDBusConnection *connection,
+ 
+         g_variant_get(parameters, "(&s&s&s)", &problem_id, &element, &value);
+ 
++        if (!allowed_problem_dir(problem_id))
++        {
++            return_InvalidProblemDir_error(invocation, problem_id);
++            return;
++        }
++
+         if (!str_is_correct_filename(element))
+         {
+             log_notice("'%s' is not a valid element name of '%s'", element, problem_id);
+@@ -666,6 +672,12 @@ static void handle_method_call(GDBusConnection *connection,
+ 
+         g_variant_get(parameters, "(&s&s)", &problem_id, &element);
+ 
++        if (!allowed_problem_dir(problem_id))
++        {
++            return_InvalidProblemDir_error(invocation, problem_id);
++            return;
++        }
++
+         if (!str_is_correct_filename(element))
+         {
+             log_notice("'%s' is not a valid element name of '%s'", element, problem_id);
+@@ -783,6 +795,18 @@ static void handle_method_call(GDBusConnection *connection,
+         g_variant_get_child(parameters, 3, "x", &timestamp_to);
+         g_variant_get_child(parameters, 4, "b", &all);
+ 
++        if (!str_is_correct_filename(element))
++        {
++            log_notice("'%s' is not a valid element name", element);
++            char *error = xasprintf(_("'%s' is not a valid element name"), element);
++            g_dbus_method_invocation_return_dbus_error(invocation,
++                                              "org.freedesktop.problems.InvalidElement",
++                                              error);
++
++            free(error);
++            return;
++        }
++
+         if (all && polkit_check_authorization_dname(caller, "org.freedesktop.problems.getall") == PolkitYes)
+             caller_uid = 0;
+ 

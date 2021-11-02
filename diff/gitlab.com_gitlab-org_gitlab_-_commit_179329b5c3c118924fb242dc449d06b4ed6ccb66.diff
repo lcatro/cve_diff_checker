@@ -1,0 +1,107 @@
+From 179329b5c3c118924fb242dc449d06b4ed6ccb66 Mon Sep 17 00:00:00 2001
+From: Stan Hu <stanhu@gmail.com>
+Date: Sun, 14 Mar 2021 21:08:05 -0700
+Subject: [PATCH] Patch Kramdown syntax highlighter gem
+
+This restricts Rouge formatters to the Rouge::Formatters namespace to
+prevent arbitrary classes from being instantiated.
+
+Relates to https://gitlab.com/gitlab-org/gitlab/-/issues/324452
+---
+ .../unreleased/security-patch-kramdown.yml    |  5 +++
+ config/initializers/kramdown_patch.rb         | 25 ++++++++++++
+ spec/initializers/kramdown_patch_spec.rb      | 38 +++++++++++++++++++
+ 3 files changed, 68 insertions(+)
+ create mode 100644 changelogs/unreleased/security-patch-kramdown.yml
+ create mode 100644 config/initializers/kramdown_patch.rb
+ create mode 100644 spec/initializers/kramdown_patch_spec.rb
+
+diff --git a/changelogs/unreleased/security-patch-kramdown.yml b/changelogs/unreleased/security-patch-kramdown.yml
+new file mode 100644
+index 0000000000000..792619327fe6a
+--- /dev/null
++++ b/changelogs/unreleased/security-patch-kramdown.yml
+@@ -0,0 +1,5 @@
++---
++title: Patch Kramdown syntax highlighter gem
++merge_request:
++author:
++type: security
+diff --git a/config/initializers/kramdown_patch.rb b/config/initializers/kramdown_patch.rb
+new file mode 100644
+index 0000000000000..5cb769cec242c
+--- /dev/null
++++ b/config/initializers/kramdown_patch.rb
+@@ -0,0 +1,25 @@
++# frozen_string_literal: true
++#
++# This pulls in https://github.com/gettalong/kramdown/pull/708 for kramdown v2.3.0.
++# Remove this file when that pull request is merged and released.
++require 'kramdown/converter'
++require 'kramdown/converter/syntax_highlighter/rouge'
++
++module Kramdown::Converter::SyntaxHighlighter
++  module Rouge
++    def self.formatter_class(opts = {})
++      case formatter = opts[:formatter]
++      when Class
++        formatter
++      when /\A[[:upper:]][[:alnum:]_]*\z/
++        ::Rouge::Formatters.const_get(formatter, false)
++      else
++        # Available in Rouge 2.0 or later
++        ::Rouge::Formatters::HTMLLegacy
++      end
++    rescue NameError
++      # Fallback to Rouge 1.x
++      ::Rouge::Formatters::HTML
++    end
++  end
++end
+diff --git a/spec/initializers/kramdown_patch_spec.rb b/spec/initializers/kramdown_patch_spec.rb
+new file mode 100644
+index 0000000000000..49dda9252bbfa
+--- /dev/null
++++ b/spec/initializers/kramdown_patch_spec.rb
+@@ -0,0 +1,38 @@
++# frozen_string_literal: true
++
++require 'spec_helper'
++
++RSpec.describe 'Kramdown patch for syntax highlighting formatters' do
++  subject { Kramdown::Document.new(options + "\n" + code).to_html }
++
++  let(:code) do
++    <<-RUBY
++~~~ ruby
++    def what?
++      42
++    end
++~~~
++    RUBY
++  end
++
++  context 'with invalid formatter' do
++    let(:options) { %({::options auto_ids="false" footnote_nr="5" syntax_highlighter="rouge" syntax_highlighter_opts="{formatter: CSV, line_numbers: true\\}" /}) }
++
++    it 'falls back to standard HTML and disallows CSV' do
++      expect(CSV).not_to receive(:new)
++      expect(::Rouge::Formatters::HTML).to receive(:new).and_call_original
++
++      expect(subject).to be_present
++    end
++  end
++
++  context 'with valid formatter' do
++    let(:options) { %({::options auto_ids="false" footnote_nr="5" syntax_highlighter="rouge" syntax_highlighter_opts="{formatter: HTMLLegacy\\}" /}) }
++
++    it 'allows formatter' do
++      expect(::Rouge::Formatters::HTMLLegacy).to receive(:new).and_call_original
++
++      expect(subject).to be_present
++    end
++  end
++end
+-- 
+GitLab
+

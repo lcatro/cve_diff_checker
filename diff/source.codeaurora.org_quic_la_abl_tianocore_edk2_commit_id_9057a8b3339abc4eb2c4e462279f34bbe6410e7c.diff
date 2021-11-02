@@ -1,0 +1,61 @@
+From 9057a8b3339abc4eb2c4e462279f34bbe6410e7c Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Fri, 29 Sep 2017 10:25:58 +0800
+Subject: QcomModulePkg: Add return value check after LocateHandleBuffer
+
+Add a return value check after calling LocateHandleBuffer, it's
+no need to run the remaining code in GetBlkIOHandles if the result
+is not EFI_SUCCESS.
+
+Change-Id: I32c8af50e5db734b1702620cf581a10a7bebb900
+---
+ QcomModulePkg/Library/BootLib/LinuxLoaderLib.c | 33 ++++++++++++++++----------
+ 1 file changed, 21 insertions(+), 12 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c b/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
+index d135cfb..9487019 100644
+--- a/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
++++ b/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
+@@ -93,18 +93,27 @@ GetBlkIOHandles (
+ 		SelectionAttrib |= (BLK_IO_SEL_PARTITIONED_GPT | BLK_IO_SEL_PARTITIONED_MBR);
+ 
+ 	/* If we need Filesystem handle then search based on that its narrower search than BlkIo */
+-	if (SelectionAttrib & (BLK_IO_SEL_SELECT_MOUNTED_FILESYSTEM | BLK_IO_SEL_SELECT_BY_VOLUME_NAME))
+-		gBS->LocateHandleBuffer (ByProtocol,
+-				&gEfiSimpleFileSystemProtocolGuid,
+-				NULL,
+-				&BlkIoHandleCount,
+-				&BlkIoHandles);
+-	else
+-		gBS->LocateHandleBuffer (ByProtocol,
+-				&gEfiBlockIoProtocolGuid,
+-				NULL,
+-				&BlkIoHandleCount,
+-				&BlkIoHandles);
++    if (SelectionAttrib &
++            (BLK_IO_SEL_SELECT_MOUNTED_FILESYSTEM |
++            BLK_IO_SEL_SELECT_BY_VOLUME_NAME)) {
++        Status = gBS->LocateHandleBuffer (ByProtocol,
++                    &gEfiSimpleFileSystemProtocolGuid,
++                    NULL,
++                    &BlkIoHandleCount,
++                    &BlkIoHandles);
++    } else {
++        Status = gBS->LocateHandleBuffer (ByProtocol,
++                    &gEfiBlockIoProtocolGuid,
++                    NULL,
++                    &BlkIoHandleCount,
++                    &BlkIoHandles);
++    }
++
++    if (Status != EFI_SUCCESS) {
++        DEBUG ((EFI_D_ERROR,
++            "Unable to get Filesystem Handle buffer %r\n", Status));
++        return Status;
++    }
+ 
+ 	/* Loop through to search for the ones we are interested in. */
+ 	for (i = 0; i < BlkIoHandleCount; i++){
+-- 
+cgit v1.1
+

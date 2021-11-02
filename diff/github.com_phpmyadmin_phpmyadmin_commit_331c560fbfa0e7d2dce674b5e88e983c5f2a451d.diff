@@ -1,0 +1,103 @@
+From 331c560fbfa0e7d2dce674b5e88e983c5f2a451d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Fri, 17 Jun 2016 10:53:23 +0200
+Subject: [PATCH] Improve error handling in setup in case config dir is not
+ present
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We do not show these options in UI, but the scripts should handle it
+gracefully.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ setup/config.php           | 33 ++++++++++++++++++++++++++++-----
+ setup/frames/index.inc.php | 14 ++++++++++++++
+ 2 files changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/setup/config.php b/setup/config.php
+index cf1761455c7..db9e7c905e4 100644
+--- a/setup/config.php
++++ b/setup/config.php
+@@ -15,6 +15,24 @@
+ 
+ require './libraries/config/setup.forms.php';
+ 
++/**
++ * Loads configuration file path
++ *
++ * Do this in a function to avoid messing up with global $cfg
++ *
++ * @param string $config_file_path
++ *
++ * @return array
++ */
++function loadConfig($config_file_path)
++{
++    $cfg = array();
++    if (file_exists($config_file_path)) {
++        include $config_file_path;
++    }
++    return $cfg;
++}
++
+ $form_display = new FormDisplay($GLOBALS['ConfigFile']);
+ $form_display->registerForm('_config.php', $forms['_config.php']);
+ $form_display->save('_config.php');
+@@ -44,20 +62,25 @@
+     //
+     // Save generated config file on the server
+     //
+-    file_put_contents(
++    $result = @file_put_contents(
+         $config_file_path,
+         ConfigGenerator::getConfigFile($GLOBALS['ConfigFile'])
+     );
++    if ($result === false) {
++        $state = 'config_not_saved';
++    } else {
++        $state = 'config_saved';
++    }
+     header('HTTP/1.1 303 See Other');
+-    header('Location: index.php' . PMA_URL_getCommon() . '&action_done=config_saved');
++    header('Location: index.php' . PMA_URL_getCommon() . '&action_done=' . $state);
+     exit;
+ } elseif (PMA_ifSetOr($_POST['submit_load'], '')) {
+     //
+     // Load config file from the server
+     //
+-    $cfg = array();
+-    include $config_file_path;
+-    $GLOBALS['ConfigFile']->setConfigData($cfg);
++    $GLOBALS['ConfigFile']->setConfigData(
++        loadConfig($config_file_path)
++    );
+     header('HTTP/1.1 303 See Other');
+     header('Location: index.php' . PMA_URL_getCommon());
+     exit;
+diff --git a/setup/frames/index.inc.php b/setup/frames/index.inc.php
+index 5310b30ed66..370bf748a71 100644
+--- a/setup/frames/index.inc.php
++++ b/setup/frames/index.inc.php
+@@ -126,6 +126,20 @@
+         )
+     );
+     break;
++case 'config_not_saved':
++    /* Use uniqid to display this message every time configuration is saved */
++    PMA_messagesSet(
++        'notice', uniqid('config_not_saved'), __('Configuration not saved!'),
++        PMA_sanitize(
++            __(
++                'Please create web server writable folder [em]config[/em] in '
++                . 'phpMyAdmin top level directory as described in '
++                . '[doc@setup_script]documentation[/doc]. Otherwise you will be '
++                . 'only able to download or display it.'
++            )
++        )
++    );
++    break;
+ default:
+     break;
+ }

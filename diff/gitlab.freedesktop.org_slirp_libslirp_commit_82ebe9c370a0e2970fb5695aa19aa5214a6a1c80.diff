@@ -1,0 +1,53 @@
+From 82ebe9c370a0e2970fb5695aa19aa5214a6a1c80 Mon Sep 17 00:00:00 2001
+From: Prasad J Pandit <pjp@fedoraproject.org>
+Date: Thu, 9 Jan 2020 15:12:28 +0530
+Subject: [PATCH] slirp: use correct size while emulating commands
+
+While emulating services in tcp_emu(), it uses 'mbuf' size
+'m->m_size' to write commands via snprintf(3). Use M_FREEROOM(m)
+size to avoid possible OOB access.
+
+Signed-off-by: Prasad J Pandit <pjp@fedoraproject.org>
+Signed-off-by: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Message-Id: <20200109094228.79764-3-ppandit@redhat.com>
+---
+ src/tcp_subr.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/src/tcp_subr.c b/src/tcp_subr.c
+index ee7a938..177dfd2 100644
+--- a/src/tcp_subr.c
++++ b/src/tcp_subr.c
+@@ -681,7 +681,7 @@ int tcp_emu(struct socket *so, struct mbuf *m)
+             n4 = (laddr & 0xff);
+ 
+             m->m_len = bptr - m->m_data; /* Adjust length */
+-            m->m_len += snprintf(bptr, m->m_size - m->m_len,
++            m->m_len += snprintf(bptr, M_FREEROOM(m),
+                                  "ORT %d,%d,%d,%d,%d,%d\r\n%s", n1, n2, n3, n4,
+                                  n5, n6, x == 7 ? buff : "");
+             return 1;
+@@ -716,8 +716,7 @@ int tcp_emu(struct socket *so, struct mbuf *m)
+             n4 = (laddr & 0xff);
+ 
+             m->m_len = bptr - m->m_data; /* Adjust length */
+-            m->m_len +=
+-                snprintf(bptr, m->m_size - m->m_len,
++            m->m_len += snprintf(bptr, M_FREEROOM(m),
+                          "27 Entering Passive Mode (%d,%d,%d,%d,%d,%d)\r\n%s",
+                          n1, n2, n3, n4, n5, n6, x == 7 ? buff : "");
+ 
+@@ -743,8 +742,8 @@ int tcp_emu(struct socket *so, struct mbuf *m)
+         if (m->m_data[m->m_len - 1] == '\0' && lport != 0 &&
+             (so = tcp_listen(slirp, INADDR_ANY, 0, so->so_laddr.s_addr,
+                              htons(lport), SS_FACCEPTONCE)) != NULL)
+-            m->m_len =
+-                snprintf(m->m_data, m->m_size, "%d", ntohs(so->so_fport)) + 1;
++            m->m_len = snprintf(m->m_data, M_ROOM(m),
++                                "%d", ntohs(so->so_fport)) + 1;
+         return 1;
+ 
+     case EMU_IRC:
+-- 
+GitLab
+

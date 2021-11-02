@@ -1,0 +1,35 @@
+From 1421e0c584ae9120ca1b88098f13d6d2e90b83a3 Mon Sep 17 00:00:00 2001
+From: "Dr. Stephen Henson" <steve@openssl.org>
+Date: Thu, 23 Oct 2014 20:36:17 +0100
+Subject: [PATCH] Unauthenticated DH client certificate fix.
+
+Fix to prevent use of DH client certificates without sending
+certificate verify message.
+
+If we've used a client certificate to generate the premaster secret
+ssl3_get_client_key_exchange returns 2 and ssl3_get_cert_verify is
+never called.
+
+We can only skip the certificate verify message in
+ssl3_get_cert_verify if the client didn't send a certificate.
+
+Thanks to Karthikeyan Bhargavan for reporting this issue.
+CVE-2015-0205
+Reviewed-by: Matt Caswell <matt@openssl.org>
+---
+ ssl/s3_srvr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ssl/s3_srvr.c b/ssl/s3_srvr.c
+index 90e95d6bc11f..8550c1b7833e 100644
+--- a/ssl/s3_srvr.c
++++ b/ssl/s3_srvr.c
+@@ -3056,7 +3056,7 @@ int ssl3_get_cert_verify(SSL *s)
+ 	if (s->s3->tmp.message_type != SSL3_MT_CERTIFICATE_VERIFY)
+ 		{
+ 		s->s3->tmp.reuse_message=1;
+-		if ((peer != NULL) && (type & EVP_PKT_SIGN))
++		if (peer != NULL)
+ 			{
+ 			al=SSL_AD_UNEXPECTED_MESSAGE;
+ 			SSLerr(SSL_F_SSL3_GET_CERT_VERIFY,SSL_R_MISSING_VERIFY_MESSAGE);

@@ -1,0 +1,86 @@
+From bae80a0b663925ec751ad2784ca32989403cdc24 Mon Sep 17 00:00:00 2001
+From: Daniel J Walsh <dwalsh@redhat.com>
+Date: Wed, 30 May 2018 13:16:10 -0400
+Subject: [PATCH] Clear all caps, except the bounding set, when --user is
+ specified.
+
+Currently we are giving all caps to users when running with podman run --user,
+They should get none by default.  If the command line includes --cap-add, then
+we need to run with those capabilties.  Similarly we need to drop caps from
+bounding set, if user specifies --cap-drop
+
+Signed-off-by: Daniel J Walsh <dwalsh@redhat.com>
+
+Closes: #851
+Approved by: mheon
+---
+ pkg/spec/spec.go     | 19 +++++++++++++++++++
+ test/e2e/run_test.go |  9 +++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/pkg/spec/spec.go b/pkg/spec/spec.go
+index 959a242139f..5260b9b1978 100644
+--- a/pkg/spec/spec.go
++++ b/pkg/spec/spec.go
+@@ -388,8 +388,19 @@ func addRlimits(config *CreateConfig, g *generate.Generator) error {
+ }
+ 
+ func setupCapabilities(config *CreateConfig, configSpec *spec.Spec) error {
++	useNotRoot := func(user string) bool {
++		if user == "" || user == "root" || user == "0" {
++			return false
++		}
++		return true
++	}
++
+ 	var err error
+ 	var caplist []string
++	bounding := configSpec.Process.Capabilities.Bounding
++	if useNotRoot(config.User) {
++		configSpec.Process.Capabilities.Bounding = caplist
++	}
+ 	caplist, err = caps.TweakCapabilities(configSpec.Process.Capabilities.Bounding, config.CapAdd, config.CapDrop)
+ 	if err != nil {
+ 		return err
+@@ -399,6 +410,14 @@ func setupCapabilities(config *CreateConfig, configSpec *spec.Spec) error {
+ 	configSpec.Process.Capabilities.Permitted = caplist
+ 	configSpec.Process.Capabilities.Inheritable = caplist
+ 	configSpec.Process.Capabilities.Effective = caplist
++	configSpec.Process.Capabilities.Ambient = caplist
++	if useNotRoot(config.User) {
++		caplist, err = caps.TweakCapabilities(bounding, config.CapAdd, config.CapDrop)
++		if err != nil {
++			return err
++		}
++	}
++	configSpec.Process.Capabilities.Bounding = caplist
+ 	return nil
+ }
+ 
+diff --git a/test/e2e/run_test.go b/test/e2e/run_test.go
+index cc8492958ac..5f2bccdac38 100644
+--- a/test/e2e/run_test.go
++++ b/test/e2e/run_test.go
+@@ -5,6 +5,7 @@ import (
+ 	"io/ioutil"
+ 	"os"
+ 	"path/filepath"
++	"strings"
+ 
+ 	"github.com/mrunalp/fileutils"
+ 	. "github.com/onsi/ginkgo"
+@@ -369,6 +370,14 @@ var _ = Describe("Podman run", func() {
+ 		Expect(session.OutputToString()).To(Equal("uid=8(mail) gid=21(ftp)"))
+ 	})
+ 
++	It("podman run with user, verify caps dropped", func() {
++		session := podmanTest.Podman([]string{"run", "--rm", "--user=1234", ALPINE, "grep", "CapEff", "/proc/self/status"})
++		session.WaitWithDefaultTimeout()
++		Expect(session.ExitCode()).To(Equal(0))
++		capEff := strings.Split(session.OutputToString(), " ")
++		Expect("0000000000000000").To(Equal(capEff[1]))
++	})
++
+ 	It("podman run with attach stdin outputs container ID", func() {
+ 		session := podmanTest.Podman([]string{"run", "--attach", "stdin", ALPINE, "printenv"})
+ 		session.WaitWithDefaultTimeout()

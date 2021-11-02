@@ -1,0 +1,25 @@
+From 5e52ef5a461570cfb68f3bdbbebfe972cb4e0fd8 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 4 May 2021 19:14:24 -0700
+Subject: [PATCH] Fix breakage in parameterized_truncated_normal_op.cc
+
+PiperOrigin-RevId: 372041718
+Change-Id: Iff79e77a2bb27032423eefcb84211627b27dfe81
+---
+ tensorflow/core/kernels/parameterized_truncated_normal_op.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/parameterized_truncated_normal_op.cc b/tensorflow/core/kernels/parameterized_truncated_normal_op.cc
+index a63457551ac29..116df3541d7cf 100644
+--- a/tensorflow/core/kernels/parameterized_truncated_normal_op.cc
++++ b/tensorflow/core/kernels/parameterized_truncated_normal_op.cc
+@@ -627,6 +627,9 @@ class ParameterizedTruncatedNormalOp : public OpKernel {
+         ctx, TensorShapeUtils::IsVector(shape_tensor.shape()),
+         errors::InvalidArgument("Input shape should be a vector, got shape: ",
+                                 shape_tensor.shape().DebugString()));
++    OP_REQUIRES(ctx, shape_tensor.NumElements() > 0,
++                errors::InvalidArgument("Shape tensor must not be empty, got ",
++                                        shape_tensor.DebugString()));
+     int32 num_batches = shape_tensor.flat<int32>()(0);
+ 
+     int32 samples_per_batch = 1;

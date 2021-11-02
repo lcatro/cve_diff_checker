@@ -1,0 +1,120 @@
+From 69de77b163f6debaeb3f8d1a85367310a40d196f Mon Sep 17 00:00:00 2001
+From: Tuisku-L <tuiskuwood@outlook.com>
+Date: Fri, 23 Oct 2020 01:38:12 +0800
+Subject: [PATCH] fix: Fixed vulnerability 4.
+
+---
+ package.json                                  |  1 +
+ .../contact/profile-editor/profile-editor.tsx | 54 ++++++++++++++-----
+ 2 files changed, 41 insertions(+), 14 deletions(-)
+
+diff --git a/package.json b/package.json
+index d1cc5e4..c69fe41 100644
+--- a/package.json
++++ b/package.json
+@@ -179,6 +179,7 @@
+     "nodemailer-mailgun-transport": "1.4.0",
+     "omit-deep-lodash": "1.1.4",
+     "onefx": "1.8.5",
++    "piexifjs": "^1.0.6",
+     "process": "0.11.10",
+     "react-apollo": "2.5.8",
+     "react-calendar-heatmap": "1.8.1",
+diff --git a/src/shared/contact/profile-editor/profile-editor.tsx b/src/shared/contact/profile-editor/profile-editor.tsx
+index 59d40a8..93aa1b7 100644
+--- a/src/shared/contact/profile-editor/profile-editor.tsx
++++ b/src/shared/contact/profile-editor/profile-editor.tsx
+@@ -38,6 +38,8 @@ import { formatToE164 } from "../phone-input/util";
+ import DynamicFormItems from "./dynamic-form-items";
+ import { ExperienceForm } from "./experience-form";
+ import { ObservationForm } from "./observation-form";
++// @ts-ignore
++import piexifjs from "piexifjs";
+ 
+ const { TabPane } = Tabs;
+ 
+@@ -218,7 +220,7 @@ class PersonalForm extends Component<
+     formRef: any;
+   },
+   PersonalFormState
+-> {
++  > {
+   state: PersonalFormState = { avatarUrl: "" };
+ 
+   renderPhoneNumbers(): JSX.Element | null {
+@@ -254,19 +256,43 @@ class PersonalForm extends Component<
+     );
+   }
+ 
++  actionTryRemoveExif = async (file: File, cb: Function) => {
++    if (file && (file.type.includes("jpg") || file.type.includes("jpeg"))) {
++      const reader = new FileReader();
++      reader.readAsDataURL(file);
++      reader.onload = async (e) => {
++        const base64 = e.target?.result;
++        const newFile = piexifjs.remove(base64);
++        let fileArr = newFile.split(',');
++        let mime = fileArr[0].match(/:(.*?);/)[1]
++        let bstr = atob(fileArr[1])
++        let length = bstr.length;
++        let fileBits = new Uint8Array(length);
++        while (length--) {
++          fileBits[length] = bstr.charCodeAt(length);
++        }
++        await cb(new File([fileBits], file.name, { type: mime }))
++      }
++    } else {
++      await cb(file);
++    }
++  }
++
+   render(): JSX.Element | null {
+     const { human, formRef } = this.props;
+ 
+     const beforeUpload = async ({ file, onSuccess }: any) => {
+       const fieldName = "avatarUrl";
+-      const data = await upload(file, fieldName);
+-      if (formRef && formRef.current) {
+-        formRef.current.setFieldsValue({
+-          [fieldName]: data.secure_url
+-        });
+-        this.setState({ [fieldName]: data.secure_url });
+-        onSuccess(data, file);
+-      }
++      await this.actionTryRemoveExif(file, async (newFile: File) => {
++        const data = await upload(newFile, fieldName);
++        if (formRef && formRef.current) {
++          formRef.current.setFieldsValue({
++            [fieldName]: data.secure_url
++          });
++          this.setState({ [fieldName]: data.secure_url });
++          onSuccess(data, newFile);
++        }
++      })
+     };
+ 
+     return (
+@@ -303,10 +329,10 @@ class PersonalForm extends Component<
+                 src={this.state.avatarUrl || human.avatarUrl}
+               />
+             ) : (
+-              <Button>
+-                <UploadOutlined /> Click to Upload
+-              </Button>
+-            )}
++                <Button>
++                  <UploadOutlined /> Click to Upload
++                </Button>
++              )}
+           </Upload>
+         </Form.Item>
+ 
+@@ -360,7 +386,7 @@ const DeleteContactPopover = withRouter(
+   class DeleteContactPopoverInner extends Component<
+     { name: string; contactId: string } & RouterProps,
+     { visible: boolean }
+-  > {
++    > {
+     state: { visible: boolean } = { visible: false };
+ 
+     render(): JSX.Element {

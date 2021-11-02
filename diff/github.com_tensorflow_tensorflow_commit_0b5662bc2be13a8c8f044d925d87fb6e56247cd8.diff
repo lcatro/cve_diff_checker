@@ -1,0 +1,156 @@
+From 0b5662bc2be13a8c8f044d925d87fb6e56247cd8 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 18 Sep 2020 14:12:45 -0700
+Subject: [PATCH] [tflite] Ensure input tensors don't have `nullptr` buffers.
+
+A crafted TFLite model can force a node to have as input a tensor backed by a `nullptr` buffer. That is, by carefully changing the buffer index in the flatbuffer serialization, we can force the TFLite interpreter to consider a read-only tensor to be a read-write one and assume that there is an operator that has this tensor as output, writing to it and allocating memory before the tensor is used as input. If this does not happen, we get memory corruption.
+
+PiperOrigin-RevId: 332524692
+Change-Id: I57ef175152a29020af9ab041dc959e5631dce40f
+---
+ tensorflow/lite/BUILD                         |   2 +
+ tensorflow/lite/core/subgraph.cc              |  14 ++++
+ tensorflow/lite/model_test.cc                 |  60 ++++++++++++------
+ .../testdata/segment_sum_invalid_buffer.bin   | Bin 0 -> 608 bytes
+ 4 files changed, 58 insertions(+), 18 deletions(-)
+ create mode 100644 tensorflow/lite/testdata/segment_sum_invalid_buffer.bin
+
+diff --git a/tensorflow/lite/BUILD b/tensorflow/lite/BUILD
+index e50cd4549b297..d08a2e2fbfa1f 100644
+--- a/tensorflow/lite/BUILD
++++ b/tensorflow/lite/BUILD
+@@ -242,6 +242,7 @@ cc_library(
+         ":arena_planner",
+         ":external_cpu_backend_context",
+         ":graph_info",
++        ":kernel_api",
+         ":memory_planner",
+         ":minimal_logging",
+         ":shared_library",
+@@ -469,6 +470,7 @@ cc_test(
+         "testdata/add_shared_tensors.bin",
+         "testdata/empty_model.bin",
+         "testdata/multi_add_flex.bin",
++        "testdata/segment_sum_invalid_buffer.bin",
+         "testdata/sparse_tensor.bin",
+         "testdata/test_min_runtime.bin",
+         "testdata/test_model.bin",
+diff --git a/tensorflow/lite/core/subgraph.cc b/tensorflow/lite/core/subgraph.cc
+index 47d0fddb12bd6..235a776c56f1a 100644
+--- a/tensorflow/lite/core/subgraph.cc
++++ b/tensorflow/lite/core/subgraph.cc
+@@ -19,6 +19,7 @@ limitations under the License.
+ #include <cstdint>
+ 
+ #include "tensorflow/lite/arena_planner.h"
++#include "tensorflow/lite/builtin_ops.h"
+ #include "tensorflow/lite/c/common.h"
+ #include "tensorflow/lite/context_util.h"
+ #include "tensorflow/lite/core/api/tensor_utils.h"
+@@ -1030,6 +1031,19 @@ TfLiteStatus Subgraph::Invoke() {
+           tensor->data_is_stale) {
+         TF_LITE_ENSURE_STATUS(EnsureTensorDataIsReadable(tensor_index));
+       }
++      if (tensor->data.raw == nullptr && tensor->bytes > 0) {
++        if (registration.builtin_code == kTfLiteBuiltinReshape && i == 1) {
++          // In general, having a tensor here with no buffer will be an error.
++          // However, for the reshape operator, the second input tensor is only
++          // used for the shape, not for the data. Thus, null buffer is ok.
++          continue;
++        } else {
++          // In all other cases, we need to return an error as otherwise we will
++          // trigger a null pointer dereference (likely).
++          ReportError("Input tensor %d lacks data", tensor_index);
++          return kTfLiteError;
++        }
++      }
+     }
+ 
+     if (check_cancelled_func_ != nullptr &&
+diff --git a/tensorflow/lite/model_test.cc b/tensorflow/lite/model_test.cc
+index 6993e350a4883..110c54aa571a7 100644
+--- a/tensorflow/lite/model_test.cc
++++ b/tensorflow/lite/model_test.cc
+@@ -438,24 +438,48 @@ TEST(BasicFlatBufferModel, TestParseModelWithSparseTensor) {
+ }
+ 
+ // TODO(b/150072943): Add malformed model with sparse tensor tests.
+-TEST(BasicFlatBufferModel, TestHandleMalformedModel) {
+-  const auto model_paths = {
+-      // These models use the same tensor as both input and ouput of a node
+-      "tensorflow/lite/testdata/add_shared_tensors.bin",
+-  };
+-
+-  for (const auto& model_path : model_paths) {
+-    std::unique_ptr<tflite::FlatBufferModel> model =
+-        FlatBufferModel::BuildFromFile(model_path);
+-    ASSERT_NE(model, nullptr);
+-
+-    tflite::ops::builtin::BuiltinOpResolver resolver;
+-    InterpreterBuilder builder(*model, resolver);
+-    std::unique_ptr<Interpreter> interpreter;
+-    ASSERT_EQ(builder(&interpreter), kTfLiteOk);
+-    ASSERT_NE(interpreter, nullptr);
+-    ASSERT_NE(interpreter->AllocateTensors(), kTfLiteOk);
+-  }
++
++// The models here have at least a node that uses the same tensor as input and
++// output. This causes segfaults when trying to eval the operator, hence we try
++// to prevent this scenario. The earliest place we can check this is in
++// `AllocateTensors`, hence the test checks that `interpreter->AllocateTensors`
++// detects these bad models.
++TEST(BasicFlatBufferModel, TestHandleMalformedModelReuseTensor) {
++  const auto model_path =
++      "tensorflow/lite/testdata/add_shared_tensors.bin";
++
++  std::unique_ptr<tflite::FlatBufferModel> model =
++      FlatBufferModel::BuildFromFile(model_path);
++  ASSERT_NE(model, nullptr);
++
++  tflite::ops::builtin::BuiltinOpResolver resolver;
++  InterpreterBuilder builder(*model, resolver);
++  std::unique_ptr<Interpreter> interpreter;
++  ASSERT_EQ(builder(&interpreter), kTfLiteOk);
++  ASSERT_NE(interpreter, nullptr);
++  ASSERT_NE(interpreter->AllocateTensors(), kTfLiteOk);
++}
++
++// The models here have a buffer index for a tensor pointing to a null buffer.
++// This results in the tensor being interpreted as read-write, but the model
++// assumes the tensor is read-only. As such, `interpreter->Invoke()` would
++// segfault if no precondition check is added. The test checks that the
++// precondition check exists.
++TEST(BasicFlatBufferModel, TestHandleMalformedModelInvalidBuffer) {
++  const auto model_path =
++      "tensorflow/lite/testdata/segment_sum_invalid_buffer.bin";
++
++  std::unique_ptr<tflite::FlatBufferModel> model =
++      FlatBufferModel::BuildFromFile(model_path);
++  ASSERT_NE(model, nullptr);
++
++  tflite::ops::builtin::BuiltinOpResolver resolver;
++  InterpreterBuilder builder(*model, resolver);
++  std::unique_ptr<Interpreter> interpreter;
++  ASSERT_EQ(builder(&interpreter), kTfLiteOk);
++  ASSERT_NE(interpreter, nullptr);
++  ASSERT_EQ(interpreter->AllocateTensors(), kTfLiteOk);
++  ASSERT_NE(interpreter->Invoke(), kTfLiteOk);
+ }
+ 
+ // TODO(aselle): Add tests for serialization of builtin op data types.
+diff --git a/tensorflow/lite/testdata/segment_sum_invalid_buffer.bin b/tensorflow/lite/testdata/segment_sum_invalid_buffer.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..b7b81cde6e78fe4570d07e4aa9346e4f2e3998c1
+GIT binary patch
+literal 608
+zcmZ9JJx;?w5QT?ef(r|xkRpW(7Zeo8fIx_X&IqMI3PlRKG;!e~P80$n1>yo6fMakD
+zDo()(C{iHI_txHqk>0+Y8SR^&-8Zw*_01{NSl40;EVRfv)+5%pF6SnQTW0U@8#n_2
+z*l76Tx2nSCz6Vc>a=dsbm&G(6Kjw@3VpiG~@jGw}2H*fl<EyGFvGOPBd3p@j)~1iZ
+z+BnKf|G#}xcMX2PF3Hg_8z$MTq~<c8q^`dX@rYUcR1y9hOn~~4w&v)Ao;x-DHuKAR
+zZVO!E#Cg)H-$1sccfA!@k2A54iDlZ~E4TvMs@V=4Qbl?lJZG)g`L+Hh+S<u{^>nm?
+zeT@&|xUED7P@nbg12>Cm@y6wpA1FYDzN=UNtFL!SM!JVUb7^wzNqW-tyD@vo{48Sa
+SP1;^xF}*i_OH=93u;)LHt~_A?
+
+literal 0
+HcmV?d00001
+

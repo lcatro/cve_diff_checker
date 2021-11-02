@@ -1,0 +1,74 @@
+From b85ace6840b8a6704641086bc3b8eb8e81cb2274 Mon Sep 17 00:00:00 2001
+From: Lukas Reschke <lukas@statuscode.ch>
+Date: Fri, 9 Sep 2016 10:58:01 +0200
+Subject: [PATCH] Double verify the SMB response
+
+In case anonymous auth is allowed this can otherwise lead to unexpected actions.
+---
+ user_external/lib/smb.php | 43 +++++++++++++++++++++++++++++----------
+ 1 file changed, 32 insertions(+), 11 deletions(-)
+
+diff --git a/user_external/lib/smb.php b/user_external/lib/smb.php
+index 5b19199d8..f2595a158 100644
+--- a/user_external/lib/smb.php
++++ b/user_external/lib/smb.php
+@@ -32,18 +32,14 @@ public function __construct($host) {
+ 	}
+ 
+ 	/**
+-	 * Check if the password is correct without logging in the user
+-	 *
+-	 * @param string $uid      The username
+-	 * @param string $password The password
+-	 *
+-	 * @return true/false
++	 * @param string $uid
++	 * @param string $password
++	 * @return bool
+ 	 */
+-	public function checkPassword($uid, $password) {
+-		$uidEscaped=escapeshellarg($uid);
+-		$password=escapeshellarg($password);
+-		$result=array();
+-		$command=self::SMBCLIENT.' '.escapeshellarg('//' . $this->host . '/dummy').' -U'.$uidEscaped.'%'.$password;
++	private function tryAuthentication($uid, $password) {
++		$uidEscaped = escapeshellarg($uid);
++		$password = escapeshellarg($password);
++		$command = self::SMBCLIENT.' '.escapeshellarg('//' . $this->host . '/dummy').' -U'.$uidEscaped.'%'.$password;
+ 		$lastline = exec($command, $output, $retval);
+ 		if ($retval === 127) {
+ 			OCP\Util::writeLog(
+@@ -66,8 +62,33 @@ public function checkPassword($uid, $password) {
+ 			return false;
+ 		} else {
+ 			login:
++			return $uid;
++		}
++	}
++
++	/**
++	 * Check if the password is correct without logging in the user
++	 *
++	 * @param string $uid      The username
++	 * @param string $password The password
++	 *
++	 * @return true/false
++	 */
++	public function checkPassword($uid, $password) {
++		// Check with an invalid password, if the user authenticates then fail
++		$attemptWithInvalidPassword = $this->tryAuthentication($uid, base64_encode($password));
++		if(is_string($attemptWithInvalidPassword)) {
++			return false;
++		}
++
++		// Check with valid password
++		$attemptWithValidPassword = $this->tryAuthentication($uid, $password);
++		if(is_string($attemptWithValidPassword)) {
+ 			$this->storeUser($uid);
+ 			return $uid;
+ 		}
++
++		return false;
+ 	}
+ }
++

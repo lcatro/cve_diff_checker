@@ -1,0 +1,68 @@
+From fe52854cdf6725c2eaa9e125995da76e6ceb27da Mon Sep 17 00:00:00 2001
+From: Marc Horowitz <mhorowitz@fb.com>
+Date: Tue, 25 Aug 2020 20:36:45 -0700
+Subject: [PATCH] [CVE-2020-1911] Look up HostObject computed properties on the
+ right object in the prototype chain.
+
+Summary:
+The change in the hermes repository fixes the security vulnerability
+CVE-2020-1911.  This vulnerability only affects applications which
+allow evaluation of uncontrolled, untrusted JavaScript code not
+shipped with the app, so React Native apps will generally not be affected.
+
+This revision includes a test for the bug.  The test is generic JSI
+code, so it is included in the hermes and react-native repositories.
+
+Changelog: [Internal]
+
+Reviewed By: tmikov
+
+Differential Revision: D23322992
+
+fbshipit-source-id: 4e88c974afe1ad33a263f9cac03e9dc98d33649a
+---
+ API/jsi/jsi/test/testlib.cpp | 17 +++++++++++++++++
+ lib/VM/JSObject.cpp          |  2 +-
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/API/jsi/jsi/test/testlib.cpp b/API/jsi/jsi/test/testlib.cpp
+index 996c2cb61..8cf831d34 100644
+--- a/API/jsi/jsi/test/testlib.cpp
++++ b/API/jsi/jsi/test/testlib.cpp
+@@ -394,6 +394,23 @@ TEST_P(JSITest, HostObjectTest) {
+                    .getBool());
+ }
+ 
++TEST_P(JSITest, HostObjectProtoTest) {
++  class ProtoHostObject : public HostObject {
++    Value get(Runtime& rt, const PropNameID&) override {
++      return String::createFromAscii(rt, "phoprop");
++    }
++  };
++
++  rt.global().setProperty(
++      rt,
++      "pho",
++      Object::createFromHostObject(rt, std::make_shared<ProtoHostObject>()));
++
++  EXPECT_EQ(
++      eval("({__proto__: pho})[Symbol.toPrimitive]").getString(rt).utf8(rt),
++      "phoprop");
++}
++
+ TEST_P(JSITest, ArrayTest) {
+   eval("x = {1:2, '3':4, 5:'six', 'seven':['eight', 'nine']}");
+ 
+diff --git a/lib/VM/JSObject.cpp b/lib/VM/JSObject.cpp
+index bbaba3022..83d60aa74 100644
+--- a/lib/VM/JSObject.cpp
++++ b/lib/VM/JSObject.cpp
+@@ -1173,7 +1173,7 @@ CallResult<PseudoHandle<>> JSObject::getComputedWithReceiver_RJS(
+   } else if (desc.flags.hostObject) {
+     SymbolID id{};
+     LAZY_TO_IDENTIFIER(runtime, nameValPrimitiveHandle, id);
+-    auto propRes = vmcast<HostObject>(selfHandle.get())->get(id);
++    auto propRes = vmcast<HostObject>(propObj.get())->get(id);
+     if (propRes == ExecutionStatus::EXCEPTION)
+       return ExecutionStatus::EXCEPTION;
+     return createPseudoHandle(*propRes);

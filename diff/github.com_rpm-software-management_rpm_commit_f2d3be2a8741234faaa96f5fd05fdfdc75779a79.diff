@@ -1,0 +1,148 @@
+From f2d3be2a8741234faaa96f5fd05fdfdc75779a79 Mon Sep 17 00:00:00 2001
+From: Panu Matilainen <pmatilai@redhat.com>
+Date: Tue, 26 Sep 2017 16:54:16 +0300
+Subject: [PATCH] Restrict following symlinks to directories by ownership
+ (CVE-2017-7500)
+
+Only follow directory symlinks owned by target directory owner or root.
+This prevents privilege escalation from user-writable directories via
+directory symlinks to privileged directories on package upgrade, while
+still allowing admin to arrange disk usage with symlinks.
+
+The rationale is that if you can create symlinks owned by user X you *are*
+user X (or root), and if you also own directory Y you can do whatever with
+it already, including change permissions. So when you create a symlink to
+that directory, the link ownership acts as a simple stamp of authority that
+you indeed want rpm to treat this symlink as it were the directory that
+you own. Such a permission can only be given by you or root, which
+is just the way we want it. Plus it's almost ridiculously simple as far
+as rules go, compared to trying to calculate something from the
+source vs destination directory permissions etc.
+
+In the normal case, the user arranging diskspace with symlinks is indeed
+root so nothing changes, the only real change here is to links created by
+non-privileged users which should be few and far between in practise.
+Unfortunately our test-suite runs as a regular user via fakechroot and
+thus the testcase for this fails under the new rules. Adjust the testcase
+to get the ownership straight and add a second case for the illegal
+behavior, basically the same as the old one but with different expectations.
+---
+ lib/fsm.c                         |  9 +++++---
+ tests/data/SPECS/replacetest.spec |  3 ++-
+ tests/rpmreplace.at               | 34 +++++++++++++++++++++++++++++++
+ 3 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/lib/fsm.c b/lib/fsm.c
+index f8767706ff..ceb38d463d 100644
+--- a/lib/fsm.c
++++ b/lib/fsm.c
+@@ -650,7 +650,7 @@ static int fsmUtime(const char *path, mode_t mode, time_t mtime)
+     return rc;
+ }
+ 
+-static int fsmVerify(const char *path, rpmfi fi)
++static int fsmVerify(const char *path, rpmfi fi, const struct stat *fsb)
+ {
+     int rc;
+     int saveerrno = errno;
+@@ -675,11 +675,14 @@ static int fsmVerify(const char *path, rpmfi fi)
+     } else if (S_ISDIR(mode)) {
+         if (S_ISDIR(dsb.st_mode)) return 0;
+         if (S_ISLNK(dsb.st_mode)) {
++	    uid_t luid = dsb.st_uid;
+             rc = fsmStat(path, 0, &dsb);
+             if (rc == RPMERR_ENOENT) rc = 0;
+             if (rc) return rc;
+             errno = saveerrno;
+-            if (S_ISDIR(dsb.st_mode)) return 0;
++	    /* Only permit directory symlinks by target owner and root */
++            if (S_ISDIR(dsb.st_mode) && (luid == 0 || luid == fsb->st_uid))
++		    return 0;
+         }
+     } else if (S_ISLNK(mode)) {
+         if (S_ISLNK(dsb.st_mode)) {
+@@ -921,7 +924,7 @@ int rpmPackageFilesInstall(rpmts ts, rpmte te, rpmfiles files,
+ 	    }
+ 	    /* Assume file does't exist when tmp suffix is in use */
+ 	    if (!suffix) {
+-		rc = fsmVerify(fpath, fi);
++		rc = fsmVerify(fpath, fi, &sb);
+ 	    } else {
+ 		rc = (action == FA_TOUCH) ? 0 : RPMERR_ENOENT;
+ 	    }
+diff --git a/tests/data/SPECS/replacetest.spec b/tests/data/SPECS/replacetest.spec
+index e8a64e8034..c764adc27e 100644
+--- a/tests/data/SPECS/replacetest.spec
++++ b/tests/data/SPECS/replacetest.spec
+@@ -1,5 +1,6 @@
+ %{!?filetype: %global filetype file}
+ %{?fixit: %global havepretrans 1}
++%{!?user: %global user root}
+ 
+ Name:		replacetest%{?sub:-%{sub}}
+ Version:	%{ver}
+@@ -43,5 +44,5 @@ rm -rf $RPM_BUILD_ROOT
+ %endif
+ 
+ %files
+-%defattr(-,root,root,-)
++%defattr(-,%{user},%{user},-)
+ /opt/*
+diff --git a/tests/rpmreplace.at b/tests/rpmreplace.at
+index 90a85bfb81..11e6221d73 100644
+--- a/tests/rpmreplace.at
++++ b/tests/rpmreplace.at
+@@ -402,12 +402,14 @@ runroot rpmbuild --quiet -bb \
+         --define "ver 1.0" \
+ 	--define "filetype datadir" \
+ 	--define "filedata README1" \
++	--define "user $(id -u -n)" \
+           /data/SPECS/replacetest.spec
+ 
+ runroot rpmbuild --quiet -bb \
+         --define "ver 2.0" \
+ 	--define "filetype datadir" \
+ 	--define "filedata README2" \
++	--define "user $(id -u -n)" \
+           /data/SPECS/replacetest.spec
+ 
+ mkdir "${RPMTEST}"/opt/f00f
+@@ -421,6 +423,38 @@ test -L "${tf}" && test -d "${tf}"
+ [])
+ AT_CLEANUP
+ 
++AT_SETUP([upgrade invalid locally symlinked directory])
++AT_KEYWORDS([install])
++AT_CHECK([
++RPMDB_CLEAR
++RPMDB_INIT
++tf="${RPMTEST}"/opt/foo
++rm -rf "${RPMTEST}"/opt/*
++rm -rf "${TOPDIR}"
++
++runroot rpmbuild --quiet -bb \
++        --define "ver 1.0" \
++	--define "filetype datadir" \
++	--define "filedata README1" \
++          /data/SPECS/replacetest.spec
++
++runroot rpmbuild --quiet -bb \
++        --define "ver 2.0" \
++	--define "filetype datadir" \
++	--define "filedata README2" \
++          /data/SPECS/replacetest.spec
++
++mkdir "${RPMTEST}"/opt/f00f
++ln -s f00f "${RPMTEST}"/opt/foo
++runroot rpm -U /build/RPMS/noarch/replacetest-1.0-1.noarch.rpm
++test -L "${tf}" && test -d "${tf}" && runroot rpm -U /build/RPMS/noarch/replacetest-2.0-1.noarch.rpm
++test -d "${tf}"
++],
++[0],
++[],
++[])
++AT_CLEANUP
++
+ AT_SETUP([upgrade empty directory to broken link])
+ AT_KEYWORDS([install])
+ AT_CHECK([

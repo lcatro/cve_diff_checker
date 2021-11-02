@@ -1,0 +1,115 @@
+From 6932f2282ba0578d6ca2f21eead920d6b78bc93c Mon Sep 17 00:00:00 2001
+From: Waldemar Brodkorb <wbx@uclibc-ng.org>
+Date: Sat, 2 Jan 2016 16:55:40 +0100
+Subject: [PATCH] libc/inet: Unbreak gethostent()
+
+Although gethostent() is obsoleted, there is no reason to keep it broken.
+Fix two problems:
+
+* commit f65e66078b "resolver: switch to config parser" leave an extra break
+  statement in case of GETHOSTENT in __read_etc_hosts_r. In result,
+  output buffer wasn't initialized at all.
+
+* gethostent static buffer has insufficient size to store aliases,
+  so __read_etc_hosts_r always returns ERANGE. Restore ALIAS_DIM define.
+
+Add test-case.
+
+Signed-off-by: Leonid Lisovskiy <lly.dev@gmail.com>
+---
+ libc/inet/resolv.c  | 13 +++++++------
+ test/inet/gethost.c | 40 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 6 deletions(-)
+ create mode 100644 test/inet/gethost.c
+
+diff --git a/libc/inet/resolv.c b/libc/inet/resolv.c
+index 25dc62dd3..eb663ac0f 100644
+--- a/libc/inet/resolv.c
++++ b/libc/inet/resolv.c
+@@ -337,6 +337,8 @@ Domain name in a message can be represented as either:
+ 
+ #define MAX_RECURSE    5
+ #define MAXALIASES  (4)
++/* 1:ip + 1:full + MAX_ALIASES:aliases + 1:NULL */
++#define ALIAS_DIM   (2 + MAXALIASES + 1)
+ #define BUFSZ       (80) /* one line */
+ 
+ #define NS_TYPE_ELT					0x40 /*%< EDNS0 extended label type */
+@@ -1650,9 +1652,8 @@ int __read_etc_hosts_r(
+ 		result_buf->h_aliases = tok+1;
+ 		if (action == GETHOSTENT) {
+ 			/* Return whatever the next entry happens to be. */
+-			break;
+-		}
+-		if (action == GET_HOSTS_BYADDR) {
++			;
++		} else if (action == GET_HOSTS_BYADDR) {
+ 			if (strcmp(name, *tok) != 0)
+ 				continue;
+ 		} else { /* GET_HOSTS_BYNAME */
+@@ -2623,13 +2624,13 @@ struct hostent *gethostent(void)
+ {
+ 	static struct hostent hoste;
+ 	static char *buf = NULL;
+-	struct hostent *host;
++	struct hostent *host = NULL;
+ #ifndef __UCLIBC_HAS_IPV6__
+  #define HOSTENT_BUFSZ	(sizeof(struct in_addr) + sizeof(struct in_addr *) * 2 + \
+-			BUFSZ /*namebuffer*/ + 2 /* margin */)
++			sizeof(char *)*ALIAS_DIM + BUFSZ /*namebuffer*/ + 2 /* margin */)
+ #else
+  #define HOSTENT_BUFSZ	(sizeof(struct in6_addr) + sizeof(struct in6_addr *) * 2 + \
+-			BUFSZ /*namebuffer*/ + 2 /* margin */)
++			sizeof(char *)*ALIAS_DIM + BUFSZ /*namebuffer*/ + 2 /* margin */)
+ #endif /* __UCLIBC_HAS_IPV6__ */
+ 
+ 	__INIT_GETXX_BUF(HOSTENT_BUFSZ);
+diff --git a/test/inet/gethost.c b/test/inet/gethost.c
+new file mode 100644
+index 000000000..77467e9e3
+--- /dev/null
++++ b/test/inet/gethost.c
+@@ -0,0 +1,40 @@
++#include <errno.h>
++#include <netdb.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <arpa/inet.h>
++#include <sys/socket.h>
++
++int main(void)
++{
++       in_addr_t addr = inet_addr("127.0.0.1");
++       struct hostent *hent;
++
++       hent = gethostent();
++       if (hent == NULL) {
++               printf("gethostent(%d):%s\n", errno, hstrerror(h_errno));
++               exit(1);
++       }
++
++       hent = gethostbyname("localhost");
++       if (hent == NULL) {
++               printf("gethostbyname(%d):%s\n", errno, hstrerror(h_errno));
++               exit(1);
++       }
++
++       hent = gethostbyname2("localhost", AF_INET);
++       if (hent == NULL) {
++               printf("gethostbyname2(%d):%s\n", errno, hstrerror(h_errno));
++               exit(1);
++       }
++
++       hent = gethostbyaddr(&addr, sizeof(addr), AF_INET);
++       if (hent == NULL) {
++               printf("gethostbyaddr(%d):%s\n", errno, hstrerror(h_errno));
++               exit(1);
++       }
++
++       return 0;
++}
++
+-- 
+2.11.4.GIT
+

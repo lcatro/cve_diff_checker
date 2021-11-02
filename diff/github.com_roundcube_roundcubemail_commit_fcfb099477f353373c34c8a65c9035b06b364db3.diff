@@ -1,0 +1,56 @@
+From fcfb099477f353373c34c8a65c9035b06b364db3 Mon Sep 17 00:00:00 2001
+From: Aleksander Machniak <alec@alec.pl>
+Date: Sun, 26 Apr 2020 08:02:03 +0200
+Subject: [PATCH] Fix remote code execution via crafted 'im_convert_path' or
+ 'im_identify_path' settings
+
+---
+ CHANGELOG                             | 1 +
+ program/lib/Roundcube/rcube_image.php | 8 +++++---
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 2a521c018b..976e88dac4 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -26,6 +26,7 @@ CHANGELOG Roundcube Webmail
+ - Fix performance issue of parsing big HTML messages by disabling HTML5 parser for these (#7331)
+ - Fix so Print button for PDF attachments works on Firefox >= 75 (#5125)
+ - Security: Fix XSS issue in handling of CDATA in HTML messages
++- Security: Fix remote code execution via crafted 'im_convert_path' or 'im_identify_path' settings
+ 
+ RELEASE 1.4.3
+ -------------
+diff --git a/program/lib/Roundcube/rcube_image.php b/program/lib/Roundcube/rcube_image.php
+index a47fd7f845..df36a34dbb 100644
+--- a/program/lib/Roundcube/rcube_image.php
++++ b/program/lib/Roundcube/rcube_image.php
+@@ -158,7 +158,8 @@ public function resize($size, $filename = null, $browser_compat = false)
+                             'size'    => $width . 'x' . $height,
+                         );
+ 
+-                        $result = rcube::exec($convert . ' 2>&1 -flatten -auto-orient -colorspace sRGB -strip'
++                        $result = rcube::exec(escapeshellcmd($convert)
++                            . ' 2>&1 -flatten -auto-orient -colorspace sRGB -strip'
+                             . ' -quality {quality} -resize {size} {intype}:{in} {type}:{out}', $p);
+                     }
+                     // use PHP's Imagick class
+@@ -323,7 +324,8 @@ public function convert($type, $filename = null)
+             $p['out']  = $filename;
+             $p['type'] = self::$extensions[$type];
+ 
+-            $result = rcube::exec($convert . ' 2>&1 -colorspace sRGB -strip -flatten -quality 75 {in} {type}:{out}', $p);
++            $result = rcube::exec(escapeshellcmd($convert)
++                . ' 2>&1 -colorspace sRGB -strip -flatten -quality 75 {in} {type}:{out}', $p);
+ 
+             if ($result === '') {
+                 chmod($filename, 0600);
+@@ -419,7 +421,7 @@ private function identify()
+         // use ImageMagick in command line
+         if ($cmd = $rcube->config->get('im_identify_path')) {
+             $args = array('in' => $this->image_file, 'format' => "%m %[fx:w] %[fx:h]");
+-            $id   = rcube::exec($cmd. ' 2>/dev/null -format {format} {in}', $args);
++            $id   = rcube::exec(escapeshellcmd($cmd) . ' 2>/dev/null -format {format} {in}', $args);
+ 
+             if ($id) {
+                 return explode(' ', strtolower($id));

@@ -1,0 +1,49 @@
+From 8aa6c42ef724f93ae309fb7c5668e19ad547eceb Mon Sep 17 00:00:00 2001
+From: Andreas Karlsson <andreas@proxel.se>
+Date: Mon, 25 May 2015 19:37:29 +0200
+Subject: [PATCH] Use secure_compare when checking CSRF token
+
+Since string comparisions may return early we want to use a constant
+time comparsion function to protect the CSRF token against timing
+attacks. Rack::Utils provides a such function.
+---
+ rack-protection/lib/rack/protection/authenticity_token.rb | 4 ++--
+ rack-protection/lib/rack/protection/base.rb               | 5 +++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/rack-protection/lib/rack/protection/authenticity_token.rb b/rack-protection/lib/rack/protection/authenticity_token.rb
+index e4524e4a62..ad2ab9cdea 100644
+--- a/rack-protection/lib/rack/protection/authenticity_token.rb
++++ b/rack-protection/lib/rack/protection/authenticity_token.rb
+@@ -23,8 +23,8 @@ def accepts?(env)
+         session = session env
+         token   = session[:csrf] ||= session['_csrf_token'] || random_string
+         safe?(env) ||
+-          env['HTTP_X_CSRF_TOKEN'] == token ||
+-          Request.new(env).params[options[:authenticity_param]] == token
++          secure_compare(env['HTTP_X_CSRF_TOKEN'], token) ||
++          secure_compare(Request.new(env).params[options[:authenticity_param]], token)
+       end
+     end
+   end
+diff --git a/rack-protection/lib/rack/protection/base.rb b/rack-protection/lib/rack/protection/base.rb
+index fe6ab37d21..c914da23c7 100644
+--- a/rack-protection/lib/rack/protection/base.rb
++++ b/rack-protection/lib/rack/protection/base.rb
+@@ -1,4 +1,5 @@
+ require 'rack/protection'
++require 'rack/utils'
+ require 'digest'
+ require 'logger'
+ require 'uri'
+@@ -110,6 +111,10 @@ def encrypt(value)
+         options[:encryptor].hexdigest value.to_s
+       end
+ 
++      def secure_compare(a, b)
++        Rack::Utils.secure_compare(a.to_s, b.to_s)
++      end
++
+       alias default_reaction deny
+ 
+       def html?(headers)

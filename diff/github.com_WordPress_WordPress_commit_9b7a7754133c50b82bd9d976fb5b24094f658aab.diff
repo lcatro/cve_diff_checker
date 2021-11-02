@@ -1,0 +1,64 @@
+From 9b7a7754133c50b82bd9d976fb5b24094f658aab Mon Sep 17 00:00:00 2001
+From: Nikolay Bachiyski <nb@nikolay.bg>
+Date: Wed, 30 Mar 2016 18:21:25 +0000
+Subject: [PATCH] Add nonce to AJAX action for script compression setting
+
+Built from https://develop.svn.wordpress.org/trunk@37143
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@37110 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-admin/includes/ajax-actions.php | 2 ++
+ wp-admin/includes/template.php     | 3 ++-
+ wp-includes/version.php            | 2 +-
+ 3 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/wp-admin/includes/ajax-actions.php b/wp-admin/includes/ajax-actions.php
+index d8b74561bb1c..a6334cb69f9b 100644
+--- a/wp-admin/includes/ajax-actions.php
++++ b/wp-admin/includes/ajax-actions.php
+@@ -197,8 +197,10 @@ function wp_ajax_wp_compression_test() {
+ 			echo $out;
+ 			wp_die();
+ 		} elseif ( 'no' == $_GET['test'] ) {
++			check_ajax_referer( 'update_can_compress_scripts' );
+ 			update_site_option('can_compress_scripts', 0);
+ 		} elseif ( 'yes' == $_GET['test'] ) {
++			check_ajax_referer( 'update_can_compress_scripts' );
+ 			update_site_option('can_compress_scripts', 1);
+ 		}
+ 	}
+diff --git a/wp-admin/includes/template.php b/wp-admin/includes/template.php
+index bc103faa711e..5138fd204ca3 100644
+--- a/wp-admin/includes/template.php
++++ b/wp-admin/includes/template.php
+@@ -1789,6 +1789,7 @@ function _media_states( $post ) {
+ function compression_test() {
+ ?>
+ 	<script type="text/javascript">
++	var compressionNonce = <?php echo wp_json_encode( wp_create_nonce( 'update_can_compress_scripts' ) ); ?>;
+ 	var testCompression = {
+ 		get : function(test) {
+ 			var x;
+@@ -1808,7 +1809,7 @@ function compression_test() {
+ 					}
+ 				};
+ 
+-				x.open('GET', ajaxurl + '?action=wp-compression-test&test='+test+'&'+(new Date()).getTime(), true);
++				x.open('GET', ajaxurl + '?action=wp-compression-test&test='+test+'&_ajax_nonce='+compressionNonce+'&'+(new Date()).getTime(), true);
+ 				x.send('');
+ 			}
+ 		},
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index b31925b86b4d..639a21c85d93 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.5-RC1-37135';
++$wp_version = '4.5-RC1-37143';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

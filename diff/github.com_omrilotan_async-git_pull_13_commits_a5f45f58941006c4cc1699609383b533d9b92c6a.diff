@@ -1,0 +1,86 @@
+From a5f45f58941006c4cc1699609383b533d9b92c6a Mon Sep 17 00:00:00 2001
+From: omrilotan <omri@hamadgera.com>
+Date: Wed, 20 Jan 2021 17:49:09 +0200
+Subject: [PATCH] Sanitise user input
+
+---
+ lib/reset/index.js | 2 +-
+ lib/reset/spec.js  | 4 ++--
+ lib/tag/index.js   | 4 ++--
+ lib/tag/spec.js    | 4 ++--
+ package.json       | 2 +-
+ 5 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/lib/reset/index.js b/lib/reset/index.js
+index 70de145..dd1250a 100644
+--- a/lib/reset/index.js
++++ b/lib/reset/index.js
+@@ -8,7 +8,7 @@ const exec = require('async-execute');
+  */
+ module.exports = async function(destination, { hard = true } = {}) {
+ 	if (destination && typeof destination === 'string') {
+-		return await exec(`git reset ${destination} ${hard ? '--hard' : ''}`);
++		return await exec(`git reset ${JSON.stringify(destination)} ${hard ? '--hard' : ''}`);
+ 	}
+ 
+ 	if (destination && typeof destination === 'number') {
+diff --git a/lib/reset/spec.js b/lib/reset/spec.js
+index 43209ae..f6232f6 100644
+--- a/lib/reset/spec.js
++++ b/lib/reset/spec.js
+@@ -32,7 +32,7 @@ describe('lib/reset', async() => {
+ 
+ 	it('Should hard reset to a given sha', async() => {
+ 		reset('shaid');
+-		expect(exec.getCall(0).args[0]).to.equal('git reset shaid --hard');
++		expect(exec.getCall(0).args[0]).to.equal('git reset "shaid" --hard');
+ 	});
+ 
+ 	it('Should hard reset to n commits back', async() => {
+@@ -47,6 +47,6 @@ describe('lib/reset', async() => {
+ 
+ 	it('Should reset w/o hard argument', async() => {
+ 		reset('shaid', { hard: false });
+-		expect(exec.getCall(0).args[0].trim()).to.equal('git reset shaid');
++		expect(exec.getCall(0).args[0].trim()).to.equal('git reset "shaid"');
+ 	});
+ });
+diff --git a/lib/tag/index.js b/lib/tag/index.js
+index c272174..4d1e784 100644
+--- a/lib/tag/index.js
++++ b/lib/tag/index.js
+@@ -16,6 +16,6 @@ module.exports = async function(tag) {
+ 		exec(`git config user.name "${await author}"`),
+ 		exec(`git config user.email "${await email}"`),
+ 	]);
+-	await exec(`git tag -a ${tag} -m "${await message}"`);
+-	await exec(`git push origin refs/tags/${tag}`);
++	await exec(`git tag -a ${JSON.stringify(tag)} -m "${await message}"`);
++	await exec(`git push origin ${JSON.stringify(`refs/tags/${tag}`)}`);
+ };
+diff --git a/lib/tag/spec.js b/lib/tag/spec.js
+index 318c374..528bfc1 100644
+--- a/lib/tag/spec.js
++++ b/lib/tag/spec.js
+@@ -31,7 +31,7 @@ describe('lib/tag', async() => {
+ 		dummy.stub = command => lines.push(command);
+ 
+ 		await gitTag('1.1.1');
+-		expect(lines).to.include('git tag -a 1.1.1 -m "this is a message"');
+-		expect(lines).to.include('git push origin refs/tags/1.1.1');
++		expect(lines).to.include('git tag -a "1.1.1" -m "this is a message"');
++		expect(lines).to.include('git push origin "refs/tags/1.1.1"');
+ 	});
+ });
+diff --git a/package.json b/package.json
+index bde0369..14c62da 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "async-git",
+-  "version": "1.13.0",
++  "version": "1.13.1",
+   "description": "👾 Retrieve data from current git repository",
+   "keywords": [
+     "git",

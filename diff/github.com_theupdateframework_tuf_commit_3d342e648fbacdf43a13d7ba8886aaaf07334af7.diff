@@ -1,0 +1,502 @@
+From 92ae4eb8a61caf7eeaefa00c025f76fa50f04d3d Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 4 Jun 2019 14:53:51 -0400
+Subject: [PATCH 01/11] do not immediately verify latest root when rotating
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 7f8f73f8b..4e930fbe6 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1125,9 +1125,11 @@ def _update_root_metadata(self, current_root_metadata):
+       None.
+     """
+ 
+-    # Retrieve the latest, remote root.json.
+-    latest_root_metadata_file = self._get_metadata_file(
+-        'root', 'root.json', DEFAULT_ROOT_UPPERLENGTH, None)
++    # Retrieve the latest, remote root.json *WITHOUT* verifying it just yet.
++    # We will verify it soon if all goes well.
++    latest_root_metadata_file = self._get_file(
++        'root.json', lambda f: f, 'meta', DEFAULT_ROOT_UPPERLENGTH,
++        download_safely=False)
+ 
+     latest_root_metadata = securesystemslib.util.load_json_string(
+         latest_root_metadata_file.read().decode('utf-8'))
+
+From 851913b235217d91cc5ff491cc3d7edabe7662fa Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Wed, 5 Jun 2019 15:45:19 -0400
+Subject: [PATCH 02/11] after verification, next root key is loaded as current
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 4e930fbe6..a38fb1ec7 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1128,7 +1128,7 @@ def _update_root_metadata(self, current_root_metadata):
+     # Retrieve the latest, remote root.json *WITHOUT* verifying it just yet.
+     # We will verify it soon if all goes well.
+     latest_root_metadata_file = self._get_file(
+-        'root.json', lambda f: f, 'meta', DEFAULT_ROOT_UPPERLENGTH,
++        'root.json', lambda f: True, 'meta', DEFAULT_ROOT_UPPERLENGTH,
+         download_safely=False)
+ 
+     latest_root_metadata = securesystemslib.util.load_json_string(
+@@ -1149,6 +1149,16 @@ def _update_root_metadata(self, current_root_metadata):
+       # _update_metadata().
+       self.consistent_snapshot = True
+       self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH, version=version)
++      # Ensure that the role and key information of the top-level roles is the
++      # latest.  We do this whether or not Root needed to be updated, in order
++      # to ensure that, e.g., the entries in roledb for top-level roles are
++      # populated with expected keyid info so that roles can be validated.  In
++      # certain circumstances, top-level metadata might be missing because it
++      # was marked obsolete and deleted after a failed attempt, and thus we
++      # should refresh them here as a protective measure.  See Issue #736.
++      self._rebuild_key_and_role_db()
++      self.consistent_snapshot = \
++          self.metadata['current']['root']['consistent_snapshot']
+ 
+ 
+ 
+
+From d8c66805a95309e683f833cdc190c369d22bfddc Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Mon, 10 Jun 2019 14:58:35 -0400
+Subject: [PATCH 03/11] some minor updates
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index a38fb1ec7..96e0be109 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1128,7 +1128,7 @@ def _update_root_metadata(self, current_root_metadata):
+     # Retrieve the latest, remote root.json *WITHOUT* verifying it just yet.
+     # We will verify it soon if all goes well.
+     latest_root_metadata_file = self._get_file(
+-        'root.json', lambda f: True, 'meta', DEFAULT_ROOT_UPPERLENGTH,
++        'root.json', lambda f: None, 'meta', DEFAULT_ROOT_UPPERLENGTH,
+         download_safely=False)
+ 
+     latest_root_metadata = securesystemslib.util.load_json_string(
+@@ -1143,11 +1143,13 @@ def _update_root_metadata(self, current_root_metadata):
+     # current = version 1
+     # latest = version 3
+     # update from 1.root.json to 3.root.json.
++
++    # Temporarily set consistent snapshot. Will be updated to whatever is set
++    # in the latest root.json after running through the intermediates with
++    # _update_metadata().
++    self.consistent_snapshot = True
++
+     for version in range(next_version, latest_version + 1):
+-      # Temporarily set consistent snapshot. Will be updated to whatever is set
+-      # in the latest root.json after running through the intermediates with
+-      # _update_metadata().
+-      self.consistent_snapshot = True
+       self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH, version=version)
+       # Ensure that the role and key information of the top-level roles is the
+       # latest.  We do this whether or not Root needed to be updated, in order
+@@ -1157,8 +1159,10 @@ def _update_root_metadata(self, current_root_metadata):
+       # was marked obsolete and deleted after a failed attempt, and thus we
+       # should refresh them here as a protective measure.  See Issue #736.
+       self._rebuild_key_and_role_db()
+-      self.consistent_snapshot = \
+-          self.metadata['current']['root']['consistent_snapshot']
++
++    # Set our consistent snapshot property to what the latest root has said.
++    self.consistent_snapshot = \
++        self.metadata['current']['root']['consistent_snapshot']
+ 
+ 
+ 
+
+From b0be9a29d10eed25d268831c1fd32863e31b76db Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Thu, 13 Jun 2019 17:25:31 -0400
+Subject: [PATCH 04/11] follow the spec
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 38 ++++++++++++++++++--------------------
+ 1 file changed, 18 insertions(+), 20 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 96e0be109..0c64e68e4 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -145,6 +145,7 @@
+ import securesystemslib.util
+ import six
+ import iso8601
++import requests.exceptions
+ 
+ # The Timestamp role does not have signed metadata about it; otherwise we
+ # would need an infinite regress of metadata. Therefore, we use some
+@@ -1125,32 +1126,26 @@ def _update_root_metadata(self, current_root_metadata):
+       None.
+     """
+ 
+-    # Retrieve the latest, remote root.json *WITHOUT* verifying it just yet.
+-    # We will verify it soon if all goes well.
+-    latest_root_metadata_file = self._get_file(
+-        'root.json', lambda f: None, 'meta', DEFAULT_ROOT_UPPERLENGTH,
+-        download_safely=False)
+-
+-    latest_root_metadata = securesystemslib.util.load_json_string(
+-        latest_root_metadata_file.read().decode('utf-8'))
+-
+-
++    # Set the next version of root to download.
+     next_version = current_root_metadata['version'] + 1
+-    latest_version = latest_root_metadata['signed']['version']
+-
+-    # update from the next version of root up to (and including) the latest
+-    # version.  For example:
+-    # current = version 1
+-    # latest = version 3
+-    # update from 1.root.json to 3.root.json.
+ 
+     # Temporarily set consistent snapshot. Will be updated to whatever is set
+     # in the latest root.json after running through the intermediates with
+     # _update_metadata().
+     self.consistent_snapshot = True
+ 
+-    for version in range(next_version, latest_version + 1):
+-      self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH, version=version)
++    # Following the spec, try downloading the N+1th root for as long as we can.
++    while True:
++      # Try downloading the next root.
++      try:
++        # Thoroughly verify it.
++        self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH,
++          version=next_version)
++      # The first time we run into any HTTP error, break out of loop.
++      except requests.exceptions.HTTPError:
++        logging.traceback('Failed to download root version '+str(next_version))
++        break
++
+       # Ensure that the role and key information of the top-level roles is the
+       # latest.  We do this whether or not Root needed to be updated, in order
+       # to ensure that, e.g., the entries in roledb for top-level roles are
+@@ -1160,9 +1155,12 @@ def _update_root_metadata(self, current_root_metadata):
+       # should refresh them here as a protective measure.  See Issue #736.
+       self._rebuild_key_and_role_db()
+ 
++      # Set the next version of root to download.
++      next_version += 1
++
+     # Set our consistent snapshot property to what the latest root has said.
+     self.consistent_snapshot = \
+-        self.metadata['current']['root']['consistent_snapshot']
++      self.metadata['current']['root']['consistent_snapshot']
+ 
+ 
+ 
+
+From 704b90c4e407f8a5d3e5c0c6cda2bcc6764c78fc Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 18 Jun 2019 11:58:25 -0400
+Subject: [PATCH 05/11] address @lukpueh comments
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 27 ++++++++++++++-------------
+ tuf/settings.py       |  4 ++++
+ 2 files changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 0c64e68e4..ada54cbe2 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1126,24 +1126,28 @@ def _update_root_metadata(self, current_root_metadata):
+       None.
+     """
+ 
+-    # Set the next version of root to download.
+-    next_version = current_root_metadata['version'] + 1
+-
+     # Temporarily set consistent snapshot. Will be updated to whatever is set
+     # in the latest root.json after running through the intermediates with
+     # _update_metadata().
+     self.consistent_snapshot = True
+ 
+-    # Following the spec, try downloading the N+1th root for as long as we can.
+-    while True:
+-      # Try downloading the next root.
++    # Following the spec, try downloading the N+1th root for a certain maximum
++    # number of times.
++    lower_bound = current_root_metadata['version'] + 1
++    upper_bound = lower_bound + tuf.settings.MAX_NUMBER_ROOT_ROTATIONS
++
++    # Try downloading the next root.
++    for next_version in range(lower_bound, upper_bound):
+       try:
+         # Thoroughly verify it.
+         self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH,
+-          version=next_version)
++            version=next_version)
+       # The first time we run into any HTTP error, break out of loop.
+-      except requests.exceptions.HTTPError:
+-        logging.traceback('Failed to download root version '+str(next_version))
++      except (requests.exceptions.HTTPError,
++              tuf.exceptions.NoWorkingMirrorError) as exception:
++        # Calling this function should give us a detailed stack trace including
++        # an HTTP error code, if any.
++        logging.exception('Failed to download root version '+str(next_version))
+         break
+ 
+       # Ensure that the role and key information of the top-level roles is the
+@@ -1155,12 +1159,9 @@ def _update_root_metadata(self, current_root_metadata):
+       # should refresh them here as a protective measure.  See Issue #736.
+       self._rebuild_key_and_role_db()
+ 
+-      # Set the next version of root to download.
+-      next_version += 1
+-
+     # Set our consistent snapshot property to what the latest root has said.
+     self.consistent_snapshot = \
+-      self.metadata['current']['root']['consistent_snapshot']
++        self.metadata['current']['root']['consistent_snapshot']
+ 
+ 
+ 
+diff --git a/tuf/settings.py b/tuf/settings.py
+index 83d289242..b8032ae19 100755
+--- a/tuf/settings.py
++++ b/tuf/settings.py
+@@ -106,3 +106,7 @@
+ # to suspend execution for a specified amount of time.  See
+ # theupdateframework/tuf/issue#338.
+ SLEEP_BEFORE_ROUND = None
++
++# Maximum number of root metadata file rotations we should perform in order to
++# prevent a denial-of-service (DoS) attack.
++MAX_NUMBER_ROOT_ROTATIONS = 2**10
+
+From 7e77327ba1dd581fff87ae7e12302ce985c1827a Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 18 Jun 2019 15:55:15 -0400
+Subject: [PATCH 06/11] safely ignore only HTTP 403 / 404 errors when updating
+ root
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 23 ++++++++++++++++-------
+ 1 file changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index ada54cbe2..3102f852a 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -145,7 +145,6 @@
+ import securesystemslib.util
+ import six
+ import iso8601
+-import requests.exceptions
+ 
+ # The Timestamp role does not have signed metadata about it; otherwise we
+ # would need an infinite regress of metadata. Therefore, we use some
+@@ -1142,12 +1141,22 @@ def _update_root_metadata(self, current_root_metadata):
+         # Thoroughly verify it.
+         self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH,
+             version=next_version)
+-      # The first time we run into any HTTP error, break out of loop.
+-      except (requests.exceptions.HTTPError,
+-              tuf.exceptions.NoWorkingMirrorError) as exception:
+-        # Calling this function should give us a detailed stack trace including
+-        # an HTTP error code, if any.
+-        logging.exception('Failed to download root version '+str(next_version))
++      # When we run into HTTP 403 /404 error from ALL mirrors, break out of
++      # loop, because the next root metadata file is most likely missing.
++      except tuf.exceptions.NoWorkingMirrorError as exception:
++        for mirror_error in exception.mirror_errors.values():
++          # Otherwise, reraise the error, because it is not a simple HTTP
++          # error.
++          if not isinstance(mirror_error, six.moves.urllib.error.HTTPError) \
++             or mirror_error.code not in {403, 404}:
++            raise
++          else:
++            # Calling this function should give us a detailed stack trace
++            # including an HTTP error code, if any.
++            logging.exception('HTTP error for root version '+str(next_version))
++        # If we are here, then we ran into only 403 / 404 errors, which are
++        # good reasons to suspect that the next root metadata file does not
++        # exist.
+         break
+ 
+       # Ensure that the role and key information of the top-level roles is the
+
+From 4839f2066e803cbdc82edc958766d35f70544dfa Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 18 Jun 2019 17:57:48 -0400
+Subject: [PATCH 07/11] better handling of HTTP errors
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 3102f852a..daf3b55cd 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -145,6 +145,7 @@
+ import securesystemslib.util
+ import six
+ import iso8601
++import requests.exceptions
+ 
+ # The Timestamp role does not have signed metadata about it; otherwise we
+ # would need an infinite regress of metadata. Therefore, we use some
+@@ -1125,6 +1126,16 @@ def _update_root_metadata(self, current_root_metadata):
+       None.
+     """
+ 
++    def neither_403_nor_404(mirror_error):
++      if isinstance(mirror_error, six.moves.urllib.error.HTTPError):
++        if mirror_error.code in {403, 404}:
++          return False
++      elif isinstance(mirror_error, requests.exceptions.HTTPError):
++        if mirror_error.response.status_code in {403, 404}:
++          return False
++      else:
++        return True
++
+     # Temporarily set consistent snapshot. Will be updated to whatever is set
+     # in the latest root.json after running through the intermediates with
+     # _update_metadata().
+@@ -1147,8 +1158,8 @@ def _update_root_metadata(self, current_root_metadata):
+         for mirror_error in exception.mirror_errors.values():
+           # Otherwise, reraise the error, because it is not a simple HTTP
+           # error.
+-          if not isinstance(mirror_error, six.moves.urllib.error.HTTPError) \
+-             or mirror_error.code not in {403, 404}:
++          if neither_403_nor_404(mirror_error):
++            logging.exception('Misc error for root version '+str(next_version))
+             raise
+           else:
+             # Calling this function should give us a detailed stack trace
+
+From 3e05cfbb0f35d6ffb7e327c2b931f9ecad6e2ab2 Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 18 Jun 2019 18:14:16 -0400
+Subject: [PATCH 08/11] fix a bug where we return incorrectly
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index daf3b55cd..765909bfd 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1127,14 +1127,14 @@ def _update_root_metadata(self, current_root_metadata):
+     """
+ 
+     def neither_403_nor_404(mirror_error):
++      WHITELIST = {403, 404}
+       if isinstance(mirror_error, six.moves.urllib.error.HTTPError):
+-        if mirror_error.code in {403, 404}:
++        if mirror_error.code in WHITELIST:
+           return False
+       elif isinstance(mirror_error, requests.exceptions.HTTPError):
+-        if mirror_error.response.status_code in {403, 404}:
++        if mirror_error.response.status_code in WHITELIST:
+           return False
+-      else:
+-        return True
++      return True
+ 
+     # Temporarily set consistent snapshot. Will be updated to whatever is set
+     # in the latest root.json after running through the intermediates with
+
+From 5fc3d90bd46e5c734cfc37c18d52b9e69529e466 Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Mon, 1 Jul 2019 13:21:08 -0400
+Subject: [PATCH 09/11] remove unnecessary conditional check
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/client/updater.py | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 765909bfd..2358df5bd 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1127,12 +1127,8 @@ def _update_root_metadata(self, current_root_metadata):
+     """
+ 
+     def neither_403_nor_404(mirror_error):
+-      WHITELIST = {403, 404}
+-      if isinstance(mirror_error, six.moves.urllib.error.HTTPError):
+-        if mirror_error.code in WHITELIST:
+-          return False
+-      elif isinstance(mirror_error, requests.exceptions.HTTPError):
+-        if mirror_error.response.status_code in WHITELIST:
++      if isinstance(mirror_error, requests.exceptions.HTTPError):
++        if mirror_error.response.status_code in {403, 404}:
+           return False
+       return True
+ 
+
+From 3bb4f73950917a140417963e6be1112e34b84de7 Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+Date: Tue, 2 Jul 2019 10:49:12 -0400
+Subject: [PATCH 10/11] reduce the excessive # of rotation checks
+
+Signed-off-by: Trishank K Kuppusamy <trishank.kuppusamy@datadoghq.com>
+---
+ tuf/settings.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tuf/settings.py b/tuf/settings.py
+index b8032ae19..3f95ce5af 100755
+--- a/tuf/settings.py
++++ b/tuf/settings.py
+@@ -109,4 +109,4 @@
+ 
+ # Maximum number of root metadata file rotations we should perform in order to
+ # prevent a denial-of-service (DoS) attack.
+-MAX_NUMBER_ROOT_ROTATIONS = 2**10
++MAX_NUMBER_ROOT_ROTATIONS = 2**5
+
+From fce6fa5b195c7bbbd8aa1183b278f723842df3f8 Mon Sep 17 00:00:00 2001
+From: Trishank K Kuppusamy
+ <33133073+trishankatdatadog@users.noreply.github.com>
+Date: Thu, 3 Oct 2019 13:39:22 -0400
+Subject: [PATCH 11/11] Remove space client.updater comment
+
+Signed-off-by: Lukas Puehringer <lukas.puehringer@nyu.edu>
+---
+ tuf/client/updater.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tuf/client/updater.py b/tuf/client/updater.py
+index 2358df5bd..de49792f9 100755
+--- a/tuf/client/updater.py
++++ b/tuf/client/updater.py
+@@ -1148,7 +1148,7 @@ def neither_403_nor_404(mirror_error):
+         # Thoroughly verify it.
+         self._update_metadata('root', DEFAULT_ROOT_UPPERLENGTH,
+             version=next_version)
+-      # When we run into HTTP 403 /404 error from ALL mirrors, break out of
++      # When we run into HTTP 403/404 error from ALL mirrors, break out of
+       # loop, because the next root metadata file is most likely missing.
+       except tuf.exceptions.NoWorkingMirrorError as exception:
+         for mirror_error in exception.mirror_errors.values():

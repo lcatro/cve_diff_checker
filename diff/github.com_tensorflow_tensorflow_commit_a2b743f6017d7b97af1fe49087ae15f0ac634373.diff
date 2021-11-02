@@ -1,0 +1,38 @@
+From a2b743f6017d7b97af1fe49087ae15f0ac634373 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Mon, 2 Aug 2021 19:05:27 -0700
+Subject: [PATCH] Fix heap OOB in `tf.raw_ops.RaggedGather`
+
+PiperOrigin-RevId: 388355464
+Change-Id: If14d96231d1cd7aad7c4d1c22c1bab1576b75717
+---
+ tensorflow/core/kernels/ragged_gather_op.cc | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/ragged_gather_op.cc b/tensorflow/core/kernels/ragged_gather_op.cc
+index 3bf82cba050e3..d6d51c770bbb7 100644
+--- a/tensorflow/core/kernels/ragged_gather_op.cc
++++ b/tensorflow/core/kernels/ragged_gather_op.cc
+@@ -58,15 +58,21 @@ class RaggedGatherOpBase : public OpKernel {
+ 
+   void Compute(OpKernelContext* context) override {
+     // Get the input Tensors.
++
+     OpInputList params_nested_splits_in;
+     OP_REQUIRES_OK(context, context->input_list("params_nested_splits",
+                                                 &params_nested_splits_in));
++    OP_REQUIRES(
++        context, params_nested_splits_in.size() > 0,
++        errors::InvalidArgument("params_nested_splits must be non empty"));
++
+     const Tensor& params_dense_values_in =
+         context->input(params_nested_splits_in.size());
+     const Tensor& indices_in =
+         context->input(params_nested_splits_in.size() + 1);
+ 
+-    DCHECK_GT(params_nested_splits_in.size(), 0);  // Enforced by REGISTER_OP.
++    OP_REQUIRES(context, params_nested_splits_in[0].dims() > 0,
++                errors::InvalidArgument("Split tensors must not be scalars"));
+     SPLITS_TYPE num_params = params_nested_splits_in[0].dim_size(0) - 1;
+     OP_REQUIRES_OK(context, ValidateIndices(indices_in, num_params));
+ 

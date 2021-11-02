@@ -1,0 +1,32 @@
+From 6058483d9fbc1b904d5ae7cfea47bfcde5c5b559 Mon Sep 17 00:00:00 2001
+From: Attila Molnar <attilamolnar@hush.com>
+Date: Thu, 16 Apr 2015 18:04:03 +0200
+Subject: [PATCH] Reject replies to DNS PTR requests that contain invalid
+ characters
+
+Fixes issue #1033 reported by @ping86
+---
+ src/dns.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/dns.cpp b/src/dns.cpp
+index 75e5731fe9..14305ccab2 100644
+--- a/src/dns.cpp
++++ b/src/dns.cpp
+@@ -700,8 +700,16 @@ DNSResult DNS::GetResult()
+ 				/* Identical handling to PTR */
+ 
+ 			case DNS_QUERY_PTR:
++			{
+ 				/* Reverse lookups just come back as char* */
+ 				resultstr = std::string((const char*)data.first);
++				if (resultstr.find_first_not_of("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-") != std::string::npos)
++				{
++					std::string ro = req->orig;
++					delete req;
++					return DNSResult(this_id | ERROR_MASK, "Invalid char(s) in reply", 0, ro);
++				}
++			}
+ 			break;
+ 
+ 			default:

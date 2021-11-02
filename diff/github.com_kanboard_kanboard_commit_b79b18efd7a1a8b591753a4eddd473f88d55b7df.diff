@@ -1,0 +1,49 @@
+From b79b18efd7a1a8b591753a4eddd473f88d55b7df Mon Sep 17 00:00:00 2001
+From: Frederic Guillot <fred@kanboard.net>
+Date: Fri, 11 Aug 2017 22:18:53 -0700
+Subject: [PATCH] Filter variables when updating user profile
+
+---
+ app/Controller/UserCredentialController.php   |  6 +++++-
+ app/Controller/UserModificationController.php | 11 ++++++++---
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/app/Controller/UserCredentialController.php b/app/Controller/UserCredentialController.php
+index ae52a13c43..a8b90b7b81 100644
+--- a/app/Controller/UserCredentialController.php
++++ b/app/Controller/UserCredentialController.php
+@@ -44,7 +44,11 @@ public function savePassword()
+         list($valid, $errors) = $this->userValidator->validatePasswordModification($values);
+ 
+         if (! $this->userSession->isAdmin()) {
+-            $values['id'] = $this->userSession->getId();
++            $values = array(
++                'id' => $this->userSession->getId(),
++                'password' => isset($values['password']) ? $values['password'] : '',
++                'confirmation' => isset($values['confirmation']) ? $values['confirmation'] : '',
++            );
+         }
+ 
+         if ($valid) {
+diff --git a/app/Controller/UserModificationController.php b/app/Controller/UserModificationController.php
+index ed1459212f..f4916f6f42 100644
+--- a/app/Controller/UserModificationController.php
++++ b/app/Controller/UserModificationController.php
+@@ -47,9 +47,14 @@ public function save()
+         $values = $this->request->getValues();
+ 
+         if (! $this->userSession->isAdmin()) {
+-            if (isset($values['role'])) {
+-                unset($values['role']);
+-            }
++            $values = array(
++                'id' => $this->userSession->getId(),
++                'username' => isset($values['username']) ? $values['username'] : '',
++                'name' => isset($values['name']) ? $values['name'] : '',
++                'email' => isset($values['email']) ? $values['email'] : '',
++                'timezone' => isset($values['timezone']) ? $values['timezone'] : '',
++                'language' => isset($values['language']) ? $values['language'] : '',
++            );
+         }
+ 
+         list($valid, $errors) = $this->userValidator->validateModification($values);

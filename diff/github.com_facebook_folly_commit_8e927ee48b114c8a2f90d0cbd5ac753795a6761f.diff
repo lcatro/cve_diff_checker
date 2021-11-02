@@ -1,0 +1,96 @@
+From 8e927ee48b114c8a2f90d0cbd5ac753795a6761f Mon Sep 17 00:00:00 2001
+From: Fred Emmott <fe@fb.com>
+Date: Wed, 8 Aug 2018 16:53:47 -0700
+Subject: [PATCH] Flush secureRandom buffer on fork
+
+Summary: On fork, flush the secureRandom buffer, so that we don't share entropy between the parent and child.
+
+Reviewed By: ricklavoie
+
+Differential Revision: D9196474
+
+fbshipit-source-id: 12ff8488d814466186df61328a5f1d4000beb27f
+---
+ folly/Random.cpp          | 21 +++++++++++++++++++--
+ folly/test/RandomTest.cpp | 21 +++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/folly/Random.cpp b/folly/Random.cpp
+index afb62f5db64..40a6b17f3e0 100644
+--- a/folly/Random.cpp
++++ b/folly/Random.cpp
+@@ -72,6 +72,7 @@ void readRandomDevice(void* data, size_t size) {
+ 
+ class BufferedRandomDevice {
+  public:
++  static once_flag flag;
+   static constexpr size_t kDefaultBufferSize = 128;
+ 
+   explicit BufferedRandomDevice(size_t bufferSize = kDefaultBufferSize);
+@@ -97,10 +98,28 @@ class BufferedRandomDevice {
+   unsigned char* ptr_;
+ };
+ 
++once_flag BufferedRandomDevice::flag;
++struct RandomTag {};
++
+ BufferedRandomDevice::BufferedRandomDevice(size_t bufferSize)
+   : bufferSize_(bufferSize),
+     buffer_(new unsigned char[bufferSize]),
+     ptr_(buffer_.get() + bufferSize) {  // refill on first use
++  call_once(flag, [this]() {
++    detail::AtFork::registerHandler(
++        this,
++        /*prepare*/ []() { return true; },
++        /*parent*/ []() {},
++        /*child*/
++        []() {
++          using Single = SingletonThreadLocal<BufferedRandomDevice, RandomTag>;
++          auto& t = Single::get();
++          // Clear out buffered data on fork.
++          //
++          // Ensure child and parent do not share same entropy pool.
++          t.ptr_ = t.buffer_.get() + t.bufferSize_;
++        });
++  });
+ }
+ 
+ void BufferedRandomDevice::getSlow(unsigned char* data, size_t size) {
+@@ -124,8 +143,6 @@ void BufferedRandomDevice::getSlow(unsigned char* data, size_t size) {
+   ptr_ += size;
+ }
+ 
+-struct RandomTag {};
+-
+ } // namespace
+ 
+ void Random::secureRandom(void* data, size_t size) {
+diff --git a/folly/test/RandomTest.cpp b/folly/test/RandomTest.cpp
+index 9c33159b0bb..2ee74c6de94 100644
+--- a/folly/test/RandomTest.cpp
++++ b/folly/test/RandomTest.cpp
+@@ -138,3 +138,24 @@ TEST(Random, sanity) {
+         std::unordered_set<uint64_t>(vals.begin(), vals.end()).size());
+   }
+ }
++
++TEST(Random, SecureFork) {
++  unsigned char buffer = 0;
++  // Init random buffer
++  folly::Random::secureRandom(&buffer, 1);
++
++  auto pid = fork();
++  EXPECT_NE(pid, -1);
++  if (pid) {
++    // parent
++    int status = 0;
++    folly::Random::secureRandom(&buffer, 1);
++    auto pid2 = wait(&status);
++    EXPECT_NE(WEXITSTATUS(status), buffer);
++    EXPECT_EQ(pid, pid2);
++  } else {
++    // child
++    folly::Random::secureRandom(&buffer, 1);
++    exit(buffer); // Do not print gtest results
++  }
++}

@@ -1,0 +1,50 @@
+From 6e76e9b9fa845b76b0b9a45f05f4b54a052578ff Mon Sep 17 00:00:00 2001
+From: Nikos Mavrogiannopoulos <nmav@redhat.com>
+Date: Mon, 19 Jan 2015 09:29:31 +0100
+Subject: [PATCH] on certificate import check whether the two signature
+ algorithms match
+
+---
+ lib/x509/x509.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/lib/x509/x509.c b/lib/x509/x509.c
+index a06cca12e8..5dcde4bc0d 100644
+--- a/lib/x509/x509.c
++++ b/lib/x509/x509.c
+@@ -186,7 +186,7 @@ gnutls_x509_crt_import(gnutls_x509_crt_t cert,
+ 		       gnutls_x509_crt_fmt_t format)
+ {
+ 	int result = 0;
+-	int version;
++	int version, s2;
+ 
+ 	if (cert == NULL) {
+ 		gnutls_assert();
+@@ -247,6 +247,23 @@ gnutls_x509_crt_import(gnutls_x509_crt_t cert,
+ 		goto cleanup;
+ 	}
+ 
++	result = _gnutls_x509_get_signature_algorithm(cert->cert,
++						      "signatureAlgorithm.algorithm");
++	if (result < 0) {
++		gnutls_assert();
++		goto cleanup;
++	}
++
++	s2 = _gnutls_x509_get_signature_algorithm(cert->cert,
++						  "tbsCertificate.signature.algorithm");
++	if (result != s2) {
++		_gnutls_debug_log("signatureAlgorithm.algorithm differs from tbsCertificate.signature.algorithm: %s, %s\n",
++			gnutls_sign_get_name(result), gnutls_sign_get_name(s2));
++		gnutls_assert();
++		result = GNUTLS_E_CERTIFICATE_ERROR;
++		goto cleanup;
++	}
++
+ 	result = _gnutls_x509_get_raw_field2(cert->cert, &cert->der,
+ 					  "tbsCertificate.issuer.rdnSequence",
+ 					  &cert->raw_issuer_dn);
+-- 
+GitLab
+

@@ -1,0 +1,40 @@
+From a8ea7a1d3daa7bdcb877615ae0a252c189153bd2 Mon Sep 17 00:00:00 2001
+From: Daniel Stone <daniels@collabora.com>
+Date: Mon, 26 Jun 2017 16:45:16 +0100
+Subject: [PATCH] parser: Don't set more maps when we don't have any
+
+If the scanner indicates that we might have something which looks like a
+map, but the parser in fact fails to create that map, we will try to
+access the map regardless. Stop doing that.
+
+testcase: 'xkb_keymap {' -> '#kb_keymap'
+
+Signed-off-by: Daniel Stone <daniels@collabora.com>
+---
+ src/xkbcomp/parser.y | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/xkbcomp/parser.y b/src/xkbcomp/parser.y
+index b555bc25..296ce19e 100644
+--- a/src/xkbcomp/parser.y
++++ b/src/xkbcomp/parser.y
+@@ -239,9 +239,9 @@ resolve_keysym(const char *name, xkb_keysym_t *sym_rtrn)
+  */
+ 
+ XkbFile         :       XkbCompositeMap
+-                        { $$ = param->rtrn = $1; param->more_maps = true; }
++                        { $$ = param->rtrn = $1; param->more_maps = !!param->rtrn; }
+                 |       XkbMapConfig
+-                        { $$ = param->rtrn = $1; param->more_maps = true; YYACCEPT; }
++                        { $$ = param->rtrn = $1; param->more_maps = !!param->rtrn; YYACCEPT; }
+                 |       END_OF_FILE
+                         { $$ = param->rtrn = NULL; param->more_maps = false; }
+                 ;
+@@ -772,6 +772,7 @@ parse(struct xkb_context *ctx, struct scanner *scanner, const char *map)
+         .scanner = scanner,
+         .ctx = ctx,
+         .rtrn = NULL,
++        .more_maps = false,
+     };
+ 
+     /*

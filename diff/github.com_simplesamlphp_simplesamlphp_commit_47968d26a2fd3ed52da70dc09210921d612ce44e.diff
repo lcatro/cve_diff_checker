@@ -1,0 +1,36 @@
+From 47968d26a2fd3ed52da70dc09210921d612ce44e Mon Sep 17 00:00:00 2001
+From: Olav Morken <olav.morken@uninett.no>
+Date: Thu, 16 Apr 2020 14:17:24 +0200
+Subject: [PATCH] Fix source code disclosure on case-insensitive file systems
+
+If the file system containing the PHP code is case-insensitive, a
+request containing an uppercase file extension will return the
+contents of the PHP file to the browser instead of executing it.
+
+E.g. a request for this URL will return the source code:
+
+  https:/sp.example.org/simplesaml/module.php/core/frontpage_welcome.PHP
+
+Fix that by converting the path to lowercase before checking the file
+extension.
+
+See the following page for details:
+
+  https://github.com/simplesamlphp/simplesamlphp/security/advisories/GHSA-24m3-w8g9-jwpq
+---
+ lib/SimpleSAML/Module.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/SimpleSAML/Module.php b/lib/SimpleSAML/Module.php
+index d6f5c79cad..dfe056a38f 100644
+--- a/lib/SimpleSAML/Module.php
++++ b/lib/SimpleSAML/Module.php
+@@ -259,7 +259,7 @@ function ($val) {
+             throw new Error\NotFound('The URL wasn\'t found in the module.');
+         }
+ 
+-        if (substr($path, -4) === '.php') {
++        if (mb_strtolower(substr($path, -4), 'UTF-8') === '.php') {
+             // PHP file - attempt to run it
+ 
+             /* In some environments, $_SERVER['SCRIPT_NAME'] is already set with $_SERVER['PATH_INFO']. Check for that

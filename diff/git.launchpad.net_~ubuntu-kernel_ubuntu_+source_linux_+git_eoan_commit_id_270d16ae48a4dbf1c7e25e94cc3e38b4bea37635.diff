@@ -1,0 +1,54 @@
+From 270d16ae48a4dbf1c7e25e94cc3e38b4bea37635 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Thu, 7 Nov 2019 10:08:25 -0600
+Subject: UBUNTU: SAUCE: ovl: Restore vm_file value when lower fs mmap fails
+
+BugLink: https://bugs.launchpad.net/bugs/1850994
+
+ovl_mmap() overwrites vma->vm_file before calling the lower
+filesystem mmap but does not restore the original value on
+failure. This means it is giving a pointer to the lower fs file
+back to the caller with no reference, which is a bad practice.
+However, it does not lead to any issues with upstream kernels as
+no caller accesses vma->vm_file after call_mmap().
+
+With the aufs patches applied the story is different. Whereas
+mmap_region() previously fput a local variable containing the
+file it assigned to vm_file, it now calls vma_fput() which will
+fput vm_file, for which it has no reference, and the reference
+for the original vm_file is not put.
+
+Fix this by restoring vma->vm_file to the original value when the
+mmap call into the lower fs fails.
+
+CVE-2019-15794
+
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Tyler Hicks <tyhicks@canonical.com>
+Signed-off-by: Khalid Elmously <khalid.elmously@canonical.com>
+---
+ fs/overlayfs/file.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/overlayfs/file.c b/fs/overlayfs/file.c
+index 895f2c5..43ad47c 100644
+--- a/fs/overlayfs/file.c
++++ b/fs/overlayfs/file.c
+@@ -334,7 +334,11 @@ static int ovl_mmap(struct file *file, struct vm_area_struct *vma)
+ 	revert_creds(old_cred);
+ 
+ 	if (ret) {
+-		/* Drop reference count from new vm_file value */
++		/*
++		 * Drop reference count from new vm_file value and restore
++		 * original vm_file value
++		 */
++		vma->vm_file = file;
+ 		fput(realfile);
+ 	} else {
+ 		/* Drop reference count from previous vm_file value */
+-- 
+cgit v1.1
+

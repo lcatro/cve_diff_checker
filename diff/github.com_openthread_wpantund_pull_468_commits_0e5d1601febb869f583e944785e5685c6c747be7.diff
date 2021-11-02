@@ -1,0 +1,34 @@
+From 0e5d1601febb869f583e944785e5685c6c747be7 Mon Sep 17 00:00:00 2001
+From: Abtin Keshavarzian <abtink@google.com>
+Date: Thu, 28 May 2020 18:13:23 -0700
+Subject: [PATCH] [wpanctl] free dbus connection and error on exit.
+
+---
+ src/wpanctl/wpanctl.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/wpanctl/wpanctl.c b/src/wpanctl/wpanctl.c
+index 0aab3cf4..2a6c75a9 100644
+--- a/src/wpanctl/wpanctl.c
++++ b/src/wpanctl/wpanctl.c
+@@ -435,7 +435,7 @@ int main(int argc, char * argv[])
+ 	int c;
+ 	bool ignore_driver_version_mismatch = false;
+ 	DBusError error;
+-	DBusConnection* connection;
++	DBusConnection* connection = NULL;
+ 
+ 	dbus_error_init(&error);
+ 
+@@ -715,5 +715,11 @@ int main(int argc, char * argv[])
+ 	if (gRet == ERRORCODE_QUIT)
+ 		gRet = 0;
+ 
++	if (connection) {
++		dbus_connection_unref(connection);
++	}
++
++	dbus_error_free(&error);
++
+ 	return gRet;
+ }

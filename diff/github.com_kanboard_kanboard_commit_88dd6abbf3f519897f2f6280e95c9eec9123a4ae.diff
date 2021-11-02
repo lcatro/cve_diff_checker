@@ -1,0 +1,40 @@
+From 88dd6abbf3f519897f2f6280e95c9eec9123a4ae Mon Sep 17 00:00:00 2001
+From: Frederic Guillot <fred@kanboard.net>
+Date: Fri, 11 Aug 2017 21:24:29 -0700
+Subject: [PATCH] Make sure only admins can change password of other users
+
+---
+ app/Controller/UserCredentialController.php | 4 ++++
+ app/Validator/UserValidator.php             | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/app/Controller/UserCredentialController.php b/app/Controller/UserCredentialController.php
+index 23e7edba19..ae52a13c43 100644
+--- a/app/Controller/UserCredentialController.php
++++ b/app/Controller/UserCredentialController.php
+@@ -43,6 +43,10 @@ public function savePassword()
+ 
+         list($valid, $errors) = $this->userValidator->validatePasswordModification($values);
+ 
++        if (! $this->userSession->isAdmin()) {
++            $values['id'] = $this->userSession->getId();
++        }
++
+         if ($valid) {
+             if ($this->userModel->update($values)) {
+                 $this->flash->success(t('Password modified successfully.'));
+diff --git a/app/Validator/UserValidator.php b/app/Validator/UserValidator.php
+index fe402c47fe..041390a361 100644
+--- a/app/Validator/UserValidator.php
++++ b/app/Validator/UserValidator.php
+@@ -116,6 +116,10 @@ public function validatePasswordModification(array $values)
+         $v = new Validator($values, array_merge($rules, $this->commonPasswordValidationRules()));
+ 
+         if ($v->execute()) {
++            if (! $this->userSession->isAdmin() && $values['id'] != $this->userSession->getId()) {
++                return array(false, array('current_password' => array('Invalid User ID')));
++            }
++
+             if ($this->authenticationManager->passwordAuthentication($this->userSession->getUsername(), $values['current_password'], false)) {
+                 return array(true, array());
+             } else {

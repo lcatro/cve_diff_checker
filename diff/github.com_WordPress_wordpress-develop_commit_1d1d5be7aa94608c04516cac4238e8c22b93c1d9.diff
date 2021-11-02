@@ -1,0 +1,45 @@
+From 1d1d5be7aa94608c04516cac4238e8c22b93c1d9 Mon Sep 17 00:00:00 2001
+From: Jake Spurlock <whyisjake@git.wordpress.org>
+Date: Thu, 12 Dec 2019 18:07:23 +0000
+Subject: [PATCH] Ensure that a user can publish_posts before making a post
+ sticky.
+
+Props: danielbachhuber, whyisjake, peterwilson, xknown.
+
+
+git-svn-id: https://develop.svn.wordpress.org/branches/5.3@46897 602fd350-edb4-49c9-b593-d223f7449a82
+---
+ .../rest-api/endpoints/class-wp-rest-posts-controller.php   | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php b/src/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
+index 2b71a76cb0d..e2a4224cc6b 100644
+--- a/src/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
++++ b/src/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
+@@ -498,7 +498,7 @@ public function create_item_permissions_check( $request ) {
+ 			return new WP_Error( 'rest_cannot_edit_others', __( 'Sorry, you are not allowed to create posts as this user.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+-		if ( ! empty( $request['sticky'] ) && ! current_user_can( $post_type->cap->edit_others_posts ) ) {
++		if ( ! empty( $request['sticky'] ) && ! current_user_can( $post_type->cap->edit_others_posts ) && ! current_user_can( $post_type->cap->publish_posts ) ) {
+ 			return new WP_Error( 'rest_cannot_assign_sticky', __( 'Sorry, you are not allowed to make posts sticky.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -653,7 +653,7 @@ public function update_item_permissions_check( $request ) {
+ 			return new WP_Error( 'rest_cannot_edit_others', __( 'Sorry, you are not allowed to update posts as this user.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+-		if ( ! empty( $request['sticky'] ) && ! current_user_can( $post_type->cap->edit_others_posts ) ) {
++		if ( ! empty( $request['sticky'] ) && ! current_user_can( $post_type->cap->edit_others_posts ) && ! current_user_can( $post_type->cap->publish_posts ) ) {
+ 			return new WP_Error( 'rest_cannot_assign_sticky', __( 'Sorry, you are not allowed to make posts sticky.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -955,7 +955,7 @@ protected function prepare_date_response( $date_gmt, $date = null ) {
+ 	 * @return stdClass|WP_Error Post object or WP_Error.
+ 	 */
+ 	protected function prepare_item_for_database( $request ) {
+-		$prepared_post = new stdClass;
++		$prepared_post = new stdClass();
+ 
+ 		// Post ID.
+ 		if ( isset( $request['id'] ) ) {

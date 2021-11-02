@@ -1,0 +1,48 @@
+From 863d37ea66d5c960db08d6f4a2cbd2518f0f80d1 Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Tue, 25 Oct 2016 13:23:16 +0200
+Subject: [PATCH] Fix #72696: imagefilltoborder stackoverflow on truecolor
+ images
+
+We must not allow negative color values be passed to
+gdImageFillToBorder(), because that can lead to infinite recursion
+since the recursion termination condition will not necessarily be met.
+---
+ ext/gd/libgd/gd.c          |  2 +-
+ ext/gd/tests/bug72696.phpt | 14 ++++++++++++++
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+ create mode 100644 ext/gd/tests/bug72696.phpt
+
+diff --git a/ext/gd/libgd/gd.c b/ext/gd/libgd/gd.c
+index 058f1c97598e..3e7d27a37301 100644
+--- a/ext/gd/libgd/gd.c
++++ b/ext/gd/libgd/gd.c
+@@ -1747,7 +1747,7 @@ void gdImageFillToBorder (gdImagePtr im, int x, int y, int border, int color)
+ 	int leftLimit = -1, rightLimit;
+ 	int i, restoreAlphaBlending = 0;
+ 
+-	if (border < 0) {
++	if (border < 0 || color < 0) {
+ 		/* Refuse to fill to a non-solid border */
+ 		return;
+ 	}
+diff --git a/ext/gd/tests/bug72696.phpt b/ext/gd/tests/bug72696.phpt
+new file mode 100644
+index 000000000000..4f0d9e7f1d25
+--- /dev/null
++++ b/ext/gd/tests/bug72696.phpt
+@@ -0,0 +1,14 @@
++--TEST--
++Bug #72696 (imagefilltoborder stackoverflow on truecolor images)
++--SKIPIF--
++<?php
++if (!extension_loaded('gd')) die('skip gd extension not available');
++?>
++--FILE--
++<?php
++$im = imagecreatetruecolor(10, 10);
++imagefilltoborder($im, 0, 0, 1, -2);
++?>
++===DONE===
++--EXPECT--
++===DONE===

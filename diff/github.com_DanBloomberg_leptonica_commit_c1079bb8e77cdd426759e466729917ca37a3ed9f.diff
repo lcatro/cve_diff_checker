@@ -1,0 +1,37 @@
+From c1079bb8e77cdd426759e466729917ca37a3ed9f Mon Sep 17 00:00:00 2001
+From: Stefan Weil <sw@weilnetz.de>
+Date: Mon, 12 Feb 2018 18:12:37 +0100
+Subject: [PATCH] prog/htmlviewer: Catch unbound memory access (CID 1386222)
+
+rootname can have any size, so limit the amount of copied bytes.
+
+Signed-off-by: Stefan Weil <sw@weilnetz.de>
+---
+ prog/htmlviewer.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/prog/htmlviewer.c b/prog/htmlviewer.c
+index 2ed1561c..820c06d9 100644
+--- a/prog/htmlviewer.c
++++ b/prog/htmlviewer.c
+@@ -171,9 +171,9 @@ SARRAY    *safiles, *sathumbs, *saviews, *sahtml, *salink;
+         return ERROR_INT("safiles not made", procName, 1);
+ 
+         /* Generate output text file names */
+-    sprintf(charbuf, "%s/%s.html", dirout, rootname);
++    snprintf(charbuf, sizeof(charbuf), "%s/%s.html", dirout, rootname);
+     mainname = stringNew(charbuf);
+-    sprintf(charbuf, "%s/%s-links.html", dirout, rootname);
++    snprintf(charbuf, sizeof(charbuf), "%s/%s-links.html", dirout, rootname);
+     linkname = stringNew(charbuf);
+     linknameshort = stringJoin(rootname, "-links.html");
+ 
+@@ -197,7 +197,7 @@ SARRAY    *safiles, *sathumbs, *saviews, *sahtml, *salink;
+         pixGetDimensions(pix, &w, NULL, &d);
+         factor = (l_float32)thumbwidth / (l_float32)w;
+         pixthumb = pixScale(pix, factor, factor);
+-        sprintf(charbuf, "%s_thumb_%03d", rootname, index);
++        snprintf(charbuf, sizeof(charbuf), "%s_thumb_%03d", rootname, index);
+         sarrayAddString(sathumbs, charbuf, L_COPY);
+         outname = genPathname(dirout, charbuf);
+         WriteFormattedPix(outname, pixthumb);

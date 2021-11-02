@@ -1,0 +1,24 @@
+From b5cdbf12ffcaaffecf98f22a6be5a64bb96e4f58 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 22:24:52 -0700
+Subject: [PATCH] Prevent overflow due to integer conversion to unsigned.
+
+PiperOrigin-RevId: 387738045
+Change-Id: Id7e95bc07e02df1c66b72bd09f389608c87bdebe
+---
+ tensorflow/core/kernels/image/non_max_suppression_op.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/image/non_max_suppression_op.cc b/tensorflow/core/kernels/image/non_max_suppression_op.cc
+index 5cb721ed7105f..69b05cc9d84f8 100644
+--- a/tensorflow/core/kernels/image/non_max_suppression_op.cc
++++ b/tensorflow/core/kernels/image/non_max_suppression_op.cc
+@@ -930,6 +930,8 @@ class CombinedNonMaxSuppressionOp : public OpKernel {
+         errors::InvalidArgument("max_size_per_class must be 0-D, got shape ",
+                                 max_output_size.shape().DebugString()));
+     const int max_size_per_class = max_output_size.scalar<int>()();
++    OP_REQUIRES(context, max_size_per_class > 0,
++                errors::InvalidArgument("max_size_per_class must be positive"));
+     // max_total_size: scalar
+     const Tensor& max_total_size = context->input(3);
+     OP_REQUIRES(

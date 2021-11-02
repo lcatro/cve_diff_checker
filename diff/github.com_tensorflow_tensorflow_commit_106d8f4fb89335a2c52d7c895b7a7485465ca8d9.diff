@@ -1,0 +1,53 @@
+From 106d8f4fb89335a2c52d7c895b7a7485465ca8d9 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 17:47:36 -0700
+Subject: [PATCH] Prevent division by 0 in TFLite
+
+PiperOrigin-RevId: 370800311
+Change-Id: I21ccdbd31c30118acc67df8751807ee2e0b12f91
+---
+ tensorflow/lite/kernels/depth_to_space.cc       | 1 +
+ tensorflow/lite/kernels/depth_to_space_test.cc  | 5 +++++
+ tensorflow/lite/micro/kernels/depth_to_space.cc | 1 +
+ 3 files changed, 7 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/depth_to_space.cc b/tensorflow/lite/kernels/depth_to_space.cc
+index d61049f85a9ad..9b552541c74b7 100644
+--- a/tensorflow/lite/kernels/depth_to_space.cc
++++ b/tensorflow/lite/kernels/depth_to_space.cc
+@@ -61,6 +61,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
+   TF_LITE_ENSURE_TYPES_EQ(context, input->type, output->type);
+ 
+   const int block_size = params->block_size;
++  TF_LITE_ENSURE(context, block_size > 0);
+   const int input_height = input->dims->data[1];
+   const int input_width = input->dims->data[2];
+   const int input_channels = input->dims->data[3];
+diff --git a/tensorflow/lite/kernels/depth_to_space_test.cc b/tensorflow/lite/kernels/depth_to_space_test.cc
+index 4429faf990917..c03512dd710ad 100644
+--- a/tensorflow/lite/kernels/depth_to_space_test.cc
++++ b/tensorflow/lite/kernels/depth_to_space_test.cc
+@@ -60,6 +60,11 @@ TEST(DepthToSpaceOpModel, BadBlockSize) {
+   EXPECT_DEATH(DepthToSpaceOpModel({TensorType_FLOAT32, {1, 1, 1, 4}}, 4),
+                "Cannot allocate tensors");
+ }
++
++TEST(DepthToSpaceOpModel, NoBlockSize) {
++  EXPECT_DEATH(DepthToSpaceOpModel({TensorType_FLOAT32, {1, 1, 1, 4}}, 0),
++               "Cannot allocate tensors");
++}
+ #endif
+ 
+ TEST(DepthToSpaceOpModel, Float32) {
+diff --git a/tensorflow/lite/micro/kernels/depth_to_space.cc b/tensorflow/lite/micro/kernels/depth_to_space.cc
+index b3960f1f0c6b1..ae42ee1b331db 100644
+--- a/tensorflow/lite/micro/kernels/depth_to_space.cc
++++ b/tensorflow/lite/micro/kernels/depth_to_space.cc
+@@ -54,6 +54,7 @@ TfLiteStatus CalculateOpData(TfLiteContext* context, TfLiteNode* node) {
+   TF_LITE_ENSURE_TYPES_EQ(context, input->type, output->type);
+ 
+   const int block_size = params->block_size;
++  TF_LITE_ENSURE(context, block_size > 0);
+   const int input_height = input->dims->data[kHeightRank];
+   const int input_width = input->dims->data[kWidthRank];
+   const int input_channels = input->dims->data[kDepthRank];

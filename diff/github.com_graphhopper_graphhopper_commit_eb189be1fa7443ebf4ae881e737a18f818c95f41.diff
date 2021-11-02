@@ -1,0 +1,35 @@
+From eb189be1fa7443ebf4ae881e737a18f818c95f41 Mon Sep 17 00:00:00 2001
+From: Peter <graphhopper@gmx.de>
+Date: Tue, 4 May 2021 20:03:31 +0200
+Subject: [PATCH] avoid regex in navigate module (#2304)
+
+* replace two regexs with one indexOf
+
+* make check stricter
+
+* use @easbar's suggestion
+---
+ .../java/com/graphhopper/navigation/NavigateResource.java | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/navigation/src/main/java/com/graphhopper/navigation/NavigateResource.java b/navigation/src/main/java/com/graphhopper/navigation/NavigateResource.java
+index 75c61c5f3b8..66880307cba 100644
+--- a/navigation/src/main/java/com/graphhopper/navigation/NavigateResource.java
++++ b/navigation/src/main/java/com/graphhopper/navigation/NavigateResource.java
+@@ -188,13 +188,11 @@ private GHResponse calcRoute(List<Double> favoredHeadings, List<GHPoint> request
+      * The url looks like: ".../{profile}/1.522438,42.504606;1.527209,42.504776;1.526113,42.505144;1.527218,42.50529?.."
+      */
+     private List<GHPoint> getPointsFromRequest(HttpServletRequest httpServletRequest, String profile) {
+-
+         String url = httpServletRequest.getRequestURI();
+-        url = url.replaceFirst("/navigate/directions/v5/gh/" + profile + "/", "");
+-        url = url.replaceAll("\\?[*]", "");
+-
++        String urlStart = "/navigate/directions/v5/gh/" + profile + "/";
++        if (!url.startsWith(urlStart)) throw new IllegalArgumentException("Incorrect URL " + url);
++        url = url.substring(urlStart.length());
+         String[] pointStrings = url.split(";");
+-
+         List<GHPoint> points = new ArrayList<>(pointStrings.length);
+         for (int i = 0; i < pointStrings.length; i++) {
+             points.add(GHPoint.fromStringLonLat(pointStrings[i]));

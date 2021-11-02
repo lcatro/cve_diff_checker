@@ -1,0 +1,26 @@
+From d6816e20da1a98bcdc6372d9c36a093df5238f4a Mon Sep 17 00:00:00 2001
+From: Jordi Sanfeliu <jordi@fibranet.cat>
+Date: Wed, 27 Jan 2021 10:45:41 +0100
+Subject: [PATCH] fixed a security bug introduced in 3.13.0 version that lead
+ the HTTP built-in server to bypass Basic Authentication when the option
+ 'hosts_deny' is not defined #309
+
+---
+ lib/HTTPServer.pm | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/lib/HTTPServer.pm b/lib/HTTPServer.pm
+index c13301a7..b02a8f76 100644
+--- a/lib/HTTPServer.pm
++++ b/lib/HTTPServer.pm
+@@ -139,6 +139,10 @@ sub http_header {
+ 		# check if the IP address is forced to auth
+ 		my $denied;
+ 		my $allowed = ip_validity($ENV{REMOTE_ADDR}, $hosts_allow);
++
++		# specific behavior
++		$hosts_deny = "all" if !$hosts_deny;
++
+ 		$denied = ip_validity($ENV{REMOTE_ADDR}, $hosts_deny) if !$allowed;
+ 		if(!$allowed && $denied) {
+ 			my (undef, $encoded_str) = split(' ', $ENV{HTTP_AUTHORIZATION} || "");

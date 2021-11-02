@@ -1,0 +1,48 @@
+From 1f37c04f2a762500222dda2459e6a04646feeedf Mon Sep 17 00:00:00 2001
+From: radare <pancake@nopcode.org>
+Date: Wed, 18 Apr 2018 13:38:22 +0200
+Subject: [PATCH] Fix #9904 - crash in r2_hoobr_r_read_le32 (over 9000
+ entrypoints) and read_le oobread (#9923)
+
+---
+ libr/bin/p/bin_elf.c | 4 ++--
+ libr/core/cbin.c     | 4 ++++
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/libr/bin/p/bin_elf.c b/libr/bin/p/bin_elf.c
+index c766d5b9001..f2043dbc8cd 100644
+--- a/libr/bin/p/bin_elf.c
++++ b/libr/bin/p/bin_elf.c
+@@ -348,7 +348,7 @@ static void process_constructors (RBinFile *bf, RList *ret, int bits) {
+ 			}
+ 			(void)r_buf_read_at (bf->buf, sec->paddr, buf, sec->size);
+ 			if (bits == 32) {
+-				for (i = 0; i < sec->size; i += 4) {
++				for (i = 0; (i + 3) < sec->size; i += 4) {
+ 					ut32 addr32 = r_read_le32 (buf + i);
+ 					if (addr32) {
+ 						RBinAddr *ba = newEntry (sec->paddr + i, (ut64)addr32, type, bits);
+@@ -356,7 +356,7 @@ static void process_constructors (RBinFile *bf, RList *ret, int bits) {
+ 					}
+ 				}
+ 			} else {
+-				for (i = 0; i < sec->size; i += 8) {
++				for (i = 0; (i + 7) < sec->size; i += 8) {
+ 					ut64 addr64 = r_read_le64 (buf + i);
+ 					if (addr64) {
+ 						RBinAddr *ba = newEntry (sec->paddr + i, addr64, type, bits);
+diff --git a/libr/core/cbin.c b/libr/core/cbin.c
+index b8c9d554d13..523ddcad486 100644
+--- a/libr/core/cbin.c
++++ b/libr/core/cbin.c
+@@ -1044,6 +1044,10 @@ static int bin_entry(RCore *r, int mode, ut64 laddr, int va, bool inifin) {
+ 			r_cons_printf ("[Entrypoints]\n");
+ 		}
+ 	}
++	if (r_list_length (entries) > 1024) {
++		eprintf ("Too many entrypoints (%d)\n", r_list_length (entries));
++		return false;
++	}
+ 
+ 	r_list_foreach (entries, iter, entry) {
+ 		ut64 paddr = entry->paddr;

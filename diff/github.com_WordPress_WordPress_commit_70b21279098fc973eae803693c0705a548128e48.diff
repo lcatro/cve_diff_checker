@@ -1,0 +1,54 @@
+From 70b21279098fc973eae803693c0705a548128e48 Mon Sep 17 00:00:00 2001
+From: Aaron Campbell <aaron@xavisys.com>
+Date: Tue, 19 Sep 2017 14:48:47 +0000
+Subject: [PATCH] Database: Hardening for `wpdb::prepare()`
+
+Previously if you passed an array of values for placeholders, additional values could be passed as well. Now additional values will be ignored.
+
+
+Built from https://develop.svn.wordpress.org/trunk@41470
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@41303 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/version.php |  2 +-
+ wp-includes/wp-db.php   | 11 ++++++++++-
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index 6967ffd8b19f..3e8480acf96c 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.9-alpha-41457';
++$wp_version = '4.9-alpha-41470';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.
+diff --git a/wp-includes/wp-db.php b/wp-includes/wp-db.php
+index 57ed865a35ae..5cc2be114fc7 100644
+--- a/wp-includes/wp-db.php
++++ b/wp-includes/wp-db.php
+@@ -1236,9 +1236,18 @@ public function prepare( $query, $args ) {
+ 
+ 		$args = func_get_args();
+ 		array_shift( $args );
++
+ 		// If args were passed as an array (as in vsprintf), move them up
+-		if ( isset( $args[0] ) && is_array($args[0]) )
++		if ( is_array( $args[0] ) && count( $args ) == 1 ) {
+ 			$args = $args[0];
++		}
++
++		foreach ( $args as $arg ) {
++			if ( ! is_scalar( $arg ) ) {
++				_doing_it_wrong( 'wpdb::prepare', sprintf( __( 'Unsupported value type (%s).' ), gettype( $arg ) ), '4.8.2' );
++			}
++		}
++
+ 		$query = str_replace( "'%s'", '%s', $query ); // in case someone mistakenly already singlequoted it
+ 		$query = str_replace( '"%s"', '%s', $query ); // doublequote unquoting
+ 		$query = preg_replace( '|(?<!%)%f|' , '%F', $query ); // Force floats to be locale unaware

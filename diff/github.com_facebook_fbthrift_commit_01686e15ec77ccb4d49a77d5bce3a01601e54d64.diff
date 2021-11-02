@@ -1,0 +1,34 @@
+From 01686e15ec77ccb4d49a77d5bce3a01601e54d64 Mon Sep 17 00:00:00 2001
+From: David Goldblatt <davidgoldblatt@fb.com>
+Date: Thu, 2 May 2019 18:52:10 -0700
+Subject: [PATCH] Throw on skipping an invalid type.
+
+Summary:
+Certain values (e.g.) T_STOP should not appear as a skip type. Allowing them to
+can cause thrift to loop unboundedly.
+
+Reviewed By: spalamarchuk
+
+Differential Revision: D15102451
+
+fbshipit-source-id: c08d52f44f37e9c212d3480233ac217105586c9f
+---
+ thrift/lib/cpp/protocol/TProtocol.h | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/thrift/lib/cpp/protocol/TProtocol.h b/thrift/lib/cpp/protocol/TProtocol.h
+index 9c5d9130093..273ff10be68 100644
+--- a/thrift/lib/cpp/protocol/TProtocol.h
++++ b/thrift/lib/cpp/protocol/TProtocol.h
+@@ -165,8 +165,9 @@ uint32_t skip(Protocol_& prot, TType arg_type) {
+       result += prot.readListEnd();
+       return result;
+     }
+-    default:
+-      return 0;
++    default: {
++      TProtocolException::throwInvalidSkipType(arg_type);
++    }
+   }
+ }
+ 

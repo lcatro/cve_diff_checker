@@ -1,0 +1,83 @@
+From 6f5ba2b651cd9d4b7fa8ee5c4f94460645877c45 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 3 Feb 2017 16:56:57 -0800
+Subject: [PATCH] CVE-2017-12893/SMB/CIFS: Add a bounds check in name_len().
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After we advance the pointer by the length value in the buffer, make
+sure it points to something in the captured data.
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ smbutil.c                |   1 +
+ tests/TESTLIST           |   3 +++
+ tests/nbns-valgrind.out  |  16 ++++++++++++++++
+ tests/nbns-valgrind.pcap | Bin 0 -> 108 bytes
+ 4 files changed, 20 insertions(+)
+ create mode 100644 tests/nbns-valgrind.out
+ create mode 100644 tests/nbns-valgrind.pcap
+
+diff --git a/smbutil.c b/smbutil.c
+index b38d73afb..fc9b3cc6f 100644
+--- a/smbutil.c
++++ b/smbutil.c
+@@ -237,6 +237,7 @@ name_len(netdissect_options *ndo,
+ 	    return(-1);	/* name goes past the end of the buffer */
+ 	ND_TCHECK2(*s, 1);
+ 	s += (*s) + 1;
++	ND_TCHECK2(*s, 1);
+     }
+     return(PTR_DIFF(s, s0) + 1);
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5e3ea8d51..514076410 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -449,6 +449,9 @@ decnet-oobr		decnet-oobr.pcap		decnet-oobr.out
+ # bad packets from Wilfried Kirsch
+ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+ 
++# bad packets from Otto Airamo and Antti Levomäki
++nbns-valgrind		nbns-valgrind.pcap		nbns-valgrind.out	-vvv -e
++
+ # RTP tests
+ # fuzzed pcap
+ rtp-seg-fault-1  rtp-seg-fault-1.pcap  rtp-seg-fault-1.out  -v -T rtp
+diff --git a/tests/nbns-valgrind.out b/tests/nbns-valgrind.out
+new file mode 100644
+index 000000000..bb9cc4973
+--- /dev/null
++++ b/tests/nbns-valgrind.out
+@@ -0,0 +1,16 @@
++00:0c:85:0e:a5:ff > 00:00:0c:07:ac:f0, ethertype IPv4 (0x0800), length 92: (tos 0x0, ttl 127, id 38615, offset 0, flags [none], proto UDP (17), length 78)
++    10.49.248.228.137 > 10.48.161.241.137: 
++>>> NBT UDP PACKET(137): QUERY; REQUEST; UNICAST
++TrnID=0x8D40
++OpCode=0
++NmFlags=0x10
++Rcode=0
++QueryCount=1
++AnswerCount=0
++AuthorityCount=0
++AddressRecCount=0
++QuestionRecords:
++Name=
++WARNING: Short packet. Try increasing the snap length
++
++
+diff --git a/tests/nbns-valgrind.pcap b/tests/nbns-valgrind.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..57657f02b5e01d870eabfcef03de10df610bf0fe
+GIT binary patch
+literal 108
+zcmca|c+)~A1{MYwZ~-zHfw)n{z`1z|F9V1l1D51rU-N;1r<HH%e+~v$1_r-r*BKb<
+s1;0+<GW_v`%V6P0hE5=~3T*Cm0O|)B0R#%J?rzSmey&b#4sI?k0PP|erT_o{
+
+literal 0
+HcmV?d00001
+

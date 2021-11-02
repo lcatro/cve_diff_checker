@@ -1,0 +1,56 @@
+From 3287534daa3beac68e2e83ca4b4fe8a3148ff870 Mon Sep 17 00:00:00 2001
+From: Kevin McCarthy <kevin@8t8.us>
+Date: Fri, 13 Jul 2018 12:15:00 -0700
+Subject: [PATCH] Don't overflow tmp in msg_parse_fetch.
+
+Ensure INTERNALDATE and RFC822.SIZE field sizes fit temp buffer.
+
+Thanks to Jeriko One for the bug report and patch, which this patch is
+based upon.
+---
+ imap/message.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/imap/message.c b/imap/message.c
+index 9ebfeb8e..e6056555 100644
+--- a/imap/message.c
++++ b/imap/message.c
+@@ -1345,6 +1345,7 @@ static int msg_parse_fetch (IMAP_HEADER *h, char *s)
+ {
+   char tmp[SHORT_STRING];
+   char *ptmp;
++  size_t dlen;
+ 
+   if (!s)
+     return -1;
+@@ -1378,8 +1379,12 @@ static int msg_parse_fetch (IMAP_HEADER *h, char *s)
+       }
+       s++;
+       ptmp = tmp;
+-      while (*s && *s != '\"')
++      dlen = sizeof(tmp) - 1;
++      while (*s && *s != '\"' && dlen)
++      {
+         *ptmp++ = *s++;
++        dlen--;
++      }
+       if (*s != '\"')
+         return -1;
+       s++; /* skip past the trailing " */
+@@ -1391,8 +1396,12 @@ static int msg_parse_fetch (IMAP_HEADER *h, char *s)
+       s += 11;
+       SKIPWS (s);
+       ptmp = tmp;
+-      while (isdigit ((unsigned char) *s))
++      dlen = sizeof(tmp) - 1;
++      while (isdigit ((unsigned char) *s) && dlen)
++      {
+         *ptmp++ = *s++;
++        dlen--;
++      }
+       *ptmp = 0;
+       if (mutt_atol (tmp, &h->content_length) < 0)
+         return -1;
+-- 
+GitLab
+

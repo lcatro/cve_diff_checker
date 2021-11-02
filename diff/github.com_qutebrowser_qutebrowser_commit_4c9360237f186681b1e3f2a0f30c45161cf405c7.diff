@@ -1,0 +1,68 @@
+From 4c9360237f186681b1e3f2a0f30c45161cf405c7 Mon Sep 17 00:00:00 2001
+From: Florian Bruhin <git@the-compiler.org>
+Date: Thu, 21 Jun 2018 21:20:19 +0200
+Subject: [PATCH] Fix XSS issue on qute://history
+
+Fixes #4011
+
+(cherry picked from commit 5a7869f2feaa346853d2a85413d6527c87ef0d9f)
+---
+ qutebrowser/browser/qutescheme.py      |  6 ++++--
+ tests/end2end/data/issue4011.html      | 10 ++++++++++
+ tests/end2end/features/history.feature |  5 +++++
+ 3 files changed, 19 insertions(+), 2 deletions(-)
+ create mode 100644 tests/end2end/data/issue4011.html
+
+diff --git a/qutebrowser/browser/qutescheme.py b/qutebrowser/browser/qutescheme.py
+index 8866f164368..9bcd2e3638f 100644
+--- a/qutebrowser/browser/qutescheme.py
++++ b/qutebrowser/browser/qutescheme.py
+@@ -24,6 +24,7 @@
+     _HANDLERS: The handlers registered via decorators.
+ """
+ 
++import html
+ import json
+ import os
+ import time
+@@ -241,8 +242,9 @@ def history_data(start_time, offset=None):
+         end_time = start_time - 24*60*60
+         entries = hist.entries_between(end_time, start_time)
+ 
+-    return [{"url": e.url, "title": e.title or e.url, "time": e.atime}
+-            for e in entries]
++    return [{"url": html.escape(e.url),
++             "title": html.escape(e.title) or html.escape(e.url),
++             "time": e.atime} for e in entries]
+ 
+ 
+ @add_handler('history')
+diff --git a/tests/end2end/data/issue4011.html b/tests/end2end/data/issue4011.html
+new file mode 100644
+index 00000000000..488193736bd
+--- /dev/null
++++ b/tests/end2end/data/issue4011.html
+@@ -0,0 +1,10 @@
++<!DOCTYPE html>
++<html>
++    <head>
++        <meta charset="utf-8">
++        <title>&lt;img src=&quot;x&quot; onerror=&quot;console.log('XSS')&quot;&gt;foo</title>
++    </head>
++    <body>
++        foo
++    </body>
++</html>
+diff --git a/tests/end2end/features/history.feature b/tests/end2end/features/history.feature
+index 9863d2c7fb0..10658cb313b 100644
+--- a/tests/end2end/features/history.feature
++++ b/tests/end2end/features/history.feature
+@@ -111,3 +111,8 @@ Feature: Page history
+         And I wait until qute://history is loaded
+         Then the page should contain the plaintext "3.txt"
+         Then the page should contain the plaintext "4.txt"
++
++    Scenario: XSS in :history
++        When I open data/issue4011.html
++        And I open qute://history
++        Then the javascript message "XSS" should not be logged

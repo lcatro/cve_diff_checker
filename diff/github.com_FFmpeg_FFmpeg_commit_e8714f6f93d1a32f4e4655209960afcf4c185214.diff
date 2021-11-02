@@ -1,0 +1,26 @@
+From e8714f6f93d1a32f4e4655209960afcf4c185214 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michaelni@gmx.at>
+Date: Wed, 17 Dec 2014 21:27:37 +0100
+Subject: [PATCH] avcodec/h264: Clear delayed_pic on deallocation
+
+Fixes use of freed memory
+
+Fixes: case5_av_frame_copy_props.mp4
+Found-by: Michal Zalewski <lcamtuf@coredump.cx>
+Signed-off-by: Michael Niedermayer <michaelni@gmx.at>
+---
+ libavcodec/h264.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libavcodec/h264.c b/libavcodec/h264.c
+index 222bf58b10f4..06d8dec82e4e 100644
+--- a/libavcodec/h264.c
++++ b/libavcodec/h264.c
+@@ -391,6 +391,7 @@ void ff_h264_free_tables(H264Context *h, int free_rbsp)
+     if (free_rbsp && h->DPB) {
+         for (i = 0; i < H264_MAX_PICTURE_COUNT; i++)
+             ff_h264_unref_picture(h, &h->DPB[i]);
++        memset(h->delayed_pic, 0, sizeof(h->delayed_pic));
+         av_freep(&h->DPB);
+     } else if (h->DPB) {
+         for (i = 0; i < H264_MAX_PICTURE_COUNT; i++)

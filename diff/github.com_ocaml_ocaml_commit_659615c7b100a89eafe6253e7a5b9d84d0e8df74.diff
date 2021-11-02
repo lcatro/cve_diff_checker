@@ -1,0 +1,97 @@
+From 659615c7b100a89eafe6253e7a5b9d84d0e8df74 Mon Sep 17 00:00:00 2001
+From: Damien Doligez <damien.doligez-inria.fr>
+Date: Mon, 19 Oct 2015 15:47:33 +0000
+Subject: [PATCH] fix PR#7003 and a few other bugs caused by misuse of Int_val
+
+git-svn-id: http://caml.inria.fr/svn/ocaml/trunk@16525 f963ae5c-01c2-4b8c-9fe0-0dff7051ff02
+---
+ Changes          | 4 +++-
+ VERSION          | 2 +-
+ byterun/alloc.c  | 4 ++--
+ byterun/intern.c | 2 +-
+ byterun/str.c    | 4 ++--
+ 5 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/Changes b/Changes
+index 047b437dd37..668f85190ce 100644
+--- a/Changes
++++ b/Changes
+@@ -204,8 +204,10 @@ Bug fixes:
+            %s#row when Bar contains private row types
+ - PR#6992: Segfault from bug in GADT/module typing
+ - PR#6993: Segfault from recursive modules violating exhaustiveness assumptions
++- PR#7003: String.sub causes segmentation fault
++  (Damien Doligez, report by Radek Micek)
+ - PR#7008: Fatal error in ocamlc with empty compilation unit name
+-  (Damien Doligez)
++  (Damien Doligez, report by Cesar Kunz)
+ - PR#7012: Variable name forgotten when it starts with a capital letter
+   (Jacques Garrigue, Gabriel Scherer, report by Thomas Leonard and Octachron)
+ - PR#7016: Stack overflow in GADT typing
+diff --git a/VERSION b/VERSION
+index 5310f512b95..fb6ef713362 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1,4 +1,4 @@
+-4.03.0+dev10-2015-07-29
++4.03.0+dev11-2015-10-19
+ 
+ # The version string is the first line of this file.
+ # It must be in the format described in stdlib/sys.mli
+diff --git a/byterun/alloc.c b/byterun/alloc.c
+index 96a21bf1f56..0db994724ee 100644
+--- a/byterun/alloc.c
++++ b/byterun/alloc.c
+@@ -153,7 +153,7 @@ CAMLexport int caml_convert_flag_list(value list, int *flags)
+ /* [size] is a [value] representing number of words (fields) */
+ CAMLprim value caml_alloc_dummy(value size)
+ {
+-  mlsize_t wosize = Int_val(size);
++  mlsize_t wosize = Long_val(size);
+ 
+   if (wosize == 0) return Atom(0);
+   return caml_alloc (wosize, 0);
+@@ -169,7 +169,7 @@ CAMLprim value caml_alloc_dummy_function(value size,value arity)
+ /* [size] is a [value] representing number of floats. */
+ CAMLprim value caml_alloc_dummy_float (value size)
+ {
+-  mlsize_t wosize = Int_val(size) * Double_wosize;
++  mlsize_t wosize = Long_val(size) * Double_wosize;
+ 
+   if (wosize == 0) return Atom(0);
+   return caml_alloc (wosize, 0);
+diff --git a/byterun/intern.c b/byterun/intern.c
+index 89d13d1169b..7b8d0497b6d 100644
+--- a/byterun/intern.c
++++ b/byterun/intern.c
+@@ -291,7 +291,7 @@ static void intern_rec(value *dest)
+   case OFreshOID:
+     /* Refresh the object ID */
+     /* but do not do it for predefined exception slots */
+-    if (Int_val(Field((value)dest, 1)) >= 0)
++    if (Long_val(Field((value)dest, 1)) >= 0)
+       caml_set_oo_id((value)dest);
+     /* Pop item and iterate */
+     sp--;
+diff --git a/byterun/str.c b/byterun/str.c
+index 5ad4e294194..885772f7482 100644
+--- a/byterun/str.c
++++ b/byterun/str.c
+@@ -266,7 +266,7 @@ CAMLprim value caml_string_greaterequal(value s1, value s2)
+ CAMLprim value caml_blit_string(value s1, value ofs1, value s2, value ofs2,
+                                 value n)
+ {
+-  memmove(&Byte(s2, Long_val(ofs2)), &Byte(s1, Long_val(ofs1)), Int_val(n));
++  memmove(&Byte(s2, Long_val(ofs2)), &Byte(s1, Long_val(ofs1)), Long_val(n));
+   return Val_unit;
+ }
+ 
+@@ -278,7 +278,7 @@ CAMLprim value caml_fill_string(value s, value offset, value len, value init)
+ 
+ CAMLprim value caml_bitvect_test(value bv, value n)
+ {
+-  int pos = Int_val(n);
++  intnat pos = Long_val(n);
+   return Val_int(Byte_u(bv, pos >> 3) & (1 << (pos & 7)));
+ }
+ 

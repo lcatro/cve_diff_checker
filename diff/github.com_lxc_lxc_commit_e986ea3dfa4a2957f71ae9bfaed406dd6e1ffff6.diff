@@ -1,0 +1,60 @@
+From e986ea3dfa4a2957f71ae9bfaed406dd6e1ffff6 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@mailbox.org>
+Date: Mon, 22 Feb 2016 23:23:58 +0100
+Subject: [PATCH] update lxc-attach manpage
+
+- explain rationale behind allocation of pty
+- briefly explain how a pty is allocated
+- add a short note that describes the changed behavior for lxc-attach when the
+  user is not placed in a writeable cgroup at login
+
+Signed-off-by: Christian Brauner <christian.brauner@mailbox.org>
+---
+ doc/lxc-attach.sgml.in | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/doc/lxc-attach.sgml.in b/doc/lxc-attach.sgml.in
+index 8535c3df6d..653ce1d9bd 100644
+--- a/doc/lxc-attach.sgml.in
++++ b/doc/lxc-attach.sgml.in
+@@ -78,6 +78,23 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+       inside the container or the container does not have a working
+       nsswitch mechanism.
+     </para>
++    <para>
++    Previous versions of <command>lxc-attach</command> simply attached to the
++    specified namespaces of a container and ran a shell or the specified
++    command without allocating a pseudo terminal. This made them vulnerable to
++    input faking via a TIOCSTI <command>ioctl</command> call after switching
++    between userspace execution contexts with different privilegel levels. Newer
++    versions of <command>lxc-attach</command> will try to allocate a pseudo
++    terminal master/slave pair and attach any standard file descriptors which
++    refer to a terminal to the slave side of the pseudo terminal before
++    executing a shell or command. <command>lxc-attach</command> will first try
++    to allocate a pseudo terminal in the container. Should this fail it will try
++    to allocate a pseudo terminal on the host before finally giving up. Note,
++    that if none of the standard file descriptors refer to a terminal
++    <command>lxc-attach</command> will not try to allocate a pseudo terminal.
++    Instead it will simply attach to the containers namespaces and run a shell
++    or the specified command.
++    </para>
+ 
+   </refsect1>
+ 
+@@ -311,6 +328,16 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+       except for the <replaceable>/proc</replaceable> and
+       <replaceable>/sys</replaceable> filesystems.
+     </para>
++    <para>
++      Previous versions of <command>lxc-attach</command> suffered a bug whereby
++      a user could attach to a containers namespace without being placed in a
++      writeable cgroup for some critical subsystems. Newer versions of
++      <command>lxc-attach</command> will check whether a user is in a writeable
++      cgroup for those critical subsystems. <command>lxc-attach</command> might
++      thus fail unexpectedly for some users (E.g. on systems where an
++      unprivileged user is not placed in a writeable cgroup in critical
++      subsystems on login.). However, this behavior is correct and more secure.
++    </para>
+   </refsect1>
+ 
+   <refsect1>

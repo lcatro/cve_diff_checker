@@ -1,0 +1,28 @@
+From 131116b15b0e35a62085d23686b43ed1c12c1331 Mon Sep 17 00:00:00 2001
+From: Jie Deng <jie.deng@intel.com>
+Date: Mon, 24 May 2021 13:57:49 +0800
+Subject: [PATCH] dm: NULL check of vq->used in virtio_net_ping_rxq
+
+Add a check on this place to avoid NULL access issue.
+
+Tracked-On: #6100
+Signed-off-by: Jie Deng <jie.deng@intel.com>
+---
+ devicemodel/hw/pci/virtio/virtio_net.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/devicemodel/hw/pci/virtio/virtio_net.c b/devicemodel/hw/pci/virtio/virtio_net.c
+index cddd6e1456..8a0afb95e6 100644
+--- a/devicemodel/hw/pci/virtio/virtio_net.c
++++ b/devicemodel/hw/pci/virtio/virtio_net.c
+@@ -490,7 +490,9 @@ virtio_net_ping_rxq(void *vdev, struct virtio_vq_info *vq)
+ 	 */
+ 	if (net->rx_ready == 0) {
+ 		net->rx_ready = 1;
+-		vq->used->flags |= VRING_USED_F_NO_NOTIFY;
++		if (vq->used != NULL) {
++			vq->used->flags |= VRING_USED_F_NO_NOTIFY;
++		}
+ 	}
+ }
+ 

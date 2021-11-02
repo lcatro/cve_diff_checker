@@ -1,0 +1,35 @@
+From 6199e653418eda58cd698d8769820904453e2535 Mon Sep 17 00:00:00 2001
+From: Yonghua Huang <yonghua.huang@intel.com>
+Date: Mon, 4 Nov 2019 09:09:35 +0800
+Subject: [PATCH] dm: validate the input in 'pci_emul_mem_handler()'
+
+ checking the inputs explicitly instead of using Assert.
+
+Tracked-On: #4003
+Signed-off-by: Yonghua Huang <yonghua.huang@intel.com>
+Reviewed-by: Shuo Liu <shuo.a.liu@intel.com>
+Acked-by: Yu Wang <yu1.wang@intel.com>
+---
+ devicemodel/hw/pci/core.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/devicemodel/hw/pci/core.c b/devicemodel/hw/pci/core.c
+index ce35230d0d..ae4b70bb0f 100644
+--- a/devicemodel/hw/pci/core.c
++++ b/devicemodel/hw/pci/core.c
+@@ -416,11 +416,10 @@ pci_emul_mem_handler(struct vmctx *ctx, int vcpu, int dir, uint64_t addr,
+ 	uint64_t offset;
+ 	int bidx = (int) arg2;
+ 
+-	assert(bidx <= PCI_BARMAX);
+-	assert(pdi->bar[bidx].type == PCIBAR_MEM32 ||
+-	       pdi->bar[bidx].type == PCIBAR_MEM64);
+-	assert(addr >= pdi->bar[bidx].addr &&
+-	       addr + size <= pdi->bar[bidx].addr + pdi->bar[bidx].size);
++	if (addr + size > pdi->bar[bidx].addr + pdi->bar[bidx].size) {
++		printf("%s, Out of emulated memory range.\n", __func__);
++		return -ESRCH;
++	}
+ 
+ 	offset = addr - pdi->bar[bidx].addr;
+ 

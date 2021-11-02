@@ -1,0 +1,120 @@
+From 5e7b9ec688d79e7b16ec7064e1d37e8481a31e72 Mon Sep 17 00:00:00 2001
+From: Giancarlo Canales Barreto <gcanalesb@me.com>
+Date: Wed, 10 Jun 2015 21:31:22 +0200
+Subject: [PATCH] Fix buffer overflow (pull request #81)
+
+---
+ CHANGELOG.md                            |  7 ++++++
+ src/Internals/QuotedString.cpp          | 32 ++++++++++++-------------
+ test/QuotedString_ExtractFrom_Tests.cpp | 10 ++++++++
+ 3 files changed, 32 insertions(+), 17 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 01c7cc98f..d43202a1a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,6 +1,13 @@
+ Arduino JSON: change log
+ ========================
+ 
++v4.5
++----
++
++* Fixed buffer overflow when input contains a backslash followed by a terminator (issue #81)
++
++**Upgrading is recommended** since previous versions contain a potential security risk.
++
+ v4.4
+ ----
+ 
+diff --git a/src/Internals/QuotedString.cpp b/src/Internals/QuotedString.cpp
+index 3a90defc0..45a6c488f 100644
+--- a/src/Internals/QuotedString.cpp
++++ b/src/Internals/QuotedString.cpp
+@@ -58,46 +58,44 @@ static char unescapeChar(char c) {
+ static inline bool isQuote(char c) { return c == '\"' || c == '\''; }
+ 
+ char *QuotedString::extractFrom(char *input, char **endPtr) {
+-  char firstChar = *input;
+-
+-  if (!isQuote(firstChar)) {
+-    // must start with a quote
+-    return NULL;
+-  }
+-
+-  char stopChar = firstChar;  // closing quote is the same as opening quote
+-
+   char *startPtr = input + 1;  // skip the quote
+   char *readPtr = startPtr;
+   char *writePtr = startPtr;
+   char c;
+ 
++  char firstChar = *input;
++  char stopChar = firstChar;  // closing quote is the same as opening quote
++
++  if (!isQuote(firstChar)) goto ERROR_OPENING_QUOTE_MISSING;
++
+   for (;;) {
+     c = *readPtr++;
+ 
+-    if (c == '\0') {
+-      // premature ending
+-      return NULL;
+-    }
++    if (c == '\0') goto ERROR_CLOSING_QUOTE_MISSING;
+ 
+-    if (c == stopChar) {
+-      // closing quote
+-      break;
+-    }
++    if (c == stopChar) goto SUCCESS;
+ 
+     if (c == '\\') {
+       // replace char
+       c = unescapeChar(*readPtr++);
++      if (c == '\0') goto ERROR_ESCAPE_SEQUENCE_INTERRUPTED;
+     }
+ 
+     *writePtr++ = c;
+   }
+ 
++SUCCESS:
+   // end the string here
+   *writePtr = '\0';
+ 
+   // update end ptr
+   *endPtr = readPtr;
+ 
++  // return pointer to unquoted string
+   return startPtr;
++
++ERROR_OPENING_QUOTE_MISSING:
++ERROR_CLOSING_QUOTE_MISSING:
++ERROR_ESCAPE_SEQUENCE_INTERRUPTED:
++  return NULL;
+ }
+diff --git a/test/QuotedString_ExtractFrom_Tests.cpp b/test/QuotedString_ExtractFrom_Tests.cpp
+index 2f6747f3d..94d062613 100644
+--- a/test/QuotedString_ExtractFrom_Tests.cpp
++++ b/test/QuotedString_ExtractFrom_Tests.cpp
+@@ -16,6 +16,11 @@ class QuotedString_ExtractFrom_Tests : public testing::Test {
+     _result = QuotedString::extractFrom(_jsonString, &_trailing);
+   }
+ 
++  void whenInputIs(const char *json, size_t len) {
++    memcpy(_jsonString, json, len);
++    _result = QuotedString::extractFrom(_jsonString, &_trailing);
++  }
++
+   void resultMustBe(const char *expected) { EXPECT_STREQ(expected, _result); }
+ 
+   void trailingMustBe(const char *expected) {
+@@ -134,3 +139,8 @@ TEST_F(QuotedString_ExtractFrom_Tests, AllEscapedCharsTogether) {
+   whenInputIs("\"1\\\"2\\\\3\\/4\\b5\\f6\\n7\\r8\\t9\"");
+   resultMustBe("1\"2\\3/4\b5\f6\n7\r8\t9");
+ }
++
++TEST_F(QuotedString_ExtractFrom_Tests, UnterminatedEscapeSequence) {
++  whenInputIs("\"\\\0\"", 4);
++  resultMustBe(0);
++}

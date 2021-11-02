@@ -1,0 +1,54 @@
+From 70697bf3c5dc3d201341b01a1a8e5bc6d2fb48f8 Mon Sep 17 00:00:00 2001
+From: Joakim Bech <joakim.bech@linaro.org>
+Date: Thu, 27 Sep 2018 10:30:20 +0200
+Subject: [PATCH] svc: check for allocation overflow in crypto calls part 2
+
+Without checking for overflow there is a risk of allocating a buffer
+with size smaller than anticipated and as a consequence of that it might
+lead to a heap based overflow with attacker controlled data written
+outside the boundaries of the buffer.
+
+Fixes: OP-TEE-2018-0011: "Integer overflow in crypto system calls (x2)"
+
+Signed-off-by: Joakim Bech <joakim.bech@linaro.org>
+Tested-by: Joakim Bech <joakim.bech@linaro.org> (QEMU v7, v8)
+Reviewed-by: Jens Wiklander <jens.wiklander@linaro.org>
+Reported-by: Riscure <inforequest@riscure.com>
+Reported-by: Alyssa Milburn <a.a.milburn@vu.nl>
+Acked-by: Etienne Carriere <etienne.carriere@linaro.org>
+---
+ core/tee/tee_svc_cryp.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/core/tee/tee_svc_cryp.c b/core/tee/tee_svc_cryp.c
+index a5beb339cc9..f60f3d248c2 100644
+--- a/core/tee/tee_svc_cryp.c
++++ b/core/tee/tee_svc_cryp.c
+@@ -3274,7 +3274,12 @@ TEE_Result syscall_asymm_operate(unsigned long state,
+ 	if (res != TEE_SUCCESS)
+ 		return res;
+ 
+-	params = malloc(sizeof(TEE_Attribute) * num_params);
++	size_t alloc_size = 0;
++
++	if (MUL_OVERFLOW(sizeof(TEE_Attribute), num_params, &alloc_size))
++		return TEE_ERROR_OVERFLOW;
++
++	params = malloc(alloc_size);
+ 	if (!params)
+ 		return TEE_ERROR_OUT_OF_MEMORY;
+ 	res = copy_in_attrs(utc, usr_params, num_params, params);
+@@ -3436,7 +3441,12 @@ TEE_Result syscall_asymm_verify(unsigned long state,
+ 	if (res != TEE_SUCCESS)
+ 		return res;
+ 
+-	params = malloc(sizeof(TEE_Attribute) * num_params);
++	size_t alloc_size = 0;
++
++	if (MUL_OVERFLOW(sizeof(TEE_Attribute), num_params, &alloc_size))
++		return TEE_ERROR_OVERFLOW;
++
++	params = malloc(alloc_size);
+ 	if (!params)
+ 		return TEE_ERROR_OUT_OF_MEMORY;
+ 	res = copy_in_attrs(utc, usr_params, num_params, params);

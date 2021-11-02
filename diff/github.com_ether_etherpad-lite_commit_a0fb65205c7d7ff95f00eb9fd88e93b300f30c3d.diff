@@ -1,0 +1,34 @@
+From a0fb65205c7d7ff95f00eb9fd88e93b300f30c3d Mon Sep 17 00:00:00 2001
+From: webzwo0i <webzwo0i@c3d2.de>
+Date: Sat, 14 Mar 2015 00:02:23 +0100
+Subject: [PATCH] oops, fix export with wildcards
+
+---
+ src/node/utils/ExportEtherpad.js | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/node/utils/ExportEtherpad.js b/src/node/utils/ExportEtherpad.js
+index b7d4385230b..46ae0d7af9e 100644
+--- a/src/node/utils/ExportEtherpad.js
++++ b/src/node/utils/ExportEtherpad.js
+@@ -23,9 +23,19 @@ exports.getPadRaw = function(padId, callback){
+   async.waterfall([
+   function(cb){
+ 
++    // Get the Pad
++    db.findKeys("pad:"+padId, null, function(err,padcontent){
++      if(!err){
++        cb(err, padcontent);
++      }
++    })
++  },
++  function(padcontent,cb){
++
+     // Get the Pad available content keys
+-    db.findKeys("pad:"+padId+"*", null, function(err,records){
++    db.findKeys("pad:"+padId+":*", null, function(err,records){
+       if(!err){
++        for (var key in padcontent) { records.push(padcontent[key]);}
+         cb(err, records);
+       }
+     })

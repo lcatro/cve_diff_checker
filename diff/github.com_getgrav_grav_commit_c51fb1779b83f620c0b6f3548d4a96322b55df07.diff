@@ -1,0 +1,140 @@
+From c51fb1779b83f620c0b6f3548d4a96322b55df07 Mon Sep 17 00:00:00 2001
+From: Matias Griese <matias@trilbymedia.com>
+Date: Tue, 14 Sep 2021 18:28:07 +0300
+Subject: [PATCH] Fixed `Session::setFlashCookieObject()` to use the same
+ options as the main session cookie
+
+---
+ CHANGELOG.md                                  |  1 +
+ system/src/Grav/Common/Session.php            | 12 ++++---
+ system/src/Grav/Framework/Session/Session.php | 34 +++++++++----------
+ 3 files changed, 25 insertions(+), 22 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 221b5c1bbe..f5ec741df9 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -13,6 +13,7 @@
+     * Fixed validation of `number` type [#3433](https://github.com/getgrav/grav/issues/3433)
+     * Fixed excessive `security.yaml` file creation [#3432](https://github.com/getgrav/grav/issues/3432)
+     * Fixed incorrect port :0 with nginx unix socket setup [#3439](https://github.com/getgrav/grav/issues/3439)
++    * Fixed `Session::setFlashCookieObject()` to use the same options as the main session cookie
+ 
+ # v1.7.20
+ ## 09/01/2021
+diff --git a/system/src/Grav/Common/Session.php b/system/src/Grav/Common/Session.php
+index 8856e7a0a4..2dbc3073ad 100644
+--- a/system/src/Grav/Common/Session.php
++++ b/system/src/Grav/Common/Session.php
+@@ -12,6 +12,7 @@
+ use Grav\Common\Form\FormFlash;
+ use Grav\Events\SessionStartEvent;
+ use Grav\Plugin\Form\Forms;
++use JsonException;
+ use function is_string;
+ 
+ /**
+@@ -148,10 +149,11 @@ public function getFlashObject($name)
+      * @param mixed $object
+      * @param int $time
+      * @return $this
++     * @throws JsonException
+      */
+     public function setFlashCookieObject($name, $object, $time = 60)
+     {
+-        setcookie($name, json_encode($object), time() + $time, '/');
++        setcookie($name, json_encode($object, JSON_THROW_ON_ERROR), $this->getCookieOptions($time));
+ 
+         return $this;
+     }
+@@ -161,13 +163,15 @@ public function setFlashCookieObject($name, $object, $time = 60)
+      *
+      * @param string $name
+      * @return mixed|null
++     * @throws JsonException
+      */
+     public function getFlashCookieObject($name)
+     {
+         if (isset($_COOKIE[$name])) {
+-            $object = json_decode($_COOKIE[$name], false);
+-            setcookie($name, '', time() - 3600, '/');
+-            return $object;
++            $cookie = $_COOKIE[$name];
++            setcookie($name, '', $this->getCookieOptions(-42000));
++
++            return json_decode($cookie, false, 512, JSON_THROW_ON_ERROR);
+         }
+ 
+         return null;
+diff --git a/system/src/Grav/Framework/Session/Session.php b/system/src/Grav/Framework/Session/Session.php
+index ddab08d757..3feae5a2a5 100644
+--- a/system/src/Grav/Framework/Session/Session.php
++++ b/system/src/Grav/Framework/Session/Session.php
+@@ -338,23 +338,12 @@ public function invalidate()
+     {
+         $name = $this->getName();
+         if (null !== $name) {
+-            $params = session_get_cookie_params();
+-
+-            $cookie_options = array (
+-                'expires'  => time() - 42000,
+-                'path'     => $params['path'],
+-                'domain'   => $params['domain'],
+-                'secure'   => $params['secure'],
+-                'httponly' => $params['httponly'],
+-                'samesite' => $params['samesite']
+-            );
+-
+             $this->removeCookie();
+ 
+             setcookie(
+                 session_name(),
+                 '',
+-                $cookie_options
++                $this->getCookieOptions(-42000)
+             );
+         }
+ 
+@@ -463,27 +452,36 @@ protected function onSessionStart(): void
+     }
+ 
+     /**
+-     * @return void
++     * Store something in cookie temporarily.
++     *
++     * @param int|null $lifetime
++     * @return array
+      */
+-    protected function setCookie(): void
++    public function getCookieOptions(int $lifetime = null): array
+     {
+         $params = session_get_cookie_params();
+ 
+-        $cookie_options = array (
+-            'expires'  => time() + $params['lifetime'],
++        return [
++            'expires'  => time() + ($lifetime ?? $params['lifetime']),
+             'path'     => $params['path'],
+             'domain'   => $params['domain'],
+             'secure'   => $params['secure'],
+             'httponly' => $params['httponly'],
+             'samesite' => $params['samesite']
+-        );
++        ];
++    }
+ 
++    /**
++     * @return void
++     */
++    protected function setCookie(): void
++    {
+         $this->removeCookie();
+ 
+         setcookie(
+             session_name(),
+             session_id(),
+-            $cookie_options
++            $this->getCookieOptions()
+         );
+     }
+ 

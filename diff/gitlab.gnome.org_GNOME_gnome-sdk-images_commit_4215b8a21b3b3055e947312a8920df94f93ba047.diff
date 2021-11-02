@@ -1,0 +1,65 @@
+From 4215b8a21b3b3055e947312a8920df94f93ba047 Mon Sep 17 00:00:00 2001
+From: Mathieu Bridon <bochecha@daitauha.fr>
+Date: Mon, 16 Jul 2018 17:16:37 +0200
+Subject: [PATCH] libsoup: Fix CVE-2018-12910
+
+https://gitlab.gnome.org/GNOME/libsoup/issues/3
+---
+ ...-bail-if-hostname-is-an-empty-string.patch | 29 +++++++++++++++++++
+ org.gnome.Sdk.json.in                         |  4 +++
+ 2 files changed, 33 insertions(+)
+ create mode 100644 0001-cookie-jar-bail-if-hostname-is-an-empty-string.patch
+
+diff --git a/0001-cookie-jar-bail-if-hostname-is-an-empty-string.patch b/0001-cookie-jar-bail-if-hostname-is-an-empty-string.patch
+new file mode 100644
+index 0000000..843b2e6
+--- /dev/null
++++ b/0001-cookie-jar-bail-if-hostname-is-an-empty-string.patch
+@@ -0,0 +1,29 @@
++From db2b0d5809d5f8226d47312b40992cadbcde439f Mon Sep 17 00:00:00 2001
++From: Michael Catanzaro <mcatanzaro@igalia.com>
++Date: Sun, 24 Jun 2018 19:46:19 -0500
++Subject: [PATCH] cookie-jar: bail if hostname is an empty string
++
++There are several other ways to fix the problem with this function, but
++skipping over all of the code is probably the simplest.
++
++Fixes #3
++---
++ libsoup/soup-cookie-jar.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/libsoup/soup-cookie-jar.c b/libsoup/soup-cookie-jar.c
++index 2369c8a..b2b7890 100644
++--- a/libsoup/soup-cookie-jar.c
+++++ b/libsoup/soup-cookie-jar.c
++@@ -307,7 +307,7 @@ get_cookies (SoupCookieJar *jar, SoupURI *uri, gboolean for_http, gboolean copy_
++ 
++ 	priv = soup_cookie_jar_get_instance_private (jar);
++ 
++-	if (!uri->host)
+++	if (!uri->host || !uri->host[0])
++ 		return NULL;
++ 
++ 	/* The logic here is a little weird, but the plan is that if
++-- 
++2.17.1
++
+diff --git a/org.gnome.Sdk.json.in b/org.gnome.Sdk.json.in
+index f40758b..725e57e 100644
+--- a/org.gnome.Sdk.json.in
++++ b/org.gnome.Sdk.json.in
+@@ -144,6 +144,10 @@
+                     "type": "archive",
+                     "url": "https://download.gnome.org/sources/libsoup/2.60/libsoup-2.60.3.tar.xz",
+                     "sha256": "1b0dc762f23abe4e0d29b77370e539fd35f31d8e8e0318d6ddccff395be68a22"
++                },
++                {
++                    "type": "patch",
++                    "path": "0001-cookie-jar-bail-if-hostname-is-an-empty-string.patch"
+                 }
+             ]
+         },
+-- 
+GitLab
+

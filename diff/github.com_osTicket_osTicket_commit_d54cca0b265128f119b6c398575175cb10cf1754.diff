@@ -1,0 +1,26 @@
+From d54cca0b265128f119b6c398575175cb10cf1754 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Thu, 16 Apr 2020 09:48:52 -0500
+Subject: [PATCH] xss: Saved Search Name
+
+This mitigates an issue discovered by Matthew Aberegg where the Name field
+for Saved Searches can be exploited via XSS to execute code. This sanitizes
+the `$_POST['queue-name']` variable via `Format::htmlchars()` so we are
+safe from any XSS attempts on creations and updates. All other Saved Search
+content is parsed/sanitized correctly.
+---
+ include/ajax.search.php | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/ajax.search.php b/include/ajax.search.php
+index e2f3a6babb..0918ec84e3 100644
+--- a/include/ajax.search.php
++++ b/include/ajax.search.php
+@@ -202,6 +202,7 @@ function saveSearch($id=0) {
+     }
+ 
+     function _saveSearch(SavedSearch $search) {
++        $_POST['queue-name'] = Format::htmlchars($_POST['queue-name']);
+ 
+         // Validate the form.
+         $form = $search->getForm($_POST);

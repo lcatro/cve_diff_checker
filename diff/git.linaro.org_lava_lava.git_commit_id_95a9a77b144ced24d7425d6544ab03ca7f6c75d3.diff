@@ -1,0 +1,172 @@
+From 95a9a77b144ced24d7425d6544ab03ca7f6c75d3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Duraffort?= <remi.duraffort@linaro.org>
+Date: Fri, 15 Jun 2018 15:23:15 +0200
+Subject: Remove the ability to past URLs in the submit page
+
+This functionality had introduced a security vulnerability in lava-server.
+
+A user can forge a http request that will force lava-server-gunicorn to return
+any file on the server that is:
+* readable by lavaserver
+* valid yaml
+
+This bug was found by running bandit (https://github.com/PyCQA/bandit).
+
+Change-Id: Ie6876bbb4d8dad210d63d2655356bb863a592b41
+---
+ .../static/lava_scheduler_app/js/job-submit.js     | 32 +---------------------
+ .../templates/lava_scheduler_app/job_submit.html   |  7 ++---
+ lava_scheduler_app/urls.py                         |  4 +--
+ lava_scheduler_app/views.py                        | 24 ----------------
+ 4 files changed, 4 insertions(+), 63 deletions(-)
+
+diff --git a/lava_scheduler_app/static/lava_scheduler_app/js/job-submit.js b/lava_scheduler_app/static/lava_scheduler_app/js/job-submit.js
+index 291be2eb7..3cc520910 100644
+--- a/lava_scheduler_app/static/lava_scheduler_app/js/job-submit.js
++++ b/lava_scheduler_app/static/lava_scheduler_app/js/job-submit.js
+@@ -18,11 +18,7 @@ $(window).ready(
+             // Need a timeout since paste event does not give the content
+             // of the clipboard.
+             setTimeout(function(){
+-                if (is_url($("#definition-input").val()) && $("#definition-input").val().split("\n").length == 1) {
+-                    load_url($("#definition-input").val());
+-                } else {
+-                    validate_input();
+-                }
++              validate_input();
+             },100);
+         });
+ 
+@@ -45,27 +41,6 @@ validate_input = function() {
+     }
+ }
+ 
+-load_url = function(url) {
+-    // Loads definition content if URL is provided in the text area.
+-    $.ajax({
+-        type: "POST",
+-        url: remote_definition_url,
+-        data: {
+-            "url": url.trim(),
+-            "csrfmiddlewaretoken": $("[name='csrfmiddlewaretoken']").val()
+-        },
+-        success: function(data) {
+-            try {
+-                $("#definition-input").val(data);
+-                validate_input();
+-            } catch (e) {
+-                validate_definition_callback(e);
+-                return;
+-            }
+-        }
+-    });
+-}
+-
+ validate_job_definition = function(data) {
+     $.post(window.location.pathname,
+            {"definition-input": data,
+@@ -120,8 +95,3 @@ select_error_line = function(error) {
+                 "height")) - 1) - ($("#definition-input").height() / 2));
+     }
+ }
+-
+-is_url = function (str) {
+-    var regexp = /^(ftp|http|https):\/\/(\w+:{0,1}\w*@)?(\S+)(:[0-9]+)?(\/|\/([\w#!:.?+=&%@!\-\/]))?/
+-    return regexp.test(str);
+-}
+diff --git a/lava_scheduler_app/templates/lava_scheduler_app/job_submit.html b/lava_scheduler_app/templates/lava_scheduler_app/job_submit.html
+index 7068e68b5..9cfb137b3 100644
+--- a/lava_scheduler_app/templates/lava_scheduler_app/job_submit.html
++++ b/lava_scheduler_app/templates/lava_scheduler_app/job_submit.html
+@@ -45,12 +45,12 @@
+ <p>To view the full job list click <a href="{{ list_url }}">here</a>.</p>
+ 
+ {% else %}
+-<p>Paste your job definition here. Alternatively, you can paste a URL to your job definition file.</p>
++<p>Paste your job definition here.</p>
+ 
+ <form action="" method="post">
+   {% csrf_token %}
+   <div>
+-    <textarea id="definition-input" name="definition-input" placeholder="Enter your job definition or link to a job definition here.">{{ definition_input }}</textarea>
++    <textarea id="definition-input" name="definition-input" placeholder="Enter your job definition here.">{{ definition_input }}</textarea>
+     <div id="busyIndicator"></div>
+     <div>
+       <div id="valid_container">
+@@ -80,9 +80,6 @@
+ 
+ {% block scripts %}
+ <script type="text/javascript" src="{{ STATIC_URL }}lava_scheduler_app/js/jquery-linedtextarea.min.js"></script>
+-<script type="text/javascript">
+-  var remote_definition_url = '{% url 'lava.scheduler.get_remote_definition' %}';
+-</script>
+ {% if not job_id %}
+ <script type="text/javascript" src="{{ STATIC_URL }}lava_scheduler_app/js/job-submit.min.js"></script>
+ {% endif %}
+diff --git a/lava_scheduler_app/urls.py b/lava_scheduler_app/urls.py
+index dcec1d2af..a600f5cf3 100644
+--- a/lava_scheduler_app/urls.py
++++ b/lava_scheduler_app/urls.py
+@@ -8,7 +8,7 @@ from lava_scheduler_app.views import (
+     device_dictionary_plain, maintenance_devices,
+     device_type_reports, edit_worker_desc,
+     failure_report, favorite_jobs,
+-    get_remote_definition, health_job_list, healthcheck, index,
++    health_job_list, healthcheck, index,
+     job_annotate_failure, job_cancel, job_fail, job_change_priority, job_complete_log,
+     job_definition, job_definition_plain, job_description_yaml, job_detail,
+     job_list, job_configuration, job_errors,
+@@ -96,8 +96,6 @@ urlpatterns = [
+     url(r'^job/(?P<pk>[0-9]+|[0-9]+\.[0-9]+)/log_pipeline_incremental$',
+         job_log_pipeline_incremental,
+         name='lava.scheduler.job.log_pipeline_incremental'),
+-    url(r'^get-remote-definition', get_remote_definition,
+-        name='lava.scheduler.get_remote_definition'),
+     url(r'^myjobs$', myjobs, name='lava.scheduler.myjobs'),
+     url(r'^favorite-jobs$', favorite_jobs, name='lava.scheduler.favorite_jobs'),
+     url(r'^favorite-jobs/~(?P<username>[^/]+)$', favorite_jobs,
+diff --git a/lava_scheduler_app/views.py b/lava_scheduler_app/views.py
+index 3e31bac8c..8b3beff5b 100644
+--- a/lava_scheduler_app/views.py
++++ b/lava_scheduler_app/views.py
+@@ -107,13 +107,6 @@ from lava_scheduler_app.tables import (
+     RunningTable,
+ )
+ 
+-if sys.version_info[0] == 2:
+-    # Python 2.x
+-    from urllib2 import urlopen
+-elif sys.version_info[0] == 3:
+-    # For Python 3.0 and later
+-    from urllib.request import urlopen
+-
+ # pylint: disable=too-many-attributes,too-many-ancestors,too-many-arguments,too-many-locals
+ # pylint: disable=too-many-statements,too-many-branches,too-many-return-statements
+ # pylint: disable=no-self-use,too-many-nested-blocks,too-few-public-methods
+@@ -1803,23 +1796,6 @@ def job_annotate_failure(request, pk):
+         request=request))
+ 
+ 
+-@post_only
+-def get_remote_definition(request):
+-    """Fetches remote job definition file."""
+-    url = request.POST.get("url")
+-
+-    try:
+-        data = urlopen(url).read()
+-        # Validate that the data at the location is really JSON or YAML.
+-        # This is security based check so noone can misuse this url.
+-        yaml.load(data)
+-    except Exception as e:
+-        return HttpResponse(simplejson.dumps(str(e)),
+-                            content_type="application/json")
+-
+-    return HttpResponse(data)
+-
+-
+ class RecentJobsView(JobTableView):
+ 
+     def __init__(self, request, device, **kwargs):
+-- 
+cgit v1.2.1
+

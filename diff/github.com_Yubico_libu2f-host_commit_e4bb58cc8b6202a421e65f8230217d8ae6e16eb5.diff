@@ -1,0 +1,52 @@
+From e4bb58cc8b6202a421e65f8230217d8ae6e16eb5 Mon Sep 17 00:00:00 2001
+From: Klas Lindfors <klas@yubico.com>
+Date: Fri, 22 Feb 2019 10:59:01 +0100
+Subject: [PATCH] fix filling out of initresp
+
+---
+ u2f-host/devs.c | 30 +++++++++++++++++++++---------
+ 1 file changed, 21 insertions(+), 9 deletions(-)
+
+diff --git a/u2f-host/devs.c b/u2f-host/devs.c
+index 2b4ca67..1eaf3fb 100644
+--- a/u2f-host/devs.c
++++ b/u2f-host/devs.c
+@@ -302,17 +302,29 @@ init_device (u2fh_devs * devs, struct u2fdevice *dev)
+       (devs, dev->id, U2FHID_INIT, nonce, sizeof (nonce), resp,
+        &resplen) == U2FH_OK)
+     {
+-      U2FHID_INIT_RESP initresp;
+-      if (resplen > sizeof (initresp))
++      int offs = sizeof (nonce);
++      /* the response has to be atleast 17 bytes, if it's more we discard that */
++      if (resplen < 17)
+ 	{
+-	  return U2FH_MEMORY_ERROR;
++	  return U2FH_SIZE_ERROR;
+ 	}
+-      memcpy (&initresp, resp, resplen);
+-      dev->cid = initresp.cid;
+-      dev->versionInterface = initresp.versionInterface;
+-      dev->versionMajor = initresp.versionMajor;
+-      dev->versionMinor = initresp.versionMinor;
+-      dev->capFlags = initresp.capFlags;
++
++      /* incoming and outgoing nonce has to match */
++      if (memcmp (nonce, resp, sizeof (nonce)) != 0)
++	{
++	  return U2FH_TRANSPORT_ERROR;
++	}
++
++      dev->cid =
++	resp[offs] << 24 | resp[offs + 1] << 16 | resp[offs +
++						       2] << 8 | resp[offs +
++								      3];
++      offs += 4;
++      dev->versionInterface = resp[offs++];
++      dev->versionMajor = resp[offs++];
++      dev->versionMinor = resp[offs++];
++      dev->versionBuild = resp[offs++];
++      dev->capFlags = resp[offs++];
+     }
+   else
+     {

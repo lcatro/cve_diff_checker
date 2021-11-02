@@ -1,0 +1,364 @@
+From 241e8f486134793cb0f4a5b0e5817a97883401f5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Tim=20R=C3=BChsen?= <tim.ruehsen@gmx.de>
+Date: Tue, 9 Apr 2019 16:58:18 +0200
+Subject: [PATCH] Perform A-Label roundtrip for lookup functions by default
+
+This adds another check to avoid unexpected results.
+It was a longstanding FIXME.
+
+Thanks to  Jonathan Birch of Microsoft Corporation,
+Florian Weimer (GNU glibc) and Nikos Mavrogiannopoulos (GnuTLS)
+for investigation, discussion and testing.
+---
+ lib/error.c   |   2 +
+ lib/idn2.h.in |  12 ++++--
+ lib/lookup.c  | 105 +++++++++++++++++++++++++++++++++++---------------
+ src/blurbs.h  |   4 +-
+ src/idn2.c    |  32 ++++++++-------
+ src/idn2.ggo  |   1 +
+ 6 files changed, 105 insertions(+), 51 deletions(-)
+
+diff --git a/lib/error.c b/lib/error.c
+index 0304044..8483f30 100644
+--- a/lib/error.c
++++ b/lib/error.c
+@@ -77,6 +77,7 @@ idn2_strerror (int rc)
+     case IDN2_DOT_IN_LABEL: return _("domain label has forbidden dot (TR46)");
+     case IDN2_INVALID_TRANSITIONAL: return _("domain label has character forbidden in transitional mode (TR46)");
+     case IDN2_INVALID_NONTRANSITIONAL: return _("domain label has character forbidden in non-transitional mode (TR46)");
++    case IDN2_ALABEL_ROUNDTRIP_FAILED: return _("Alabel roundtrip failed");
+     default: return _("Unknown error");
+     }
+ }
+@@ -129,6 +130,7 @@ idn2_strerror_name (int rc)
+     case IDN2_DOT_IN_LABEL: return ERR2STR (IDN2_DOT_IN_LABEL);
+     case IDN2_INVALID_TRANSITIONAL: return ERR2STR (IDN2_INVALID_TRANSITIONAL);
+     case IDN2_INVALID_NONTRANSITIONAL: return ERR2STR (IDN2_INVALID_NONTRANSITIONAL);
++    case IDN2_ALABEL_ROUNDTRIP_FAILED: return ERR2STR (IDN2_ALABEL_ROUNDTRIP_FAILED);
+     default: return "IDN2_UNKNOWN";
+     }
+ }
+diff --git a/lib/idn2.h.in b/lib/idn2.h.in
+index 695662b..c7835b0 100644
+--- a/lib/idn2.h.in
++++ b/lib/idn2.h.in
+@@ -178,10 +178,11 @@ extern "C"
+ /**
+  * idn2_flags:
+  * @IDN2_NFC_INPUT: Normalize input string using normalization form C.
+- * @IDN2_ALABEL_ROUNDTRIP: Perform optional IDNA2008 lookup roundtrip check (not implemented yet).
+- * @IDN2_NO_TR46: Disable Unicode TR46 processing (default).
++ * @IDN2_ALABEL_ROUNDTRIP: Perform optional IDNA2008 lookup roundtrip check (default).
++ * @IDN2_NO_ALABEL_ROUNDTRIP: Disable ALabel lookup roundtrip check.
++ * @IDN2_NO_TR46: Disable Unicode TR46 processing.
+  * @IDN2_TRANSITIONAL: Perform Unicode TR46 transitional processing.
+- * @IDN2_NONTRANSITIONAL: Perform Unicode TR46 non-transitional processing.
++ * @IDN2_NONTRANSITIONAL: Perform Unicode TR46 non-transitional processing (default).
+  * @IDN2_ALLOW_UNASSIGNED: Libidn compatibility flag, unused.
+  * @IDN2_USE_STD3_ASCII_RULES: Use STD3 ASCII rules.
+  * This is a #TR46 only flag, and will be ignored when set without either
+@@ -198,7 +199,8 @@ extern "C"
+     IDN2_NONTRANSITIONAL = 8,
+     IDN2_ALLOW_UNASSIGNED = 16,
+     IDN2_USE_STD3_ASCII_RULES = 32,
+-    IDN2_NO_TR46 = 64
++    IDN2_NO_TR46 = 64,
++    IDN2_NO_ALABEL_ROUNDTRIP = 128
+   } idn2_flags;
+ 
+ /* IDNA2008 with UTF-8 encoded inputs. */
+@@ -249,6 +251,7 @@ extern "C"
+  * @IDN2_DOT_IN_LABEL: Label has forbidden dot (TR46).
+  * @IDN2_INVALID_TRANSITIONAL: Label has character forbidden in transitional mode (TR46).
+  * @IDN2_INVALID_NONTRANSITIONAL: Label has character forbidden in non-transitional mode (TR46).
++ * @IDN2_ALABEL_ROUNDTRIP_FAILED: ALabel -> Ulabel -> ALabel result differs from input.
+  *
+  * Return codes for IDN2 functions.  All return codes are negative
+  * except for the successful code IDN2_OK which are guaranteed to be
+@@ -287,6 +290,7 @@ extern "C"
+     IDN2_DOT_IN_LABEL = -311,
+     IDN2_INVALID_TRANSITIONAL = -312,
+     IDN2_INVALID_NONTRANSITIONAL = -313,
++    IDN2_ALABEL_ROUNDTRIP_FAILED = -314,
+   } idn2_rc;
+ 
+ /* Auxiliary functions. */
+diff --git a/lib/lookup.c b/lib/lookup.c
+index 0342ee5..1dd0e97 100644
+--- a/lib/lookup.c
++++ b/lib/lookup.c
+@@ -51,6 +51,9 @@ static int set_default_flags(int *flags)
+   if (((*flags) & (IDN2_TRANSITIONAL|IDN2_NONTRANSITIONAL)) && ((*flags) & IDN2_NO_TR46))
+     return IDN2_INVALID_FLAGS;
+ 
++  if (((*flags) & IDN2_ALABEL_ROUNDTRIP) && ((*flags) & IDN2_NO_ALABEL_ROUNDTRIP))
++    return IDN2_INVALID_FLAGS;
++
+   if (!((*flags) & (IDN2_NO_TR46|IDN2_TRANSITIONAL)))
+     *flags |= IDN2_NONTRANSITIONAL;
+ 
+@@ -63,23 +66,39 @@ label (const uint8_t * src, size_t srclen, uint8_t * dst, size_t * dstlen,
+ {
+   size_t plen;
+   uint32_t *p;
+-  int rc;
+-  size_t tmpl;
+-
+-  if (_idn2_ascii_p (src, srclen))
+-    {
+-      if (flags & IDN2_ALABEL_ROUNDTRIP)
+-	/* FIXME implement this MAY:
+-
+-	   If the input to this procedure appears to be an A-label
+-	   (i.e., it starts in "xn--", interpreted
+-	   case-insensitively), the lookup application MAY attempt to
+-	   convert it to a U-label, first ensuring that the A-label is
+-	   entirely in lowercase (converting it to lowercase if
+-	   necessary), and apply the tests of Section 5.4 and the
+-	   conversion of Section 5.5 to that form. */
+-	return IDN2_INVALID_FLAGS;
++  const uint8_t *src_org = NULL;
++  uint8_t *src_allocated = NULL;
++  int rc, check_roundtrip = 0;
++  size_t tmpl, srclen_org = 0;
++  uint32_t label_u32[IDN2_LABEL_MAX_LENGTH];
++  size_t label32_len = IDN2_LABEL_MAX_LENGTH;
++
++  if (_idn2_ascii_p (src, srclen)) {
++    if (!(flags & IDN2_NO_ALABEL_ROUNDTRIP) && srclen >= 4 && memcmp (src, "xn--", 4) == 0) {
++      /*
++	 If the input to this procedure appears to be an A-label
++	 (i.e., it starts in "xn--", interpreted
++	 case-insensitively), the lookup application MAY attempt to
++	 convert it to a U-label, first ensuring that the A-label is
++	 entirely in lowercase (converting it to lowercase if
++	 necessary), and apply the tests of Section 5.4 and the
++	 conversion of Section 5.5 to that form. */
++      rc = _idn2_punycode_decode (srclen - 4, (char *) src + 4, &label32_len, label_u32);
++      if (rc)
++	return rc;
+ 
++      check_roundtrip = 1;
++      src_org = src;
++      srclen_org = srclen;
++
++      srclen = IDN2_LABEL_MAX_LENGTH;
++      src = src_allocated = u32_to_u8 (label_u32, label32_len, NULL, &srclen);
++      if (!src) {
++	if (errno == ENOMEM)
++	  return IDN2_MALLOC;
++	return IDN2_ENCODING_ERROR;
++      }
++    } else {
+       if (srclen > IDN2_LABEL_MAX_LENGTH)
+ 	return IDN2_TOO_BIG_LABEL;
+       if (srclen > *dstlen)
+@@ -89,10 +108,11 @@ label (const uint8_t * src, size_t srclen, uint8_t * dst, size_t * dstlen,
+       *dstlen = srclen;
+       return IDN2_OK;
+     }
++  }
+ 
+   rc = _idn2_u8_to_u32_nfc (src, srclen, &p, &plen, flags & IDN2_NFC_INPUT);
+   if (rc != IDN2_OK)
+-    return rc;
++    goto out;
+ 
+   if (!(flags & IDN2_TRANSITIONAL))
+     {
+@@ -110,8 +130,8 @@ label (const uint8_t * src, size_t srclen, uint8_t * dst, size_t * dstlen,
+ 
+       if (rc != IDN2_OK)
+ 	{
+-	  free(p);
+-	  return rc;
++	  free (p);
++	  goto out;
+ 	}
+     }
+ 
+@@ -124,11 +144,25 @@ label (const uint8_t * src, size_t srclen, uint8_t * dst, size_t * dstlen,
+   rc = _idn2_punycode_encode (plen, p, &tmpl, (char *) dst + 4);
+   free (p);
+   if (rc != IDN2_OK)
+-    return rc;
++    goto out;
++
+ 
+   *dstlen = 4 + tmpl;
+ 
+-  return IDN2_OK;
++  if (check_roundtrip)
++    {
++      if (srclen_org != *dstlen || memcmp (src_org, dst, srclen_org))
++      {
++        rc = IDN2_ALABEL_ROUNDTRIP_FAILED;
++	goto out;
++      }
++    }
++
++  rc = IDN2_OK;
++
++out:
++  free (src_allocated);
++  return rc;
+ }
+ 
+ #define TR46_TRANSITIONAL_CHECK \
+@@ -379,13 +413,17 @@ _tr46 (const uint8_t * domain_u8, uint8_t ** out, int flags)
+  * Pass %IDN2_NFC_INPUT in @flags to convert input to NFC form before
+  * further processing.  %IDN2_TRANSITIONAL and %IDN2_NONTRANSITIONAL
+  * do already imply %IDN2_NFC_INPUT.
++ *
+  * Pass %IDN2_ALABEL_ROUNDTRIP in @flags to
+  * convert any input A-labels to U-labels and perform additional
+- * testing (not implemented yet).
++ * testing. This is default since version 2.2.
++ * To switch this behavior off, pass IDN2_NO_ALABEL_ROUNDTRIP
++ *
+  * Pass %IDN2_TRANSITIONAL to enable Unicode TR46
+  * transitional processing, and %IDN2_NONTRANSITIONAL to enable
+- * Unicode TR46 non-transitional processing.  Multiple flags may be
+- * specified by binary or:ing them together.
++ * Unicode TR46 non-transitional processing.
++ *
++ * Multiple flags may be specified by binary or:ing them together.
+  *
+  * After version 2.0.3: %IDN2_USE_STD3_ASCII_RULES disabled by default.
+  * Previously we were eliminating non-STD3 characters from domain strings
+@@ -503,14 +541,19 @@ idn2_lookup_u8 (const uint8_t * src, uint8_t ** lookupname, int flags)
+  * to be encoded in the locale's default coding system, and will be
+  * transcoded to UTF-8 and NFC normalized by this function.
+  *
+- * Pass %IDN2_ALABEL_ROUNDTRIP in @flags to convert any input A-labels
+- * to U-labels and perform additional testing.  Pass
+- * %IDN2_TRANSITIONAL to enable Unicode TR46 transitional processing,
++ * Pass %IDN2_ALABEL_ROUNDTRIP in @flags to
++ * convert any input A-labels to U-labels and perform additional
++ * testing. This is default since version 2.2.
++ * To switch this behavior off, pass IDN2_NO_ALABEL_ROUNDTRIP
++ *
++ * Pass %IDN2_TRANSITIONAL to enable Unicode TR46 transitional processing,
+  * and %IDN2_NONTRANSITIONAL to enable Unicode TR46 non-transitional
+- * processing.  Multiple flags may be specified by binary or:ing them
+- * together, for example %IDN2_ALABEL_ROUNDTRIP |
+- * %IDN2_NONTRANSITIONAL.  The %IDN2_NFC_INPUT in @flags is always
+- * enabled in this function.
++ * processing.
++ *
++ * Multiple flags may be specified by binary or:ing them together, for
++ * example %IDN2_ALABEL_ROUNDTRIP | %IDN2_NONTRANSITIONAL.
++ *
++ * The %IDN2_NFC_INPUT in @flags is always enabled in this function.
+  *
+  * After version 0.11: @lookupname may be NULL to test lookup of @src
+  * without allocating memory.
+diff --git a/src/blurbs.h b/src/blurbs.h
+index 2d71ed0..4fdea0f 100644
+--- a/src/blurbs.h
++++ b/src/blurbs.h
+@@ -1,5 +1,5 @@
+ /* blurbs.h - warranty and conditions blurbs
+-   Copyright (C) 2011-2017 Simon Josefsson
++   Copyright (C) 2011-2019 Simon Josefsson, Tim Ruehsen
+ 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -16,7 +16,7 @@
+ */
+ 
+ #define GREETING							\
+-  "Copyright (C) 2011-2017  Simon Josefsson\n"				\
++  "Copyright (C) 2011-2019  Simon Josefsson, Tim Ruehsen\n"				\
+   "This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.\n" \
+   "This is free software, and you are welcome to redistribute it\n"	\
+   "under certain conditions; type `show c' for details.\n\n"
+diff --git a/src/idn2.c b/src/idn2.c
+index b13ecad..c890d8e 100644
+--- a/src/idn2.c
++++ b/src/idn2.c
+@@ -1,5 +1,5 @@
+ /* idn2.c - command line interface to libidn2
+-   Copyright (C) 2011-2017 Simon Josefsson
++   Copyright (C) 2011-2019 Simon Josefsson, Tim Ruehsen
+ 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -50,7 +50,7 @@ const char version_etc_copyright[] =
+   /* Do *not* mark this string for translation.  %s is a copyright
+      symbol suitable for this locale, and %d is the copyright
+      year.  */
+-  "Copyright %s %d Simon Josefsson.";
++  "Copyright 2011-%s %d Simon Josefsson, Tim Ruehsen.";
+ 
+ static void
+ usage (int status)
+@@ -78,23 +78,24 @@ to signal the end of parameters, as in `idn2 --quiet -- -foo'.\n\
+ Mandatory arguments to long options are mandatory for short options too.\n\
+ "), stdout);
+       fputs (_("\
+-  -h, --help               Print help and exit\n\
+-  -V, --version            Print version and exit\n\
++  -h, --help                Print help and exit\n\
++  -V, --version             Print version and exit\n\
+ "), stdout);
+       fputs (_("\
+-  -d, --decode             Decode (punycode) domain name\n\
+-  -l, --lookup             Lookup domain name (default)\n\
+-  -r, --register           Register label\n\
++  -d, --decode              Decode (punycode) domain name\n\
++  -l, --lookup              Lookup domain name (default)\n\
++  -r, --register            Register label\n\
+ "), stdout);
+       fputs (_("\
+-  -T, --tr46t              Enable TR46 transitional processing\n\
+-  -N, --tr46nt             Enable TR46 non-transitional processing\n\
+-      --no-tr46            Disable TR46 processing\n\
++  -T, --tr46t               Enable TR46 transitional processing\n\
++  -N, --tr46nt              Enable TR46 non-transitional processing\n\
++      --no-tr46             Disable TR46 processing\n\
+ "), stdout);
+       fputs (_("\
+-      --usestd3asciirules  Enable STD3 ASCII rules\n\
+-      --debug              Print debugging information\n\
+-      --quiet              Silent operation\n\
++      --usestd3asciirules   Enable STD3 ASCII rules\n\
++      --no-alabelroundtrip  Disable ALabel rountrip for lookups\n\
++      --debug               Print debugging information\n\
++      --quiet               Silent operation\n\
+ "), stdout);
+       emit_bug_reporting_address ();
+     }
+@@ -201,7 +202,7 @@ main (int argc, char *argv[])
+   if (args_info.version_given)
+     {
+       version_etc (stdout, "idn2", PACKAGE_NAME, VERSION,
+-		   "Simon Josefsson", (char *) NULL);
++		   "Simon Josefsson, Tim Ruehsen", (char *) NULL);
+       return EXIT_SUCCESS;
+     }
+ 
+@@ -230,6 +231,9 @@ main (int argc, char *argv[])
+   if (flags && args_info.usestd3asciirules_given)
+     flags |= IDN2_USE_STD3_ASCII_RULES;
+ 
++  if (flags && args_info.no_alabelroundtrip_given)
++    flags |= IDN2_NO_ALABEL_ROUNDTRIP;
++
+   for (cmdn = 0; cmdn < args_info.inputs_num; cmdn++)
+     process_input (args_info.inputs[cmdn], flags | IDN2_NFC_INPUT);
+ 
+diff --git a/src/idn2.ggo b/src/idn2.ggo
+index 3732cb5..04a5360 100644
+--- a/src/idn2.ggo
++++ b/src/idn2.ggo
+@@ -20,5 +20,6 @@ option "tr46t" T "Enable TR46 transitional processing" flag off
+ option "tr46nt" N "Enable TR46 non-transitional processing" flag off
+ option "no-tr46" - "Disable TR46 processing" flag off
+ option "usestd3asciirules" - "Enable STD3 ASCII rules" flag off
++option "no-alabelroundtrip" - "Disable ALabel roundtrip for lookups" flag off
+ option "debug" - "Print debugging information" flag off
+ option "quiet" - "Silent operation" flag off
+-- 
+GitLab
+

@@ -1,0 +1,40 @@
+From 69aacbd26480f94f986cd136bbf82854109ee545 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Tue, 27 Sep 2016 07:40:56 +0200
+Subject: [PATCH] Fix h1 report 148745
+
+Reflected file download
+-----------------------
+
+Abdullah Hussam has reported via HackerOne that www/delivery/asyncspc.php
+was vulnerable to the fairly new Reflected File Download (RFD) web attack
+vector that enables attackers to gain complete control over a victim's
+machine by virtually downloading a file from a trusted domain.
+
+CWE: CWE-79
+CVSSv2: 9.3 (AV:N/AC:M/Au:N/C:C/I:C/A:C)
+
+CVSSv3 Vector: CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H/E:F/RL:O/RC:C
+CVSSv3 Base Score: 9.6
+CVSSv3 Temporal Score: 8.9
+---
+ www/delivery_dev/asyncspc.php | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/www/delivery_dev/asyncspc.php b/www/delivery_dev/asyncspc.php
+index f51e5f64ad..bff82f3ac4 100644
+--- a/www/delivery_dev/asyncspc.php
++++ b/www/delivery_dev/asyncspc.php
+@@ -29,6 +29,12 @@
+ /* Main code                                             */
+ /*-------------------------------------------------------*/
+ 
++// Protect from Reflected File Download attacks
++if (preg_match('/[^a-zA-Z0-9_-]/', $prefix)) {
++    MAX_sendStatusCode(400);
++    exit;
++}
++
+ // Derive the source parameter
+ $source = MAX_commonDeriveSource($source);
+ 

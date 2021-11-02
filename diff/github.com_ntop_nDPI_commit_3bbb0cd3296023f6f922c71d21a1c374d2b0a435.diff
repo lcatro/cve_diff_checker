@@ -1,0 +1,65 @@
+From 3bbb0cd3296023f6f922c71d21a1c374d2b0a435 Mon Sep 17 00:00:00 2001
+From: Philippe Antoine <contact@catenacyber.fr>
+Date: Thu, 2 Apr 2020 16:35:10 +0200
+Subject: [PATCH] ssh: adds systematic bounds checks in concat_hash_string
+
+cf GHSL-2020-052
+---
+ src/lib/protocols/ssh.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/lib/protocols/ssh.c b/src/lib/protocols/ssh.c
+index 853fbb24b..292433e55 100644
+--- a/src/lib/protocols/ssh.c
++++ b/src/lib/protocols/ssh.c
+@@ -110,10 +110,14 @@ static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,
+   buf[buf_out_len++] = ';';
+   offset += len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.server_host_key_algorithms [None] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+   offset += 4 + len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.encryption_algorithms_client_to_server [C] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+ 
+@@ -130,6 +134,8 @@ static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,
+   } else
+     offset += 4 + len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.encryption_algorithms_server_to_client [S] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+ 
+@@ -146,6 +152,8 @@ static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,
+   } else
+     offset += 4 + len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.mac_algorithms_client_to_server [C] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+ 
+@@ -162,6 +170,8 @@ static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,
+   } else
+     offset += 4 + len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.mac_algorithms_server_to_client [S] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+ 
+@@ -195,6 +205,8 @@ static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,
+   } else
+     offset += 4 + len;
+ 
++  if(offset+sizeof(u_int32_t) >= packet->payload_packet_len)
++    goto invalid_payload;
+   /* ssh.compression_algorithms_server_to_client [S] */
+   len = ntohl(*(u_int32_t*)&packet->payload[offset]);
+ 

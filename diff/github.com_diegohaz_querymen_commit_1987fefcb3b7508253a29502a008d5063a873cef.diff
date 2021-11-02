@@ -1,0 +1,86 @@
+From 1987fefcb3b7508253a29502a008d5063a873cef Mon Sep 17 00:00:00 2001
+From: Haz <hazdiego@gmail.com>
+Date: Thu, 12 Mar 2020 14:17:17 -0300
+Subject: [PATCH] Fix prototype pollution vulnerability (#77)
+
+* Fix prototype pollution vulnerability
+
+* Fix test
+---
+ .travis.yml             |  3 +--
+ src/index.js            |  8 ++++++++
+ test/index.js           | 15 +++++++++++++++
+ test/querymen-schema.js |  2 +-
+ 4 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/.travis.yml b/.travis.yml
+index ddf8371..658ac06 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -1,7 +1,6 @@
+ language: node_js
+ services: mongodb
+ node_js:
+-  - v5
+-  - v4
++  - v6
+ after_script:
+   - 'npm run coveralls'
+diff --git a/src/index.js b/src/index.js
+index de520de..7673d0b 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -19,6 +19,14 @@ export let handlers = {
+  * @param {Function} [fn] - Set the handler method.
+  */
+ export function handler (type, name, fn) {
++  if (
++    type === 'constructor' ||
++    type === '__proto__' ||
++    name === 'constructor' ||
++    name === '__proto__'
++  ) {
++    return
++  }
+   if (arguments.length > 2) {
+     handlers[type][name] = fn
+   }
+diff --git a/test/index.js b/test/index.js
+index 04ee025..bb9cf01 100644
+--- a/test/index.js
++++ b/test/index.js
+@@ -42,6 +42,21 @@ const route = (...args) => {
+   return app
+ }
+ 
++test('Prototype pollution', (t) => {
++  const { toString } = {}
++
++  querymen.handler('__proto__', 'toString', 'JHU')
++  t.ok({}.toString === toString, 'should not be vulnerable to prototype pollution')
++
++  querymen.handler('formatters', '__proto__', { toString: 'JHU' })
++  t.ok({}.toString === toString, 'should not be vulnerable to prototype pollution')
++
++  querymen.handler('validators', '__proto__', { toString: 'JHU' })
++  t.ok({}.toString === toString, 'should not be vulnerable to prototype pollution')
++
++  t.end()
++})
++
+ test('Querymen handler', (t) => {
+   t.notOk(querymen.parser('testParser'), 'should not get nonexistent parser')
+   t.notOk(querymen.formatter('testFormatter'), 'should not get nonexistent formatter')
+diff --git a/test/querymen-schema.js b/test/querymen-schema.js
+index b2e92a3..11ef39a 100644
+--- a/test/querymen-schema.js
++++ b/test/querymen-schema.js
+@@ -29,7 +29,7 @@ test('QuerymenSchema add', (t) => {
+   t.same(add('123,456', [Number]), [123, 456], 'should add a param with type option number array')
+   t.same(add('123,0', [Boolean]), [true, false], 'should add a param with type option boolean array')
+   t.same(add('2016,2017', [Date]), [new Date('2016'), new Date('2017')], 'should add a param with type option date array')
+-  t.same(add('123,456', [RegExp]), [/123/i, /123/i], 'should add a param with type option regexp array')
++  t.same(add('123,456', [RegExp]), [/123/i, /456/i], 'should add a param with type option regexp array')
+   t.end()
+ })
+ 

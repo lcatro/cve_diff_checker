@@ -1,0 +1,74 @@
+From c5dd7bef5e54da5996dc4713284aa6266ae75b75 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 22:02:41 -0700
+Subject: [PATCH] CVE-2017-13020/VTP: Add some missing bounds checks.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-vtp.c         |   2 ++
+ tests/TESTLIST      |   1 +
+ tests/vtp_asan.out  |   6 ++++++
+ tests/vtp_asan.pcap | Bin 0 -> 154 bytes
+ 4 files changed, 9 insertions(+)
+ create mode 100644 tests/vtp_asan.out
+ create mode 100644 tests/vtp_asan.pcap
+
+diff --git a/print-vtp.c b/print-vtp.c
+index 285beb96a..18c1356ef 100644
+--- a/print-vtp.c
++++ b/print-vtp.c
+@@ -223,6 +223,7 @@ vtp_print (netdissect_options *ndo,
+ 	 *
+ 	 */
+ 
++	ND_TCHECK_32BITS(tptr);
+ 	ND_PRINT((ndo, ", Config Rev %x", EXTRACT_32BITS(tptr)));
+ 
+ 	/*
+@@ -243,6 +244,7 @@ vtp_print (netdissect_options *ndo,
+ 	tptr += 4;
+ 	while (tptr < (pptr+length)) {
+ 
++	    ND_TCHECK_8BITS(tptr);
+ 	    len = *tptr;
+ 	    if (len == 0)
+ 		break;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 942372328..6f5d3314d 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -521,6 +521,7 @@ esis_snpa_asan-5	esis_snpa_asan-5.pcap		esis_snpa_asan-5.out	-v
+ dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
+ pgm_opts_asan		pgm_opts_asan.pcap		pgm_opts_asan.out	-v
+ pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
++vtp_asan		vtp_asan.pcap			vtp_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/vtp_asan.out b/tests/vtp_asan.out
+new file mode 100644
+index 000000000..17b682bf6
+--- /dev/null
++++ b/tests/vtp_asan.out
+@@ -0,0 +1,6 @@
++FRF.16 Frag, seq 193, Flags [Begin, End], UI 08! VTPv69, Message Subset advertisement (0x02), length 2126400013
++	Domain name: , Seq number: 0[|vtp]
++[|mfr]
++[|mfr]
++[|mfr]
++[|mfr]
+diff --git a/tests/vtp_asan.pcap b/tests/vtp_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..515828a0b606ab2f659b2ce2e4f213054025ecd1
+GIT binary patch
+literal 154
+zcmca|c+)~A1{Q{G5y1}`fWQcdw*hg=oQPCr27v|;U&?D=-GPG#`r6_-8W<RO6qsF^
+w7$g|x@;_i$D+m-|2%9!z&CLU^|4WPiUwxK|k%<o|h7MTJ1z`LX7z3RK06Hfcr~m)}
+
+literal 0
+HcmV?d00001
+

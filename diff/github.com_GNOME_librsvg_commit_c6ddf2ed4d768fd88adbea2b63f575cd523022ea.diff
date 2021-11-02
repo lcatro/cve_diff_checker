@@ -1,0 +1,626 @@
+From 72a4f0584e08bcb16b189eb8b395e193fdc3f88a Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 13:06:39 -0600
+Subject: [PATCH 01/10] Make _rsvg_handle_allow_load() take a GFile for the
+ base uri, not a handle
+
+---
+ rsvg-base.c | 15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/rsvg-base.c b/rsvg-base.c
+index 74a59ec8e..5437ec63e 100644
+--- a/rsvg-base.c
++++ b/rsvg-base.c
+@@ -2666,11 +2666,10 @@ rsvg_return_if_fail_warning (const char *pretty_function, const char *expression
+ }
+ 
+ static gboolean
+-_rsvg_handle_allow_load (RsvgHandle *handle,
++_rsvg_handle_allow_load (GFile      *base_gfile,
+                          const char *uri,
+                          GError **error)
+ {
+-    RsvgHandlePrivate *priv = handle->priv;
+     GFile *base;
+     char *path, *dir;
+     char *scheme = NULL, *cpath = NULL, *cdir = NULL;
+@@ -2686,11 +2685,11 @@ _rsvg_handle_allow_load (RsvgHandle *handle,
+         goto allow;
+ 
+     /* No base to compare to? */
+-    if (priv->base_gfile == NULL)
++    if (base_gfile == NULL)
+         goto deny;
+ 
+     /* Deny loads from differing URI schemes */
+-    if (!g_file_has_uri_scheme (priv->base_gfile, scheme))
++    if (!g_file_has_uri_scheme (base_gfile, scheme))
+         goto deny;
+ 
+     /* resource: is allowed to load anything from other resources */
+@@ -2701,7 +2700,7 @@ _rsvg_handle_allow_load (RsvgHandle *handle,
+     if (!g_str_equal (scheme, "file"))
+         goto deny;
+ 
+-    base = g_file_get_parent (priv->base_gfile);
++    base = g_file_get_parent (base_gfile);
+     if (base == NULL)
+         goto deny;
+ 
+@@ -2782,12 +2781,13 @@ _rsvg_handle_acquire_data (RsvgHandle *handle,
+                            gsize *len,
+                            GError **error)
+ {
++    RsvgHandlePrivate *priv = handle->priv;
+     char *uri;
+     char *data;
+ 
+     uri = _rsvg_handle_resolve_uri (handle, url);
+ 
+-    if (_rsvg_handle_allow_load (handle, uri, error)) {
++    if (_rsvg_handle_allow_load (priv->base_gfile, uri, error)) {
+         data = _rsvg_io_acquire_data (uri,
+                                       rsvg_handle_get_base_uri (handle),
+                                       content_type,
+@@ -2808,12 +2808,13 @@ _rsvg_handle_acquire_stream (RsvgHandle *handle,
+                              char **content_type,
+                              GError **error)
+ {
++    RsvgHandlePrivate *priv = handle->priv;
+     char *uri;
+     GInputStream *stream;
+ 
+     uri = _rsvg_handle_resolve_uri (handle, url);
+ 
+-    if (_rsvg_handle_allow_load (handle, uri, error)) {
++    if (_rsvg_handle_allow_load (priv->base_gfile, uri, error)) {
+         stream = _rsvg_io_acquire_stream (uri,
+                                           rsvg_handle_get_base_uri (handle),
+                                           content_type,
+
+From 5c55192f48b7ac094a5f4486f20af5124701694d Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 13:11:37 -0600
+Subject: [PATCH 02/10] rsvg_allow_load(): Rename from
+ _rsvg_handle_allow_load(); make it public
+
+---
+ rsvg-base.c    | 14 ++++++++------
+ rsvg-private.h |  5 +++++
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/rsvg-base.c b/rsvg-base.c
+index 5437ec63e..43258baf9 100644
+--- a/rsvg-base.c
++++ b/rsvg-base.c
+@@ -2665,15 +2665,17 @@ rsvg_return_if_fail_warning (const char *pretty_function, const char *expression
+     g_set_error (error, RSVG_ERROR, 0, _("%s: assertion `%s' failed"), pretty_function, expression);
+ }
+ 
+-static gboolean
+-_rsvg_handle_allow_load (GFile      *base_gfile,
+-                         const char *uri,
+-                         GError **error)
++gboolean
++rsvg_allow_load (GFile       *base_gfile,
++                 const char  *uri,
++                 GError     **error)
+ {
+     GFile *base;
+     char *path, *dir;
+     char *scheme = NULL, *cpath = NULL, *cdir = NULL;
+ 
++    g_assert (error == NULL || *error == NULL);
++
+     scheme = g_uri_parse_scheme (uri);
+ 
+     /* Not a valid URI */
+@@ -2787,7 +2789,7 @@ _rsvg_handle_acquire_data (RsvgHandle *handle,
+ 
+     uri = _rsvg_handle_resolve_uri (handle, url);
+ 
+-    if (_rsvg_handle_allow_load (priv->base_gfile, uri, error)) {
++    if (rsvg_allow_load (priv->base_gfile, uri, error)) {
+         data = _rsvg_io_acquire_data (uri,
+                                       rsvg_handle_get_base_uri (handle),
+                                       content_type,
+@@ -2814,7 +2816,7 @@ _rsvg_handle_acquire_stream (RsvgHandle *handle,
+ 
+     uri = _rsvg_handle_resolve_uri (handle, url);
+ 
+-    if (_rsvg_handle_allow_load (priv->base_gfile, uri, error)) {
++    if (rsvg_allow_load (priv->base_gfile, uri, error)) {
+         stream = _rsvg_io_acquire_stream (uri,
+                                           rsvg_handle_get_base_uri (handle),
+                                           content_type,
+diff --git a/rsvg-private.h b/rsvg-private.h
+index 546bf0211..cbf50dcc1 100644
+--- a/rsvg-private.h
++++ b/rsvg-private.h
+@@ -561,6 +561,11 @@ G_GNUC_INTERNAL
+ void rsvg_return_if_fail_warning (const char *pretty_function,
+                                   const char *expression, GError ** error);
+ 
++G_GNUC_INTERNAL
++gboolean rsvg_allow_load (GFile       *base_gfile,
++                          const char  *uri,
++                          GError     **error);
++
+ G_GNUC_INTERNAL
+ char *_rsvg_handle_acquire_data (RsvgHandle *handle,
+                                  const char *uri,
+
+From 89c40a0838b35cfc1dd8a93c68589e094ea28516 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 13:21:27 -0600
+Subject: [PATCH 03/10] rsvg_acquire_data_data(): Remove unused argument
+
+---
+ rsvg-io.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/rsvg-io.c b/rsvg-io.c
+index 7452b73dc..fc886c3a1 100644
+--- a/rsvg-io.c
++++ b/rsvg-io.c
+@@ -67,7 +67,6 @@ uri_decoded_copy (const char *part,
+ 
+ static char *
+ rsvg_acquire_data_data (const char *uri,
+-                        const char *base_uri, 
+                         char **out_mime_type,
+                         gsize *out_len,
+                         GError **error)
+@@ -313,7 +312,7 @@ _rsvg_io_acquire_data (const char *href,
+         len = &llen;
+ 
+     if (strncmp (href, "data:", 5) == 0)
+-      return rsvg_acquire_data_data (href, NULL, mime_type, len, error);
++      return rsvg_acquire_data_data (href, mime_type, len, error);
+ 
+     if ((data = rsvg_acquire_file_data (href, base_uri, mime_type, len, cancellable, NULL)))
+       return data;
+@@ -342,7 +341,7 @@ _rsvg_io_acquire_stream (const char *href,
+     }
+ 
+     if (strncmp (href, "data:", 5) == 0) {
+-        if (!(data = rsvg_acquire_data_data (href, NULL, mime_type, &len, error)))
++        if (!(data = rsvg_acquire_data_data (href, mime_type, &len, error)))
+             return NULL;
+ 
+         return g_memory_input_stream_new_from_data (data, len, (GDestroyNotify) g_free);
+
+From 6efc43c86b8c4ec0598b7fd9ceb0d274fe1a7ca6 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 13:22:54 -0600
+Subject: [PATCH 04/10] Add emacs indentation magic
+
+---
+ rsvg-io.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/rsvg-io.c b/rsvg-io.c
+index fc886c3a1..611dc91e4 100644
+--- a/rsvg-io.c
++++ b/rsvg-io.c
+@@ -1,3 +1,4 @@
++/* -*- Mode: C; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+ /*
+    Copyright (C) 2000 Eazel, Inc.
+    Copyright (C) 2002, 2003, 2004, 2005 Dom Lachowicz <cinamod@hotmail.com>
+
+From a3c375ffc85d3759d01841bc7489bddd1876a0da Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 13:23:17 -0600
+Subject: [PATCH 05/10] rsvg_decode_data_uri(): Renamed from
+ rsvg_acquire_data_data()
+
+---
+ rsvg-io.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/rsvg-io.c b/rsvg-io.c
+index 611dc91e4..20e0316d1 100644
+--- a/rsvg-io.c
++++ b/rsvg-io.c
+@@ -67,10 +67,10 @@ uri_decoded_copy (const char *part,
+ #define BASE64_INDICATOR_LEN (sizeof (";base64") - 1)
+ 
+ static char *
+-rsvg_acquire_data_data (const char *uri,
+-                        char **out_mime_type,
+-                        gsize *out_len,
+-                        GError **error)
++rsvg_decode_data_uri (const char *uri,
++                      char **out_mime_type,
++                      gsize *out_len,
++                      GError **error)
+ {
+     const char *comma, *start, *end;
+     char *mime_type;
+@@ -313,7 +313,7 @@ _rsvg_io_acquire_data (const char *href,
+         len = &llen;
+ 
+     if (strncmp (href, "data:", 5) == 0)
+-      return rsvg_acquire_data_data (href, mime_type, len, error);
++      return rsvg_decode_data_uri (href, mime_type, len, error);
+ 
+     if ((data = rsvg_acquire_file_data (href, base_uri, mime_type, len, cancellable, NULL)))
+       return data;
+@@ -342,7 +342,7 @@ _rsvg_io_acquire_stream (const char *href,
+     }
+ 
+     if (strncmp (href, "data:", 5) == 0) {
+-        if (!(data = rsvg_acquire_data_data (href, mime_type, &len, error)))
++        if (!(data = rsvg_decode_data_uri (href, mime_type, &len, error)))
+             return NULL;
+ 
+         return g_memory_input_stream_new_from_data (data, len, (GDestroyNotify) g_free);
+
+From ea4c0821269ccce62bcaf368f21d9edd0dbd51e8 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 18:25:20 -0600
+Subject: [PATCH 06/10] rsvg_handle_resolve_uri(): Make public
+
+---
+ rsvg-base.c    | 10 +++++-----
+ rsvg-private.h |  4 ++++
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/rsvg-base.c b/rsvg-base.c
+index 43258baf9..e87dd594e 100644
+--- a/rsvg-base.c
++++ b/rsvg-base.c
+@@ -2747,9 +2747,9 @@ rsvg_allow_load (GFile       *base_gfile,
+     return FALSE;
+ }
+ 
+-static char *
+-_rsvg_handle_resolve_uri (RsvgHandle *handle,
+-                          const char *uri)
++char *
++rsvg_handle_resolve_uri (RsvgHandle *handle,
++                         const char *uri)
+ {
+     RsvgHandlePrivate *priv = handle->priv;
+     char *scheme, *resolved_uri;
+@@ -2787,7 +2787,7 @@ _rsvg_handle_acquire_data (RsvgHandle *handle,
+     char *uri;
+     char *data;
+ 
+-    uri = _rsvg_handle_resolve_uri (handle, url);
++    uri = rsvg_handle_resolve_uri (handle, url);
+ 
+     if (rsvg_allow_load (priv->base_gfile, uri, error)) {
+         data = _rsvg_io_acquire_data (uri,
+@@ -2814,7 +2814,7 @@ _rsvg_handle_acquire_stream (RsvgHandle *handle,
+     char *uri;
+     GInputStream *stream;
+ 
+-    uri = _rsvg_handle_resolve_uri (handle, url);
++    uri = rsvg_handle_resolve_uri (handle, url);
+ 
+     if (rsvg_allow_load (priv->base_gfile, uri, error)) {
+         stream = _rsvg_io_acquire_stream (uri,
+diff --git a/rsvg-private.h b/rsvg-private.h
+index cbf50dcc1..ffc2c6b7a 100644
+--- a/rsvg-private.h
++++ b/rsvg-private.h
+@@ -561,6 +561,10 @@ G_GNUC_INTERNAL
+ void rsvg_return_if_fail_warning (const char *pretty_function,
+                                   const char *expression, GError ** error);
+ 
++G_GNUC_INTERNAL
++char *rsvg_handle_resolve_uri (RsvgHandle *handle,
++                               const char *uri);
++
+ G_GNUC_INTERNAL
+ gboolean rsvg_allow_load (GFile       *base_gfile,
+                           const char  *uri,
+
+From 4de19d9fdddf81773125b04a4defe1ffd0d3bfe0 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 18:26:39 -0600
+Subject: [PATCH 07/10] rsvg_handle_new_from_file(): Use the GFile machinery to
+ convert a filename to a URI
+
+---
+ rsvg-base-file-util.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/rsvg-base-file-util.c b/rsvg-base-file-util.c
+index d33f93f66..c443f08e9 100644
+--- a/rsvg-base-file-util.c
++++ b/rsvg-base-file-util.c
+@@ -87,11 +87,22 @@ rsvg_handle_new_from_file (const gchar * file_name, GError ** error)
+     char *data;
+     gsize data_len;
+     RsvgHandle *handle = NULL;
++    GFile *file;
+ 
+     rsvg_return_val_if_fail (file_name != NULL, NULL, error);
+ 
+-    base_uri = rsvg_get_base_uri_from_filename (file_name);
+-    data = _rsvg_io_acquire_data (file_name, base_uri, NULL, &data_len, NULL, error);
++    file = g_file_new_for_path (file_name);
++    base_uri = g_file_get_uri (file);
++    if (!base_uri) {
++        g_set_error (error,
++                     G_IO_ERROR,
++                     G_IO_ERROR_FAILED,
++                     _("Cannot obtain URI from '%s'"), file_name);
++        g_object_unref (file);
++        return NULL;
++    }
++
++    data = _rsvg_io_acquire_data (base_uri, base_uri, NULL, &data_len, NULL, error);
+ 
+     if (data) {
+         handle = rsvg_handle_new ();
+
+From b49acf81cc50dd5a812c4afb3a5bbf68295d37fe Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 18:27:59 -0600
+Subject: [PATCH 08/10] rsvg_get_base_uri_from_filename(): Make private
+
+---
+ rsvg-base.c    | 3 +--
+ rsvg-private.h | 2 --
+ 2 files changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/rsvg-base.c b/rsvg-base.c
+index e87dd594e..f4465d49e 100644
+--- a/rsvg-base.c
++++ b/rsvg-base.c
+@@ -1206,14 +1206,13 @@ rsvg_path_is_uri (char const *path)
+     return (p[0] == ':' && p[1] == '/' && p[2] == '/');
+ }
+ 
+-gchar *
++static gchar *
+ rsvg_get_base_uri_from_filename (const gchar * filename)
+ {
+     gchar *current_dir;
+     gchar *absolute_filename;
+     gchar *base_uri;
+ 
+-
+     if (g_path_is_absolute (filename))
+         return g_filename_to_uri (filename, NULL, NULL);
+ 
+diff --git a/rsvg-private.h b/rsvg-private.h
+index ffc2c6b7a..0af0b492f 100644
+--- a/rsvg-private.h
++++ b/rsvg-private.h
+@@ -451,8 +451,6 @@ GdkPixbuf *rsvg_pixbuf_from_data_with_size_data (const guchar * buff,
+                                                  const char *base_uri, GError ** error);
+ G_GNUC_INTERNAL
+ gboolean     rsvg_eval_switch_attributes	(RsvgPropertyBag * atts, gboolean * p_has_cond);
+-G_GNUC_INTERNAL
+-gchar       *rsvg_get_base_uri_from_filename    (const gchar * file_name);
+ 
+ G_GNUC_INTERNAL
+ void rsvg_pop_discrete_layer    (RsvgDrawingCtx * ctx);
+
+From 5d171cf4f4b3c1e34956c704bb190ca73b90dbb5 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 18:28:43 -0600
+Subject: [PATCH 09/10] rsvg-io - Don't resolve relative filenames here; do it
+ in the caller
+
+---
+ rsvg-io.c | 47 ++++++++++++-----------------------------------
+ 1 file changed, 12 insertions(+), 35 deletions(-)
+
+diff --git a/rsvg-io.c b/rsvg-io.c
+index 20e0316d1..d989929c0 100644
+--- a/rsvg-io.c
++++ b/rsvg-io.c
+@@ -124,56 +124,32 @@ rsvg_decode_data_uri (const char *uri,
+     return data;
+ }
+ 
+-gchar *
+-_rsvg_io_get_file_path (const gchar * filename,
+-                        const gchar * base_uri)
+-{
+-    gchar *absolute_filename;
+-
+-    if (g_file_test (filename, G_FILE_TEST_EXISTS) || g_path_is_absolute (filename)) {
+-        absolute_filename = g_strdup (filename);
+-    } else {
+-        gchar *tmpcdir;
+-        gchar *base_filename;
+-
+-        if (base_uri) {
+-            base_filename = g_filename_from_uri (base_uri, NULL, NULL);
+-            if (base_filename != NULL) {
+-                tmpcdir = g_path_get_dirname (base_filename);
+-                g_free (base_filename);
+-            } else 
+-                return NULL;
+-        } else
+-            tmpcdir = g_get_current_dir ();
+-
+-        absolute_filename = g_build_filename (tmpcdir, filename, NULL);
+-        g_free (tmpcdir);
+-    }
+-
+-    return absolute_filename;
+-}
+-
+ static char *
+-rsvg_acquire_file_data (const char *filename,
+-                        const char *base_uri,
++rsvg_acquire_file_data (const char *uri,
+                         char **out_mime_type,
+                         gsize *out_len,
+                         GCancellable *cancellable,
+                         GError **error)
+ {
++    GFile *file;
+     gchar *path, *data;
+     gsize len;
+     char *content_type;
+ 
+-    rsvg_return_val_if_fail (filename != NULL, NULL, error);
++    rsvg_return_val_if_fail (uri != NULL, NULL, error);
+     g_assert (out_len != NULL);
+ 
+-    path = _rsvg_io_get_file_path (filename, base_uri);
+-    if (path == NULL)
++    file = g_file_new_for_uri (uri);
++    path = g_file_get_path (file);
++
++    if (path == NULL) {
++        g_object_unref (file);
+         return NULL;
++    }
+ 
+     if (!g_file_get_contents (path, &data, &len, error)) {
+         g_free (path);
++        g_object_unref (file);
+         return NULL;
+     }
+ 
+@@ -184,6 +160,7 @@ rsvg_acquire_file_data (const char *filename,
+     }
+ 
+     g_free (path);
++    g_object_unref (file);
+ 
+     *out_len = len;
+     return data;
+@@ -315,7 +292,7 @@ _rsvg_io_acquire_data (const char *href,
+     if (strncmp (href, "data:", 5) == 0)
+       return rsvg_decode_data_uri (href, mime_type, len, error);
+ 
+-    if ((data = rsvg_acquire_file_data (href, base_uri, mime_type, len, cancellable, NULL)))
++    if ((data = rsvg_acquire_file_data (href, mime_type, len, cancellable, NULL)))
+       return data;
+ 
+     if ((data = rsvg_acquire_gvfs_data (href, base_uri, mime_type, len, cancellable, error)))
+
+From 5fc44d9cf5e3b20ac06264d93554bd7fa701f788 Mon Sep 17 00:00:00 2001
+From: Federico Mena Quintero <federico@gnome.org>
+Date: Mon, 4 Dec 2017 18:29:46 -0600
+Subject: [PATCH 10/10] Clean up rsvg-defs a bit
+
+---
+ rsvg-defs.c | 54 ++++++++++++++++++++++++++---------------------------
+ rsvg-io.c   |  2 +-
+ rsvg-io.h   |  4 ----
+ 3 files changed, 27 insertions(+), 33 deletions(-)
+
+diff --git a/rsvg-defs.c b/rsvg-defs.c
+index efe7acd87..e74e11555 100644
+--- a/rsvg-defs.c
++++ b/rsvg-defs.c
+@@ -50,52 +50,50 @@ rsvg_defs_new (RsvgHandle *handle)
+     return result;
+ }
+ 
+-static int
+-rsvg_defs_load_extern (const RsvgDefs * defs, const char *name)
++static RsvgHandle *
++rsvg_defs_load_extern (const RsvgDefs * defs, const char *uri)
+ {
+-    RsvgHandle *handle;
+-    gchar *filename, *base_uri;
++    RsvgHandle *handle = NULL;
+     char *data;
+     gsize data_len;
+-    gboolean rv;
+-
+-    filename = _rsvg_io_get_file_path (name, rsvg_handle_get_base_uri (defs->ctx));
+ 
+-    data = _rsvg_handle_acquire_data (defs->ctx, name, NULL, &data_len, NULL);
++    data = _rsvg_handle_acquire_data (defs->ctx, uri, NULL, &data_len, NULL);
+ 
+     if (data) {
+         handle = rsvg_handle_new ();
+-
+-        base_uri = rsvg_get_base_uri_from_filename (filename);
+-        rsvg_handle_set_base_uri (handle, base_uri);
+-        g_free (base_uri);
+-
+-        rv = rsvg_handle_write (handle, (guchar *) data, data_len, NULL);
+-        rv = rsvg_handle_close (handle, NULL) && rv;
+-        if (rv) {
+-            g_hash_table_insert (defs->externs, g_strdup (name), handle);
++        rsvg_handle_set_base_uri (handle, uri);
++
++        if (rsvg_handle_write (handle, (guchar *) data, data_len, NULL)
++            && rsvg_handle_close (handle, NULL)) {
++            g_hash_table_insert (defs->externs, g_strdup (uri), handle);
++        } else {
++            g_object_unref (handle);
++            handle = NULL;
+         }
+ 
+         g_free (data);
+     }
+ 
+-    g_free (filename);
+-    return 0;
++    return handle;
+ }
+ 
+ static RsvgNode *
+-rsvg_defs_extern_lookup (const RsvgDefs * defs, const char *filename, const char *name)
++rsvg_defs_extern_lookup (const RsvgDefs * defs, const char *possibly_relative_uri, const char *name)
+ {
+-    RsvgHandle *file;
+-    file = (RsvgHandle *) g_hash_table_lookup (defs->externs, filename);
+-    if (file == NULL) {
+-        if (rsvg_defs_load_extern (defs, filename))
+-            return NULL;
+-        file = (RsvgHandle *) g_hash_table_lookup (defs->externs, filename);
++    RsvgHandle *handle;
++    char *uri;
++
++    uri = rsvg_handle_resolve_uri (defs->ctx, possibly_relative_uri);
++    if (!uri)
++        return NULL;
++
++    handle = (RsvgHandle *) g_hash_table_lookup (defs->externs, uri);
++    if (handle == NULL) {
++        handle = rsvg_defs_load_extern (defs, uri);
+     }
+ 
+-    if (file != NULL)
+-        return g_hash_table_lookup (file->priv->defs->hash, name);
++    if (handle != NULL)
++        return g_hash_table_lookup (handle->priv->defs->hash, name);
+     else
+         return NULL;
+ }
+diff --git a/rsvg-io.c b/rsvg-io.c
+index d989929c0..79c786355 100644
+--- a/rsvg-io.c
++++ b/rsvg-io.c
+@@ -325,7 +325,7 @@ _rsvg_io_acquire_stream (const char *href,
+         return g_memory_input_stream_new_from_data (data, len, (GDestroyNotify) g_free);
+     }
+ 
+-    if ((data = rsvg_acquire_file_data (href, base_uri, mime_type, &len, cancellable, NULL)))
++    if ((data = rsvg_acquire_file_data (href, mime_type, &len, cancellable, NULL)))
+       return g_memory_input_stream_new_from_data (data, len, (GDestroyNotify) g_free);
+ 
+     if ((stream = rsvg_acquire_gvfs_stream (href, base_uri, mime_type, cancellable, error)))
+diff --git a/rsvg-io.h b/rsvg-io.h
+index d710ccfe1..50e0002b1 100644
+--- a/rsvg-io.h
++++ b/rsvg-io.h
+@@ -26,10 +26,6 @@
+ #include <glib.h>
+ #include <gio/gio.h>
+ 
+-G_GNUC_INTERNAL
+-gchar *_rsvg_io_get_file_path (const gchar *filename, 
+-                               const gchar *basedir);
+-
+ char *_rsvg_io_acquire_data (const char *uri,
+ 			     const char *base_uri,
+ 			     char **mime_type,

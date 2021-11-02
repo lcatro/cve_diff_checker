@@ -1,0 +1,59 @@
+From 257578a23d1537a2d235aaa2b1488ee4f818e360 Mon Sep 17 00:00:00 2001
+From: Matej Habrnal <mhabrnal@redhat.com>
+Date: Mon, 12 Oct 2015 09:14:12 +0200
+Subject: [PATCH] wizard: fix save users changes after reviewing dump dir files
+
+If the user reviewed the dump dir's files during reporting the crash, the
+changes was thrown away and original data was passed to the bugzilla bug
+report.
+
+report-gtk saves the first text view buffer and then reloads data from the
+reported problem directory, which causes that the changes made to those text
+views are thrown away.
+
+Function save_text_if_changed(), except of saving text, also reload the files
+from dump dir and update gui state from the dump dir. The commit moves the
+reloading and updating gui functions away from this function.
+
+Related to rhbz#1270235
+
+Signed-off-by: Matej Habrnal <mhabrnal@redhat.com>
+---
+ src/gui-wizard-gtk/wizard.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/gui-wizard-gtk/wizard.c b/src/gui-wizard-gtk/wizard.c
+index 55a4b586f..2d8d6bab2 100644
+--- a/src/gui-wizard-gtk/wizard.c
++++ b/src/gui-wizard-gtk/wizard.c
+@@ -433,8 +433,6 @@ static void save_text_if_changed(const char *name, const char *new_value)
+ 
+ //FIXME: else: what to do with still-unsaved data in the widget??
+         dd_close(dd);
+-        problem_data_reload_from_dump_dir();
+-        update_gui_state_from_problem_data(/* don't update selected event */ 0);
+     }
+ }
+ 
+@@ -777,7 +775,11 @@ static void tv_details_row_activated(
+         load_text_to_text_view(GTK_TEXT_VIEW(textview), item_name);
+ 
+         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
++        {
+             save_text_from_text_view(GTK_TEXT_VIEW(textview), item_name);
++            problem_data_reload_from_dump_dir();
++            update_gui_state_from_problem_data(/* don't update selected event */ 0);
++        }
+ 
+         gtk_widget_destroy(textview);
+         gtk_widget_destroy(scrolled);
+@@ -2709,7 +2711,8 @@ static void on_page_prepare(GtkNotebook *assistant, GtkWidget *page, gpointer us
+      * these tabs will be lost */
+     save_items_from_notepad();
+     save_text_from_text_view(g_tv_comment, FILENAME_COMMENT);
+-
++    problem_data_reload_from_dump_dir();
++    update_gui_state_from_problem_data(/* don't update selected event */ 0);
+ 
+     if (pages[PAGENO_SUMMARY].page_widget == page)
+     {

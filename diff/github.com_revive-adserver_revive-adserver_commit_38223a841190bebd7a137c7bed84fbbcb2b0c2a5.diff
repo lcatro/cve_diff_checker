@@ -1,0 +1,55 @@
+From 38223a841190bebd7a137c7bed84fbbcb2b0c2a5 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Fri, 20 Nov 2015 07:38:21 +0100
+Subject: [PATCH] Fix h1 report 98612
+
+Information Exposure Through Discrepancy
+----------------------------------------
+
+Karan M. Tank and Smit B. Shah have reported via HackerOne that it was
+possible to check whether or not an email address was associated to one or
+more user accounts on a target Revive Adserver instance by examining the
+message printed by the password recovery system. Such information cannot
+however be used directly to log in to the system, which requires usernames
+instead.
+
+A CVE-ID has been requested, but not assigned yet.
+
+CWE: CWE-203
+CVSSv2: 5 (AV:N/AC:L/Au:N/C:P/I:N/A:N)
+---
+ lib/OA/Admin/PasswordRecovery.php    | 8 +++-----
+ lib/max/language/en/default.lang.php | 1 -
+ 2 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/lib/OA/Admin/PasswordRecovery.php b/lib/OA/Admin/PasswordRecovery.php
+index a293e9d50e..8cc920fbdb 100644
+--- a/lib/OA/Admin/PasswordRecovery.php
++++ b/lib/OA/Admin/PasswordRecovery.php
+@@ -107,11 +107,9 @@ function handlePost($vars)
+                 $this->displayRecoveryRequestForm($GLOBALS['strEmailRequired']);
+             } else {
+                 $sent = $this->sendRecoveryEmail(stripslashes($vars['email']));
+-                if ($sent) {
+-                    $this->displayMessage($GLOBALS['strNotifyPageMessage']);
+-                } else {
+-                $this->displayRecoveryRequestForm($GLOBALS['strPwdRecEmailNotFound']);
+-                }
++
++                // Always pretend an email was sent, even if not to avoid information disclosure
++                $this->displayMessage($GLOBALS['strNotifyPageMessage']);
+             }
+         } else {
+             if (empty($vars['newpassword']) || empty($vars['newpassword2']) || $vars['newpassword'] != $vars['newpassword2']) {
+diff --git a/lib/max/language/en/default.lang.php b/lib/max/language/en/default.lang.php
+index 0f04d4e88b..eb70f0ef6a 100644
+--- a/lib/max/language/en/default.lang.php
++++ b/lib/max/language/en/default.lang.php
+@@ -1067,7 +1067,6 @@
+ $GLOBALS['strForgotPassword'] = "Forgot your password?";
+ $GLOBALS['strPasswordRecovery'] = "Password recovery";
+ $GLOBALS['strEmailRequired'] = "Email is a required field";
+-$GLOBALS['strPwdRecEmailNotFound'] = "Email address not found";
+ $GLOBALS['strPwdRecWrongId'] = "Wrong ID";
+ $GLOBALS['strPwdRecEnterEmail'] = "Enter your email address below";
+ $GLOBALS['strPwdRecEnterPassword'] = "Enter your new password below";

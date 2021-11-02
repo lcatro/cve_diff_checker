@@ -1,0 +1,46 @@
+From 48be7adb70568e20e961ea1cb70904454a671b1d Mon Sep 17 00:00:00 2001
+From: Universal Omega <54654040+Universal-Omega@users.noreply.github.com>
+Date: Mon, 19 Jul 2021 16:20:42 -0600
+Subject: [PATCH] Use PageMoveComplete hook (#17)
+
+---
+ extension.json                   | 4 ++--
+ includes/GlobalNewFilesHooks.php | 9 ++++++---
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/extension.json b/extension.json
+index e1b7b8b..f940a35 100644
+--- a/extension.json
++++ b/extension.json
+@@ -53,8 +53,8 @@
+ 		"FileDeleteComplete": [
+ 			"GlobalNewFilesHooks::onFileDeleteComplete"
+ 		],
+-		"TitleMoveComplete": [
+-			"GlobalNewFilesHooks::onTitleMoveComplete"
++		"PageMoveComplete": [
++			"GlobalNewFilesHooks::onPageMoveComplete"
+ 		],
+ 		"UploadComplete": [
+ 			"GlobalNewFilesHooks::onUploadComplete"
+diff --git a/includes/GlobalNewFilesHooks.php b/includes/GlobalNewFilesHooks.php
+index ecc6c95..51f5315 100644
+--- a/includes/GlobalNewFilesHooks.php
++++ b/includes/GlobalNewFilesHooks.php
+@@ -19,10 +19,13 @@ public static function onFileDeleteComplete( $file, $oldimage, $article, $user,
+ 		);
+ 	}
+ 
+-	public static function onTitleMoveComplete( $title, $newTitle, $user, $oldid, $newid, $reason, $revision ) {
+-		if ( $title->inNamespace( NS_FILE ) ) {
++	public static function onPageMoveComplete( $old, $new, $userIdentity, $pageid, $redirid, $reason, $revision ) {
++		$oldTitle = Title::newFromLinkTarget( $old );
++		$newTitle = Title::newFromLinkTarget( $new );
++
++		if ( $oldTitle->inNamespace( NS_FILE ) ) {
+ 			JobQueueGroup::singleton()->push(
+-				new GlobalNewFilesMoveJob( [ 'oldtitle' => $title, 'newtitle' => $newTitle ] )
++				new GlobalNewFilesMoveJob( [ 'oldtitle' => $oldTitle, 'newtitle' => $newTitle ] )
+ 			);
+ 		}
+ 	}

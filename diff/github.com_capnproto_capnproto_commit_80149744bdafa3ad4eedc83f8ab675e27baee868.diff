@@ -1,0 +1,125 @@
+From 80149744bdafa3ad4eedc83f8ab675e27baee868 Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@sandstorm.io>
+Date: Thu, 5 Mar 2015 10:27:29 -0800
+Subject: [PATCH] SECURITY: Additional CPU amplification case.
+
+Unfortunately, commit 104870608fde3c698483fdef6b97f093fc15685d missed a case of CPU amplification via struct lists with zero-sized elements.
+
+See advisory: https://github.com/sandstorm-io/capnproto/blob/master/security-advisories/2015-03-05-0-c++-addl-cpu-amplification.md
+---
+ c++/src/capnp/encoding-test.c++ | 21 +++++++++++------
+ c++/src/capnp/layout.c++        | 42 +++++++++++++++++++--------------
+ 2 files changed, 38 insertions(+), 25 deletions(-)
+
+diff --git a/c++/src/capnp/encoding-test.c++ b/c++/src/capnp/encoding-test.c++
+index 6bf07adf1..360d0e0f8 100644
+--- a/c++/src/capnp/encoding-test.c++
++++ b/c++/src/capnp/encoding-test.c++
+@@ -1427,17 +1427,24 @@ TEST(Encoding, VoidListAmplification) {
+ }
+ 
+ TEST(Encoding, EmptyStructListAmplification) {
+-  MallocMessageBuilder builder;
+-  builder.initRoot<test::TestAnyPointer>().getAnyPointerField()
+-      .initAs<List<test::TestEmptyStruct>>(1u << 28);
++  MallocMessageBuilder builder(1024);
++  auto listList = builder.initRoot<test::TestAnyPointer>().getAnyPointerField()
++      .initAs<List<List<test::TestEmptyStruct>>>(500);
++
++  for (uint i = 0; i < listList.size(); i++) {
++    listList.init(i, 1u << 28);
++  }
+ 
+   auto segments = builder.getSegmentsForOutput();
+-  EXPECT_EQ(1, segments.size());
+-  EXPECT_LT(segments[0].size(), 16);  // quite small for such a big list!
++  ASSERT_EQ(1, segments.size());
+ 
+   SegmentArrayMessageReader reader(builder.getSegmentsForOutput());
+-  auto root = reader.getRoot<test::TestAnyPointer>().getAnyPointerField();
+-  EXPECT_NONFATAL_FAILURE(root.getAs<List<TestAllTypes>>());
++  auto root = reader.getRoot<test::TestAnyPointer>();
++  auto listListReader = root.getAnyPointerField().getAs<List<List<TestAllTypes>>>();
++  EXPECT_NONFATAL_FAILURE(listListReader[0]);
++  EXPECT_NONFATAL_FAILURE(listListReader[10]);
++
++  EXPECT_EQ(segments[0].size() - 1, root.totalSize().wordCount);
+ }
+ 
+ TEST(Encoding, Constants) {
+diff --git a/c++/src/capnp/layout.c++ b/c++/src/capnp/layout.c++
+index de6ee5b37..2c7d593e4 100644
+--- a/c++/src/capnp/layout.c++
++++ b/c++/src/capnp/layout.c++
+@@ -555,14 +555,16 @@ struct WireHelpers {
+             WordCount dataSize = elementTag->structRef.dataSize.get();
+             WirePointerCount pointerCount = elementTag->structRef.ptrCount.get();
+ 
+-            word* pos = ptr + POINTER_SIZE_IN_WORDS;
+             uint count = elementTag->inlineCompositeListElementCount() / ELEMENTS;
+-            for (uint i = 0; i < count; i++) {
+-              pos += dataSize;
+-
+-              for (uint j = 0; j < pointerCount / POINTERS; j++) {
+-                zeroObject(segment, reinterpret_cast<WirePointer*>(pos));
+-                pos += POINTER_SIZE_IN_WORDS;
++            if (pointerCount > 0 * POINTERS) {
++              word* pos = ptr + POINTER_SIZE_IN_WORDS;
++              for (uint i = 0; i < count; i++) {
++                pos += dataSize;
++
++                for (uint j = 0; j < pointerCount / POINTERS; j++) {
++                  zeroObject(segment, reinterpret_cast<WirePointer*>(pos));
++                  pos += POINTER_SIZE_IN_WORDS;
++                }
+               }
+             }
+ 
+@@ -680,8 +682,6 @@ struct WireHelpers {
+               return result;
+             }
+ 
+-            result.wordCount += wordCount + POINTER_SIZE_IN_WORDS;
+-
+             const WirePointer* elementTag = reinterpret_cast<const WirePointer*>(ptr);
+             ElementCount count = elementTag->inlineCompositeListElementCount();
+ 
+@@ -690,23 +690,29 @@ struct WireHelpers {
+               return result;
+             }
+ 
+-            KJ_REQUIRE(elementTag->structRef.wordSize() / ELEMENTS *
+-                       ElementCount64(count) <= wordCount,
++            auto actualSize = elementTag->structRef.wordSize() / ELEMENTS * ElementCount64(count);
++            KJ_REQUIRE(actualSize <= wordCount,
+                        "Struct list pointer's elements overran size.") {
+               return result;
+             }
+ 
++            // We count the actual size rather than the claimed word count because that's what
++            // we'll end up with if we make a copy.
++            result.wordCount += actualSize + POINTER_SIZE_IN_WORDS;
++
+             WordCount dataSize = elementTag->structRef.dataSize.get();
+             WirePointerCount pointerCount = elementTag->structRef.ptrCount.get();
+ 
+-            const word* pos = ptr + POINTER_SIZE_IN_WORDS;
+-            for (uint i = 0; i < count / ELEMENTS; i++) {
+-              pos += dataSize;
++            if (pointerCount > 0 * POINTERS) {
++              const word* pos = ptr + POINTER_SIZE_IN_WORDS;
++              for (uint i = 0; i < count / ELEMENTS; i++) {
++                pos += dataSize;
+ 
+-              for (uint j = 0; j < pointerCount / POINTERS; j++) {
+-                result += totalSize(segment, reinterpret_cast<const WirePointer*>(pos),
+-                                    nestingLimit);
+-                pos += POINTER_SIZE_IN_WORDS;
++                for (uint j = 0; j < pointerCount / POINTERS; j++) {
++                  result += totalSize(segment, reinterpret_cast<const WirePointer*>(pos),
++                                      nestingLimit);
++                  pos += POINTER_SIZE_IN_WORDS;
++                }
+               }
+             }
+             break;

@@ -1,0 +1,312 @@
+From 1dcd10aceabbc03bf571ea32b892c522cbe923de Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 3 Feb 2017 12:24:14 -0800
+Subject: [PATCH] CVE-2017-12897/ISO CLNS: Use ND_TTEST() for the bounds checks
+ in isoclns_print().
+
+This fixes a buffer over-read discovered by Kamil Frankowicz.
+
+Don't pass the remaining caplen - that's too hard to get right, and we
+were getting it wrong in at least one case; just use ND_TTEST().
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ netdissect.h            |   2 +-
+ print-atm.c             |   2 +-
+ print-chdlc.c           |   4 ++--
+ print-ether.c           |   2 +-
+ print-fr.c              |   2 +-
+ print-gre.c             |   2 +-
+ print-isoclns.c         |  13 ++++++-------
+ print-juniper.c         |  16 ++++++++--------
+ print-llc.c             |   2 +-
+ print-mpls.c            |   2 +-
+ print-null.c            |   2 +-
+ print-ppp.c             |   2 +-
+ tests/TESTLIST          |   1 +
+ tests/isoclns-oobr.out  |   1 +
+ tests/isoclns-oobr.pcap | Bin 0 -> 88 bytes
+ 15 files changed, 27 insertions(+), 26 deletions(-)
+ create mode 100644 tests/isoclns-oobr.out
+ create mode 100644 tests/isoclns-oobr.pcap
+
+diff --git a/netdissect.h b/netdissect.h
+index 26d6d47b3..9060d1500 100644
+--- a/netdissect.h
++++ b/netdissect.h
+@@ -512,7 +512,7 @@ extern void ipx_netbios_print(netdissect_options *, const u_char *, u_int);
+ extern void ipx_print(netdissect_options *, const u_char *, u_int);
+ extern void isakmp_print(netdissect_options *, const u_char *, u_int, const u_char *);
+ extern void isakmp_rfc3948_print(netdissect_options *, const u_char *, u_int, const u_char *);
+-extern void isoclns_print(netdissect_options *, const u_char *, u_int, u_int);
++extern void isoclns_print(netdissect_options *, const u_char *, u_int);
+ extern void krb_print(netdissect_options *, const u_char *);
+ extern void l2tp_print(netdissect_options *, const u_char *, u_int);
+ extern void lane_print(netdissect_options *, const u_char *, u_int, u_int);
+diff --git a/print-atm.c b/print-atm.c
+index 7c12262c9..12ada49df 100644
+--- a/print-atm.c
++++ b/print-atm.c
+@@ -262,7 +262,7 @@ atm_if_print(netdissect_options *ndo,
+         if (*p == LLC_UI) {
+             if (ndo->ndo_eflag)
+                 ND_PRINT((ndo, "CNLPID "));
+-            isoclns_print(ndo, p + 1, length - 1, caplen - 1);
++            isoclns_print(ndo, p + 1, length - 1);
+             return hdrlen;
+         }
+ 
+diff --git a/print-chdlc.c b/print-chdlc.c
+index ca96cc506..24acfbd2e 100644
+--- a/print-chdlc.c
++++ b/print-chdlc.c
+@@ -97,9 +97,9 @@ chdlc_print(netdissect_options *ndo, register const u_char *p, u_int length)
+                 if (*(p+1) == 0x81 ||
+                     *(p+1) == 0x82 ||
+                     *(p+1) == 0x83)
+-                    isoclns_print(ndo, p + 1, length - 1, ndo->ndo_snapend - p - 1);
++                    isoclns_print(ndo, p + 1, length - 1);
+                 else
+-                    isoclns_print(ndo, p, length, ndo->ndo_snapend - p);
++                    isoclns_print(ndo, p, length);
+                 break;
+ 	default:
+                 if (!ndo->ndo_eflag)
+diff --git a/print-ether.c b/print-ether.c
+index 57c07ce93..33a135e0c 100644
+--- a/print-ether.c
++++ b/print-ether.c
+@@ -367,7 +367,7 @@ ethertype_print(netdissect_options *ndo,
+ 			ND_PRINT((ndo, " [|osi]"));
+ 			return (1);
+ 		}
+-		isoclns_print(ndo, p + 1, length - 1, caplen - 1);
++		isoclns_print(ndo, p + 1, length - 1);
+ 		return(1);
+ 
+ 	case ETHERTYPE_PPPOED:
+diff --git a/print-fr.c b/print-fr.c
+index dad8173c7..f1a8b21e5 100644
+--- a/print-fr.c
++++ b/print-fr.c
+@@ -329,7 +329,7 @@ fr_print(netdissect_options *ndo,
+ 	case NLPID_CLNP:
+ 	case NLPID_ESIS:
+ 	case NLPID_ISIS:
+-		isoclns_print(ndo, p - 1, length + 1, ndo->ndo_snapend - p + 1); /* OSI printers need the NLPID field */
++		isoclns_print(ndo, p - 1, length + 1); /* OSI printers need the NLPID field */
+ 		break;
+ 
+ 	case NLPID_SNAP:
+diff --git a/print-gre.c b/print-gre.c
+index 4664bd3f1..47a000cf5 100644
+--- a/print-gre.c
++++ b/print-gre.c
+@@ -227,7 +227,7 @@ gre_print_0(netdissect_options *ndo, const u_char *bp, u_int length)
+ 		atalk_print(ndo, bp, len);
+ 		break;
+ 	case ETHERTYPE_GRE_ISO:
+-		isoclns_print(ndo, bp, len, ndo->ndo_snapend - bp);
++		isoclns_print(ndo, bp, len);
+ 		break;
+ 	case ETHERTYPE_TEB:
+ 		ether_print(ndo, bp, len, ndo->ndo_snapend - bp, NULL, NULL);
+diff --git a/print-isoclns.c b/print-isoclns.c
+index a3583e77b..95339a0ad 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -670,10 +670,9 @@ struct isis_tlv_lsp {
+ #define ISIS_PSNP_HEADER_SIZE (sizeof(struct isis_psnp_header))
+ 
+ void
+-isoclns_print(netdissect_options *ndo,
+-              const uint8_t *p, u_int length, u_int caplen)
++isoclns_print(netdissect_options *ndo, const uint8_t *p, u_int length)
+ {
+-	if (caplen <= 1) { /* enough bytes on the wire ? */
++	if (!ND_TTEST(*p)) { /* enough bytes on the wire ? */
+ 		ND_PRINT((ndo, "|OSI"));
+ 		return;
+ 	}
+@@ -685,7 +684,7 @@ isoclns_print(netdissect_options *ndo,
+ 
+ 	case NLPID_CLNP:
+ 		if (!clnp_print(ndo, p, length))
+-			print_unknown_data(ndo, p, "\n\t", caplen);
++			print_unknown_data(ndo, p, "\n\t", length);
+ 		break;
+ 
+ 	case NLPID_ESIS:
+@@ -694,7 +693,7 @@ isoclns_print(netdissect_options *ndo,
+ 
+ 	case NLPID_ISIS:
+ 		if (!isis_print(ndo, p, length))
+-			print_unknown_data(ndo, p, "\n\t", caplen);
++			print_unknown_data(ndo, p, "\n\t", length);
+ 		break;
+ 
+ 	case NLPID_NULLNS:
+@@ -721,8 +720,8 @@ isoclns_print(netdissect_options *ndo,
+ 		if (!ndo->ndo_eflag)
+ 			ND_PRINT((ndo, "OSI NLPID 0x%02x unknown", *p));
+ 		ND_PRINT((ndo, "%slength: %u", ndo->ndo_eflag ? "" : ", ", length));
+-		if (caplen > 1)
+-			print_unknown_data(ndo, p, "\n\t", caplen);
++		if (length > 1)
++			print_unknown_data(ndo, p, "\n\t", length);
+ 		break;
+ 	}
+ }
+diff --git a/print-juniper.c b/print-juniper.c
+index e4ee11c0b..9a258d9ae 100644
+--- a/print-juniper.c
++++ b/print-juniper.c
+@@ -793,7 +793,7 @@ juniper_mlppp_print(netdissect_options *ndo,
+             mpls_print(ndo, p, l2info.length);
+             return l2info.header_len;
+         case JUNIPER_LSQ_L3_PROTO_ISO:
+-            isoclns_print(ndo, p, l2info.length, l2info.caplen);
++            isoclns_print(ndo, p, l2info.length);
+             return l2info.header_len;
+         default:
+             break;
+@@ -848,7 +848,7 @@ juniper_mfr_print(netdissect_options *ndo,
+                 mpls_print(ndo, p, l2info.length);
+                 return l2info.header_len;
+             case JUNIPER_LSQ_L3_PROTO_ISO:
+-                isoclns_print(ndo, p, l2info.length, l2info.caplen);
++                isoclns_print(ndo, p, l2info.length);
+                 return l2info.header_len;
+             default:
+                 break;
+@@ -861,13 +861,13 @@ juniper_mfr_print(netdissect_options *ndo,
+             ND_PRINT((ndo, "Bundle-ID %u, ", l2info.bundle));
+         switch (l2info.proto) {
+         case (LLCSAP_ISONS<<8 | LLCSAP_ISONS):
+-            isoclns_print(ndo, p + 1, l2info.length - 1, l2info.caplen - 1);
++            isoclns_print(ndo, p + 1, l2info.length - 1);
+             break;
+         case (LLC_UI<<8 | NLPID_Q933):
+         case (LLC_UI<<8 | NLPID_IP):
+         case (LLC_UI<<8 | NLPID_IP6):
+             /* pass IP{4,6} to the OSI layer for proper link-layer printing */
+-            isoclns_print(ndo, p - 1, l2info.length + 1, l2info.caplen + 1);
++            isoclns_print(ndo, p - 1, l2info.length + 1);
+             break;
+         default:
+             ND_PRINT((ndo, "unknown protocol 0x%04x, length %u", l2info.proto, l2info.length));
+@@ -896,13 +896,13 @@ juniper_mlfr_print(netdissect_options *ndo,
+         switch (l2info.proto) {
+         case (LLC_UI):
+         case (LLC_UI<<8):
+-            isoclns_print(ndo, p, l2info.length, l2info.caplen);
++            isoclns_print(ndo, p, l2info.length);
+             break;
+         case (LLC_UI<<8 | NLPID_Q933):
+         case (LLC_UI<<8 | NLPID_IP):
+         case (LLC_UI<<8 | NLPID_IP6):
+             /* pass IP{4,6} to the OSI layer for proper link-layer printing */
+-            isoclns_print(ndo, p - 1, l2info.length + 1, l2info.caplen + 1);
++            isoclns_print(ndo, p - 1, l2info.length + 1);
+             break;
+         default:
+             ND_PRINT((ndo, "unknown protocol 0x%04x, length %u", l2info.proto, l2info.length));
+@@ -949,7 +949,7 @@ juniper_atm1_print(netdissect_options *ndo,
+         }
+ 
+         if (p[0] == 0x03) { /* Cisco style NLPID encaps ? */
+-            isoclns_print(ndo, p + 1, l2info.length - 1, l2info.caplen - 1);
++            isoclns_print(ndo, p + 1, l2info.length - 1);
+             /* FIXME check if frame was recognized */
+             return l2info.header_len;
+         }
+@@ -1004,7 +1004,7 @@ juniper_atm2_print(netdissect_options *ndo,
+         }
+ 
+         if (p[0] == 0x03) { /* Cisco style NLPID encaps ? */
+-            isoclns_print(ndo, p + 1, l2info.length - 1, l2info.caplen - 1);
++            isoclns_print(ndo, p + 1, l2info.length - 1);
+             /* FIXME check if frame was recognized */
+             return l2info.header_len;
+         }
+diff --git a/print-llc.c b/print-llc.c
+index 6bdf59984..be8886abd 100644
+--- a/print-llc.c
++++ b/print-llc.c
+@@ -324,7 +324,7 @@ llc_print(netdissect_options *ndo, const u_char *p, u_int length, u_int caplen,
+ #endif
+ 	if (ssap == LLCSAP_ISONS && dsap == LLCSAP_ISONS
+ 	    && control == LLC_UI) {
+-		isoclns_print(ndo, p, length, caplen);
++		isoclns_print(ndo, p, length);
+ 		return (hdrlen);
+ 	}
+ 
+diff --git a/print-mpls.c b/print-mpls.c
+index ba4223346..5c26e4f9b 100644
+--- a/print-mpls.c
++++ b/print-mpls.c
+@@ -201,7 +201,7 @@ mpls_print(netdissect_options *ndo, const u_char *bp, u_int length)
+ 		break;
+ 
+ 	case PT_OSI:
+-		isoclns_print(ndo, p, length, length);
++		isoclns_print(ndo, p, length);
+ 		break;
+ 
+ 	default:
+diff --git a/print-null.c b/print-null.c
+index 14df5fd15..59b691cc6 100644
+--- a/print-null.c
++++ b/print-null.c
+@@ -117,7 +117,7 @@ null_if_print(netdissect_options *ndo, const struct pcap_pkthdr *h, const u_char
+ 		break;
+ 
+ 	case BSD_AFNUM_ISO:
+-		isoclns_print(ndo, p, length, caplen);
++		isoclns_print(ndo, p, length);
+ 		break;
+ 
+ 	case BSD_AFNUM_APPLETALK:
+diff --git a/print-ppp.c b/print-ppp.c
+index b30f224c8..134389209 100644
+--- a/print-ppp.c
++++ b/print-ppp.c
+@@ -1484,7 +1484,7 @@ handle_ppp(netdissect_options *ndo,
+ 		ipx_print(ndo, p, length);
+ 		break;
+ 	case PPP_OSI:
+-		isoclns_print(ndo, p, length, length);
++		isoclns_print(ndo, p, length);
+ 		break;
+ 	case PPP_MPLS_UCAST:
+ 	case PPP_MPLS_MCAST:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index ee6fb46ea..986c18fe8 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -442,6 +442,7 @@ stp-v4-length-sigsegv	stp-v4-length-sigsegv.pcap	stp-v4-length-sigsegv.out
+ hoobr_pimv1		hoobr_pimv1.pcap		hoobr_pimv1.out
+ hoobr_safeputs		hoobr_safeputs.pcap		hoobr_safeputs.out
+ isakmp-rfc3948-oobr	isakmp-rfc3948-oobr.pcap	isakmp-rfc3948-oobr.out
++isoclns-oobr		isoclns-oobr.pcap		isoclns-oobr.out
+ 
+ # bad packets from Wilfried Kirsch
+ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+diff --git a/tests/isoclns-oobr.out b/tests/isoclns-oobr.out
+new file mode 100644
+index 000000000..c2cfdfb23
+--- /dev/null
++++ b/tests/isoclns-oobr.out
+@@ -0,0 +1 @@
++|OSI
+diff --git a/tests/isoclns-oobr.pcap b/tests/isoclns-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..276b8a9211fe67c6444cee6ef00f97ddc4a3a031
+GIT binary patch
+literal 88
+scmca|c+)~A1{MYbC=g~~U|?i`a}5lDe3%@J{`b$|{C{R;7#AxI085V&^#A|>
+
+literal 0
+HcmV?d00001
+

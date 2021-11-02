@@ -1,0 +1,44 @@
+From 86b623f8bb3c4155f96bc082a9e3c7bbf4737098 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Sat, 26 Sep 2015 09:17:49 +0200
+Subject: [PATCH] Fix CVE-2015-7372
+
+Local File Inclusion
+--------------------
+
+Krzysztof K. Wasielewski reported that the layerstyle parameter in al.php was
+not properly sanitized, causing a potential LFI vulnerability. Under normal
+circumstances, an attacker would need to place a file named layerstyle.inc.php
+in an arbitrary directory on the server and craft the layerstyle parameter
+accordingly to load it. If an old version of PHP is being used the server,
+other attack techniques might be possible, e.g. NULL-byte truncation.
+
+CWE: CWE-98
+CVSSv2: 7.6 (AV:N/AC:H/Au:N/C:C/I:C/A:C)
+---
+ www/delivery_dev/al.php | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/www/delivery_dev/al.php b/www/delivery_dev/al.php
+index fb0bc34106..e8961a61fd 100644
+--- a/www/delivery_dev/al.php
++++ b/www/delivery_dev/al.php
+@@ -27,13 +27,13 @@
+     $layerstyle = 'geocities';
+ }
+ 
+-// Include layerstyle
+-if (file_exists(MAX_PATH . $conf['pluginPaths']['plugins'] . 'invocationTags/oxInvocationTags/layerstyles/' . $layerstyle . '/layerstyle.inc.php')) {
+-    include MAX_PATH . $conf['pluginPaths']['plugins'] . 'invocationTags/oxInvocationTags/layerstyles/' . $layerstyle . '/layerstyle.inc.php';
+-} else {
++$plugin = MAX_PATH.$conf['pluginPaths']['plugins'].'invocationTags/oxInvocationTags/layerstyles/'.$layerstyle.'/layerstyle.inc.php';
++
++if (!preg_match('/^[a-z0-9-]{1,64}$/Di', $layerstyle) || !@include($plugin)) {
+     // Don't generate output when plugin layerstyleisn't available,just send javascript comment on fail
++    MAX_sendStatusCode(404);
+     echo '// Cannot load required layerstyle file. Check if openXInvocationTags plugin is installed';
+-    exit(1);
++    exit;
+ }
+ 
+ //Register any script specific input variables

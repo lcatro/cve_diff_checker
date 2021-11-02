@@ -1,0 +1,44 @@
+From c21eff4b031acb04fb4dfce8bd5fdfecc2b6524f Mon Sep 17 00:00:00 2001
+From: Jehan <jehan@girinstud.io>
+Date: Sun, 24 Jun 2018 04:48:48 +0200
+Subject: [PATCH] Issue #1689: create unique temporary file with
+ g_file_open_tmp().
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Not sure this is really solving the issue reported, which is that
+`g_get_tmp_dir()` uses environment variables (yet as g_file_open_tmp()
+uses g_get_tmp_dir()…). But at least g_file_open_tmp() should create
+unique temporary files, which prevents overriding existing files (which
+is most likely the only real attack possible here, or at least the only
+one I can think of unless some weird vulnerabilities exist in glib).
+---
+ app/tests/test-xcf.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/app/tests/test-xcf.c b/app/tests/test-xcf.c
+index 9fc2ec1f4b8..98ca4f0bed9 100644
+--- a/app/tests/test-xcf.c
++++ b/app/tests/test-xcf.c
+@@ -295,7 +295,8 @@ gimp_write_and_read_file (Gimp     *gimp,
+   GimpImage           *image;
+   GimpImage           *loaded_image;
+   GimpPlugInProcedure *proc;
+-  gchar               *filename;
++  gchar               *filename = NULL;
++  gint                 file_handle;
+   GFile               *file;
+ 
+   /* Create the image */
+@@ -311,7 +312,9 @@ gimp_write_and_read_file (Gimp     *gimp,
+                          use_gimp_2_8_features);
+ 
+   /* Write to file */
+-  filename = g_build_filename (g_get_tmp_dir (), "gimp-test.xcf", NULL);
++  file_handle = g_file_open_tmp ("gimp-test-XXXXXX.xcf", &filename, NULL);
++  g_assert (file_handle != -1);
++  close (file_handle);
+   file = g_file_new_for_path (filename);
+   g_free (filename);
+ 

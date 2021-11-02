@@ -1,0 +1,44 @@
+From 54720a14d85bc1197ded7cb09bd3ea790caa0b6e Mon Sep 17 00:00:00 2001
+From: Pascal Birchler <pascal.birchler@gmail.com>
+Date: Tue, 6 Sep 2016 17:26:31 +0000
+Subject: [PATCH] Upgrade/Install: Sanitize file name in
+ `File_Upload_Upgrader`. Built from
+ https://develop.svn.wordpress.org/trunk@38524
+
+git-svn-id: http://core.svn.wordpress.org/trunk@38465 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-admin/includes/class-file-upload-upgrader.php | 6 +++++-
+ wp-includes/version.php                          | 2 +-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/wp-admin/includes/class-file-upload-upgrader.php b/wp-admin/includes/class-file-upload-upgrader.php
+index 35baa7faebcd..eb4efe7121eb 100644
+--- a/wp-admin/includes/class-file-upload-upgrader.php
++++ b/wp-admin/includes/class-file-upload-upgrader.php
+@@ -100,8 +100,12 @@ public function __construct( $form, $urlholder ) {
+ 			if ( ! ( ( $uploads = wp_upload_dir() ) && false === $uploads['error'] ) )
+ 				wp_die( $uploads['error'] );
+ 
+-			$this->filename = $_GET[$urlholder];
++			$this->filename = sanitize_file_name( $_GET[ $urlholder ] );
+ 			$this->package = $uploads['basedir'] . '/' . $this->filename;
++
++			if ( 0 !== strpos( realpath( $this->package ), realpath( $uploads['basedir'] ) ) ) {
++				wp_die( __( 'Please select a file' ) );
++			}
+ 		}
+ 	}
+ 
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index 9f39bc2c38fc..2265a47bd19e 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.7-alpha-38523';
++$wp_version = '4.7-alpha-38524';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

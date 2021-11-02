@@ -1,0 +1,213 @@
+From 021ee20400ea4636090fb41213f3dcfd1770edf6 Mon Sep 17 00:00:00 2001
+From: Cheng Zhao <zcbenz@gmail.com>
+Date: Sat, 3 Oct 2015 17:52:46 +0800
+Subject: [PATCH 1/3] No need to add "app" to search paths
+
+---
+ atom/renderer/lib/init.coffee | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/atom/renderer/lib/init.coffee b/atom/renderer/lib/init.coffee
+index 274c50ec5f39..ff9b12ecbf3c 100644
+--- a/atom/renderer/lib/init.coffee
++++ b/atom/renderer/lib/init.coffee
+@@ -11,9 +11,6 @@ process.argv.splice 1, 1
+ # of Atom's built-in libraries.
+ globalPaths = Module.globalPaths
+ globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
+-# And also app.
+-globalPaths.push path.join(process.resourcesPath, 'app')
+-globalPaths.push path.join(process.resourcesPath, 'app.asar')
+ 
+ # Import common settings.
+ require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
+
+From 9fe326ebeb43ffb2c955945ca8b4a2135efb08c2 Mon Sep 17 00:00:00 2001
+From: Cheng Zhao <zcbenz@gmail.com>
+Date: Sat, 3 Oct 2015 19:55:59 +0800
+Subject: [PATCH 2/3] Clear node's global search paths
+
+---
+ atom/browser/lib/init.coffee  |  6 +++---
+ atom/common/lib/init.coffee   | 13 ++-----------
+ atom/renderer/lib/init.coffee |  6 +++---
+ 3 files changed, 8 insertions(+), 17 deletions(-)
+
+diff --git a/atom/browser/lib/init.coffee b/atom/browser/lib/init.coffee
+index 454baf0b8ac5..44ae29522ebf 100644
+--- a/atom/browser/lib/init.coffee
++++ b/atom/browser/lib/init.coffee
+@@ -7,14 +7,14 @@ Module = require 'module'
+ # we need to restore it here.
+ process.argv.splice 1, 1
+ 
++# Import common settings.
++require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
++
+ # Add browser/api/lib to module search paths, which contains javascript part of
+ # Electron's built-in libraries.
+ globalPaths = Module.globalPaths
+ globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
+ 
+-# Import common settings.
+-require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
+-
+ if process.platform is 'win32'
+   # Redirect node's console to use our own implementations, since node can not
+   # handle console output when running as GUI program.
+diff --git a/atom/common/lib/init.coffee b/atom/common/lib/init.coffee
+index acb635edeaa4..2bfea3d72afa 100644
+--- a/atom/common/lib/init.coffee
++++ b/atom/common/lib/init.coffee
+@@ -9,18 +9,9 @@ process.atomBinding = (name) ->
+   catch e
+     process.binding "atom_common_#{name}" if /No such module/.test e.message
+ 
+-# Global module search paths.
++# Clear node's global search paths.
+ globalPaths = Module.globalPaths
+-
+-# Don't lookup modules in user-defined search paths, see http://git.io/vf8sF.
+-homeDir =
+-  if process.platform is 'win32'
+-    process.env.USERPROFILE
+-  else
+-    process.env.HOME
+-if homeDir  # Node only add user-defined search paths when $HOME is defined.
+-  userModulePath = path.resolve homeDir, '.node_modules'
+-  globalPaths.splice globalPaths.indexOf(userModulePath), 2
++globalPaths.length = 0
+ 
+ # Add common/api/lib to module search paths.
+ globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
+diff --git a/atom/renderer/lib/init.coffee b/atom/renderer/lib/init.coffee
+index ff9b12ecbf3c..e5173fcd1ec8 100644
+--- a/atom/renderer/lib/init.coffee
++++ b/atom/renderer/lib/init.coffee
+@@ -7,14 +7,14 @@ Module = require 'module'
+ # atom-renderer.js, we need to restore it here.
+ process.argv.splice 1, 1
+ 
++# Import common settings.
++require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
++
+ # Add renderer/api/lib to require's search paths, which contains javascript part
+ # of Atom's built-in libraries.
+ globalPaths = Module.globalPaths
+ globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
+ 
+-# Import common settings.
+-require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
+-
+ # The global variable will be used by ipc for event dispatching
+ v8Util = process.atomBinding 'v8_util'
+ v8Util.setHiddenValue global, 'ipc', new events.EventEmitter
+
+From 01d2765e4b566df853cd583006ebc7993d48cd38 Mon Sep 17 00:00:00 2001
+From: Cheng Zhao <zcbenz@gmail.com>
+Date: Sat, 3 Oct 2015 20:38:39 +0800
+Subject: [PATCH 3/3] Prevent Node from adding paths outside this app to search
+ paths
+
+---
+ atom/browser/lib/init.coffee              |  3 +++
+ atom/common/lib/init.coffee               |  6 +----
+ atom/common/lib/reset-search-paths.coffee | 29 +++++++++++++++++++++++
+ atom/renderer/lib/init.coffee             |  3 +++
+ filenames.gypi                            |  1 +
+ 5 files changed, 37 insertions(+), 5 deletions(-)
+ create mode 100644 atom/common/lib/reset-search-paths.coffee
+
+diff --git a/atom/browser/lib/init.coffee b/atom/browser/lib/init.coffee
+index 44ae29522ebf..b394c0fecc28 100644
+--- a/atom/browser/lib/init.coffee
++++ b/atom/browser/lib/init.coffee
+@@ -7,6 +7,9 @@ Module = require 'module'
+ # we need to restore it here.
+ process.argv.splice 1, 1
+ 
++# Clear search paths.
++require path.resolve(__dirname, '..', '..', 'common', 'lib', 'reset-search-paths')
++
+ # Import common settings.
+ require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
+ 
+diff --git a/atom/common/lib/init.coffee b/atom/common/lib/init.coffee
+index 2bfea3d72afa..1c80e6171a4d 100644
+--- a/atom/common/lib/init.coffee
++++ b/atom/common/lib/init.coffee
+@@ -9,12 +9,8 @@ process.atomBinding = (name) ->
+   catch e
+     process.binding "atom_common_#{name}" if /No such module/.test e.message
+ 
+-# Clear node's global search paths.
+-globalPaths = Module.globalPaths
+-globalPaths.length = 0
+-
+ # Add common/api/lib to module search paths.
+-globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
++Module.globalPaths.push path.resolve(__dirname, '..', 'api', 'lib')
+ 
+ # setImmediate and process.nextTick makes use of uv_check and uv_prepare to
+ # run the callbacks, however since we only run uv loop on requests, the
+diff --git a/atom/common/lib/reset-search-paths.coffee b/atom/common/lib/reset-search-paths.coffee
+new file mode 100644
+index 000000000000..7061103306aa
+--- /dev/null
++++ b/atom/common/lib/reset-search-paths.coffee
+@@ -0,0 +1,29 @@
++path   = require 'path'
++Module = require 'module'
++
++# Clear Node's global search paths.
++Module.globalPaths.length = 0
++
++# Clear current and parent(init.coffee)'s search paths.
++module.paths = []
++module.parent.paths = []
++
++# Prevent Node from adding paths outside this app to search paths.
++Module._nodeModulePaths = (from) ->
++  from = path.resolve from
++
++  # If "from" is outside the app then we do nothing.
++  skipOutsidePaths = from.startsWith process.resourcesPath
++
++  # Following logoic is copied from module.js.
++  splitRe = if process.platform is 'win32' then /[\/\\]/ else /\//
++  paths = []
++
++  parts = from.split splitRe
++  for part, tip in parts by -1
++    continue if part is 'node_modules'
++    dir = parts.slice(0, tip + 1).join path.sep
++    break if skipOutsidePaths and not dir.startsWith process.resourcesPath
++    paths.push path.join(dir, 'node_modules')
++
++  paths
+diff --git a/atom/renderer/lib/init.coffee b/atom/renderer/lib/init.coffee
+index e5173fcd1ec8..b7224b39aeed 100644
+--- a/atom/renderer/lib/init.coffee
++++ b/atom/renderer/lib/init.coffee
+@@ -7,6 +7,9 @@ Module = require 'module'
+ # atom-renderer.js, we need to restore it here.
+ process.argv.splice 1, 1
+ 
++# Clear search paths.
++require path.resolve(__dirname, '..', '..', 'common', 'lib', 'reset-search-paths')
++
+ # Import common settings.
+ require path.resolve(__dirname, '..', '..', 'common', 'lib', 'init')
+ 
+diff --git a/filenames.gypi b/filenames.gypi
+index 0e7010d7a4cf..000633fb96b1 100644
+--- a/filenames.gypi
++++ b/filenames.gypi
+@@ -37,6 +37,7 @@
+       'atom/common/api/lib/native-image.coffee',
+       'atom/common/api/lib/shell.coffee',
+       'atom/common/lib/init.coffee',
++      'atom/common/lib/reset-search-paths.coffee',
+       'atom/renderer/lib/chrome-api.coffee',
+       'atom/renderer/lib/init.coffee',
+       'atom/renderer/lib/inspector.coffee',

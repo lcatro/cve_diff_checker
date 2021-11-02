@@ -1,0 +1,134 @@
+From 05dfb9b4531f12944fe39556f58449b9a56241be Mon Sep 17 00:00:00 2001
+From: "VINADES.,JSC" <contact@vinades.vn>
+Date: Wed, 14 Nov 2018 15:05:57 +0700
+Subject: [PATCH] fix security error Thank Zepto Team, hungnguyenmz
+
+---
+ includes/core/is_user.php                |  5 ++-
+ modules/banners/funcs/click.php          |  3 +-
+ modules/users/functions.php              |  2 +-
+ vendor/vinades/nukeviet/Core/Request.php | 45 ++++--------------------
+ 4 files changed, 10 insertions(+), 45 deletions(-)
+
+diff --git a/includes/core/is_user.php b/includes/core/is_user.php
+index d1dbcebd25..7853357d36 100755
+--- a/includes/core/is_user.php
++++ b/includes/core/is_user.php
+@@ -50,11 +50,10 @@
+     if ($nv_Request->get_bool('nvloginhash', 'cookie', false)) {
+         $user = $nv_Request->get_string('nvloginhash', 'cookie', '');
+         if (!empty($user) and $global_config['allowuserlogin']) {
+-            $user = unserialize($user);
+-
++            $user = json_decode($user, true);
+             if (isset($user['userid']) and isset($user['checknum']) and isset($user['checkhash'])) {
+                 $user['userid'] = intval($user['userid']);
+-                if ($user['checkhash'] == md5($user['userid'] . $user['checknum'] . $global_config['sitekey'] . $client_info['browser']['key'])) {
++                if ($user['checkhash'] === md5($user['userid'] . $user['checknum'] . $global_config['sitekey'] . $client_info['browser']['key'])) {
+                     $_sql = 'SELECT userid, group_id, username, email, first_name, last_name, gender, photo, birthday, regdate,
+ 						view_mail, remember, in_groups, active2step, checknum, last_agent AS current_agent, last_ip AS current_ip, last_login AS current_login,
+ 						last_openid AS current_openid, password, question, answer, safemode, email_verification_time
+diff --git a/modules/banners/funcs/click.php b/modules/banners/funcs/click.php
+index b857c5bda3..6536bc6a73 100755
+--- a/modules/banners/funcs/click.php
++++ b/modules/banners/funcs/click.php
+@@ -7,7 +7,6 @@
+  * @License GNU/GPL version 2 or any later version
+  * @Createdate 3-6-2010 0:19
+  */
+-
+ if (!defined('NV_IS_MOD_BANNERS')) {
+     die('Stop!!!');
+ }
+@@ -29,7 +28,7 @@
+ 
+             $db->query('UPDATE ' . NV_BANNERS_GLOBALTABLE . '_rows SET hits_total=hits_total+1 WHERE id=' . $id);
+             $sql = "INSERT INTO " . NV_BANNERS_GLOBALTABLE . "_click (bid, click_time, click_day, click_ip, click_country, click_browse_key, click_browse_name, click_os_key, click_os_name, click_ref)
+- 		         VALUES (" . $id . ", " . NV_CURRENTTIME . ", 0, '" . $client_info['ip'] . "', '" . $client_info['country'] . "', '', '" . $browser . "', '','" . $client_info['client_os']['name'] . "','" . $client_info['referer'] . "');";
++ 		         VALUES (" . $id . ", " . NV_CURRENTTIME . ", 0, " . $db->quote($client_info['ip']) . ", " . $db->quote($client_info['country']) . ", '', " . $db->quote($browser) . ", '', " . $db->quote($client_info['client_os']['name']) . ", " . $db->quote($client_info['referer']) . ");";
+             $db->query($sql);
+         }
+     }
+diff --git a/modules/users/functions.php b/modules/users/functions.php
+index 25ec1919e9..0c9107098b 100755
+--- a/modules/users/functions.php
++++ b/modules/users/functions.php
+@@ -64,7 +64,7 @@ function validUserLog($array_user, $remember, $opid, $current_mode = 0)
+     $stmt->execute();
+     $live_cookie_time = ($remember) ? NV_LIVE_COOKIE_TIME : 0;
+ 
+-    $nv_Request->set_Cookie('nvloginhash', serialize($user), $live_cookie_time);
++    $nv_Request->set_Cookie('nvloginhash', json_encode($user), $live_cookie_time);
+ 
+     if (!empty($global_users_config['active_user_logs'])) {
+         $log_message = $opid ? ($lang_module['userloginviaopt'] . ' ' . $opid) : $lang_module['st_login'];
+diff --git a/vendor/vinades/nukeviet/Core/Request.php b/vendor/vinades/nukeviet/Core/Request.php
+index 4cbe2df703..a70c42e3bc 100644
+--- a/vendor/vinades/nukeviet/Core/Request.php
++++ b/vendor/vinades/nukeviet/Core/Request.php
+@@ -765,28 +765,6 @@ private function parse_mode($mode)
+         return array_values($mode);
+     }
+ 
+-    /**
+-     * Request::base64Encode()
+-     *
+-     * @param mixed $input
+-     * @return
+-     */
+-    private function base64Encode($input)
+-    {
+-        return strtr(base64_encode($input), '+/=', '-_,');
+-    }
+-
+-    /**
+-     * Request::base64Decode()
+-     *
+-     * @param mixed $input
+-     * @return
+-     */
+-    private function base64Decode($input)
+-    {
+-        return base64_decode(strtr($input, '-_,', '+/='));
+-    }
+-
+     /**
+      * Request::encodeCookie()
+      *
+@@ -795,14 +773,9 @@ private function base64Decode($input)
+      */
+     private function encodeCookie($string)
+     {
+-        $result = '';
+-        $strlen = strlen($string);
+-        for ($i = 0; $i < $strlen; ++$i) {
+-            $char = substr($string, $i, 1);
+-            $keychar = substr($this->cookie_key, ($i % 32) - 1, 1);
+-            $result .= chr(ord($char) + ord($keychar));
+-        }
+-        return $this->base64Encode($result);
++        $iv = substr($this->cookie_key, 0, 16);
++        $string = openssl_encrypt($string, 'aes-256-cbc', $this->cookie_key, 0, $iv);
++        return strtr($string, '+/=', '-_,');
+     }
+ 
+     /**
+@@ -813,15 +786,9 @@ private function encodeCookie($string)
+      */
+     private function decodeCookie($string)
+     {
+-        $result = '';
+-        $string = $this->base64Decode($string);
+-        $strlen = strlen($string);
+-        for ($i = 0; $i < $strlen; ++$i) {
+-            $char = substr($string, $i, 1);
+-            $keychar = substr($this->cookie_key, ($i % 32) - 1, 1);
+-            $result .= chr(ord($char) - ord($keychar));
+-        }
+-        return $result;
++        $string = strtr($string, '-_,', '+/=');
++        $iv = substr($this->cookie_key, 0, 16);
++        return openssl_decrypt($string, 'aes-256-cbc', $this->cookie_key, 0, $iv);
+     }
+ 
+     /**

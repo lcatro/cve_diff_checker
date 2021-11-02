@@ -1,0 +1,62 @@
+From 67c7126062d59729cd421bb38f9594015c9907ba Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 23:01:44 -0700
+Subject: [PATCH] CVE-2017-13021/ICMP6: Add a missing bounds check.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-icmp6.c                      |   1 +
+ tests/TESTLIST                     |   1 +
+ tests/icmp6_mobileprefix_asan.out  |   2 ++
+ tests/icmp6_mobileprefix_asan.pcap | Bin 0 -> 116 bytes
+ 4 files changed, 4 insertions(+)
+ create mode 100644 tests/icmp6_mobileprefix_asan.out
+ create mode 100644 tests/icmp6_mobileprefix_asan.pcap
+
+diff --git a/print-icmp6.c b/print-icmp6.c
+index 7fe639dc8..c481e446f 100644
+--- a/print-icmp6.c
++++ b/print-icmp6.c
+@@ -1131,6 +1131,7 @@ icmp6_print(netdissect_options *ndo,
+ 		if (ndo->ndo_vflag) {
+ 			ND_TCHECK(dp->icmp6_data16[0]);
+ 			ND_PRINT((ndo,", id 0x%04x", EXTRACT_16BITS(&dp->icmp6_data16[0])));
++			ND_TCHECK(dp->icmp6_data16[1]);
+ 			if (dp->icmp6_data16[1] & 0xc0)
+ 				ND_PRINT((ndo," "));
+ 			if (dp->icmp6_data16[1] & 0x80)
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 6f5d3314d..070010c76 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -522,6 +522,7 @@ dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
+ pgm_opts_asan		pgm_opts_asan.pcap		pgm_opts_asan.out	-v
+ pgm_opts_asan_2		pgm_opts_asan_2.pcap		pgm_opts_asan_2.out	-v
+ vtp_asan		vtp_asan.pcap			vtp_asan.out	-v
++icmp6_mobileprefix_asan	icmp6_mobileprefix_asan.pcap	icmp6_mobileprefix_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/icmp6_mobileprefix_asan.out b/tests/icmp6_mobileprefix_asan.out
+new file mode 100644
+index 000000000..0e0d97c34
+--- /dev/null
++++ b/tests/icmp6_mobileprefix_asan.out
+@@ -0,0 +1,2 @@
++IP6 (class 0x50, flowlabel 0x0002c, hlim 0, next-header ICMPv6 (58) payload length: 7168) 4f:f829:c:1a1a:1a1a:1a1a:1a37:0 > 16:0:400:0:64fb:9303:f293:8200: ICMP6, mobile router advertisement, length 7168, id 0x9393[|icmp6]
++[|ether]
+diff --git a/tests/icmp6_mobileprefix_asan.pcap b/tests/icmp6_mobileprefix_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..fa40fbb28332c47ead3080f56890508def3f7fac
+GIT binary patch
+literal 116
+zcmca|c+)~A1{Q`zDWMM;fWQWb8G*QATTC!B!v-+ltN|#(^E-1|-GTrAJ*Snn-A!d+
+t(2-%VVqoz9p~=7_1p($jZDI^SvltjseotopG`WdkG8k}fQU(da0RS2m9H;;Q
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,57 @@
+From a324ac84e573fba362a5e53d4e74d5de6729933e Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 21 Apr 2021 18:11:15 -0700
+Subject: [PATCH] Validate arguments to `QuantizedReshape`.
+
+Ensure that validations from `Reshape` also terminate `QuantizedReshape` on failure.
+
+PiperOrigin-RevId: 369775421
+Change-Id: If8c5342267aceea65b7cb83a4b183304886f1ce8
+---
+ .../core/kernels/quantized_reshape_op.cc      | 25 +++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/tensorflow/core/kernels/quantized_reshape_op.cc b/tensorflow/core/kernels/quantized_reshape_op.cc
+index bd76c94edeea7..682f4aaa1f79e 100644
+--- a/tensorflow/core/kernels/quantized_reshape_op.cc
++++ b/tensorflow/core/kernels/quantized_reshape_op.cc
+@@ -17,6 +17,7 @@ limitations under the License.
+ 
+ #include "tensorflow/core/framework/op_kernel.h"
+ #include "tensorflow/core/framework/register_types.h"
++#include "tensorflow/core/framework/tensor_shape.h"
+ #include "tensorflow/core/framework/tensor_types.h"
+ #include "tensorflow/core/framework/types.h"
+ #include "tensorflow/core/kernels/reshape_op.h"
+@@ -30,9 +31,29 @@ class QuantizedReshapeOp : public ReshapeOp {
+   void Compute(OpKernelContext* ctx) override {
+     // This call processes inputs 1 and 2 to write output 0.
+     ReshapeOp::Compute(ctx);
++    if (!ctx->status().ok()) {
++      return;
++    }
++
++    const auto& input_min_float_tensor = ctx->input(2);
++    const auto& input_min_float_shape = input_min_float_tensor.shape();
++    OP_REQUIRES(ctx,
++                TensorShapeUtils::IsScalar(input_min_float_shape) ||
++                    (TensorShapeUtils::IsVector(input_min_float_shape) &&
++                     (input_min_float_shape.dim_size(0) == 1)),
++                errors::InvalidArgument(
++                    "input_min must be a scalar or a vector of 1 element"));
++    const float input_min_float = input_min_float_tensor.flat<float>()(0);
++    const auto& input_max_float_tensor = ctx->input(3);
++    const auto& input_max_float_shape = input_max_float_tensor.shape();
++    OP_REQUIRES(ctx,
++                TensorShapeUtils::IsScalar(input_max_float_shape) ||
++                    (TensorShapeUtils::IsVector(input_max_float_shape) &&
++                     (input_max_float_shape.dim_size(0) == 1)),
++                errors::InvalidArgument(
++                    "input_max must be a scalar or a vector of 1 element"));
++    const float input_max_float = input_max_float_tensor.flat<float>()(0);
+ 
+-    const float input_min_float = ctx->input(2).flat<float>()(0);
+-    const float input_max_float = ctx->input(3).flat<float>()(0);
+     Tensor* output_min = nullptr;
+     OP_REQUIRES_OK(ctx, ctx->allocate_output(1, TensorShape({}), &output_min));
+     output_min->flat<float>()(0) = input_min_float;

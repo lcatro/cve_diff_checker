@@ -1,0 +1,858 @@
+From 196729cc045ef93ceeddd1de505a1de8f9cdf74d Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Levy <jeanphilippe.levy@gmail.com>
+Date: Thu, 27 Oct 2016 09:33:52 +0200
+Subject: [PATCH] Fix vulnerabilities
+
+---
+ include/arrays.php                      |   4 +
+ include/function.php                    |  20 +++-
+ module/admin_bp/php/auto_completion.php |  34 +++---
+ module/admin_bp/php/function_bp.php     | 137 ++++++++++++++----------
+ module/admin_user/search.php            |   3 +-
+ module/index.php                        |  10 +-
+ module/monitoring_ged/ajax.php          |  50 ++++++---
+ module/monitoring_ged/ged_actions.php   |   2 +
+ module/monitoring_ged/ged_functions.php | 115 +++++++++++++-------
+ 9 files changed, 243 insertions(+), 132 deletions(-)
+
+diff --git a/include/arrays.php b/include/arrays.php
+index d365596..f47f879 100644
+--- a/include/arrays.php
++++ b/include/arrays.php
+@@ -37,6 +37,8 @@
+ 	10 => "EON - Name Error",
+ 	11 => "EON - GED");
+ 
++$array_modules = array ("glpi","ocsinventory-reports");
++	
+ $array_tools = array (
+ 	"snmpwalk"		 => "tools/snmpwalk.php",
+ 	"show interface" => "tools/interface.php",
+@@ -60,6 +62,8 @@
+ 	"duplicate" 		=> "duplicate",
+ 	"back-up file" 		=> "backup");
+ 
++$array_ged_queues = array("active","sync","history");
++		
+ $array_ged_types = array(
+ 	0 => "label.all",
+ 	1 => "services",
+diff --git a/include/function.php b/include/function.php
+index 8f93817..7194cbf 100644
+--- a/include/function.php
++++ b/include/function.php
+@@ -63,7 +63,7 @@ function message($id, $text, $type){
+ }
+ 
+ // Connect to Database
+-function sqlrequest($database,$sql,$id=false){
++function sqlrequest($database,$sql,$id=false,$prepare=false){
+ 
+ 	// Get the global value
+ 	global $database_host;
+@@ -83,8 +83,22 @@ function sqlrequest($database,$sql,$id=false){
+ 		// Force UTF-8
+ 		mysqli_query($connexion, "SET NAMES 'utf8'");
+ 	}
+-	$result=mysqli_query($connexion, "$sql");
+-
++	
++	if(is_array($prepare)) {
++		$stmt = mysqli_prepare($connexion,$sql);
++		
++		if(isset($prepare[0]) && isset($prepare[1])) {
++			$ref = new ReflectionClass('mysqli_stmt');
++			$method = $ref->getMethod("bind_param");
++			$method->invokeArgs($stmt,$prepare);
++		}
++		
++		mysqli_stmt_execute($stmt);
++		$result = mysqli_stmt_get_result($stmt);
++	} else {
++		$result=mysqli_query($connexion, "$sql");
++	}
++		
+ 	if($id==true)
+ 		$result=mysqli_insert_id($connexion);
+ 		
+diff --git a/module/admin_bp/php/auto_completion.php b/module/admin_bp/php/auto_completion.php
+index ca0347a..f7b42ec 100644
+--- a/module/admin_bp/php/auto_completion.php
++++ b/module/admin_bp/php/auto_completion.php
+@@ -1,20 +1,24 @@
+ <?php
+-  // Mot tapé par l'utilisateur
+-  $q = $_GET['query'];
+-	$table_name = $_GET['table_name'];
+ 
+-    try {
+-        $bdd = new PDO('mysql:host=localhost;dbname=lilac', 'root', 'root66');
+-    } catch(Exception $e) {
+-		 echo "Connection failed: " . $e->getMessage();
+-        exit('Impossible de se connecter à la base de données.');
+-    }
++include("../../../include/config.php");
+ 
+-    // Requête SQL
+-    $requete = "SELECT name FROM " . $table_name .  " WHERE name LIKE '". $q ."%' LIMIT 0, 10";
++// Mot tapé par l'utilisateur
++$q = $_GET['query'];
++$table_name = $_GET['table_name'];
++
++try {
++	$bdd = new PDO('mysql:host=localhost;dbname='.$database_lilac, $database_username, $database_password);
++} catch(Exception $e) {
++	 echo "Connection failed: " . $e->getMessage();
++	exit('Impossible de se connecter à la base de données.');
++}
++
++// Requête SQL
++$requete = "SELECT name FROM " . $table_name .  " WHERE name LIKE '". $q ."%' LIMIT 0, 10";
++
++foreach  ($bdd->query($requete) as $row) {
++	$suggestions['suggestions'][] = $row['name'];
++}
++echo json_encode($suggestions);
+ 
+-	foreach  ($bdd->query($requete) as $row) {
+-		$suggestions['suggestions'][] = $row['name'];
+-	}
+-    echo json_encode($suggestions);
+ ?>
+diff --git a/module/admin_bp/php/function_bp.php b/module/admin_bp/php/function_bp.php
+index c550b7b..3fe12c2 100644
+--- a/module/admin_bp/php/function_bp.php
++++ b/module/admin_bp/php/function_bp.php
+@@ -1,5 +1,7 @@
+ <?php
+ 
++include("../../../include/config.php");
++
+ $action = isset($_GET['action']) ? $_GET['action'] : false;
+ $bp_name = isset($_GET['bp_name']) ? $_GET['bp_name'] : false;
+ $host_name = isset($_GET['host_name']) ? $_GET['host_name'] : false;
+@@ -16,7 +18,7 @@
+ $min_value = isset($_GET['min_value']) ? $_GET['min_value'] : false;
+ 
+ try {
+-	$bdd = new PDO('mysql:host=localhost;dbname=nagiosbp', 'root', 'root66');
++	$bdd = new PDO('mysql:host=localhost;dbname='.$database_nagios, $database_username, $database_password);
+ } catch(Exception $e) {
+ 	echo "Connection failed: " . $e->getMessage();
+ 	exit('Impossible de se connecter à la base de données.');
+@@ -73,17 +75,21 @@ function verify_services($bp,$host,$bdd){
+ }
+ 
+ function delete_bp($bp,$bdd){
+-    $sql = "delete from bp where name = '" . $bp . "'";
+-    $bdd->exec($sql);
++	$sql = "delete from bp where name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ 
+-	$sql = "delete from bp_services where bp_name = '" . $bp . "'";
+-    $bdd->exec($sql);
++	$sql = "delete from bp_services where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ 
+-	$sql = "delete from bp_links where bp_name = '" . $bp . "'";
+-	$bdd->exec($sql);
++	$sql = "delete from bp_links where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ 	
+-	$sql = "delete from bp_links where bp_link = '" . $bp . "'";
+-	$bdd->exec($sql);
++	$sql = "delete from bp_links where bp_link = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ }
+ 
+ function list_services($host_name){
+@@ -112,8 +118,9 @@ function list_services($host_name){
+ }
+ 
+ function list_process($bp,$display,$bdd){
+-	$sql = "select name from bp where is_define = 1 and name!='".$bp."' and priority = '" . $display . "'";
+-	$req = $bdd->query($sql);
++	$sql = "select name from bp where is_define = 1 and name!=? and priority = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp,$display));
+ 	$process = $req->fetchall();
+ 
+     echo json_encode($process);
+@@ -130,20 +137,20 @@ function add_services($bp,$services,$bdd){
+ 			$list_services[] = $service;
+ 		}
+ 	}
+-	$sql = "select service,host from bp_services where bp_name = '" . $bp . "'";
+-	$req = $bdd->query($sql);
+ 
+-	$sql = "delete from bp_services where bp_name = '" . $bp . "'";
+-	$bdd->exec($sql);
++	$sql = "delete from bp_services where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ 
+ 	if(count($services) > 0){
+-		$sql = "update bp set is_define = 1 where name = '" . $bp . "'";
+-		$bdd->exec($sql);
++		$sql = "update bp set is_define = 1 where name = ?";
++		$req = $bdd->prepare($sql);
++		$req->execute(array($bp));
+ 	}
+-
+ 	else{
+-		$sql = "update bp set is_define = 0 where name = '" . $bp . "'";
+-        $bdd->exec($sql);
++		$sql = "update bp set is_define = 0 where name = ?";
++		$req = $bdd->prepare($sql);
++		$req->execute(array($bp));
+     }
+ 
+ 	if(is_array($services)) {
+@@ -152,37 +159,43 @@ function add_services($bp,$services,$bdd){
+ 			$host = $value[0];
+ 			$service = $value[1];
+ 			echo $service;
+-			$sql = "insert into bp_services (bp_name,host,service) values('" . trim($bp) . "','" . $host . "','" . $service . "')";
+-			$bdd->exec($sql);
++			$sql = "insert into bp_services (bp_name,host,service) values(?,?,?)";
++			$req = $bdd->prepare($sql);
++			$req->execute(array(trim($bp),$host,$service));
+ 		}
+ 	}
+ }
+ 
+ function add_process($bp,$process,$bdd){
+-    $sql = "delete from bp_links where bp_name = '" . $bp . "'";
+-    $bdd->exec($sql);
+-	$sql = "update bp set is_define = 0 where name = '" . $bp . "'";
+-	$bdd->exec($sql);	
++	$sql = "delete from bp_links where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
++	$sql = "update bp set is_define = 0 where name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp));
+ 
+     if(count($process) > 0 and is_array($process)){
+-        $sql = "update bp set is_define = 1 where name = '" . $bp . "'";
+-        $bdd->exec($sql);
++		$sql = "update bp set is_define = 1 where name = ?";
++		$req = $bdd->prepare($sql);
++		$req->execute(array($bp));
+ 	
+ 		foreach($process as $values){
+ 			$value = explode("::", $values);
+ 			$bp_link = $value[1];
+ 
+-			$sql = "insert into bp_links (bp_name,bp_link) values('" . $bp . "','" . $bp_link . "')";
++			$sql = "insert into bp_links (bp_name,bp_link) values(?,?)";
+ 
+-			$bdd->exec($sql);
++			$req = $bdd->prepare($sql);
++			$req->execute(array($bp,$bp_link));
+ 		}	
+ 	}
+ }
+ 
+ function check_app_exists($uniq_name, $bdd)
+ {
+-	$sql = "select count(*) from bp where name = '" . $uniq_name . "';";
+-	$req = $bdd->query($sql);
++	$sql = "select count(*) from bp where name = ?;";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($uniq_name));
+ 	$bp_exist = $req->fetch(PDO::FETCH_NUM);
+ 	
+ 	if($bp_exist[0] == 1){
+@@ -196,34 +209,41 @@ function add_application($uniq_name_orig,$uniq_name,$process_name,$display,$url,
+ 	if($type != 'MIN'){
+ 		$min_value = "";
+ 	}
+-	$sql = "select count(*) from bp where name = '" . $uniq_name . "';";
+-	$req = $bdd->query($sql);
++	$sql = "select count(*) from bp where name = ?;";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($uniq_name));
+ 	$bp_exist = $req->fetch();
+ 
+ 	// add
+ 	if($bp_exist[0] == 0 and empty($uniq_name_orig)){
+-		$sql = "insert into bp (name,description,priority,type,command,url,min_value) values('" . $uniq_name ."','" . $process_name ."','" . $display . "','" . $type . "','" . $command . "','" . $url . "','" . $min_value . "')";
+-		$bdd->exec($sql);
++		$sql = "insert into bp (name,description,priority,type,command,url,min_value) values(?,?,?,?,?,?,?)";
++		$req = $bdd->prepare($sql);
++		$req->execute(array($uniq_name,$process_name,$display,$type,$command,$url,$min_value));
+ 	}
+ 	// uniq name modification
+ 	elseif($uniq_name_orig != $uniq_name) {
+ 		if($bp_exist[0] != 0){
+ 			// TODO QUENTIN
+ 		} else {
+-			$sql = "update bp set name = '" . $uniq_name . "',description = '" . $process_name . "',priority = '" . $display . "',type = '" . $type . "',command = '" . $command . "',url = '" . $url . "',min_value = '" . $min_value . "' where name = '" . $uniq_name_orig . "'";
+-			$bdd->exec($sql);
+-			$sql = "update bp_links set bp_name = '" . $uniq_name . "' where bp_name = '" . $uniq_name_orig . "'";
+-			$bdd->exec($sql);		
+-			$sql = "update bp_links set bp_link = '" . $uniq_name . "' where bp_link = '" . $uniq_name_orig . "'";
+-			$bdd->exec($sql);
+-			$sql = "update bp_services set bp_name = '" . $uniq_name . "' where bp_name = '" . $uniq_name_orig . "'";					
+-			$bdd->exec($sql);		
++			$sql = "update bp set name = ?,description = ?,priority = ?,type = ?,command = ?,url = ?,min_value = ? where name = ?";
++			$req = $bdd->prepare($sql);
++			$req->execute(array($uniq_name,$process_name,$display,$type,$command,$url,$min_value,$uniq_name_orig));
++			$sql = "update bp_links set bp_name = ? where bp_name = ?";
++			$req = $bdd->prepare($sql);
++			$req->execute(array($uniq_name,$uniq_name_orig));	
++			$sql = "update bp_links set bp_link = ? where bp_link = ?";
++			$req = $bdd->prepare($sql);
++			$req->execute(array($uniq_name,$uniq_name_orig));
++			$sql = "update bp_services set bp_name = ? where bp_name = ?";					
++			$req = $bdd->prepare($sql);
++			$req->execute(array($uniq_name,$uniq_name_orig));	
+ 		}
+ 	}	
+ 	// modification
+ 	else{
+-		$sql = "update bp set name = '" . $uniq_name . "',description = '" . $process_name . "',priority = '" . $display . "',type = '" . $type . "',command = '" . $command . "',url = '" . $url . "',min_value = '" . $min_value . "' where name = '" . $uniq_name . "'";
+-		$bdd->exec($sql);	
++		$sql = "update bp set name = ?,description = ?,priority = ?,type = ?,command = ?,url = ?,min_value = ? where name = ?";
++		$req = $bdd->prepare($sql);
++		$req->execute(array($uniq_name,$process_name,$display,$type,$command,$url,$min_value,$uniq_name));
+ 	}
+ }
+ 
+@@ -252,16 +272,18 @@ function build_file($bdd){
+ 
+ function build_file_recursive($bdd,$bp_file,$bp_informations,$bp_sons){
+ 
+-	$sql = "SELECT bp_link FROM bp_links where bp_name='".$bp_informations['name']."'";
+-	$req = $bdd->query($sql);
++	$sql = "SELECT bp_link FROM bp_links where bp_name=?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp_informations['name']));
+ 	if($req->rowCount() == 0) {
+ 		$bp_sons[]=$bp_informations['name'];
+ 		build_file_bp($bdd,$bp_file, $bp_informations);
+ 	} else {
+ 		$bp_links = $req->fetchall();
+ 		foreach($bp_links as $bp_link){
+-			$sql = "SELECT * FROM bp where is_define ='1' and name='".$bp_link["bp_link"]."'";
+-			$req = $bdd->query($sql);
++			$sql = "SELECT * FROM bp where is_define ='1' and name=?";
++			$req = $bdd->prepare($sql);
++			$req->execute(array($bp_link["bp_link"]));
+ 			$bps_sons_informations = $req->fetchall();
+ 			foreach($bps_sons_informations as $bp_sons_informations){
+ 				if(!in_array($bp_sons_informations['name'],$bp_sons,true)) {
+@@ -287,8 +309,9 @@ function build_file_bp($bdd,$bp_file, $bp_informations){
+ 		$type = "+";
+ 		fputs($bp_file, $bp_informations['min_value'] . " of: ");
+ 	}
+-	$sql = "select host,service from bp_services where bp_name = '" . $bp_informations['name'] . "'";
+-	$req = $bdd->query($sql);
++	$sql = "select host,service from bp_services where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp_informations['name']));
+ 	$host_services = $req->fetchall();
+ 
+ 	$counter1 = count($host_services);
+@@ -303,8 +326,9 @@ function build_file_bp($bdd,$bp_file, $bp_informations){
+ 		}
+ 	}
+ 
+-	$sql = "select bp_link from bp_links where bp_name = '" .$bp_informations['name'] . "'";
+-	$req = $bdd->query($sql);
++	$sql = "select bp_link from bp_links where bp_name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp_informations['name']));
+ 	$link_informations = $req->fetchall();
+ 
+ 	$counter1 = count($link_informations);
+@@ -333,8 +357,9 @@ function build_file_bp($bdd,$bp_file, $bp_informations){
+ }
+ 
+ function info_application($bp_name, $bdd){
+-	$sql = "select * from bp where name = '" . $bp_name . "'";
+-	$req = $bdd->query($sql);
++	$sql = "select * from bp where name = ?";
++	$req = $bdd->prepare($sql);
++	$req->execute(array($bp_name));
+ 	$info = $req->fetch();
+ 	echo json_encode($info);
+ }
+diff --git a/module/admin_user/search.php b/module/admin_user/search.php
+index 6722c91..b5a6364 100644
+--- a/module/admin_user/search.php
++++ b/module/admin_user/search.php
+@@ -25,7 +25,8 @@
+ 
+ // Search function for Jquery an exit
+ if(isset($_GET['term']) && isset($_GET['request']) && $_GET['request'] == "search_user") {
+-	$result=sqlrequest($database_eonweb,"select * from ldap_users_extended where (user LIKE '%".$_GET['term']."%') OR (login LIKE '%".$_GET['term']."%') order by user");
++	$sql="select * from ldap_users_extended where (user LIKE ?) OR (login LIKE ?) order by user";
++	$result=sqlrequest($database_eonweb,$sql,false,array("ss","%".$_GET['term']."%","%".$_GET['term']."%"));
+ 	
+ 	$array = array();
+ 	while ($line = mysqli_fetch_array($result)){
+diff --git a/module/index.php b/module/index.php
+index 49b30a8..9a60c95 100644
+--- a/module/index.php
++++ b/module/index.php
+@@ -23,10 +23,14 @@
+ # Check optionnal module to load
+ if(isset($_GET["module"]) && isset($_GET["link"])) { 
+ 
+-	$module=exec("rpm -q ".$_GET["module"]." |grep '.eon' |wc -l");
++	include("../include/config.php");
++	include("../include/arrays.php");
+ 	
+-	# Redirect to module page if rpm installed
+-	if($module!=0) { header('Location: '.$_GET["link"].''); }
++	if(in_array($_GET["module"],$array_modules)) {
++		$module=exec("rpm -q ".$_GET["module"]." |grep '.eon' |wc -l");
++		# Redirect to module page if rpm installed
++		if($module!=0) { header('Location: '.$_GET["link"].''); }
++	}
+ 
+ } 
+ 	
+diff --git a/module/monitoring_ged/ajax.php b/module/monitoring_ged/ajax.php
+index a93cd2a..6dca5d5 100644
+--- a/module/monitoring_ged/ajax.php
++++ b/module/monitoring_ged/ajax.php
+@@ -26,6 +26,8 @@
+ include("ged_functions.php");
+ 
+ extract($_GET);
++if(!isset($queue)) { $queue="active"; } 
++elseif(!in_array($queue,$array_ged_queues)) { $queue="active"; }
+ 
+ // get all GED filters
+ $default = "";
+@@ -62,16 +64,19 @@
+ 			<tbody>
+ 				<?php
+ 					if($_GET["type"] == 0){
+-						$ged_where = "WHERE pkt_type_id!='0'";
++						$sql = "SELECT pkt_type_id,pkt_type_name FROM pkt_type WHERE pkt_type_id!='0' AND pkt_type_id<'100';";
++						$gedsql_result1=sqlrequest($database_ged,$sql);
+ 					} else {
+-						$ged_where = "WHERE pkt_type_id='".$_GET["type"]."'";
++						$sql = "SELECT pkt_type_id,pkt_type_name FROM pkt_type WHERE pkt_type_id=? AND pkt_type_id<'100';";
++						$prepare=array("i",(int)$_GET["type"]);
++						$gedsql_result1=sqlrequest($database_ged,$sql,false,$prepare);
+ 					}
+-					$gedsql_result1=sqlrequest($database_ged,"SELECT pkt_type_id,pkt_type_name FROM pkt_type $ged_where AND pkt_type_id<'100';");
+-					
++										
+ 					while($ged_type = mysqli_fetch_assoc($gedsql_result1)){
+ 
+ 						// request for ged events according to queue and filters
+ 						$sql = createSelectClause($ged_type["pkt_type_name"], $queue);
++						$mysqli_prepare=array("");
+ 						
+ 						// time periods (only in active events);
+ 						if($time_period != ""){
+@@ -84,25 +89,40 @@
+ 
+ 							switch ($time_period) {
+ 								case '0-5m':
+-									$sql .= " AND o_sec <= ". $actual_time ." AND o_sec > ". $five_minutes;
++									$sql .= " AND o_sec <= ? AND o_sec > ?";
++									$mysqli_prepare[0].="ii";
++									$mysqli_prepare[]=(int)$actual_time;
++									$mysqli_prepare[]=(int)$five_minutes;
+ 									break;
+ 								case '5-15m':
+-									$sql .= " AND o_sec <= ". $five_minutes ." AND o_sec > ". $fifteen_minutes;
++									$sql .= " AND o_sec <= ? AND o_sec > ?";
++									$mysqli_prepare[0].="ii";
++									$mysqli_prepare[]=(int)$five_minutes;
++									$mysqli_prepare[]=(int)$fifteen_minutes;
+ 									break;
+ 								case '15-30m':
+-									$sql .= " AND o_sec <= ". $fifteen_minutes ." AND o_sec > ". $thirty_minutes;
++									$sql .= " AND o_sec <= ? AND o_sec > ?";
++									$mysqli_prepare[0].="ii";
++									$mysqli_prepare[]=(int)$fifteen_minutes;
++									$mysqli_prepare[]=(int)$thirty_minutes;
+ 									break;
+ 								case '30m-1h':
+-									$sql .= " AND o_sec <= ". $thirty_minutes ." AND o_sec > ". $one_hour;
++									$sql .= " AND o_sec <= ? AND o_sec > ?";
++									$mysqli_prepare[0].="ii";
++									$mysqli_prepare[]=(int)$thirty_minutes;
++									$mysqli_prepare[]=(int)$one_hour;
+ 									break;
+ 								case 'more':
+-									$sql .= " AND o_sec <= ". $one_hour;
++									$sql .= " AND o_sec <= ?";
++									$mysqli_prepare[0].="i";
++									$mysqli_prepare[]=(int)$one_hour;
+ 									break;
+ 							}
+ 						}
+ 
+ 						if($ack_time != ""){
+-							$sql .= " AND a_sec - o_sec >= $ack_time";
++							$sql .= " AND a_sec - o_sec >= ?";
++							$mysqli_prepare=array("i",(int)$ack_time);
+ 						}
+ 
+ 						// if there's a default filter
+@@ -132,9 +152,13 @@
+ 										$like .= "%";
+ 									}
+ 									if($sqlcpt=="0") {
+-										$sql .= " AND ($key LIKE '$like'";
++										$sql .= " AND ($key LIKE ?";
++										$mysqli_prepare[0].="s";
++										$mysqli_prepare[]=(string)$like;
+ 									} else {
+-										$sql .= " OR $key LIKE '$like'";
++										$sql .= " OR $key LIKE ?";
++										$mysqli_prepare[0].="s";
++										$mysqli_prepare[]=(string)$like;
+ 									}
+ 									$sqlcpt++;
+ 								}
+@@ -144,7 +168,7 @@
+ 
+ 						$sql .= createWhereClause($owner,$filter,$search,$daterange,$ok,$warning,$critical,$unknown);
+ 
+-						$request = sqlrequest($database_ged, $sql);
++						$request = sqlrequest($database_ged, $sql, false, $mysqli_prepare);
+ 						while($event = mysqli_fetch_object($request)){
+ 							$event_state = getEventState($event);
+ 							$row_class = getClassRow($event_state);
+diff --git a/module/monitoring_ged/ged_actions.php b/module/monitoring_ged/ged_actions.php
+index 9e2eb43..02e2156 100644
+--- a/module/monitoring_ged/ged_actions.php
++++ b/module/monitoring_ged/ged_actions.php
+@@ -27,6 +27,8 @@
+ 
+ // create variables from $_GET
+ extract($_GET);
++if(!isset($queue)) { $queue="active"; } 
++elseif(!in_array($queue,$array_ged_queues)) { $queue="active"; }
+ 
+ if(isset($action) && $action != "" && (isset($selected_events) && count($selected_events) > 0) || isset($filter_name) || isset($filter) ){
+ 	switch ($action) {
+diff --git a/module/monitoring_ged/ged_functions.php b/module/monitoring_ged/ged_functions.php
+index 0199b80..2dcfd51 100644
+--- a/module/monitoring_ged/ged_functions.php
++++ b/module/monitoring_ged/ged_functions.php
+@@ -49,8 +49,11 @@ function getClassRow($event_state)
+ 
+ function createTableRow($event, $event_state, $queue)
+ {
++	global $array_ged_queues;
+ 	global $dateformat;
+ 	global $ged_prefix;
++
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
+ 	
+ 	foreach ($event as $key => $value) {
+ 		$class = "";
+@@ -96,9 +99,12 @@ function createTableRow($event, $event_state, $queue)
+ 
+ function createSelectClause($ged_type, $queue)
+ {
++	global $array_ged_queues; 
+ 	global $array_ged_packets;
+ 	global $database_ged;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++
+ 	$sql = "SELECT id,";
+ 	foreach ($array_ged_packets as $key => $value) {
+ 		if($value["col"] == true){
+@@ -119,6 +125,9 @@ function createSelectClause($ged_type, $queue)
+ 
+ function createWhereClause($owner, $filter, $search, $daterange, $ok, $warning, $critical, $unknown)
+ {
++	
++	global $mysqli_prepare;
++	
+ 	$where_clause = "";
+ 	
+ 	// owner
+@@ -136,7 +145,9 @@ function createWhereClause($owner, $filter, $search, $daterange, $ok, $warning,
+ 			$like .= "%";
+ 		}
+ 
+-		$where_clause .= " AND $filter LIKE '$like'";
++		$where_clause .= " AND $filter LIKE ?";
++		$mysqli_prepare[0].="s";
++		$mysqli_prepare[]=(string)$like;
+ 	}
+ 
+ 	// daterange
+@@ -151,15 +162,18 @@ function createWhereClause($owner, $filter, $search, $daterange, $ok, $warning,
+ 		$start += 3600;
+ 		$end = strtotime($end);
+ 		$end += 86400 + 3600;
+-		$where_clause .= " AND o_sec > $start AND o_sec < $end";
++		$where_clause .= " AND o_sec > ? AND o_sec < ?";
++		$mysqli_prepare[0].="ii";
++		$mysqli_prepare[]=(int)$start;
++		$mysqli_prepare[]=(int)$end;
+ 	}
+ 
+ 	// states
+ 	$states_list = "";
+-	if($ok != "")		{ $states_list .= "0,"; }
+-	if($warning != "")	{ $states_list .= "1,"; }
+-	if($critical != "")	{ $states_list .= "2,"; }
+-	if($unknown != "")	{ $states_list .= "3,"; }
++	if($ok != "")		{ $states_list .= "?,"; $mysqli_prepare[0].="i"; $mysqli_prepare[]=0; }
++	if($warning != "")	{ $states_list .= "?,"; $mysqli_prepare[0].="i"; $mysqli_prepare[]=1; }
++	if($critical != "")	{ $states_list .= "?,"; $mysqli_prepare[0].="i"; $mysqli_prepare[]=2; }
++	if($unknown != "")	{ $states_list .= "?,"; $mysqli_prepare[0].="i"; $mysqli_prepare[]=3; }
+ 	$states_list = trim($states_list, ",");
+ 	
+ 	if($states_list != ""){
+@@ -203,15 +217,18 @@ function createDetailRow($event, $db_col_name, $row_name)
+ 
+ function details($selected_events, $queue)
+ {
++	global $array_ged_queues; 
+ 	global $database_ged;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++
+ 	// get all needed infos into variables
+ 	$value_parts = explode(":", $selected_events);
+ 	$id = $value_parts[0];
+ 	$ged_type = $value_parts[1];
+ 
+-	$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = $id";
+-	$result = sqlrequest($database_ged, $sql);
++	$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = ?";
++	$result = sqlrequest($database_ged, $sql, false, array("s",(string)$id));
+ 	$event = mysqli_fetch_assoc($result);
+ 
+ 	// display event's details
+@@ -238,20 +255,20 @@ function details($selected_events, $queue)
+ 
+ function edit($selected_events, $queue)
+ {
++	global $array_ged_queues; 
+ 	global $database_ged;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++
+ 	// get all needed infos into variables
+ 	$value_parts = explode(":", $selected_events);
+ 	$id = $value_parts[0];
+ 	$ged_type = $value_parts[1];
+ 
+-	$sql = "SELECT comments FROM ".$ged_type."_queue_".$queue." WHERE id = $id";
+-	$result = sqlrequest($database_ged, $sql);
++	$sql = "SELECT comments FROM ".$ged_type."_queue_".$queue." WHERE id = ?";
++	$result = sqlrequest($database_ged, $sql, false, array("s",(string)$id));
+ 	$event = mysqli_fetch_assoc($result);
+ 
+-	$event["comments"] = str_replace("\'", "'", $event["comments"]);
+-	$event["comments"] = str_replace("\#", "#'", $event["comments"]);
+-
+ 	echo "
+ 	<form id='edit-event-form'>
+ 		<div class='form-group'>
+@@ -263,19 +280,18 @@ function edit($selected_events, $queue)
+ 
+ function editEvent($selected_events, $queue, $comments)
+ {
++	global $array_ged_queues;
+ 	global $database_ged;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++	
+ 	// get all needed infos into variables
+ 	$value_parts = explode(":", $selected_events);
+ 	$id = $value_parts[0];
+ 	$ged_type = $value_parts[1];
+ 
+-	// format comment string to avoid errors
+-	$comments = str_replace("'", "\'", $comments);
+-	$comments = str_replace("#", "\#", $comments);
+-
+-	$sql = "UPDATE ".$ged_type."_queue_".$queue." SET comments='$comments' WHERE id = $id";
+-	$result = sqlrequest($database_ged, $sql);
++	$sql = "UPDATE ".$ged_type."_queue_".$queue." SET comments=? WHERE id = ?";
++	$result = sqlrequest($database_ged, $sql, false, array("ss",(string)$comments,(string)$id));
+ 	if($result){
+ 		message(11, " : ".getLabel("message.event_edited"), "ok");
+ 	} else {
+@@ -285,8 +301,11 @@ function editEvent($selected_events, $queue, $comments)
+ 
+ function editAllEvents($selected_events, $queue, $comments)
+ {
++	global $array_ged_queues;
+ 	global $database_ged;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++	
+ 	$success = true;
+ 	foreach ($selected_events as $key => $value) {
+ 		// get all needed infos into variables
+@@ -294,12 +313,8 @@ function editAllEvents($selected_events, $queue, $comments)
+ 		$id = $value_parts[0];
+ 		$ged_type = $value_parts[1];
+ 
+-		// format comment string to avoid errors
+-		$comments = str_replace("'", "\'", $comments);
+-		$comments = str_replace("#", "\#", $comments);
+-
+-		$sql = "UPDATE ".$ged_type."_queue_".$queue." SET comments='$comments' WHERE id = $id";
+-		$result = sqlrequest($database_ged, $sql);
++		$sql = "UPDATE ".$ged_type."_queue_".$queue." SET comments=? WHERE id = ?";
++		$result = sqlrequest($database_ged, $sql, false, array("ss",(string)$comments,(string)$id));
+ 		if(!$result){
+ 			$success = false;
+ 		}
+@@ -317,9 +332,12 @@ function ownDisown($selected_events, $queue, $global_action)
+ {
+ 	global $database_ged;
+ 	global $array_ged_packets;
++	global $array_ged_queues;
+ 	global $path_ged_bin;
+ 	global $array_serv_system;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++	
+ 	if(exec($array_serv_system["Ged agent"]["status"])==NULL) {
+ 		return message(0," : ged daemon must be dead","critical");
+ 	}
+@@ -337,8 +355,8 @@ function ownDisown($selected_events, $queue, $global_action)
+ 		if($ged_type == "nagios"){ $ged_type_nbr = 1; }
+ 		if($ged_type == "snmptrap"){ $ged_type_nbr = 2; }
+ 
+-		$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = $id";
+-		$result = sqlrequest($database_ged, $sql);
++		$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = ?";
++		$result = sqlrequest($database_ged, $sql, false, array("s",(string)$id));
+ 		$event = mysqli_fetch_assoc($result);
+ 
+ 		$ged_command = "-update -type $ged_type_nbr ";
+@@ -351,7 +369,8 @@ function ownDisown($selected_events, $queue, $global_action)
+ 			}
+ 		}
+ 		$ged_command = trim($ged_command, " ");
+-
++		$ged_command=escapeshellcmd($ged_command);
++		
+ 		shell_exec($path_ged_bin." ".$ged_command);
+ 		logging("ged_update",$ged_command);
+ 	}
+@@ -359,11 +378,14 @@ function ownDisown($selected_events, $queue, $global_action)
+ 
+ function acknowledge($selected_events, $queue)
+ {
++	global $array_ged_queues;
+ 	global $database_ged;
+ 	global $array_ged_packets;
+ 	global $path_ged_bin;
+ 	global $array_serv_system;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++	
+ 	if(exec($array_serv_system["Ged agent"]["status"])==NULL) {
+ 		return message(0," : ged daemon must be dead","critical");
+ 	}
+@@ -380,8 +402,8 @@ function acknowledge($selected_events, $queue)
+ 		$event_to_delete = [];
+ 		array_push($event_to_delete, $value);
+ 
+-		$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = $id";
+-		$result = sqlrequest($database_ged, $sql);
++		$sql = "SELECT * FROM ".$ged_type."_queue_".$queue." WHERE id = ?";
++		$result = sqlrequest($database_ged, $sql, false, array("s",(string)$id));
+ 		$event = mysqli_fetch_assoc($result);
+ 
+ 		$ged_command = "-update -type $ged_type_nbr ";
+@@ -394,7 +416,8 @@ function acknowledge($selected_events, $queue)
+ 			}
+ 		}
+ 		$ged_command = trim($ged_command, " ");
+-
++		$ged_command=escapeshellcmd($ged_command);
++		
+ 		shell_exec($path_ged_bin." ".$ged_command);
+ 		logging("ged_update",$ged_command);
+ 		delete($event_to_delete, $queue);
+@@ -403,11 +426,14 @@ function acknowledge($selected_events, $queue)
+ 
+ function delete($selected_events, $queue)
+ {
++	global $array_ged_queues;
+ 	global $database_ged;
+ 	global $array_ged_packets;
+ 	global $path_ged_bin;
+ 	global $array_serv_system;
+ 
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
++	
+ 	if(exec($array_serv_system["Ged agent"]["status"])==NULL) {
+ 		return message(0," : ged daemon must be dead","critical");
+ 	}
+@@ -433,7 +459,8 @@ function delete($selected_events, $queue)
+ 				}
+ 			}
+ 			$ged_command = trim($ged_command, " ");
+-
++			$ged_command=escapeshellcmd($ged_command);
++					
+ 			shell_exec($path_ged_bin." ".$ged_command);
+ 			logging("ged_update",$ged_command);
+ 		} else {
+@@ -444,7 +471,8 @@ function delete($selected_events, $queue)
+ 	if($queue == "history"){
+ 		$id_list = trim($id_list, ",");
+ 		$ged_command = "-drop -id ".$id_list." -queue history";
+-
++		$ged_command=escapeshellcmd($ged_command);
++		
+ 		shell_exec($path_ged_bin." ".$ged_command);
+ 		logging("ged_update",$ged_command);
+ 	}
+@@ -482,8 +510,12 @@ function changeGedFilter($filter_name)
+ // advanced search autocomplete
+ function advancedFilterSearch($queue, $filter)
+ {
++	global $array_ged_packets;
++	global $array_ged_queues;
+ 	global $database_ged;
+ 	$datas = array();
++	
++	if(!in_array($queue,$array_ged_queues)) { $queue=$array_ged_queues[0]; }
+ 
+ 	if($filter == "description"){
+ 		echo json_encode($datas);
+@@ -492,14 +524,15 @@ function advancedFilterSearch($queue, $filter)
+ 
+ 	$gedsql_result1=sqlrequest($database_ged,"SELECT pkt_type_id,pkt_type_name FROM pkt_type WHERE pkt_type_id!='0' AND pkt_type_id<'100';");
+ 	
+-	
+-	while($ged_type = mysqli_fetch_assoc($gedsql_result1)){
+-		$sql = "SELECT DISTINCT $filter FROM ".$ged_type["pkt_type_name"]."_queue_".$queue;
+-
+-		$results = sqlrequest($database_ged, $sql);
+-		while($result = mysqli_fetch_array($results)){
+-			if( !in_array($result[$filter], $datas) && $result[$filter] != "" ){
+-				array_push($datas, $result[$filter]);
++	if(isset($array_ged_packets[$filter])) {
++		while($ged_type = mysqli_fetch_assoc($gedsql_result1)){
++			$sql = "SELECT DISTINCT $filter FROM ".$ged_type["pkt_type_name"]."_queue_".$queue;
++
++			$results = sqlrequest($database_ged, $sql);
++			while($result = mysqli_fetch_array($results)){
++				if( !in_array($result[$filter], $datas) && $result[$filter] != "" ){
++					array_push($datas, $result[$filter]);
++				}
+ 			}
+ 		}
+ 	}

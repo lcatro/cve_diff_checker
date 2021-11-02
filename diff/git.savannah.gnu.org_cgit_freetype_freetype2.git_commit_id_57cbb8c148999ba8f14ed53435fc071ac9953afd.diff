@@ -1,0 +1,81 @@
+From 57cbb8c148999ba8f14ed53435fc071ac9953afd Mon Sep 17 00:00:00 2001
+From: Werner Lemberg <wl@gnu.org>
+Date: Sat, 31 Oct 2015 18:47:26 +0100
+Subject: [sfnt] Fix cmap 14 validation (#46346).
+
+* src/sfnt/ttcmap.c (tt_cmap14_validate): Check limit before
+accessing `numRanges' and `numMappings'.
+Fix size check for non-default UVS table.
+---
+ ChangeLog         |  8 ++++++++
+ src/sfnt/ttcmap.c | 26 ++++++++++++++++++--------
+ 2 files changed, 26 insertions(+), 8 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 3804dfa49..44fc7defc 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,11 @@
++2015-10-31  Werner Lemberg  <wl@gnu.org>
++
++	[sfnt] Fix cmap 14 validation (#46346).
++
++	* src/sfnt/ttcmap.c (tt_cmap14_validate): Check limit before
++	accessing `numRanges' and `numMappings'.
++	Fix size check for non-default UVS table.
++
+ 2015-10-31  Werner Lemberg  <wl@gnu.org>
+ 
+ 	[sfnt] Handle infinite recursion in bitmap strikes (#46344).
+diff --git a/src/sfnt/ttcmap.c b/src/sfnt/ttcmap.c
+index f5725087b..579f64ad8 100644
+--- a/src/sfnt/ttcmap.c
++++ b/src/sfnt/ttcmap.c
+@@ -2968,12 +2968,17 @@
+         /* through the normal Unicode cmap, no GIDs, just check order) */
+         if ( defOff != 0 )
+         {
+-          FT_Byte*  defp      = table + defOff;
+-          FT_ULong  numRanges = TT_NEXT_ULONG( defp );
++          FT_Byte*  defp     = table + defOff;
++          FT_ULong  numRanges;
+           FT_ULong  i;
+-          FT_ULong  lastBase  = 0;
++          FT_ULong  lastBase = 0;
+ 
+ 
++          if ( defp + 4 > valid->limit )
++            FT_INVALID_TOO_SHORT;
++
++          numRanges = TT_NEXT_ULONG( defp );
++
+           /* defp + numRanges * 4 > valid->limit ? */
+           if ( numRanges > (FT_ULong)( valid->limit - defp ) / 4 )
+             FT_INVALID_TOO_SHORT;
+@@ -2997,13 +3002,18 @@
+         /* and the non-default table (these glyphs are specified here) */
+         if ( nondefOff != 0 )
+         {
+-          FT_Byte*  ndp         = table + nondefOff;
+-          FT_ULong  numMappings = TT_NEXT_ULONG( ndp );
+-          FT_ULong  i, lastUni  = 0;
++          FT_Byte*  ndp        = table + nondefOff;
++          FT_ULong  numMappings;
++          FT_ULong  i, lastUni = 0;
++
++
++          if ( ndp + 4 > valid->limit )
++            FT_INVALID_TOO_SHORT;
+ 
++          numMappings = TT_NEXT_ULONG( ndp );
+ 
+-          /* numMappings * 4 > (FT_ULong)( valid->limit - ndp ) ? */
+-          if ( numMappings > ( (FT_ULong)( valid->limit - ndp ) ) / 4 )
++          /* numMappings * 5 > (FT_ULong)( valid->limit - ndp ) ? */
++          if ( numMappings > ( (FT_ULong)( valid->limit - ndp ) ) / 5 )
+             FT_INVALID_TOO_SHORT;
+ 
+           for ( i = 0; i < numMappings; ++i )
+-- 
+cgit v1.2.1
+

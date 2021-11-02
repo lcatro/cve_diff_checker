@@ -1,0 +1,39 @@
+From bcaf452e516c02c9bed584a73736431c5e8831f1 Mon Sep 17 00:00:00 2001
+From: Unrud <unrud@openaliasbox.org>
+Date: Thu, 24 Dec 2015 13:32:30 +0100
+Subject: [PATCH] Convert component names safely to filenames Component names
+ are controlled by the user and without this checks access to arbitrary files
+ is possible if the multifilesystem backend is used.
+
+---
+ radicale/storage/multifilesystem.py | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/radicale/storage/multifilesystem.py b/radicale/storage/multifilesystem.py
+index fe5637d4..93cec874 100644
+--- a/radicale/storage/multifilesystem.py
++++ b/radicale/storage/multifilesystem.py
+@@ -53,6 +53,11 @@ def write(self):
+             name = (
+                 component.name if sys.version_info[0] >= 3 else
+                 component.name.encode(filesystem.FILESYSTEM_ENCODING))
++            if not pathutils.is_safe_filesystem_path_component(name):
++                log.LOGGER.debug(
++                    "Can't tranlate name safely to filesystem, "
++                    "skipping component: %s", name)
++                continue
+             filesystem_path = os.path.join(self._filesystem_path, name)
+             with filesystem.open(filesystem_path, "w") as fd:
+                 fd.write(text)
+@@ -62,6 +67,11 @@ def delete(self):
+         os.remove(self._props_path)
+ 
+     def remove(self, name):
++        if not pathutils.is_safe_filesystem_path_component(name):
++            log.LOGGER.debug(
++                "Can't tranlate name safely to filesystem, "
++                "skipping component: %s", name)
++            return
+         filesystem_path = os.path.join(self._filesystem_path, name)
+         if os.path.exists(filesystem_path):
+             os.remove(filesystem_path)

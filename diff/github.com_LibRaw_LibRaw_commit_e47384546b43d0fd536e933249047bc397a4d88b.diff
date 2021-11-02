@@ -1,0 +1,57 @@
+From e47384546b43d0fd536e933249047bc397a4d88b Mon Sep 17 00:00:00 2001
+From: Alex Tutubalin <lexa@lexa.ru>
+Date: Thu, 10 May 2018 11:27:30 +0300
+Subject: [PATCH] Secunia Advisory SA83050: possible infinite loop in
+ parse_minolta()
+
+---
+ dcraw/dcraw.c             | 7 +++++++
+ internal/dcraw_common.cpp | 7 +++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/dcraw/dcraw.c b/dcraw/dcraw.c
+index ace1866c..d1c8895b 100644
+--- a/dcraw/dcraw.c
++++ b/dcraw/dcraw.c
+@@ -15669,11 +15669,18 @@ void CLASS parse_minolta(int base)
+     return;
+   order = fgetc(ifp) * 0x101;
+   offset = base + get4() + 8;
++#ifdef LIBRAW_LIBRARY_BUILD
++  if(offset>ifp->size()-8) // At least 8 bytes for tag/len
++    offset = ifp->size()-8;
++#endif
++
+   while ((save = ftell(ifp)) < offset)
+   {
+     for (tag = i = 0; i < 4; i++)
+       tag = tag << 8 | fgetc(ifp);
+     len = get4();
++    if(len < 0)
++      return; // just ignore wrong len?? or raise bad file exception?
+     switch (tag)
+     {
+     case 0x505244: /* PRD */
+diff --git a/internal/dcraw_common.cpp b/internal/dcraw_common.cpp
+index e0060856..6406198f 100644
+--- a/internal/dcraw_common.cpp
++++ b/internal/dcraw_common.cpp
+@@ -14331,11 +14331,18 @@ void CLASS parse_minolta(int base)
+     return;
+   order = fgetc(ifp) * 0x101;
+   offset = base + get4() + 8;
++#ifdef LIBRAW_LIBRARY_BUILD
++  if(offset>ifp->size()-8) // At least 8 bytes for tag/len
++    offset = ifp->size()-8;
++#endif
++
+   while ((save = ftell(ifp)) < offset)
+   {
+     for (tag = i = 0; i < 4; i++)
+       tag = tag << 8 | fgetc(ifp);
+     len = get4();
++    if(len < 0)
++      return; // just ignore wrong len?? or raise bad file exception?
+     switch (tag)
+     {
+     case 0x505244: /* PRD */

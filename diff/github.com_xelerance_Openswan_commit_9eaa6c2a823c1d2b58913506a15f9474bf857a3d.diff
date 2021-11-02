@@ -1,0 +1,39 @@
+From 9eaa6c2a823c1d2b58913506a15f9474bf857a3d Mon Sep 17 00:00:00 2001
+From: Bart Trojanowski <bart@jukie.net>
+Date: Tue, 14 Aug 2018 14:06:37 -0400
+Subject: [PATCH] wo#7449 . verify padding contents for IKEv2 RSA sig check
+
+Special thanks to Sze Yiu Chau of Purdue University (schau@purdue.edu)
+who reported the issue.
+---
+ lib/liboswkeys/signatures.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/lib/liboswkeys/signatures.c b/lib/liboswkeys/signatures.c
+index 27fd77e22..7f0fb90fb 100644
+--- a/lib/liboswkeys/signatures.c
++++ b/lib/liboswkeys/signatures.c
+@@ -157,8 +157,21 @@ err_t verify_signed_hash(const struct RSA_public_key *k
+ 	return "3""SIG padding does not check out";
+     }
+ 
+-    s += padlen + 3;
+-    (*psig) = s;
++    /* signature starts after ASN wrapped padding [00,01,FF..FF,00] */
++    (*psig) = s + padlen + 3;
++
++    /* verify padding contents */
++    {
++        const u_char *p;
++        size_t cnt_ffs = 0;
++
++        for (p = s+2; p < s+padlen+2; p++)
++            if (*p == 0xFF)
++                cnt_ffs ++;
++
++        if (cnt_ffs != padlen)
++            return "4" "invalid Padding String";
++    }
+ 
+     /* return SUCCESS */
+     return NULL;

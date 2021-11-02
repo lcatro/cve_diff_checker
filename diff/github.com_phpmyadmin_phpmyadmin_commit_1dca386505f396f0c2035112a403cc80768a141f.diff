@@ -1,0 +1,54 @@
+From 1dca386505f396f0c2035112a403cc80768a141f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Wed, 15 Jun 2016 17:48:43 +0200
+Subject: [PATCH] Use javascript for redirection to https
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The current approach is broken since whitelisting is active in url.php
+and also allows potential bbcode injection.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ setup/frames/index.inc.php | 27 ++++++++++++---------------
+ 1 file changed, 12 insertions(+), 15 deletions(-)
+
+diff --git a/setup/frames/index.inc.php b/setup/frames/index.inc.php
+index ed6902a53fd..d28305a6909 100644
+--- a/setup/frames/index.inc.php
++++ b/setup/frames/index.inc.php
+@@ -73,21 +73,18 @@
+         . 'sensitive information, like passwords) is transferred unencrypted!'
+     );
+ 
+-    if (!empty($_SERVER['REQUEST_URI']) && !empty($_SERVER['HTTP_HOST'])) {
+-        $link = htmlspecialchars(
+-            'https://' .  $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI']
+-        );
+-        $text .= ' ';
+-        $text .= PMA_sanitize(
+-            sprintf(
+-                __(
+-                    'If your server is also configured to accept HTTPS requests '
+-                    . 'follow [a@%s]this link[/a] to use a secure connection.'
+-                ),
+-                $link
+-            )
+-        );
+-    }
++    $text .= ' <a href="#" onclick="window.location.href = \'https:\' + window.location.href.substring(window.location.protocol.length);">';
++
++    // Temporary workaround to use tranlated message in older releases
++    $text .= str_replace(
++        array('[a@%s]', '[/a]'),
++        array('', ''),
++        __(
++            'If your server is also configured to accept HTTPS requests '
++            . 'follow [a@%s]this link[/a] to use a secure connection.'
++        )
++    );
++    $text .= '</a>';
+     PMA_messagesSet('notice', 'no_https', __('Insecure connection'), $text);
+ }
+ 

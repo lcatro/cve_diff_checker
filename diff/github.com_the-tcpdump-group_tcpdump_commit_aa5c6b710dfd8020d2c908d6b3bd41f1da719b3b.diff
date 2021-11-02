@@ -1,0 +1,110 @@
+From aa5c6b710dfd8020d2c908d6b3bd41f1da719b3b Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Sun, 8 Oct 2017 11:49:24 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14461/LDP: Fix a bounds check
+
+In ldp_tlv_print(), the FT Session TLV length must be 12, not 8 (RFC3479)
+
+This fixes a buffer over-read discovered by Konrad Rieck and
+Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s).
+
+Moreover:
+Add and use tstr[].
+Add a comment.
+---
+ print-ldp.c                       |   9 ++++++---
+ tests/TESTLIST                    |   1 +
+ tests/ldp-ldp_tlv_print-oobr.out  |   6 ++++++
+ tests/ldp-ldp_tlv_print-oobr.pcap | Bin 0 -> 395 bytes
+ 4 files changed, 13 insertions(+), 3 deletions(-)
+ create mode 100644 tests/ldp-ldp_tlv_print-oobr.out
+ create mode 100644 tests/ldp-ldp_tlv_print-oobr.pcap
+
+diff --git a/print-ldp.c b/print-ldp.c
+index 1bb27fe41..afd943d0a 100644
+--- a/print-ldp.c
++++ b/print-ldp.c
+@@ -29,6 +29,8 @@
+ #include "l2vpn.h"
+ #include "af.h"
+ 
++static const char tstr[] = " [|LDP]";
++
+ /*
+  * ldp common header
+  *
+@@ -486,7 +488,7 @@ ldp_tlv_print(netdissect_options *ndo,
+ 	break;
+ 
+     case LDP_TLV_FT_SESSION:
+-	TLV_TCHECK(8);
++	TLV_TCHECK(12);
+ 	ft_flags = EXTRACT_16BITS(tptr);
+ 	ND_PRINT((ndo, "\n\t      Flags: [%sReconnect, %sSave State, %sAll-Label Protection, %s Checkpoint, %sRe-Learn State]",
+ 	       ft_flags&0x8000 ? "" : "No ",
+@@ -494,6 +496,7 @@ ldp_tlv_print(netdissect_options *ndo,
+ 	       ft_flags&0x4 ? "" : "No ",
+ 	       ft_flags&0x2 ? "Sequence Numbered Label" : "All Labels",
+ 	       ft_flags&0x1 ? "" : "Don't "));
++	/* 16 bits (FT Flags) + 16 bits (Reserved) */
+ 	tptr+=4;
+ 	ui = EXTRACT_32BITS(tptr);
+ 	if (ui)
+@@ -534,7 +537,7 @@ ldp_tlv_print(netdissect_options *ndo,
+     return(tlv_len+4); /* Type & Length fields not included */
+ 
+ trunc:
+-    ND_PRINT((ndo, "\n\t\t packet exceeded snapshot"));
++    ND_PRINT((ndo, "%s", tstr));
+     return 0;
+ 
+ badtlv:
+@@ -692,7 +695,7 @@ ldp_pdu_print(netdissect_options *ndo,
+     }
+     return pdu_len+4;
+ trunc:
+-    ND_PRINT((ndo, "\n\t\t packet exceeded snapshot"));
++    ND_PRINT((ndo, "%s", tstr));
+     return 0;
+ }
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 0bc46baed..ac8feb4aa 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -552,6 +552,7 @@ ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
+ ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
+ isakmp-ikev1_n_print-oobr isakmp-ikev1_n_print-oobr.pcap isakmp-ikev1_n_print-oobr.out -v -c3
++ldp-ldp_tlv_print-oobr ldp-ldp_tlv_print-oobr.pcap ldp-ldp_tlv_print-oobr.out -v -c1
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/ldp-ldp_tlv_print-oobr.out b/tests/ldp-ldp_tlv_print-oobr.out
+new file mode 100644
+index 000000000..e5f611766
+--- /dev/null
++++ b/tests/ldp-ldp_tlv_print-oobr.out
+@@ -0,0 +1,6 @@
++IP (tos 0x0, id 4608, offset 0, flags [+, DF, rsvd], proto UDP (17), length 25600, options (EOL), bad cksum 8e (->4023)!)
++    24.250.219.0.4098 > 0.0.0.0.646: 
++	LDP, Label-Space-ID: 0.0.127.255:796, pdu-length: 514
++	  Address Withdraw Message (0x0301), length: 22, Message ID: 0x00001600, Flags: [ignore if unknown]
++	    Unknown TLV (0x0404), length: 0, Flags: [ignore and don't forward if unknown]
++	    Fault-Tolerant Session Parameters TLV (0x0503), length: 8, Flags: [ignore and don't forward if unknown] [|LDP] [|LDP]
+diff --git a/tests/ldp-ldp_tlv_print-oobr.pcap b/tests/ldp-ldp_tlv_print-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..29fb84a50d4b8b2a7183e89bfca3ae442458bacf
+GIT binary patch
+literal 395
+zcma)&F-ikL7=^!?-GLwxW`(SR3c(z}8>FzX*(P9N4qzwf4P2{~+NIDU<O-fZ@c?PW
+z#v)NqAXx1d<D0|;vC+r;!!UgF9`l|a@5YvtHFn{WZVxb;5LKRXtn*&HY1ZxG#r;D%
+z@-#T)gbikpakW*wh><4ycxwj-Rb?^OLK%{s#E_$vrr;798np15_A2IGx{2FwwZd&a
+zkL#egUY6+@!O^5146pt9cHh3qa2~=RA^-l1!_=G=MWJ5G*C~7k^}#guvi{sZ$`day
+f=iH2rS+Z8(roaXJv1D7-idBo>zLEU_nuX~XS%Y)W
+
+literal 0
+HcmV?d00001
+

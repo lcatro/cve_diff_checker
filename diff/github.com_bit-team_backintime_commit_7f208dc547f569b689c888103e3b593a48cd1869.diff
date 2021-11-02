@@ -1,0 +1,54 @@
+From 7f208dc547f569b689c888103e3b593a48cd1869 Mon Sep 17 00:00:00 2001
+From: Matthias Gerstner <matthias.gerstner@suse.de>
+Date: Wed, 5 Apr 2017 13:57:59 +0200
+Subject: [PATCH] polkit CheckAuthorization: fix race condition in privilege
+ authorization
+
+The unix-process authorization subject is deprecated:
+
+https://www.freedesktop.org/software/polkit/docs/latest/PolkitUnixProcess.html#polkit-unix-process-new
+
+as it is subject to a race condition. A client process requesting
+authorization can replace itself by a suid or otherwise root owned
+executable, thus granting the original non-privileged request
+privileges.
+
+See also:
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1002375
+https://github.com/Kabot/Unix-Privilege-Escalation-Exploits-Pack/blob/master/2011/CVE-2011-1485/polkit-pwnage.c
+
+Polkit uses the real-uid of the process by now, thus mitigating the
+exploit using suid binaries. It is still possible, however, to exit the
+client process and try to get a root program to get the same PID.
+
+In worst case this would allow an unauthenticated user to get backintime
+or some other program to be executed via udev rules as root user.
+---
+ qt/serviceHelper.py | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/qt/serviceHelper.py b/qt/serviceHelper.py
+index d45d99e5..ec643c11 100644
+--- a/qt/serviceHelper.py
++++ b/qt/serviceHelper.py
+@@ -282,18 +282,12 @@ def _checkPolkitPrivilege(self, sender, conn, privilege):
+             # bus, and it does not make sense to restrict operations here
+             return
+ 
+-        info = SenderInfo(sender, conn)
+-
+-        # get peer PID
+-        pid = info.connectionPid()
+-
+         # query PolicyKit
+         self._initPolkit()
+         try:
+             # we don't need is_challenge return here, since we call with AllowUserInteraction
+             (is_auth, _, details) = self.polkit.CheckAuthorization(
+-                    ('unix-process', {'pid': dbus.UInt32(pid, variant_level=1),
+-                    'start-time': dbus.UInt64(0, variant_level=1)}),
++                    ('system-bus-name', {'name': dbus.String(sender, variant_level=1)}),
+                     privilege, {'': ''}, dbus.UInt32(1), '', timeout=3000)
+         except dbus.DBusException as e:
+             if e._dbus_error_name == 'org.freedesktop.DBus.Error.ServiceUnknown':

@@ -1,0 +1,33 @@
+From 20431e9044cf2ad3c0323c34888b192f3289af6b Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Mon, 26 Apr 2021 13:43:59 -0700
+Subject: [PATCH] Fix `tf.raw_ops.QuantizeAndDequantizeV4Grad` CHECK failure.
+
+PiperOrigin-RevId: 370532425
+Change-Id: I767721be266851b63d8fe55e7ac6be0af6017f6c
+---
+ tensorflow/core/kernels/quantize_and_dequantize_op.cc | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantize_and_dequantize_op.cc b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+index 675bdaec225bd..c2a7a90d8713d 100644
+--- a/tensorflow/core/kernels/quantize_and_dequantize_op.cc
++++ b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+@@ -160,7 +160,17 @@ class QuantizeAndDequantizeV4GradientOp : public OpKernel {
+         errors::InvalidArgument("gradient and input must be the same size"));
+     const int depth = (axis_ == -1) ? 1 : input.dim_size(axis_);
+     const Tensor& input_min_tensor = ctx->input(2);
++    OP_REQUIRES(ctx,
++                input_min_tensor.dims() == 0 || input_min_tensor.dims() == 1,
++                errors::InvalidArgument(
++                    "Input min tensor must have dimension 1. Recieved ",
++                    input_min_tensor.dims(), "."));
+     const Tensor& input_max_tensor = ctx->input(3);
++    OP_REQUIRES(ctx,
++                input_max_tensor.dims() == 0 || input_max_tensor.dims() == 1,
++                errors::InvalidArgument(
++                    "Input max tensor must have dimension 1. Recieved ",
++                    input_max_tensor.dims(), "."));
+     if (axis_ != -1) {
+       OP_REQUIRES(
+           ctx, input_min_tensor.dim_size(0) == depth,

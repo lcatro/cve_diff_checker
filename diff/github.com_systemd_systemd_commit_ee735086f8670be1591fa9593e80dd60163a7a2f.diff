@@ -1,0 +1,77 @@
+From ee735086f8670be1591fa9593e80dd60163a7a2f Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 11 Nov 2015 22:54:56 +0100
+Subject: [PATCH] util-lib: use MODE_INVALID as invalid value for mode_t
+ everywhere
+
+---
+ src/basic/fs-util.c        | 4 ++--
+ src/core/timer.c           | 4 ++--
+ src/test/test-conf-files.c | 3 ++-
+ 3 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/basic/fs-util.c b/src/basic/fs-util.c
+index 7aee404bfcfa..cddd4232fceb 100644
+--- a/src/basic/fs-util.c
++++ b/src/basic/fs-util.c
+@@ -311,7 +311,7 @@ int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gi
+         if (fd < 0)
+                 return -errno;
+ 
+-        if (mode > 0) {
++        if (mode != MODE_INVALID) {
+                 r = fchmod(fd, mode);
+                 if (r < 0)
+                         return -errno;
+@@ -338,7 +338,7 @@ int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gi
+ }
+ 
+ int touch(const char *path) {
+-        return touch_file(path, false, USEC_INFINITY, UID_INVALID, GID_INVALID, 0);
++        return touch_file(path, false, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
+ }
+ 
+ int symlink_idempotent(const char *from, const char *to) {
+diff --git a/src/core/timer.c b/src/core/timer.c
+index c50e891aeb67..06a6035315f4 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -519,7 +519,7 @@ static void timer_enter_running(Timer *t) {
+         dual_timestamp_get(&t->last_trigger);
+ 
+         if (t->stamp_path)
+-                touch_file(t->stamp_path, true, t->last_trigger.realtime, UID_INVALID, GID_INVALID, 0);
++                touch_file(t->stamp_path, true, t->last_trigger.realtime, UID_INVALID, GID_INVALID, MODE_INVALID);
+ 
+         timer_set_state(t, TIMER_RUNNING);
+         return;
+@@ -555,7 +555,7 @@ static int timer_start(Unit *u) {
+                         /* The timer has never run before,
+                          * make sure a stamp file exists.
+                          */
+-                        touch_file(t->stamp_path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, 0);
++                        touch_file(t->stamp_path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
+         }
+ 
+         t->result = TIMER_SUCCESS;
+diff --git a/src/test/test-conf-files.c b/src/test/test-conf-files.c
+index a69698d4ead1..86ac513d4f51 100644
+--- a/src/test/test-conf-files.c
++++ b/src/test/test-conf-files.c
+@@ -26,6 +26,7 @@
+ #include "conf-files.h"
+ #include "fs-util.h"
+ #include "macro.h"
++#include "parse-util.h"
+ #include "rm-rf.h"
+ #include "string-util.h"
+ #include "strv.h"
+@@ -40,7 +41,7 @@ static void setup_test_dir(char *tmp_dir, const char *files, ...) {
+         va_start(ap, files);
+         while (files != NULL) {
+                 _cleanup_free_ char *path = strappend(tmp_dir, files);
+-                assert_se(touch_file(path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, 0) == 0);
++                assert_se(touch_file(path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID) == 0);
+                 files = va_arg(ap, const char *);
+         }
+         va_end(ap);

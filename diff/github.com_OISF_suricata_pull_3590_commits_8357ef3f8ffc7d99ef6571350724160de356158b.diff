@@ -1,0 +1,58 @@
+From 8357ef3f8ffc7d99ef6571350724160de356158b Mon Sep 17 00:00:00 2001
+From: Victor Julien <victor@inliniac.net>
+Date: Wed, 19 Dec 2018 11:49:42 +0100
+Subject: [PATCH] proto/detect: workaround dns misdetected as dcerpc
+
+The DCERPC UDP detection would misfire on DNS with transaction
+ID 0x0400. This would happen as the protocol detection engine
+gives preference to pattern based detection over probing parsers for
+performance reasons.
+
+This hack/workaround fixes this specific case by still running the
+probing parser if DCERPC has been detected on UDP. The probing
+parser result will take precedence.
+
+Bug #2736.
+---
+ src/app-layer-detect-proto.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/app-layer-detect-proto.c b/src/app-layer-detect-proto.c
+index b90266d787e..7e951cf8547 100644
+--- a/src/app-layer-detect-proto.c
++++ b/src/app-layer-detect-proto.c
+@@ -1361,6 +1361,7 @@ AppProto AppLayerProtoDetectGetProto(AppLayerProtoDetectThreadCtx *tctx,
+             (direction & STREAM_TOSERVER) ? "toserver" : "toclient");
+ 
+     AppProto alproto = ALPROTO_UNKNOWN;
++    AppProto pm_alproto = ALPROTO_UNKNOWN;
+ 
+     if (!FLOW_IS_PM_DONE(f, direction)) {
+         AppProto pm_results[ALPROTO_MAX];
+@@ -1371,7 +1372,15 @@ AppProto AppLayerProtoDetectGetProto(AppLayerProtoDetectThreadCtx *tctx,
+                                                    pm_results);
+         if (pm_matches > 0) {
+             alproto = pm_results[0];
+-            goto end;
++
++            /* HACK: if detected protocol is dcerpc/udp, we run PP as well
++             * to avoid misdetecting DNS as DCERPC. */
++            if (!(ipproto == IPPROTO_UDP && alproto == ALPROTO_DCERPC))
++                goto end;
++
++            pm_alproto = alproto;
++
++            /* fall through */
+         }
+     }
+ 
+@@ -1388,6 +1397,9 @@ AppProto AppLayerProtoDetectGetProto(AppLayerProtoDetectThreadCtx *tctx,
+     }
+ 
+  end:
++    if (alproto == ALPROTO_UNKNOWN)
++        alproto = pm_alproto;
++
+     SCReturnUInt(alproto);
+ }
+ 

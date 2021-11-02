@@ -1,0 +1,43 @@
+From 252c1ca184cb38e1acb917aa0e451c5f08519996 Mon Sep 17 00:00:00 2001
+From: Xiaoyin Liu <xiaoyinl@users.noreply.github.com>
+Date: Tue, 12 Jun 2018 22:12:57 -0700
+Subject: [PATCH] Fix integer overflow in layer_resize in map_engine.c (#268)
+
+* Fix integer overflow in layer_resize in map_engine.c
+
+There's a buffer overflow bug in the function layer_resize. It allocates
+a buffer `tilemap` with size `x_size * y_size * sizeof(struct map_tile)`.
+But it didn't check for integer overflow, so if x_size and y_size are
+very large, it's possible that the buffer size is smaller than needed,
+causing a buffer overflow later.
+
+PoC: `SetLayerSize(0, 0x7FFFFFFF, 0x7FFFFFFF);`
+
+* move malloc to a separate line
+---
+ src/minisphere/map_engine.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/minisphere/map_engine.c b/src/minisphere/map_engine.c
+index 0d47a326..cba8a612 100644
+--- a/src/minisphere/map_engine.c
++++ b/src/minisphere/map_engine.c
+@@ -1036,6 +1036,7 @@ layer_resize(int layer, int x_size, int y_size)
+ 	struct map_tile*    tilemap;
+ 	struct map_trigger* trigger;
+ 	struct map_zone*    zone;
++	size_t              tilemap_size;
+ 
+ 	int x, y, i;
+ 
+@@ -1044,7 +1045,9 @@ layer_resize(int layer, int x_size, int y_size)
+ 
+ 	// allocate a new tilemap and copy the old layer tiles into it.  we can't simply realloc
+ 	// because the tilemap is a 2D array.
+-	if (!(tilemap = malloc(x_size * y_size * sizeof(struct map_tile))))
++	tilemap_size = x_size * y_size * sizeof(struct map_tile);
++	if (x_size == 0 || tilemap_size / x_size / sizeof(struct map_tile) != y_size
++		|| !(tilemap = malloc(tilemap_size)))
+ 		return false;
+ 	for (x = 0; x < x_size; ++x) {
+ 		for (y = 0; y < y_size; ++y) {

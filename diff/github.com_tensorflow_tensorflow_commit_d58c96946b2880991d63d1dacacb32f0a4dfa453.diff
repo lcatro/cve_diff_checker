@@ -1,0 +1,158 @@
+From d58c96946b2880991d63d1dacacb32f0a4dfa453 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 18 Sep 2020 14:04:39 -0700
+Subject: [PATCH] [tflite] Ensure inputs and outputs don't overlap.
+
+If a model uses the same tensor for both an input and an output then this can result in data loss and memory corruption. This should not happen.
+
+PiperOrigin-RevId: 332522916
+Change-Id: If0905b142415a9dfceaf2d181872f2a8fb88f48a
+---
+ tensorflow/lite/BUILD                         |   1 +
+ tensorflow/lite/core/subgraph.cc              |  37 ++++++++++++++++++
+ tensorflow/lite/core/subgraph.h               |   9 +++++
+ tensorflow/lite/model_test.cc                 |  19 +++++++++
+ .../lite/testdata/add_shared_tensors.bin      | Bin 0 -> 432 bytes
+ tensorflow/lite/testdata/sparse_tensor.bin    | Bin 592 -> 592 bytes
+ 6 files changed, 66 insertions(+)
+ create mode 100644 tensorflow/lite/testdata/add_shared_tensors.bin
+
+diff --git a/tensorflow/lite/BUILD b/tensorflow/lite/BUILD
+index 76e9f5de7c100..e50cd4549b297 100644
+--- a/tensorflow/lite/BUILD
++++ b/tensorflow/lite/BUILD
+@@ -466,6 +466,7 @@ cc_test(
+     data = [
+         "testdata/0_subgraphs.bin",
+         "testdata/2_subgraphs.bin",
++        "testdata/add_shared_tensors.bin",
+         "testdata/empty_model.bin",
+         "testdata/multi_add_flex.bin",
+         "testdata/sparse_tensor.bin",
+diff --git a/tensorflow/lite/core/subgraph.cc b/tensorflow/lite/core/subgraph.cc
+index 2fe8099d3723e..47d0fddb12bd6 100644
+--- a/tensorflow/lite/core/subgraph.cc
++++ b/tensorflow/lite/core/subgraph.cc
+@@ -581,6 +581,33 @@ TfLiteStatus Subgraph::CheckTensorIndices(const char* label, const int* indices,
+   return kTfLiteOk;
+ }
+ 
++// We have two arrays and we need to check that elements from one array don't
++// show up in the other. We could sort both arrays and then iterate with two
++// pointers from start to finish always increasing the smaller one but since
++// these arrays are usually short (<25 elements for inputs, usually <3 for
++// outputs), this might be slower than the naive approach (if arrays have size n
++// and m, with n >> m ~ O(1), first approach is O(nlogn) whereas the other is
++// O(n)). Plus, sorting the input and output arrays might not be something we
++// want as it destroys ordering of elements.
++//
++// If it turns out that this is an issue, we can switch to the other algorithm.
++TfLiteStatus Subgraph::CheckInputAndOutputForOverlap(const int* input_indices,
++                                                     int num_inputs,
++                                                     const int* output_indices,
++                                                     int num_outputs) {
++  for (int i = 0; i < num_inputs; i++) {
++    for (int j = 0; j < num_outputs; j++) {
++      if (input_indices[i] == output_indices[j]) {
++        ReportError("Tensor %d is both input %d and output %d\n",
++                    input_indices[i], i, j);
++        consistent_ = false;
++        return kTfLiteError;
++      }
++    }
++  }
++  return kTfLiteOk;
++}
++
+ namespace {
+ // Multiply two sizes and return true if overflow occurred;
+ // This is based off tensorflow/overflow.h but is simpler as we already
+@@ -707,6 +734,16 @@ TfLiteStatus Subgraph::AddNodeWithParameters(
+       &context_,
+       CheckTensorIndices("node outputs", outputs.data(), outputs.size()));
+ 
++  // For builtin ops, inputs and outputs must not overlap. Custom ops must do
++  // this check by themselves if they don't support overlapping tensors. This
++  // distinction is to allow custom ops to just forward a tensor, reusing it as
++  // both input and output.
++  if (builtin_data != nullptr) {
++    TF_LITE_ENSURE_OK(&context_, CheckInputAndOutputForOverlap(
++                                     inputs.data(), inputs.size(),
++                                     outputs.data(), outputs.size()));
++  }
++
+   int new_node_index = nodes_and_registration_.size();
+   if (node_index) *node_index = new_node_index;
+   nodes_and_registration_.resize(nodes_and_registration_.size() + 1);
+diff --git a/tensorflow/lite/core/subgraph.h b/tensorflow/lite/core/subgraph.h
+index c74611a6ca44a..b94d1a0b2bc4d 100644
+--- a/tensorflow/lite/core/subgraph.h
++++ b/tensorflow/lite/core/subgraph.h
+@@ -451,6 +451,15 @@ class Subgraph {
+   TfLiteStatus CheckTensorIndices(const char* label, const int* indices,
+                                   int length);
+ 
++  // Check that the input indices and the output indices don't overlap.
++  // This is needed because same tensor must not be used both as input and
++  // output for an operator.
++  // NOTE: this changes consistent_ to be false if indices are out of bounds.
++  TfLiteStatus CheckInputAndOutputForOverlap(const int* input_indices,
++                                             int num_inputs,
++                                             const int* output_indices,
++                                             int num_outputs);
++
+   // Compute the number of bytes required to represent a tensor with dimensions
+   // specified by the array dims (of length dims_size). Returns the status code
+   // and bytes.
+diff --git a/tensorflow/lite/model_test.cc b/tensorflow/lite/model_test.cc
+index ba96494225ccc..6993e350a4883 100644
+--- a/tensorflow/lite/model_test.cc
++++ b/tensorflow/lite/model_test.cc
+@@ -438,6 +438,25 @@ TEST(BasicFlatBufferModel, TestParseModelWithSparseTensor) {
+ }
+ 
+ // TODO(b/150072943): Add malformed model with sparse tensor tests.
++TEST(BasicFlatBufferModel, TestHandleMalformedModel) {
++  const auto model_paths = {
++      // These models use the same tensor as both input and ouput of a node
++      "tensorflow/lite/testdata/add_shared_tensors.bin",
++  };
++
++  for (const auto& model_path : model_paths) {
++    std::unique_ptr<tflite::FlatBufferModel> model =
++        FlatBufferModel::BuildFromFile(model_path);
++    ASSERT_NE(model, nullptr);
++
++    tflite::ops::builtin::BuiltinOpResolver resolver;
++    InterpreterBuilder builder(*model, resolver);
++    std::unique_ptr<Interpreter> interpreter;
++    ASSERT_EQ(builder(&interpreter), kTfLiteOk);
++    ASSERT_NE(interpreter, nullptr);
++    ASSERT_NE(interpreter->AllocateTensors(), kTfLiteOk);
++  }
++}
+ 
+ // TODO(aselle): Add tests for serialization of builtin op data types.
+ // These tests will occur with the evaluation tests of individual operators,
+diff --git a/tensorflow/lite/testdata/add_shared_tensors.bin b/tensorflow/lite/testdata/add_shared_tensors.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..cf9f9775818b9fedc6a777be6f9ad3f4e58ffe1c
+GIT binary patch
+literal 432
+zcmZutu?@m75In#@B&;Y!3Q7i`BO@RxN)|v$Ljx%iiGl$bfFYO%F$@*v&UPY*uypUg
+z`0o790>EywU2%&mMGk`mmOMksIwH;kV9DJOZ2c)Pq0X>|@7%g2O-9%*E%Tlmzg>w7
+zp{yaXj{U<q$96Vn(d{~ay`58*bb^*RI9blBIj3<>(jRZZJZW2h+xNNNR}lrFJMZ)<
+xTfN?PYU-+~1D7|6knj1W9g`o9Uh2Jlt>vuB3{!{yBd(l%S^o938HT6QegKcoAA$e?
+
+literal 0
+HcmV?d00001
+
+diff --git a/tensorflow/lite/testdata/sparse_tensor.bin b/tensorflow/lite/testdata/sparse_tensor.bin
+index ef02328088720ccfb1946e9a798e306233bfd5eb..ec4c8dcf1fc3e2a51447303fe1791d31cc758d0e 100644
+GIT binary patch
+delta 20
+Xcmcb>a)D*S9!>@zU<BcfN4psTIz9yg
+
+delta 20
+Zcmcb>a)D*S9?t(jz{mgu8;^D~0sv?W2>k#6
+

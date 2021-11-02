@@ -1,0 +1,25 @@
+From d7de67733925de196ec8863a33445b73f9562d1d Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 22:23:46 -0700
+Subject: [PATCH] Prevent a CHECK-fail due to empty tensor input in
+ `map_stage_op.cc`
+
+PiperOrigin-RevId: 387737906
+Change-Id: Idc52df0c71c7ed6e2dd633b651a581932f277c8a
+---
+ tensorflow/core/kernels/map_stage_op.cc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/map_stage_op.cc b/tensorflow/core/kernels/map_stage_op.cc
+index b575c2d3862e0..9411792762baa 100644
+--- a/tensorflow/core/kernels/map_stage_op.cc
++++ b/tensorflow/core/kernels/map_stage_op.cc
+@@ -527,6 +527,8 @@ class MapStageOp : public OpKernel {
+     OP_REQUIRES_OK(ctx, ctx->input("key", &key_tensor));
+     OP_REQUIRES_OK(ctx, ctx->input("indices", &indices_tensor));
+     OP_REQUIRES_OK(ctx, ctx->input_list("values", &values_tensor));
++    OP_REQUIRES(ctx, key_tensor->NumElements() > 0,
++                errors::InvalidArgument("key must not be empty"));
+ 
+     // Create copy for insertion into Staging Area
+     Tensor key(*key_tensor);

@@ -1,0 +1,2739 @@
+From 12a277ca22f15e3594eacaf6cc6141fb2ef137da Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:33:48 -0500
+Subject: [PATCH 01/49] Add 'classifierFMethodWithOptionallyExcludedPath'.
+
+---
+ .../metrics/prometheus/Prometheus.scala       | 46 ++++++++++++++++++-
+ 1 file changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 01ecd887e28..eaf0a82fd83 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -1,9 +1,12 @@
+ package org.http4s.metrics.prometheus
+ 
++import cats.Foldable
+ import cats.data.NonEmptyList
+ import cats.effect.Sync
++import cats.implicits._
+ import io.prometheus.client._
+-import org.http4s.{Method, Status}
++import org.http4s.dsl.Http4sDsl
++import org.http4s.{Method, Request, Status}
+ import org.http4s.metrics.MetricsOps
+ import org.http4s.metrics.TerminationType
+ import org.http4s.metrics.TerminationType.{Abnormal, Error, Timeout}
+@@ -191,6 +194,47 @@ object Prometheus {
+   private val DefaultHistogramBuckets: NonEmptyList[Double] =
+     NonEmptyList(.005, List(.01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
+ 
++  /**
++    * Given an exclude function, return a 'classifier' function, i.e. for application in
++    * [[org.http4s.client.middleware.Metrics#apply]].
++    *
++    * Let's say you want a classifier that excludes integers since your paths consist of:
++    *   * GET    /users/{integer}
++    *   * POST   /users
++    *   * PUT    /users/{integer}
++    *   * DELETE /users/{integer}
++    *
++    * In such a case, we could use:
++    *
++    * classifierFMethodWithOptionallyExcludedPath { str: String => scala.util.Try(str.toInt).isSuccess }
++    *
++    * @param exclude For a given String, namely a path value, determine whether the value gets excluded.
++    * @return Request[F] => Option[String]
++    */
++  def classifierFMethodWithOptionallyExcludedPath[F[_]](
++    exclude: String => Boolean
++  ): Request[F] => Option[String] = {
++    request: Request[F] =>
++
++      val dsl: Http4sDsl[F] = Http4sDsl[F]
++
++      val initial: String = request.method.name.toLowerCase
++
++      val pathList: List[String] =
++        dsl.Path.unapplySeq(request).getOrElse(Nil)
++
++      val minusExcluded: List[String] = pathList.map {
++        value: String => if (exclude(value)) "*" else value.toLowerCase
++      }
++
++      val result: String =
++        minusExcluded match {
++          case Nil      => initial
++          case nonEmpty => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
++        }
++
++      Some(result)
++  }
+ }
+ 
+ case class MetricsCollection(
+
+From c13d63e0e42b16dae4537a2863b3a84806c43799 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:34:17 -0500
+Subject: [PATCH 02/49] Add 'Arbitrary[UUID]'.
+
+---
+ .../main/scala/org/http4s/testing/ArbitraryInstances.scala   | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala b/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
+index 5337052ebc5..330dcb1141f 100644
+--- a/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
++++ b/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
+@@ -11,7 +11,7 @@ import cats.implicits.{catsSyntaxEither => _, _}
+ import fs2.{Pure, Stream}
+ import java.nio.charset.{Charset => NioCharset}
+ import java.time._
+-import java.util.Locale
++import java.util.{Locale, UUID}
+ import org.http4s.headers._
+ import org.http4s.syntax.literals._
+ import org.http4s.syntax.string._
+@@ -861,6 +861,9 @@ trait ArbitraryInstances {
+         body <- http4sTestingGenForPureByteStream
+       } yield Response(status, httpVersion, headers, body)
+     }
++
++  implicit val arbUUID: Arbitrary[UUID] =
++    Arbitrary(Gen.uuid)
+ }
+ 
+ object ArbitraryInstances extends ArbitraryInstances
+
+From 39ef4341b91ee10d7a0e8beaac27393ef1575875 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:35:07 -0500
+Subject: [PATCH 03/49] Add tests for
+ 'classifierFMethodWithOptionallyExcludedPath'.
+
+---
+ .../metrics/prometheus/PrometheusSpec.scala   | 59 +++++++++++++++++++
+ 1 file changed, 59 insertions(+)
+ create mode 100644 prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+new file mode 100644
+index 00000000000..57f8c08b87a
+--- /dev/null
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -0,0 +1,59 @@
++package org.http4s.metrics.prometheus
++
++import cats.effect.IO
++import cats.implicits._
++import java.util.UUID
++import org.http4s._
++import Prometheus.classifierFMethodWithOptionallyExcludedPath
++
++class PrometheusSpec extends Http4sSpec {
++
++  "classifierFMethodWithOptionallyExcludedPath" should {
++    "properly exclude UUIDs" in prop {
++      (method: Method, uuid: UUID) => {
++        val request: Request[IO] = Request[IO](
++          method = method,
++          uri    = Uri.unsafeFromString(s"/users/$uuid/comments")
++        )
++
++        val excludeUUIDs: String => Boolean = {
++          str: String =>
++            Either
++              .catchOnly[IllegalArgumentException](UUID.fromString(str))
++              .isRight
++        }
++
++        val classifier: Request[IO] => Option[String] =
++          classifierFMethodWithOptionallyExcludedPath(
++            excludeUUIDs
++          )
++
++        val result: Option[String] =
++          classifier(request)
++
++        val expected: Option[String] =
++          Some(method.name.toLowerCase() + "_" + "users_*_comments")
++
++        result ==== expected
++      }
++    }
++    "return '$method' if the path is '/'" in prop {
++      method: Method =>
++        val request: Request[IO] = Request[IO](
++          method = method,
++          uri    = uri"""/"""
++        )
++
++        val classifier: Request[IO] => Option[String] =
++          classifierFMethodWithOptionallyExcludedPath(
++            _ => true
++          )
++
++        val result: Option[String] =
++          classifier(request)
++
++        result ==== Some(method.name.toLowerCase)
++    }
++  }
++  
++}
+
+From 494b7de97c6250032b094371ace6e54907ef2c8e Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:36:11 -0500
+Subject: [PATCH 04/49] Run scalafmt for src and test.
+
+---
+ .../metrics/prometheus/Prometheus.scala       | 30 +++++++------
+ .../metrics/prometheus/PrometheusSpec.scala   | 42 +++++++++----------
+ 2 files changed, 34 insertions(+), 38 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index eaf0a82fd83..7553963b1a0 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -212,28 +212,26 @@ object Prometheus {
+     * @return Request[F] => Option[String]
+     */
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+-    exclude: String => Boolean
+-  ): Request[F] => Option[String] = {
+-    request: Request[F] =>
++      exclude: String => Boolean
++  ): Request[F] => Option[String] = { request: Request[F] =>
++    val dsl: Http4sDsl[F] = Http4sDsl[F]
+ 
+-      val dsl: Http4sDsl[F] = Http4sDsl[F]
++    val initial: String = request.method.name.toLowerCase
+ 
+-      val initial: String = request.method.name.toLowerCase
++    val pathList: List[String] =
++      dsl.Path.unapplySeq(request).getOrElse(Nil)
+ 
+-      val pathList: List[String] =
+-        dsl.Path.unapplySeq(request).getOrElse(Nil)
++    val minusExcluded: List[String] = pathList.map { value: String =>
++      if (exclude(value)) "*" else value.toLowerCase
++    }
+ 
+-      val minusExcluded: List[String] = pathList.map {
+-        value: String => if (exclude(value)) "*" else value.toLowerCase
++    val result: String =
++      minusExcluded match {
++        case Nil => initial
++        case nonEmpty => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
+       }
+ 
+-      val result: String =
+-        minusExcluded match {
+-          case Nil      => initial
+-          case nonEmpty => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
+-        }
+-
+-      Some(result)
++    Some(result)
+   }
+ }
+ 
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+index 57f8c08b87a..ccd781716c3 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -9,18 +9,17 @@ import Prometheus.classifierFMethodWithOptionallyExcludedPath
+ class PrometheusSpec extends Http4sSpec {
+ 
+   "classifierFMethodWithOptionallyExcludedPath" should {
+-    "properly exclude UUIDs" in prop {
+-      (method: Method, uuid: UUID) => {
++    "properly exclude UUIDs" in prop { (method: Method, uuid: UUID) =>
++      {
+         val request: Request[IO] = Request[IO](
+           method = method,
+-          uri    = Uri.unsafeFromString(s"/users/$uuid/comments")
++          uri = Uri.unsafeFromString(s"/users/$uuid/comments")
+         )
+ 
+-        val excludeUUIDs: String => Boolean = {
+-          str: String =>
+-            Either
+-              .catchOnly[IllegalArgumentException](UUID.fromString(str))
+-              .isRight
++        val excludeUUIDs: String => Boolean = { str: String =>
++          Either
++            .catchOnly[IllegalArgumentException](UUID.fromString(str))
++            .isRight
+         }
+ 
+         val classifier: Request[IO] => Option[String] =
+@@ -37,23 +36,22 @@ class PrometheusSpec extends Http4sSpec {
+         result ==== expected
+       }
+     }
+-    "return '$method' if the path is '/'" in prop {
+-      method: Method =>
+-        val request: Request[IO] = Request[IO](
+-          method = method,
+-          uri    = uri"""/"""
++    "return '$method' if the path is '/'" in prop { method: Method =>
++      val request: Request[IO] = Request[IO](
++        method = method,
++        uri = uri"""/"""
++      )
++
++      val classifier: Request[IO] => Option[String] =
++        classifierFMethodWithOptionallyExcludedPath(
++          _ => true
+         )
+ 
+-        val classifier: Request[IO] => Option[String] =
+-          classifierFMethodWithOptionallyExcludedPath(
+-            _ => true
+-          )
++      val result: Option[String] =
++        classifier(request)
+ 
+-        val result: Option[String] =
+-          classifier(request)
+-
+-        result ==== Some(method.name.toLowerCase)
++      result ==== Some(method.name.toLowerCase)
+     }
+   }
+-  
++
+ }
+
+From b955e824d4cf55d44e745fca54123b94935a14ec Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:40:07 -0500
+Subject: [PATCH 05/49] Add classifier results to documentation.
+
+---
+ .../scala/org/http4s/metrics/prometheus/Prometheus.scala  | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 7553963b1a0..ee52cfd58b3 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -199,10 +199,10 @@ object Prometheus {
+     * [[org.http4s.client.middleware.Metrics#apply]].
+     *
+     * Let's say you want a classifier that excludes integers since your paths consist of:
+-    *   * GET    /users/{integer}
+-    *   * POST   /users
+-    *   * PUT    /users/{integer}
+-    *   * DELETE /users/{integer}
++    *   * GET    /users/{integer} = get_users_*
++    *   * POST   /users           = post_users
++    *   * PUT    /users/{integer} = put_users_*
++    *   * DELETE /users/{integer} = delete_users_*
+     *
+     * In such a case, we could use:
+     *
+
+From 695d37f9bcaaa2bd19f66251f18a516740ca078c Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:49:55 -0500
+Subject: [PATCH 06/49] Update docs to indicate both client and server's
+ Metrics#apply are relevant.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index ee52cfd58b3..fc649430073 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -196,7 +196,7 @@ object Prometheus {
+ 
+   /**
+     * Given an exclude function, return a 'classifier' function, i.e. for application in
+-    * [[org.http4s.client.middleware.Metrics#apply]].
++    * [[org.http4s.server/client.middleware.Metrics#apply]].
+     *
+     * Let's say you want a classifier that excludes integers since your paths consist of:
+     *   * GET    /users/{integer} = get_users_*
+
+From c9748b74b8a77c7fc342262fc888ef6f24bd8ce3 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 00:54:45 -0500
+Subject: [PATCH 07/49] Update pattern match to explicitly be non-empty.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index fc649430073..88ffc61e092 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -228,7 +228,7 @@ object Prometheus {
+     val result: String =
+       minusExcluded match {
+         case Nil => initial
+-        case nonEmpty => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
++        case nonEmpty @ _ :: _ => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
+       }
+ 
+     Some(result)
+
+From 6317e9b91467aee6e39f1c78ccc5551ae16eeb2b Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 15:38:39 -0500
+Subject: [PATCH 08/49] Revert "Add 'Arbitrary[UUID]'."
+
+This reverts commit c13d63e0e42b16dae4537a2863b3a84806c43799.
+---
+ .../main/scala/org/http4s/testing/ArbitraryInstances.scala   | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala b/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
+index 330dcb1141f..5337052ebc5 100644
+--- a/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
++++ b/testing/src/main/scala/org/http4s/testing/ArbitraryInstances.scala
+@@ -11,7 +11,7 @@ import cats.implicits.{catsSyntaxEither => _, _}
+ import fs2.{Pure, Stream}
+ import java.nio.charset.{Charset => NioCharset}
+ import java.time._
+-import java.util.{Locale, UUID}
++import java.util.Locale
+ import org.http4s.headers._
+ import org.http4s.syntax.literals._
+ import org.http4s.syntax.string._
+@@ -861,9 +861,6 @@ trait ArbitraryInstances {
+         body <- http4sTestingGenForPureByteStream
+       } yield Response(status, httpVersion, headers, body)
+     }
+-
+-  implicit val arbUUID: Arbitrary[UUID] =
+-    Arbitrary(Gen.uuid)
+ }
+ 
+ object ArbitraryInstances extends ArbitraryInstances
+
+From 4329e58da7e6cda204f068cd9d78b0d5c0d3079b Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 15:45:42 -0500
+Subject: [PATCH 09/49] Add Arbitrary[UUID] to PrometheusSpec.
+
+---
+ .../org/http4s/metrics/prometheus/PrometheusSpec.scala   | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+index ccd781716c3..db318517c33 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -4,10 +4,19 @@ import cats.effect.IO
+ import cats.implicits._
+ import java.util.UUID
+ import org.http4s._
++import org.scalacheck.{Arbitrary, Gen}
+ import Prometheus.classifierFMethodWithOptionallyExcludedPath
+ 
++object PrometheusSpec {
++
++  private implicit val arbUUID: Arbitrary[UUID] =
++    Arbitrary(Gen.uuid)
++}
++
+ class PrometheusSpec extends Http4sSpec {
+ 
++  import PrometheusSpec.arbUUID
++
+   "classifierFMethodWithOptionallyExcludedPath" should {
+     "properly exclude UUIDs" in prop { (method: Method, uuid: UUID) =>
+       {
+
+From 1c3a145b3a522cf66aa19fed3fec57a5d49b8b05 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 22:28:41 -0500
+Subject: [PATCH 10/49] Remove dependency on Http4sDsl.
+
+Addresses Ross's comment: https://github.com/http4s/http4s/pull/3167#discussion_r376800343.
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala  | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 88ffc61e092..e50a5b1fce8 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -5,7 +5,6 @@ import cats.data.NonEmptyList
+ import cats.effect.Sync
+ import cats.implicits._
+ import io.prometheus.client._
+-import org.http4s.dsl.Http4sDsl
+ import org.http4s.{Method, Request, Status}
+ import org.http4s.metrics.MetricsOps
+ import org.http4s.metrics.TerminationType
+@@ -214,12 +213,10 @@ object Prometheus {
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+       exclude: String => Boolean
+   ): Request[F] => Option[String] = { request: Request[F] =>
+-    val dsl: Http4sDsl[F] = Http4sDsl[F]
+ 
+     val initial: String = request.method.name.toLowerCase
+ 
+     val pathList: List[String] =
+-      dsl.Path.unapplySeq(request).getOrElse(Nil)
+ 
+     val minusExcluded: List[String] = pathList.map { value: String =>
+       if (exclude(value)) "*" else value.toLowerCase
+
+From 92925270e676bc70abbda0bc67fab93817b09f4a Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 22:29:10 -0500
+Subject: [PATCH 11/49] Add function to extract path (List[String]) from
+ Request.
+
+---
+ .../metrics/prometheus/Prometheus.scala       | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index e50a5b1fce8..4abb722fe58 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -5,7 +5,7 @@ import cats.data.NonEmptyList
+ import cats.effect.Sync
+ import cats.implicits._
+ import io.prometheus.client._
+-import org.http4s.{Method, Request, Status}
++import org.http4s.{Method, Request, Status, Uri}
+ import org.http4s.metrics.MetricsOps
+ import org.http4s.metrics.TerminationType
+ import org.http4s.metrics.TerminationType.{Abnormal, Error, Timeout}
+@@ -230,6 +230,23 @@ object Prometheus {
+ 
+     Some(result)
+   }
++
++  // The following was copied from
++  // https://github.com/http4s/http4s/blob/v0.20.17/dsl/src/main/scala/org/http4s/dsl/impl/Path.scala#L56-L64,
++  // and then modified.
++  private def requestToPathList[F[_]](request: Request[F]): List[String] = {
++    val str: String = request.pathInfo
++
++    if (str == "" || str == "/")
++      Nil
++    else {
++      val segments = str.split("/", -1)
++      // .head is safe because split always returns non-empty array
++      val segments0 = if (segments.head == "") segments.drop(1) else segments
++      segments0.foldLeft[List[String]](Nil)((path, seg) => path ++ List(Uri.decode(seg)))
++    }
++  }
++
+ }
+ 
+ case class MetricsCollection(
+
+From 20248b2d874b490361a8a0c29a9d696998fef6a3 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 22:29:34 -0500
+Subject: [PATCH 12/49] Call function for extracting path list from Request.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala    | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 4abb722fe58..cc5689a3b8e 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -217,6 +217,7 @@ object Prometheus {
+     val initial: String = request.method.name.toLowerCase
+ 
+     val pathList: List[String] =
++      requestToPathList(request)
+ 
+     val minusExcluded: List[String] = pathList.map { value: String =>
+       if (exclude(value)) "*" else value.toLowerCase
+
+From 34cbd086093d7b44dfc263bdbea802f70466f111 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sun, 9 Feb 2020 22:30:00 -0500
+Subject: [PATCH 13/49] Run scalafmt on src/.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala    | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index cc5689a3b8e..9599bd0187a 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -213,7 +213,6 @@ object Prometheus {
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+       exclude: String => Boolean
+   ): Request[F] => Option[String] = { request: Request[F] =>
+-
+     val initial: String = request.method.name.toLowerCase
+ 
+     val pathList: List[String] =
+
+From 03517004f7b22cd5b5f9b4cb70a1e9d1239ef187 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:11:02 -0500
+Subject: [PATCH 14/49] Increase performance of 'requestToPathList'.
+
+Address Chris's comment in https://github.com/http4s/http4s/pull/3167#discussion_r377373773.
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 9599bd0187a..de0faf413b5 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -243,7 +243,9 @@ object Prometheus {
+       val segments = str.split("/", -1)
+       // .head is safe because split always returns non-empty array
+       val segments0 = if (segments.head == "") segments.drop(1) else segments
+-      segments0.foldLeft[List[String]](Nil)((path, seg) => path ++ List(Uri.decode(seg)))
++      val reversed: List[String ] =
++        segments0.foldLeft[List[String]](Nil)((path, seg) => Uri.decode(seg) :: path)
++      reversed.reverse
+     }
+   }
+ 
+
+From 8c0986652080d57b6e6d79b1653f3a551c584ae1 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:39:00 -0500
+Subject: [PATCH 15/49] Add comment that the output will be lower-cased.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala   | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index de0faf413b5..0e188734336 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -197,6 +197,8 @@ object Prometheus {
+     * Given an exclude function, return a 'classifier' function, i.e. for application in
+     * [[org.http4s.server/client.middleware.Metrics#apply]].
+     *
++    * Note that the output String will be lower-cased.
++    *
+     * Let's say you want a classifier that excludes integers since your paths consist of:
+     *   * GET    /users/{integer} = get_users_*
+     *   * POST   /users           = post_users
+
+From f3693c591991bc10c373f4d16e00903f85ae5dd0 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:39:45 -0500
+Subject: [PATCH 16/49] Pass 'excludedValue' and 'pathSeparator' as
+ configurable input.
+
+Aims to address https://github.com/http4s/http4s/pull/3167#pullrequestreview-356313901.
+---
+ .../http4s/metrics/prometheus/Prometheus.scala  | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 0e188734336..7c4293a2426 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -207,13 +207,21 @@ object Prometheus {
+     *
+     * In such a case, we could use:
+     *
+-    * classifierFMethodWithOptionallyExcludedPath { str: String => scala.util.Try(str.toInt).isSuccess }
++    * classifierFMethodWithOptionallyExcludedPath(
++    *   exclude          = { str: String => scala.util.Try(str.toInt).isSuccess },
++    *   excludedValue    = "*",
++    *   intercalateValue = "_"
++    * )
+     *
+     * @param exclude For a given String, namely a path value, determine whether the value gets excluded.
++    * @param excludedValue Indicates the String value to be supplied for an excluded path's field.
++    * @param pathSeparator Value to use for separating the metrics fields' values
+     * @return Request[F] => Option[String]
+     */
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+-      exclude: String => Boolean
++                                                         exclude: String => Boolean,
++                                                         excludedValue: String,
++                                                         pathSeparator: String
+   ): Request[F] => Option[String] = { request: Request[F] =>
+     val initial: String = request.method.name.toLowerCase
+ 
+@@ -221,13 +229,14 @@ object Prometheus {
+       requestToPathList(request)
+ 
+     val minusExcluded: List[String] = pathList.map { value: String =>
+-      if (exclude(value)) "*" else value.toLowerCase
++      if (exclude(value)) excludedValue.toLowerCase else value.toLowerCase
+     }
+ 
+     val result: String =
+       minusExcluded match {
+         case Nil => initial
+-        case nonEmpty @ _ :: _ => initial + "_" + Foldable[List].intercalate(nonEmpty, "_")
++        case nonEmpty @ _ :: _ =>
++          initial + pathSeparator.toLowerCase + Foldable[List].intercalate(nonEmpty, pathSeparator.toLowerCase)
+       }
+ 
+     Some(result)
+
+From b9354e93200115ffcc7a865a3f97ff401f7607d8 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:40:18 -0500
+Subject: [PATCH 17/49] Update spec to include generators for 'excludedValue'
+ and 'separator'.
+
+---
+ .../metrics/prometheus/PrometheusSpec.scala   | 20 +++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+index db318517c33..7580aff00f8 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -18,7 +18,7 @@ class PrometheusSpec extends Http4sSpec {
+   import PrometheusSpec.arbUUID
+ 
+   "classifierFMethodWithOptionallyExcludedPath" should {
+-    "properly exclude UUIDs" in prop { (method: Method, uuid: UUID) =>
++    "properly exclude UUIDs" in prop { (method: Method, uuid: UUID, excludedValue: String, separator: String) =>
+       {
+         val request: Request[IO] = Request[IO](
+           method = method,
+@@ -33,14 +33,24 @@ class PrometheusSpec extends Http4sSpec {
+ 
+         val classifier: Request[IO] => Option[String] =
+           classifierFMethodWithOptionallyExcludedPath(
+-            excludeUUIDs
++            exclude = excludeUUIDs,
++            excludedValue = excludedValue,
++            pathSeparator = separator
+           )
+ 
+         val result: Option[String] =
+           classifier(request)
+ 
+         val expected: Option[String] =
+-          Some(method.name.toLowerCase() + "_" + "users_*_comments")
++          Some(
++            method.name.toLowerCase +
++              separator.toLowerCase +
++              "users" +
++              separator.toLowerCase +
++              excludedValue.toLowerCase +
++              separator.toLowerCase +
++              "comments"
++          )
+ 
+         result ==== expected
+       }
+@@ -53,7 +63,9 @@ class PrometheusSpec extends Http4sSpec {
+ 
+       val classifier: Request[IO] => Option[String] =
+         classifierFMethodWithOptionallyExcludedPath(
+-          _ => true
++          _ => true,
++          "*",
++          "_"
+         )
+ 
+       val result: Option[String] =
+
+From 19a17d9248fc532a572eae0cea528689e29f479b Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:40:53 -0500
+Subject: [PATCH 18/49] Run scalafmt for /src and /test.
+
+---
+ .../metrics/prometheus/Prometheus.scala       | 11 ++--
+ .../metrics/prometheus/PrometheusSpec.scala   | 63 ++++++++++---------
+ 2 files changed, 38 insertions(+), 36 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 7c4293a2426..74594c7da35 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -219,9 +219,9 @@ object Prometheus {
+     * @return Request[F] => Option[String]
+     */
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+-                                                         exclude: String => Boolean,
+-                                                         excludedValue: String,
+-                                                         pathSeparator: String
++      exclude: String => Boolean,
++      excludedValue: String,
++      pathSeparator: String
+   ): Request[F] => Option[String] = { request: Request[F] =>
+     val initial: String = request.method.name.toLowerCase
+ 
+@@ -236,7 +236,8 @@ object Prometheus {
+       minusExcluded match {
+         case Nil => initial
+         case nonEmpty @ _ :: _ =>
+-          initial + pathSeparator.toLowerCase + Foldable[List].intercalate(nonEmpty, pathSeparator.toLowerCase)
++          initial + pathSeparator.toLowerCase + Foldable[List]
++            .intercalate(nonEmpty, pathSeparator.toLowerCase)
+       }
+ 
+     Some(result)
+@@ -254,7 +255,7 @@ object Prometheus {
+       val segments = str.split("/", -1)
+       // .head is safe because split always returns non-empty array
+       val segments0 = if (segments.head == "") segments.drop(1) else segments
+-      val reversed: List[String ] =
++      val reversed: List[String] =
+         segments0.foldLeft[List[String]](Nil)((path, seg) => Uri.decode(seg) :: path)
+       reversed.reverse
+     }
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+index 7580aff00f8..19147338394 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -18,42 +18,43 @@ class PrometheusSpec extends Http4sSpec {
+   import PrometheusSpec.arbUUID
+ 
+   "classifierFMethodWithOptionallyExcludedPath" should {
+-    "properly exclude UUIDs" in prop { (method: Method, uuid: UUID, excludedValue: String, separator: String) =>
+-      {
+-        val request: Request[IO] = Request[IO](
+-          method = method,
+-          uri = Uri.unsafeFromString(s"/users/$uuid/comments")
+-        )
++    "properly exclude UUIDs" in prop {
++      (method: Method, uuid: UUID, excludedValue: String, separator: String) =>
++        {
++          val request: Request[IO] = Request[IO](
++            method = method,
++            uri = Uri.unsafeFromString(s"/users/$uuid/comments")
++          )
+ 
+-        val excludeUUIDs: String => Boolean = { str: String =>
+-          Either
+-            .catchOnly[IllegalArgumentException](UUID.fromString(str))
+-            .isRight
+-        }
++          val excludeUUIDs: String => Boolean = { str: String =>
++            Either
++              .catchOnly[IllegalArgumentException](UUID.fromString(str))
++              .isRight
++          }
+ 
+-        val classifier: Request[IO] => Option[String] =
+-          classifierFMethodWithOptionallyExcludedPath(
+-            exclude = excludeUUIDs,
+-            excludedValue = excludedValue,
+-            pathSeparator = separator
+-          )
++          val classifier: Request[IO] => Option[String] =
++            classifierFMethodWithOptionallyExcludedPath(
++              exclude = excludeUUIDs,
++              excludedValue = excludedValue,
++              pathSeparator = separator
++            )
+ 
+-        val result: Option[String] =
+-          classifier(request)
++          val result: Option[String] =
++            classifier(request)
+ 
+-        val expected: Option[String] =
+-          Some(
+-            method.name.toLowerCase +
+-              separator.toLowerCase +
+-              "users" +
+-              separator.toLowerCase +
+-              excludedValue.toLowerCase +
+-              separator.toLowerCase +
+-              "comments"
+-          )
++          val expected: Option[String] =
++            Some(
++              method.name.toLowerCase +
++                separator.toLowerCase +
++                "users" +
++                separator.toLowerCase +
++                excludedValue.toLowerCase +
++                separator.toLowerCase +
++                "comments"
++            )
+ 
+-        result ==== expected
+-      }
++          result ==== expected
++        }
+     }
+     "return '$method' if the path is '/'" in prop { method: Method =>
+       val request: Request[IO] = Request[IO](
+
+From 7fc120071a6b587f50436ee4c7841c625d4b6604 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:45:05 -0500
+Subject: [PATCH 19/49] Call String#toLowerCase at end of function.
+
+It makes the code, I'll argue, somewhat easier to follow since the 'toLowerCase' is reserved until the end and called once.
+---
+ .../scala/org/http4s/metrics/prometheus/Prometheus.scala  | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 74594c7da35..46c4e9f5dd9 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -229,18 +229,18 @@ object Prometheus {
+       requestToPathList(request)
+ 
+     val minusExcluded: List[String] = pathList.map { value: String =>
+-      if (exclude(value)) excludedValue.toLowerCase else value.toLowerCase
++      if (exclude(value)) excludedValue else value.toLowerCase
+     }
+ 
+     val result: String =
+       minusExcluded match {
+         case Nil => initial
+         case nonEmpty @ _ :: _ =>
+-          initial + pathSeparator.toLowerCase + Foldable[List]
+-            .intercalate(nonEmpty, pathSeparator.toLowerCase)
++          initial + pathSeparator + Foldable[List]
++            .intercalate(nonEmpty, pathSeparator)
+       }
+ 
+-    Some(result)
++    Some(result.toLowerCase)
+   }
+ 
+   // The following was copied from
+
+From 3a0cfc7d8451b15813b12f0fb3eb3480ad4a14b9 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Mon, 10 Feb 2020 23:45:51 -0500
+Subject: [PATCH 20/49] Remove a 'toLowerCase' that I missed.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 46c4e9f5dd9..a1b02d8e897 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -229,7 +229,7 @@ object Prometheus {
+       requestToPathList(request)
+ 
+     val minusExcluded: List[String] = pathList.map { value: String =>
+-      if (exclude(value)) excludedValue else value.toLowerCase
++      if (exclude(value)) excludedValue else value
+     }
+ 
+     val result: String =
+
+From badda6576d5929b6011a043d461a38b28779b1bc Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:17:48 -0500
+Subject: [PATCH 21/49] Remove lower-casing.
+
+---
+ .../org/http4s/metrics/prometheus/Prometheus.scala | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index a1b02d8e897..bb16ee273ea 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -197,13 +197,11 @@ object Prometheus {
+     * Given an exclude function, return a 'classifier' function, i.e. for application in
+     * [[org.http4s.server/client.middleware.Metrics#apply]].
+     *
+-    * Note that the output String will be lower-cased.
+-    *
+     * Let's say you want a classifier that excludes integers since your paths consist of:
+-    *   * GET    /users/{integer} = get_users_*
+-    *   * POST   /users           = post_users
+-    *   * PUT    /users/{integer} = put_users_*
+-    *   * DELETE /users/{integer} = delete_users_*
++    *   * GET    /users/{integer} = GET_users_*
++    *   * POST   /users           = POST_users
++    *   * PUT    /users/{integer} = PUT_users_*
++    *   * DELETE /users/{integer} = DELETE_users_*
+     *
+     * In such a case, we could use:
+     *
+@@ -223,7 +221,7 @@ object Prometheus {
+       excludedValue: String,
+       pathSeparator: String
+   ): Request[F] => Option[String] = { request: Request[F] =>
+-    val initial: String = request.method.name.toLowerCase
++    val initial: String = request.method.name
+ 
+     val pathList: List[String] =
+       requestToPathList(request)
+@@ -240,7 +238,7 @@ object Prometheus {
+             .intercalate(nonEmpty, pathSeparator)
+       }
+ 
+-    Some(result.toLowerCase)
++    Some(result)
+   }
+ 
+   // The following was copied from
+
+From e6b26f506302e199ae95b582a296120aaa12bd1c Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:18:21 -0500
+Subject: [PATCH 22/49] Update spec to not expect lower-cased value.
+
+---
+ .../http4s/metrics/prometheus/PrometheusSpec.scala   | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+index 19147338394..93c5a5c2e31 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+@@ -44,12 +44,12 @@ class PrometheusSpec extends Http4sSpec {
+ 
+           val expected: Option[String] =
+             Some(
+-              method.name.toLowerCase +
+-                separator.toLowerCase +
++              method.name +
++                separator +
+                 "users" +
+-                separator.toLowerCase +
+-                excludedValue.toLowerCase +
+-                separator.toLowerCase +
++                separator +
++                excludedValue +
++                separator +
+                 "comments"
+             )
+ 
+@@ -72,7 +72,7 @@ class PrometheusSpec extends Http4sSpec {
+       val result: Option[String] =
+         classifier(request)
+ 
+-      result ==== Some(method.name.toLowerCase)
++      result ==== Some(method.name)
+     }
+   }
+ 
+
+From ae745986f513ffb1693096e8a6c6e292ed0f81c9 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:21:43 -0500
+Subject: [PATCH 23/49] Add default values.
+
+Addresses Chris' comment, https://github.com/http4s/http4s/pull/3167#discussion_r377451735.
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index bb16ee273ea..abbbb5b3e8f 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -218,8 +218,8 @@ object Prometheus {
+     */
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+       exclude: String => Boolean,
+-      excludedValue: String,
+-      pathSeparator: String
++      excludedValue: String = "*",
++      pathSeparator: String = "_"
+   ): Request[F] => Option[String] = { request: Request[F] =>
+     val initial: String = request.method.name
+ 
+
+From 48c0661ca6a6ce800d39332685139a9b95c80541 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:25:00 -0500
+Subject: [PATCH 24/49] Add note on performance in comment regarding
+ Throwable's versus regex's.
+
+Aims to address: https://github.com/http4s/http4s/pull/3167#discussion_r377452577.
+---
+ .../scala/org/http4s/metrics/prometheus/Prometheus.scala  | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index abbbb5b3e8f..8b20e7d44d6 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -211,6 +211,14 @@ object Prometheus {
+     *   intercalateValue = "_"
+     * )
+     *
++    *
++    * Chris Davenport notes the following on performance considerations of exclude's function value:
++    *
++    * > It's worth noting that this runs on every segment of a path. So note that if an intermediate Throwables with
++    * > Stack traces is known and discarded, there may be a performance penalty, such as the above example with Try(str.toInt).
++    * > I benchmarked some approaches and regex matches should generally be preferred over Throwable's
++    * > in this position.
++    *
+     * @param exclude For a given String, namely a path value, determine whether the value gets excluded.
+     * @param excludedValue Indicates the String value to be supplied for an excluded path's field.
+     * @param pathSeparator Value to use for separating the metrics fields' values
+
+From 7819ac9fb020bb8f9e7daba6cb226b081fa29fb7 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:28:07 -0500
+Subject: [PATCH 25/49] Move 'classifierFMethodWithOptionallyExcludedPath' from
+ Prometheus to MetricOps.
+
+Addresses review comment: https://github.com/http4s/http4s/pull/3167#pullrequestreview-356424098.
+---
+ .../scala/org/http4s/metrics/MetricsOps.scala | 82 ++++++++++++++++++-
+ .../metrics/prometheus/Prometheus.scala       | 79 +-----------------
+ 2 files changed, 82 insertions(+), 79 deletions(-)
+
+diff --git a/core/src/main/scala/org/http4s/metrics/MetricsOps.scala b/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
+index 5096faf7141..73d2a8c504b 100644
+--- a/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
++++ b/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
+@@ -1,6 +1,8 @@
+ package org.http4s.metrics
+ 
+-import org.http4s.{Method, Status}
++import cats.Foldable
++import cats.implicits._
++import org.http4s.{Method, Request, Status, Uri}
+ 
+ /**
+   * Describes an algebra capable of writing metrics to a metrics registry
+@@ -57,6 +59,84 @@ trait MetricsOps[F[_]] {
+       classifier: Option[String]): F[Unit]
+ }
+ 
++object MetricsOps {
++
++  /**
++    * Given an exclude function, return a 'classifier' function, i.e. for application in
++    * org.http4s.server/client.middleware.Metrics#apply.
++    *
++    * Let's say you want a classifier that excludes integers since your paths consist of:
++    *   * GET    /users/{integer} = GET_users_*
++    *   * POST   /users           = POST_users
++    *   * PUT    /users/{integer} = PUT_users_*
++    *   * DELETE /users/{integer} = DELETE_users_*
++    *
++    * In such a case, we could use:
++    *
++    * classifierFMethodWithOptionallyExcludedPath(
++    *   exclude          = { str: String => scala.util.Try(str.toInt).isSuccess },
++    *   excludedValue    = "*",
++    *   intercalateValue = "_"
++    * )
++    *
++    *
++    * Chris Davenport notes the following on performance considerations of exclude's function value:
++    *
++    * > It's worth noting that this runs on every segment of a path. So note that if an intermediate Throwables with
++    * > Stack traces is known and discarded, there may be a performance penalty, such as the above example with Try(str.toInt).
++    * > I benchmarked some approaches and regex matches should generally be preferred over Throwable's
++    * > in this position.
++    *
++    * @param exclude For a given String, namely a path value, determine whether the value gets excluded.
++    * @param excludedValue Indicates the String value to be supplied for an excluded path's field.
++    * @param pathSeparator Value to use for separating the metrics fields' values
++    * @return Request[F] => Option[String]
++    */
++  def classifierFMethodWithOptionallyExcludedPath[F[_]](
++                                                         exclude: String => Boolean,
++                                                         excludedValue: String = "*",
++                                                         pathSeparator: String = "_"
++                                                       ): Request[F] => Option[String] = { request: Request[F] =>
++    val initial: String = request.method.name
++
++    val pathList: List[String] =
++      requestToPathList(request)
++
++    val minusExcluded: List[String] = pathList.map { value: String =>
++      if (exclude(value)) excludedValue else value
++    }
++
++    val result: String =
++      minusExcluded match {
++        case Nil => initial
++        case nonEmpty @ _ :: _ =>
++          initial + pathSeparator + Foldable[List]
++            .intercalate(nonEmpty, pathSeparator)
++      }
++
++    Some(result)
++  }
++
++  // The following was copied from
++  // https://github.com/http4s/http4s/blob/v0.20.17/dsl/src/main/scala/org/http4s/dsl/impl/Path.scala#L56-L64,
++  // and then modified.
++  private def requestToPathList[F[_]](request: Request[F]): List[String] = {
++    val str: String = request.pathInfo
++
++    if (str == "" || str == "/")
++      Nil
++    else {
++      val segments = str.split("/", -1)
++      // .head is safe because split always returns non-empty array
++      val segments0 = if (segments.head == "") segments.drop(1) else segments
++      val reversed: List[String] =
++        segments0.foldLeft[List[String]](Nil)((path, seg) => Uri.decode(seg) :: path)
++      reversed.reverse
++    }
++  }
++
++}
++
+ /** Describes the type of abnormal termination*/
+ sealed trait TerminationType
+ 
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 8b20e7d44d6..71d51c209dc 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -1,11 +1,9 @@
+ package org.http4s.metrics.prometheus
+ 
+-import cats.Foldable
+ import cats.data.NonEmptyList
+ import cats.effect.Sync
+-import cats.implicits._
+ import io.prometheus.client._
+-import org.http4s.{Method, Request, Status, Uri}
++import org.http4s.{Method, Status}
+ import org.http4s.metrics.MetricsOps
+ import org.http4s.metrics.TerminationType
+ import org.http4s.metrics.TerminationType.{Abnormal, Error, Timeout}
+@@ -192,81 +190,6 @@ object Prometheus {
+   // https://github.com/prometheus/client_java/blob/parent-0.6.0/simpleclient/src/main/java/io/prometheus/client/Histogram.java#L73
+   private val DefaultHistogramBuckets: NonEmptyList[Double] =
+     NonEmptyList(.005, List(.01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
+-
+-  /**
+-    * Given an exclude function, return a 'classifier' function, i.e. for application in
+-    * [[org.http4s.server/client.middleware.Metrics#apply]].
+-    *
+-    * Let's say you want a classifier that excludes integers since your paths consist of:
+-    *   * GET    /users/{integer} = GET_users_*
+-    *   * POST   /users           = POST_users
+-    *   * PUT    /users/{integer} = PUT_users_*
+-    *   * DELETE /users/{integer} = DELETE_users_*
+-    *
+-    * In such a case, we could use:
+-    *
+-    * classifierFMethodWithOptionallyExcludedPath(
+-    *   exclude          = { str: String => scala.util.Try(str.toInt).isSuccess },
+-    *   excludedValue    = "*",
+-    *   intercalateValue = "_"
+-    * )
+-    *
+-    *
+-    * Chris Davenport notes the following on performance considerations of exclude's function value:
+-    *
+-    * > It's worth noting that this runs on every segment of a path. So note that if an intermediate Throwables with
+-    * > Stack traces is known and discarded, there may be a performance penalty, such as the above example with Try(str.toInt).
+-    * > I benchmarked some approaches and regex matches should generally be preferred over Throwable's
+-    * > in this position.
+-    *
+-    * @param exclude For a given String, namely a path value, determine whether the value gets excluded.
+-    * @param excludedValue Indicates the String value to be supplied for an excluded path's field.
+-    * @param pathSeparator Value to use for separating the metrics fields' values
+-    * @return Request[F] => Option[String]
+-    */
+-  def classifierFMethodWithOptionallyExcludedPath[F[_]](
+-      exclude: String => Boolean,
+-      excludedValue: String = "*",
+-      pathSeparator: String = "_"
+-  ): Request[F] => Option[String] = { request: Request[F] =>
+-    val initial: String = request.method.name
+-
+-    val pathList: List[String] =
+-      requestToPathList(request)
+-
+-    val minusExcluded: List[String] = pathList.map { value: String =>
+-      if (exclude(value)) excludedValue else value
+-    }
+-
+-    val result: String =
+-      minusExcluded match {
+-        case Nil => initial
+-        case nonEmpty @ _ :: _ =>
+-          initial + pathSeparator + Foldable[List]
+-            .intercalate(nonEmpty, pathSeparator)
+-      }
+-
+-    Some(result)
+-  }
+-
+-  // The following was copied from
+-  // https://github.com/http4s/http4s/blob/v0.20.17/dsl/src/main/scala/org/http4s/dsl/impl/Path.scala#L56-L64,
+-  // and then modified.
+-  private def requestToPathList[F[_]](request: Request[F]): List[String] = {
+-    val str: String = request.pathInfo
+-
+-    if (str == "" || str == "/")
+-      Nil
+-    else {
+-      val segments = str.split("/", -1)
+-      // .head is safe because split always returns non-empty array
+-      val segments0 = if (segments.head == "") segments.drop(1) else segments
+-      val reversed: List[String] =
+-        segments0.foldLeft[List[String]](Nil)((path, seg) => Uri.decode(seg) :: path)
+-      reversed.reverse
+-    }
+-  }
+-
+ }
+ 
+ case class MetricsCollection(
+
+From ab1661db48f39b72bde075a3d3add924385219a0 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Wed, 12 Feb 2020 23:34:47 -0500
+Subject: [PATCH 26/49] 'git mv' and re-name.
+
+---
+ .../src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala    | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+ rename prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala => core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala (95%)
+
+diff --git a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+similarity index 95%
+rename from prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
+rename to core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 93c5a5c2e31..9aca775d7bc 100644
+--- a/prometheus-metrics/src/test/scala/org/http4s/metrics/prometheus/PrometheusSpec.scala
++++ b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -1,11 +1,11 @@
+-package org.http4s.metrics.prometheus
++package org.http4s.metrics
+ 
+ import cats.effect.IO
+ import cats.implicits._
+ import java.util.UUID
+ import org.http4s._
+ import org.scalacheck.{Arbitrary, Gen}
+-import Prometheus.classifierFMethodWithOptionallyExcludedPath
++import MetricsOps.classifierFMethodWithOptionallyExcludedPath
+ 
+ object PrometheusSpec {
+ 
+
+From 0c6873ada6306e85feb1feee056e7238437a813d Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:49:10 -0500
+Subject: [PATCH 27/49] Add 'specs2-scalacheck' dependency for test-only.
+
+---
+ project/Http4sPlugin.scala | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/project/Http4sPlugin.scala b/project/Http4sPlugin.scala
+index c7e7608a4aa..b8af4a6829e 100644
+--- a/project/Http4sPlugin.scala
++++ b/project/Http4sPlugin.scala
+@@ -341,6 +341,7 @@ object Http4sPlugin extends AutoPlugin {
+   def specs2Matcher(sv: String)             = "org.specs2"             %% "specs2-matcher"            % specs2Version(sv)
+   def specs2MatcherExtra(sv: String)        = "org.specs2"             %% "specs2-matcher-extra"      % specs2Version(sv)
+   def specs2Scalacheck(sv: String)          = "org.specs2"             %% "specs2-scalacheck"         % specs2Version(sv)
++  def specs2ScalacheckTest(sv: String)      = "org.specs2"             %% "specs2-scalacheck"         % specs2Version(sv) % Test
+   lazy val tomcatCatalina                   = "org.apache.tomcat"      %  "tomcat-catalina"           % "9.0.30"
+   lazy val tomcatCoyote                     = "org.apache.tomcat"      %  "tomcat-coyote"             % tomcatCatalina.revision
+   lazy val treeHugger                       = "com.eed3si9n"           %% "treehugger"                % "0.4.4"
+
+From f806124eb85d895b1b34f08632742e3c7765b371 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:49:30 -0500
+Subject: [PATCH 28/49] Add specs2-scalacheck dependency in test for 'core'.
+
+---
+ build.sbt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/build.sbt b/build.sbt
+index c2ac4e02dd9..4e61539635f 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -98,6 +98,7 @@ lazy val core = libraryProject("core")
+       log4s,
+       parboiled,
+       vault,
++      specs2ScalacheckTest(scalaVersion.value)
+     ),
+     unmanagedSourceDirectories in Compile ++= {
+       (unmanagedSourceDirectories in Compile).value.map { dir =>
+
+From 8e2b022215120cf3337afe8187f8b8df33ce17f1 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:50:21 -0500
+Subject: [PATCH 29/49] Re-name class: PrometheusSpec -> MetricsOpsSpec.
+
+---
+ core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 9aca775d7bc..5984fc82af7 100644
+--- a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -7,15 +7,15 @@ import org.http4s._
+ import org.scalacheck.{Arbitrary, Gen}
+ import MetricsOps.classifierFMethodWithOptionallyExcludedPath
+ 
+-object PrometheusSpec {
++object MetricsOpsSpec {
+ 
+   private implicit val arbUUID: Arbitrary[UUID] =
+     Arbitrary(Gen.uuid)
+ }
+ 
+-class PrometheusSpec extends Http4sSpec {
++class MetricsOpsSpec {
+ 
+-  import PrometheusSpec.arbUUID
++  import MetricsOpsSpec.{arbUUID, http4sTestingArbitraryForMethod}
+ 
+   "classifierFMethodWithOptionallyExcludedPath" should {
+     "properly exclude UUIDs" in prop {
+
+From cb7c7c354bbbd1cda5ef5b1704a7ce80240929d2 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:51:02 -0500
+Subject: [PATCH 30/49] Update MetricsOpsSpec to be a specs2-scalacheck test.
+
+---
+ core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 5984fc82af7..444f53bb773 100644
+--- a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -6,6 +6,8 @@ import java.util.UUID
+ import org.http4s._
+ import org.scalacheck.{Arbitrary, Gen}
+ import MetricsOps.classifierFMethodWithOptionallyExcludedPath
++import org.specs2.ScalaCheck
++import org.specs2.mutable.Specification
+ 
+ object MetricsOpsSpec {
+ 
+@@ -13,7 +15,7 @@ object MetricsOpsSpec {
+     Arbitrary(Gen.uuid)
+ }
+ 
+-class MetricsOpsSpec {
++class MetricsOpsSpec extends Specification with ScalaCheck {
+ 
+   import MetricsOpsSpec.{arbUUID, http4sTestingArbitraryForMethod}
+ 
+
+From b9600afc0cfea2e0513c5378685c2d3bf242476c Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:51:22 -0500
+Subject: [PATCH 31/49] Add Arbitrary[Method].
+
+I copied it from the 'testing' package.
+---
+ core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 444f53bb773..029ca757aa1 100644
+--- a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -13,6 +13,10 @@ object MetricsOpsSpec {
+ 
+   private implicit val arbUUID: Arbitrary[UUID] =
+     Arbitrary(Gen.uuid)
++
++  private implicit val http4sTestingArbitraryForMethod: Arbitrary[Method] = Arbitrary(
++    Gen.oneOf(Method.all)
++  )
+ }
+ 
+ class MetricsOpsSpec extends Specification with ScalaCheck {
+
+From c7df72c065ae4d41494279a82b0cefc86c040c7d Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Thu, 13 Feb 2020 22:52:00 -0500
+Subject: [PATCH 32/49] Run scalafmt in src and test.
+
+---
+ core/src/main/scala/org/http4s/metrics/MetricsOps.scala | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/core/src/main/scala/org/http4s/metrics/MetricsOps.scala b/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
+index 73d2a8c504b..32b71b42c6e 100644
+--- a/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
++++ b/core/src/main/scala/org/http4s/metrics/MetricsOps.scala
+@@ -93,10 +93,10 @@ object MetricsOps {
+     * @return Request[F] => Option[String]
+     */
+   def classifierFMethodWithOptionallyExcludedPath[F[_]](
+-                                                         exclude: String => Boolean,
+-                                                         excludedValue: String = "*",
+-                                                         pathSeparator: String = "_"
+-                                                       ): Request[F] => Option[String] = { request: Request[F] =>
++      exclude: String => Boolean,
++      excludedValue: String = "*",
++      pathSeparator: String = "_"
++  ): Request[F] => Option[String] = { request: Request[F] =>
+     val initial: String = request.method.name
+ 
+     val pathList: List[String] =
+
+From ff9cae62f27c184503bbd04857305137ec34e3ee Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 20:58:21 -0500
+Subject: [PATCH 33/49] Remove unnecessary 'specs2-scalacheck' dependency in
+ test.
+
+---
+ project/Http4sPlugin.scala | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/project/Http4sPlugin.scala b/project/Http4sPlugin.scala
+index 681c046d1bb..93e9e1eb37b 100644
+--- a/project/Http4sPlugin.scala
++++ b/project/Http4sPlugin.scala
+@@ -273,7 +273,6 @@ object Http4sPlugin extends AutoPlugin {
+   def specs2Matcher(sv: String)             = "org.specs2"             %% "specs2-matcher"            % specs2Version(sv)
+   def specs2MatcherExtra(sv: String)        = "org.specs2"             %% "specs2-matcher-extra"      % specs2Version(sv)
+   def specs2Scalacheck(sv: String)          = "org.specs2"             %% "specs2-scalacheck"         % specs2Version(sv)
+-  def specs2ScalacheckTest(sv: String)      = "org.specs2"             %% "specs2-scalacheck"         % specs2Version(sv) % Test
+   lazy val tomcatCatalina                   = "org.apache.tomcat"      %  "tomcat-catalina"           % "9.0.31"
+   lazy val tomcatCoyote                     = "org.apache.tomcat"      %  "tomcat-coyote"             % tomcatCatalina.revision
+   lazy val treeHugger                       = "com.eed3si9n"           %% "treehugger"                % "0.4.4"
+
+From f0423e1f34aabeec399eb983181d0791b7527e32 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 20:58:55 -0500
+Subject: [PATCH 34/49] Remove core's dependency on deleted specs2-scalacheck
+ (in test).
+
+---
+ build.sbt | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/build.sbt b/build.sbt
+index f32620d2976..deff61ad209 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -97,8 +97,7 @@ lazy val core = libraryProject("core")
+       fs2Io(scalaVersion.value),
+       log4s,
+       parboiled,
+-      vault,
+-      specs2ScalacheckTest(scalaVersion.value)
++      vault
+     ),
+     unmanagedSourceDirectories in Compile ++= {
+       (unmanagedSourceDirectories in Compile).value.map { dir =>
+
+From d79a17326fd6513759e60493f7e1144a72d4ad07 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:01:07 -0500
+Subject: [PATCH 35/49] Move MetricsOpsSpec to tests/.
+
+Address Ross's comment, https://github.com/http4s/http4s/pull/3167#discussion_r379850831.
+---
+ .../src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala        | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename {core => tests}/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala (100%)
+
+diff --git a/core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+similarity index 100%
+rename from core/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+rename to tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+
+From b9df51a7b3d447a69cf1aed7969eb1bf22b5abb7 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:04:10 -0500
+Subject: [PATCH 36/49] Update spec to extends Http4sSpec.
+
+---
+ tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 029ca757aa1..5fea120291d 100644
+--- a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -19,7 +19,7 @@ object MetricsOpsSpec {
+   )
+ }
+ 
+-class MetricsOpsSpec extends Specification with ScalaCheck {
++class MetricsOpsSpec extends Http4sSpec {
+ 
+   import MetricsOpsSpec.{arbUUID, http4sTestingArbitraryForMethod}
+ 
+
+From fd9041210963662719f25e664c43a1c2695b8713 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:05:17 -0500
+Subject: [PATCH 37/49] Remove unnecessary imports.
+
+---
+ tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 5fea120291d..8d7292b592a 100644
+--- a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -6,8 +6,6 @@ import java.util.UUID
+ import org.http4s._
+ import org.scalacheck.{Arbitrary, Gen}
+ import MetricsOps.classifierFMethodWithOptionallyExcludedPath
+-import org.specs2.ScalaCheck
+-import org.specs2.mutable.Specification
+ 
+ object MetricsOpsSpec {
+ 
+
+From 59feb8bdb5585b3a0ed5bd503b79a61c67a2dcf5 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:05:38 -0500
+Subject: [PATCH 38/49] Remove redundant Arbitrary[Method].
+
+It's already included in Http4sSpec.
+---
+ .../src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala  | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+index 8d7292b592a..4fa61e4b969 100644
+--- a/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
++++ b/tests/src/test/scala/org/http4s/metrics/MetricsOpsSpec.scala
+@@ -11,15 +11,11 @@ object MetricsOpsSpec {
+ 
+   private implicit val arbUUID: Arbitrary[UUID] =
+     Arbitrary(Gen.uuid)
+-
+-  private implicit val http4sTestingArbitraryForMethod: Arbitrary[Method] = Arbitrary(
+-    Gen.oneOf(Method.all)
+-  )
+ }
+ 
+ class MetricsOpsSpec extends Http4sSpec {
+ 
+-  import MetricsOpsSpec.{arbUUID, http4sTestingArbitraryForMethod}
++  import MetricsOpsSpec.arbUUID
+ 
+   "classifierFMethodWithOptionallyExcludedPath" should {
+     "properly exclude UUIDs" in prop {
+
+From 6d2a69917e047c014b7688f3ca4904bd33d3c375 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:07:16 -0500
+Subject: [PATCH 39/49] Add trailing comma to build.sbt.
+
+The motivation for this change was to show that the larger PR did not modify the build.sbt.
+---
+ build.sbt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build.sbt b/build.sbt
+index deff61ad209..82a34258b61 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -97,7 +97,7 @@ lazy val core = libraryProject("core")
+       fs2Io(scalaVersion.value),
+       log4s,
+       parboiled,
+-      vault
++      vault,
+     ),
+     unmanagedSourceDirectories in Compile ++= {
+       (unmanagedSourceDirectories in Compile).value.map { dir =>
+
+From 434aba728d3485aca988608d12891add0ec64eb4 Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 21:08:16 -0500
+Subject: [PATCH 40/49] Add newline to Prometheus.
+
+The motivation for this change was to show that the larger PR did not modify this file.
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala    | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 71d51c209dc..0cd43ad73ad 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -190,6 +190,7 @@ object Prometheus {
+   // https://github.com/prometheus/client_java/blob/parent-0.6.0/simpleclient/src/main/java/io/prometheus/client/Histogram.java#L73
+   private val DefaultHistogramBuckets: NonEmptyList[Double] =
+     NonEmptyList(.005, List(.01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
++  
+ }
+ 
+ case class MetricsCollection(
+
+From ee7826d313d8f4ae60ef969d599b4e12c9432c3b Mon Sep 17 00:00:00 2001
+From: Kevin Meredith <kevin.m.meredith@gmail.com>
+Date: Sat, 15 Feb 2020 23:46:40 -0500
+Subject: [PATCH 41/49] Run scalafmt on prometheus-metrics.
+
+---
+ .../main/scala/org/http4s/metrics/prometheus/Prometheus.scala   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+index 0cd43ad73ad..01ecd887e28 100644
+--- a/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
++++ b/prometheus-metrics/src/main/scala/org/http4s/metrics/prometheus/Prometheus.scala
+@@ -190,7 +190,7 @@ object Prometheus {
+   // https://github.com/prometheus/client_java/blob/parent-0.6.0/simpleclient/src/main/java/io/prometheus/client/Histogram.java#L73
+   private val DefaultHistogramBuckets: NonEmptyList[Double] =
+     NonEmptyList(.005, List(.01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
+-  
++
+ }
+ 
+ case class MetricsCollection(
+
+From 464060da6c146e3b96a65843f62168e9658c4eb1 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Mon, 23 Mar 2020 00:08:43 -0400
+Subject: [PATCH 42/49] Fix GHSA-66q9-f7ff-mmx6
+
+Co-Authored-By: Brian P. Holt <bholt@planetholt.com>
+---
+ build.sbt                                     |   8 ++
+ project/build.properties                      |   2 +-
+ .../server/staticcontent/FileService.scala    |  59 ++++++---
+ .../staticcontent/ResourceService.scala       |  63 +++++++--
+ .../server/staticcontent/WebjarService.scala  |  59 ++++++---
+ .../src/test/resources/Dir/partial-prefix.txt |   1 +
+ .../machine head/space truckin'.txt           |   5 +
+ server/src/test/resources/space truckin'.txt  |   5 +
+ server/src/test/resources/symlink             |   1 +
+ .../staticcontent/FileServiceSpec.scala       | 125 ++++++++++++++++--
+ .../staticcontent/ResourceServiceSpec.scala   | 107 ++++++++++++++-
+ .../staticcontent/WebjarServiceSpec.scala     |  44 +++++-
+ 12 files changed, 411 insertions(+), 68 deletions(-)
+ create mode 100644 server/src/test/resources/Dir/partial-prefix.txt
+ create mode 100644 server/src/test/resources/META-INF/resources/webjars/deep purple/machine head/space truckin'.txt
+ create mode 100644 server/src/test/resources/space truckin'.txt
+ create mode 120000 server/src/test/resources/symlink
+
+diff --git a/build.sbt b/build.sbt
+index 75017d4a7e1..0a7f8224cba 100644
+--- a/build.sbt
++++ b/build.sbt
+@@ -63,6 +63,14 @@ lazy val server = libraryProject("server")
+   .settings(
+     description := "Base library for building http4s servers"
+   )
++  .settings(BuildInfoPlugin.buildInfoScopedSettings(Test))
++  .settings(BuildInfoPlugin.buildInfoDefaultSettings)
++  .settings(
++    buildInfoKeys := Seq[BuildInfoKey](
++      resourceDirectory in Test,
++    ),
++    buildInfoPackage := "org.http4s.server.test"
++  )
+   .dependsOn(core, testing % "test->test", theDsl % "test->compile")
+ 
+ lazy val serverMetrics = libraryProject("server-metrics")
+diff --git a/project/build.properties b/project/build.properties
+index 0cd8b07982e..a919a9b5f46 100644
+--- a/project/build.properties
++++ b/project/build.properties
+@@ -1 +1 @@
+-sbt.version=1.2.3
++sbt.version=1.3.8
+diff --git a/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala b/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
+index 0a39b34ef31..524fdadd637 100644
+--- a/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
++++ b/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
+@@ -4,12 +4,22 @@ package staticcontent
+ 
+ import cats.data._
+ import cats.effect._
++import cats.implicits._
+ import java.io.File
++import java.nio.file.{LinkOption, Paths}
+ import org.http4s.headers.Range.SubRange
+ import org.http4s.headers._
++import org.http4s.server.middleware.TranslateUri
++import org.http4s.util.UrlCodingUtils.urlDecode
++import org.log4s.getLogger
+ import scala.concurrent.ExecutionContext
++import scala.util.control.NoStackTrace
++import scala.util.{Failure, Success, Try}
++import java.nio.file.NoSuchFileException
+ 
+ object FileService {
++  private[this] val logger = getLogger
++
+   type PathCollector[F[_]] = (File, Config[F], Request[F]) => OptionT[F, Response[F]]
+ 
+   /** [[org.http4s.server.staticcontent.FileService]] configuration
+@@ -42,14 +52,41 @@ object FileService {
+   }
+ 
+   /** Make a new [[org.http4s.HttpService]] that serves static files. */
+-  private[staticcontent] def apply[F[_]](config: Config[F])(implicit F: Effect[F]): HttpService[F] =
+-    Kleisli {
+-      case request if request.pathInfo.startsWith(config.pathPrefix) =>
+-        getFile(s"${config.systemPath}/${getSubPath(request.pathInfo, config.pathPrefix)}")
+-          .flatMap(f => config.pathCollector(f, config, request))
+-          .semiflatMap(config.cacheStrategy.cache(request.pathInfo, _))
+-      case _ => OptionT.none
++  private[staticcontent] def apply[F[_]](config: Config[F])(
++      implicit F: Effect[F]): HttpService[F] = {
++    object BadTraversal extends Exception with NoStackTrace
++    Try(Paths.get(config.systemPath)) match {
++      case Success(rootPath) =>
++        TranslateUri(config.pathPrefix)(Kleisli {
++          case request =>
++            request.pathInfo.split("/") match {
++              case Array(head, segments @ _*) if head.isEmpty =>
++                OptionT
++                  .liftF(F.catchNonFatal {
++                    segments.foldLeft(rootPath) {
++                      case (_, "" | "." | "..") => throw BadTraversal
++                      case (path, segment) =>
++                        path.resolve(urlDecode(segment, plusIsSpace = true))
++                    }
++                  })
++                  .semiflatMap(path => F.delay(path.toRealPath(LinkOption.NOFOLLOW_LINKS)))
++                  .collect { case path if path.startsWith(rootPath) => path.toFile }
++                  .flatMap(f => config.pathCollector(f, config, request))
++                  .semiflatMap(config.cacheStrategy.cache(request.pathInfo, _))
++                  .recoverWith {
++                    case _: NoSuchFileException => OptionT.none
++                    case BadTraversal => OptionT.some(Response(Status.BadRequest))
++                  }
++              case _ => OptionT.none
++            }
++        })
++
++      case Failure(e) =>
++        logger.error(e)(
++          s"Could not get root path from FileService config: systemPath = ${config.systemPath}, pathPrefix = ${config.pathPrefix}. All requests will fail.")
++        Kleisli(_ => OptionT.pure(Response(Status.InternalServerError)))
+     }
++  }
+ 
+   private def filesOnly[F[_]](file: File, config: Config[F], req: Request[F])(
+       implicit F: Sync[F]): OptionT[F, Response[F]] =
+@@ -95,12 +132,4 @@ object FileService {
+ 
+       case _ => OptionT.none
+     }
+-
+-  // Attempts to sanitize the file location and retrieve the file. Returns None if the file doesn't exist.
+-  private def getFile[F[_]](unsafePath: String)(implicit F: Sync[F]): OptionT[F, File] =
+-    OptionT(F.delay {
+-      val f = new File(PathNormalizer.removeDotSegments(unsafePath))
+-      if (f.exists()) Some(f)
+-      else None
+-    })
+ }
+diff --git a/server/src/main/scala/org/http4s/server/staticcontent/ResourceService.scala b/server/src/main/scala/org/http4s/server/staticcontent/ResourceService.scala
+index 1d5553fe76e..35b0e3743be 100644
+--- a/server/src/main/scala/org/http4s/server/staticcontent/ResourceService.scala
++++ b/server/src/main/scala/org/http4s/server/staticcontent/ResourceService.scala
+@@ -4,9 +4,17 @@ package staticcontent
+ 
+ import cats.data.{Kleisli, OptionT}
+ import cats.effect._
++import cats.implicits._
++import java.nio.file.Paths
++import org.http4s.server.middleware.TranslateUri
++import org.http4s.util.UrlCodingUtils.urlDecode
++import org.log4s.getLogger
+ import scala.concurrent.ExecutionContext
++import scala.util.{Failure, Success, Try}
++import scala.util.control.NoStackTrace
+ 
+ object ResourceService {
++  private[this] val logger = getLogger
+ 
+   /** [[org.http4s.server.staticcontent.ResourceService]] configuration
+     *
+@@ -26,17 +34,48 @@ object ResourceService {
+       preferGzipped: Boolean = false)
+ 
+   /** Make a new [[org.http4s.HttpService]] that serves static files. */
+-  private[staticcontent] def apply[F[_]: Effect](config: Config[F]): HttpService[F] =
+-    Kleisli {
+-      case request if request.pathInfo.startsWith(config.pathPrefix) =>
+-        StaticFile
+-          .fromResource(
+-            PathNormalizer.removeDotSegments(
+-              s"${config.basePath}/${getSubPath(request.pathInfo, config.pathPrefix)}"),
+-            Some(request),
+-            preferGzipped = config.preferGzipped
+-          )
+-          .semiflatMap(config.cacheStrategy.cache(request.pathInfo, _))
+-      case _ => OptionT.none
++  private[staticcontent] def apply[F[_]](config: Config[F])(
++      implicit F: Effect[F]): HttpService[F] = {
++    val basePath = if (config.basePath.isEmpty) "/" else config.basePath
++    object BadTraversal extends Exception with NoStackTrace
++
++    Try(Paths.get(basePath)) match {
++      case Success(rootPath) =>
++        TranslateUri(config.pathPrefix)(Kleisli {
++          case request =>
++            request.pathInfo.split("/") match {
++              case Array(head, segments @ _*) if head.isEmpty =>
++                OptionT
++                  .liftF(F.catchNonFatal {
++                    segments.foldLeft(rootPath) {
++                      case (_, "" | "." | "..") => throw BadTraversal
++                      case (path, segment) =>
++                        path.resolve(urlDecode(segment, plusIsSpace = true))
++                    }
++                  })
++                  .collect {
++                    case path if path.startsWith(rootPath) => path
++                  }
++                  .flatMap { path =>
++                    StaticFile.fromResource(
++                      path.toString,
++                      Some(request),
++                      preferGzipped = config.preferGzipped
++                    )
++                  }
++                  .semiflatMap(config.cacheStrategy.cache(request.pathInfo, _))
++                  .recoverWith {
++                    case BadTraversal => OptionT.some(Response(Status.BadRequest))
++                  }
++              case _ =>
++                OptionT.none
++            }
++        })
++
++      case Failure(e) =>
++        logger.error(e)(
++          s"Could not get root path from ResourceService config: basePath = ${config.basePath}, pathPrefix = ${config.pathPrefix}. All requests will fail.")
++        Kleisli(_ => OptionT.pure(Response(Status.InternalServerError)))
+     }
++  }
+ }
+diff --git a/server/src/main/scala/org/http4s/server/staticcontent/WebjarService.scala b/server/src/main/scala/org/http4s/server/staticcontent/WebjarService.scala
+index fe561e008f5..3ee8eaecc21 100644
+--- a/server/src/main/scala/org/http4s/server/staticcontent/WebjarService.scala
++++ b/server/src/main/scala/org/http4s/server/staticcontent/WebjarService.scala
+@@ -4,6 +4,10 @@ package staticcontent
+ 
+ import cats.data.{Kleisli, OptionT}
+ import cats.effect.Effect
++import cats.implicits._
++import java.nio.file.{Path, Paths}
++import org.http4s.util.UrlCodingUtils.urlDecode
++import scala.util.control.NoStackTrace
+ 
+ /**
+   * Constructs new services to serve assets from Webjars
+@@ -51,16 +55,32 @@ object WebjarService {
+     * @param config The configuration for this service
+     * @return The HttpService
+     */
+-  def apply[F[_]: Effect](config: Config[F]): HttpService[F] = Kleisli {
+-    // Intercepts the routes that match webjar asset names
+-    case request if request.method == Method.GET =>
+-      OptionT
+-        .pure[F](request.pathInfo)
+-        .map(PathNormalizer.removeDotSegments)
+-        .subflatMap(toWebjarAsset)
+-        .filter(config.filter)
+-        .flatMap(serveWebjarAsset(config, request)(_))
+-    case _ => OptionT.none
++  def apply[F[_]](config: Config[F])(implicit F: Effect[F]): HttpService[F] = {
++    object BadTraversal extends Exception with NoStackTrace
++    val Root = Paths.get("")
++    Kleisli {
++      // Intercepts the routes that match webjar asset names
++      case request if request.method == Method.GET =>
++        request.pathInfo.split("/") match {
++          case Array(head, segments @ _*) if head.isEmpty =>
++            OptionT
++              .liftF(F.catchNonFatal {
++                segments.foldLeft(Root) {
++                  case (_, "" | "." | "..") => throw BadTraversal
++                  case (path, segment) =>
++                    path.resolve(urlDecode(segment, plusIsSpace = true))
++                }
++              })
++              .subflatMap(toWebjarAsset)
++              .filter(config.filter)
++              .flatMap(serveWebjarAsset(config, request)(_))
++              .recover {
++                case BadTraversal => Response(Status.BadRequest)
++              }
++          case _ => OptionT.none
++        }
++      case _ => OptionT.none
++    }
+   }
+ 
+   /**
+@@ -69,14 +89,17 @@ object WebjarService {
+     * @param subPath The request path without the prefix
+     * @return The WebjarAsset, or None if it couldn't be mapped
+     */
+-  private def toWebjarAsset(subPath: String): Option[WebjarAsset] =
+-    Option(subPath)
+-      .map(_.split("/", 4))
+-      .collect {
+-        case Array("", library, version, asset)
+-            if library.nonEmpty && version.nonEmpty && asset.nonEmpty =>
+-          WebjarAsset(library, version, asset)
+-      }
++  private def toWebjarAsset(p: Path): Option[WebjarAsset] = {
++    val count = p.getNameCount
++    if (count > 2) {
++      val library = p.getName(0).toString
++      val version = p.getName(1).toString
++      val asset = p.subpath(2, count)
++      Some(WebjarAsset(library, version, asset.toString))
++    } else {
++      None
++    }
++  }
+ 
+   /**
+     * Returns an asset that matched the request if it's found in the webjar path
+diff --git a/server/src/test/resources/Dir/partial-prefix.txt b/server/src/test/resources/Dir/partial-prefix.txt
+new file mode 100644
+index 00000000000..6508103a460
+--- /dev/null
++++ b/server/src/test/resources/Dir/partial-prefix.txt
+@@ -0,0 +1 @@
++I am useful to test leaks from prefix paths.
+diff --git a/server/src/test/resources/META-INF/resources/webjars/deep purple/machine head/space truckin'.txt b/server/src/test/resources/META-INF/resources/webjars/deep purple/machine head/space truckin'.txt
+new file mode 100644
+index 00000000000..88e1e0dadba
+--- /dev/null
++++ b/server/src/test/resources/META-INF/resources/webjars/deep purple/machine head/space truckin'.txt	
+@@ -0,0 +1,5 @@
++Come on
++Come on
++Come on
++Let's go
++Space truckin'
+diff --git a/server/src/test/resources/space truckin'.txt b/server/src/test/resources/space truckin'.txt
+new file mode 100644
+index 00000000000..88e1e0dadba
+--- /dev/null
++++ b/server/src/test/resources/space truckin'.txt	
+@@ -0,0 +1,5 @@
++Come on
++Come on
++Come on
++Let's go
++Space truckin'
+diff --git a/server/src/test/resources/symlink b/server/src/test/resources/symlink
+new file mode 120000
+index 00000000000..6fbc0d7126f
+--- /dev/null
++++ b/server/src/test/resources/symlink
+@@ -0,0 +1 @@
++../scala
+\ No newline at end of file
+diff --git a/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala b/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
+index 9f0c18e2d2c..a1068176f3d 100644
+--- a/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
++++ b/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
+@@ -4,11 +4,12 @@ package staticcontent
+ 
+ import cats.effect._
+ import fs2._
+-import java.io.File
++import java.nio.file._
+ import org.http4s.server.middleware.TranslateUri
+ 
+ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+-  val s = fileService(FileService.Config[IO](new File(getClass.getResource("/").toURI).getPath))
++  val defaultSystemPath = test.BuildInfo.test_resourceDirectory.getAbsolutePath
++  val s = fileService(FileService.Config[IO](defaultSystemPath))
+ 
+   "FileService" should {
+ 
+@@ -16,25 +17,122 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+       val s2 = TranslateUri("/foo")(s)
+ 
+       {
+-        val req = Request[IO](uri = uri("foo/testresource.txt"))
++        val req = Request[IO](uri = uri("/foo/testresource.txt"))
+         s2.orNotFound(req) must returnBody(testResource)
+         s2.orNotFound(req) must returnStatus(Status.Ok)
+       }
+ 
+       {
+-        val req = Request[IO](uri = uri("testresource.txt"))
++        val req = Request[IO](uri = uri("/testresource.txt"))
+         s2.orNotFound(req) must returnStatus(Status.NotFound)
+       }
+     }
+ 
+     "Return a 200 Ok file" in {
+-      val req = Request[IO](uri = uri("testresource.txt"))
++      val req = Request[IO](uri = uri("/testresource.txt"))
+       s.orNotFound(req) must returnBody(testResource)
+       s.orNotFound(req) must returnStatus(Status.Ok)
+     }
+ 
++    "Decodes path segments" in {
++      val req = Request[IO](uri = uri("/space+truckin%27.txt"))
++      s.orNotFound(req) must returnStatus(Status.Ok)
++    }
++
++    "Respect the path prefix" in {
++      val relativePath = "testresource.txt"
++      val s0 = fileService(
++        FileService.Config[IO](
++          systemPath = defaultSystemPath,
++          pathPrefix = "/path-prefix"
++        ))
++      val file = Paths.get(defaultSystemPath).resolve(relativePath).toFile
++      file.exists() must beTrue
++      val uri = Uri.unsafeFromString("/path-prefix/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s0.orNotFound(req) must returnStatus(Status.Ok)
++    }
++
++    "Return a 400 if the request tries to escape the context" in {
++      val relativePath = "../testresource.txt"
++      val systemPath = Paths.get(defaultSystemPath).resolve("testDir")
++      val file = systemPath.resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = fileService(
++        FileService.Config[IO](
++          systemPath = systemPath.toString
++        ))
++      s0.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 400 on path traversal, even if it's inside the context" in {
++      val relativePath = "testDir/../testresource.txt"
++      val file = Paths.get(defaultSystemPath).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 404 Not Found if the request tries to escape the context with a partial system path prefix match" in {
++      val relativePath = "Dir/partial-prefix.txt"
++      val file = Paths.get(defaultSystemPath).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/test" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = fileService(
++        FileService.Config[IO](
++          systemPath = Paths.get(defaultSystemPath).resolve("/test").toString
++        ))
++      s0.orNotFound(req) must returnStatus(Status.NotFound)
++    }
++
++    "Return a 404 Not Found if the request tries to escape the context with a partial path-prefix match" in {
++      val relativePath = "Dir/partial-prefix.txt"
++      val file = Paths.get(defaultSystemPath).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/prefix" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = fileService(
++        FileService.Config[IO](
++          systemPath = defaultSystemPath,
++          pathPrefix = "/prefix"
++        ))
++      s0.orNotFound(req) must returnStatus(Status.NotFound)
++    }
++
++    "Return a 400 if the request tries to escape the context with /" in {
++      val absPath = Paths.get(defaultSystemPath).resolve("testresource.txt")
++      val file = absPath.toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("///" + absPath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "return files included via symlink" in {
++      val relativePath = "symlink/org/http4s/server/staticcontent/FileServiceSpec.scala"
++      val path = Paths.get(defaultSystemPath).resolve(relativePath)
++      val file = path.toFile
++      Files.isSymbolicLink(Paths.get(defaultSystemPath).resolve("symlink")) must beTrue
++      file.exists() must beTrue
++      val bytes = Chunk.bytes(Files.readAllBytes(path))
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.Ok)
++      s.orNotFound(req) must returnBody(bytes)
++    }
++
+     "Return index.html if request points to a directory" in {
+-      val req = Request[IO](uri = uri("testDir/"))
++      val req = Request[IO](uri = uri("/testDir/"))
+       val rb = runReq(req)
+ 
+       rb._2.as[String] must returnValue("<html>Hello!</html>")
+@@ -42,20 +140,20 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+     }
+ 
+     "Not find missing file" in {
+-      val req = Request[IO](uri = uri("testresource.txtt"))
++      val req = Request[IO](uri = uri("/missing.txt"))
+       s.orNotFound(req) must returnStatus(Status.NotFound)
+     }
+ 
+     "Return a 206 PartialContent file" in {
+       val range = headers.Range(4)
+-      val req = Request[IO](uri = uri("testresource.txt")).replaceAllHeaders(range)
++      val req = Request[IO](uri = uri("/testresource.txt")).replaceAllHeaders(range)
+       s.orNotFound(req) must returnStatus(Status.PartialContent)
+       s.orNotFound(req) must returnBody(Chunk.bytes(testResource.toArray.splitAt(4)._2))
+     }
+ 
+     "Return a 206 PartialContent file" in {
+       val range = headers.Range(-4)
+-      val req = Request[IO](uri = uri("testresource.txt")).replaceAllHeaders(range)
++      val req = Request[IO](uri = uri("/testresource.txt")).replaceAllHeaders(range)
+       s.orNotFound(req) must returnStatus(Status.PartialContent)
+       s.orNotFound(req) must returnBody(
+         Chunk.bytes(testResource.toArray.splitAt(testResource.size - 4)._2))
+@@ -63,7 +161,7 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+ 
+     "Return a 206 PartialContent file" in {
+       val range = headers.Range(2, 4)
+-      val req = Request[IO](uri = uri("testresource.txt")).replaceAllHeaders(range)
++      val req = Request[IO](uri = uri("/testresource.txt")).replaceAllHeaders(range)
+       s.orNotFound(req) must returnStatus(Status.PartialContent)
+       s.orNotFound(req) must returnBody(Chunk.bytes(testResource.toArray.slice(2, 4 + 1))) // the end number is inclusive in the Range header
+     }
+@@ -76,12 +174,15 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+         headers.Range(200, 201),
+         headers.Range(-200)
+       )
+-      val reqs = ranges.map(r => Request[IO](uri = uri("testresource.txt")).replaceAllHeaders(r))
++      val reqs = ranges.map(r => Request[IO](uri = uri("/testresource.txt")).replaceAllHeaders(r))
+       forall(reqs) { req =>
+         s.orNotFound(req) must returnStatus(Status.Ok)
+         s.orNotFound(req) must returnBody(testResource)
+       }
+     }
+-  }
+ 
++    "doesn't crash on /" in {
++      s.orNotFound(Request[IO](uri = uri("/"))) must returnStatus(Status.NotFound)
++    }
++  }
+ }
+diff --git a/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala b/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
+index 4d02dc24bce..5e7b1e65fe2 100644
+--- a/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
++++ b/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
+@@ -3,12 +3,14 @@ package server
+ package staticcontent
+ 
+ import cats.effect._
++import java.nio.file.Paths
+ import org.http4s.headers.{`Accept-Encoding`, `If-Modified-Since`}
+ import org.http4s.server.middleware.TranslateUri
+ 
+ class ResourceServiceSpec extends Http4sSpec with StaticContentShared {
+ 
+   val config = ResourceService.Config[IO]("", executionContext = Http4sSpec.TestExecutionContext)
++  val defaultBase = getClass.getResource("/").getPath.toString
+   val s = resourceService(config)
+ 
+   "ResourceService" should {
+@@ -17,28 +19,115 @@ class ResourceServiceSpec extends Http4sSpec with StaticContentShared {
+       val s2 = TranslateUri("/foo")(s)
+ 
+       {
+-        val req = Request[IO](uri = uri("foo/testresource.txt"))
++        val req = Request[IO](uri = uri("/foo/testresource.txt"))
+         s2.orNotFound(req) must returnBody(testResource)
+         s2.orNotFound(req) must returnStatus(Status.Ok)
+       }
+ 
+       {
+-        val req = Request[IO](uri = uri("testresource.txt"))
++        val req = Request[IO](uri = uri("/testresource.txt"))
+         s2.orNotFound(req) must returnStatus(Status.NotFound)
+       }
+     }
+ 
+     "Serve available content" in {
+-      val req = Request[IO](uri = Uri.fromString("testresource.txt").yolo)
++      val req = Request[IO](uri = Uri.fromString("/testresource.txt").yolo)
+       val rb = s.orNotFound(req)
+ 
+       rb must returnBody(testResource)
+       rb must returnStatus(Status.Ok)
+     }
+ 
++    "Decodes path segments" in {
++      val req = Request[IO](uri = uri("/space+truckin%27.txt"))
++      s.orNotFound(req) must returnStatus(Status.Ok)
++    }
++
++    "Respect the path prefix" in {
++      val relativePath = "testresource.txt"
++      val s0 = resourceService(
++        ResourceService.Config[IO](
++          basePath = "",
++          pathPrefix = "/path-prefix"
++        ))
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++      val uri = Uri.unsafeFromString("/path-prefix/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s0.orNotFound(req) must returnStatus(Status.Ok)
++    }
++
++    "Return a 400 if the request tries to escape the context" in {
++      val relativePath = "../testresource.txt"
++      val basePath = Paths.get(defaultBase).resolve("testDir")
++      val file = basePath.resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = resourceService(
++        ResourceService.Config[IO](
++          basePath = "/testDir"
++        ))
++      s0.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 400 on path traversal, even if it's inside the context" in {
++      val relativePath = "testDir/../testresource.txt"
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 404 Not Found if the request tries to escape the context with a partial base path prefix match" in {
++      val relativePath = "Dir/partial-prefix.txt"
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/test" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = resourceService(
++        ResourceService.Config[IO](
++          basePath = ""
++        ))
++      s0.orNotFound(req) must returnStatus(Status.NotFound)
++    }
++
++    "Return a 404 Not Found if the request tries to escape the context with a partial path-prefix match" in {
++      val relativePath = "Dir/partial-prefix.txt"
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/test" + relativePath)
++      val req = Request[IO](uri = uri)
++      val s0 = resourceService(
++        ResourceService.Config[IO](
++          basePath = "",
++          pathPrefix = "/test"
++        ))
++      s0.orNotFound(req) must returnStatus(Status.NotFound)
++    }
++
++    "Return a 400 Not Found if the request tries to escape the context with /" in {
++      val absPath = Paths.get(defaultBase).resolve("testresource.txt")
++      val file = absPath.toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("///" + absPath)
++      val req = Request[IO](uri = uri)
++      val s0 = resourceService(
++        ResourceService.Config[IO](
++          basePath = "/testDir"
++        ))
++      s0.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
+     "Try to serve pre-gzipped content if asked to" in {
+       val req = Request[IO](
+-        uri = Uri.fromString("testresource.txt").yolo,
++        uri = Uri.fromString("/testresource.txt").yolo,
+         headers = Headers(`Accept-Encoding`(ContentCoding.gzip))
+       )
+       val rb = resourceService(config.copy(preferGzipped = true)).orNotFound(req)
+@@ -51,7 +140,7 @@ class ResourceServiceSpec extends Http4sSpec with StaticContentShared {
+ 
+     "Fallback to un-gzipped file if pre-gzipped version doesn't exist" in {
+       val req = Request[IO](
+-        uri = Uri.fromString("testresource2.txt").yolo,
++        uri = Uri.fromString("/testresource2.txt").yolo,
+         headers = Headers(`Accept-Encoding`(ContentCoding.gzip))
+       )
+       val rb = resourceService(config.copy(preferGzipped = true)).orNotFound(req)
+@@ -63,15 +152,19 @@ class ResourceServiceSpec extends Http4sSpec with StaticContentShared {
+     }
+ 
+     "Generate non on missing content" in {
+-      val req = Request[IO](uri = Uri.fromString("testresource.txtt").yolo)
++      val req = Request[IO](uri = Uri.fromString("/testresource.txtt").yolo)
+       s.orNotFound(req) must returnStatus(Status.NotFound)
+     }
+ 
+     "Not send unmodified files" in {
+-      val req = Request[IO](uri = uri("testresource.txt"))
++      val req = Request[IO](uri = uri("/testresource.txt"))
+         .putHeaders(`If-Modified-Since`(HttpDate.MaxValue))
+ 
+       runReq(req)._2.status must_== Status.NotModified
+     }
++
++    "doesn't crash on /" in {
++      s.orNotFound(Request[IO](uri = uri("/"))) must returnStatus(Status.NotFound)
++    }
+   }
+ }
+diff --git a/server/src/test/scala/org/http4s/server/staticcontent/WebjarServiceSpec.scala b/server/src/test/scala/org/http4s/server/staticcontent/WebjarServiceSpec.scala
+index d72bf3f0121..345be54523b 100644
+--- a/server/src/test/scala/org/http4s/server/staticcontent/WebjarServiceSpec.scala
++++ b/server/src/test/scala/org/http4s/server/staticcontent/WebjarServiceSpec.scala
+@@ -3,12 +3,15 @@ package server
+ package staticcontent
+ 
+ import cats.effect._
++import java.nio.file.Paths
+ import org.http4s.Method.{GET, POST}
+ import org.http4s.server.staticcontent.WebjarService.Config
+ 
+ object WebjarServiceSpec extends Http4sSpec with StaticContentShared {
+ 
+   def s: HttpService[IO] = webjarService(Config[IO]())
++  val defaultBase =
++    test.BuildInfo.test_resourceDirectory.toPath.resolve("META-INF/resources/webjars").toString
+ 
+   "The WebjarService" should {
+ 
+@@ -28,6 +31,41 @@ object WebjarServiceSpec extends Http4sSpec with StaticContentShared {
+       rb._2.status must_== Status.Ok
+     }
+ 
++    "Decodes path segments" in {
++      val req = Request[IO](uri = uri("/deep+purple/machine+head/space+truckin%27.txt"))
++      s.orNotFound(req) must returnStatus(Status.Ok)
++    }
++
++    "Return a 400 on a relative link even if it's inside the context" in {
++      val relativePath = "test-lib/1.0.0/sub/../testresource.txt"
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 400 if the request tries to escape the context" in {
++      val relativePath = "../../../testresource.txt"
++      val file = Paths.get(defaultBase).resolve(relativePath).toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("/" + relativePath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
++    "Return a 400 if the request tries to escape the context with /" in {
++      val absPath = Paths.get(defaultBase).resolve("test-lib/1.0.0/testresource.txt")
++      val file = absPath.toFile
++      file.exists() must beTrue
++
++      val uri = Uri.unsafeFromString("///" + absPath)
++      val req = Request[IO](uri = uri)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
++    }
++
+     "Not find missing file" in {
+       val req = Request[IO](uri = uri("/test-lib/1.0.0/doesnotexist.txt"))
+       s.apply(req).value must returnValue(None)
+@@ -38,12 +76,12 @@ object WebjarServiceSpec extends Http4sSpec with StaticContentShared {
+       s.apply(req).value must returnValue(None)
+     }
+ 
+-    "Not find missing version" in {
++    "Return bad request on missing version" in {
+       val req = Request[IO](uri = uri("/test-lib//doesnotexist.txt"))
+-      s.apply(req).value must returnValue(None)
++      s.orNotFound(req) must returnStatus(Status.BadRequest)
+     }
+ 
+-    "Not find missing asset" in {
++    "Not find blank asset" in {
+       val req = Request[IO](uri = uri("/test-lib/1.0.0/"))
+       s.apply(req).value must returnValue(None)
+     }
+
+From 185deb20b759c5dad8ce288ba5728b0acba534fd Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 00:51:47 -0400
+Subject: [PATCH 43/49] Reinstate relative system paths in FileService
+
+---
+ .../http4s/server/staticcontent/FileService.scala   |  9 +++++++--
+ server/src/test/resources/test/keep.txt             |  1 +
+ .../server/staticcontent/FileServiceSpec.scala      | 13 ++++++++++++-
+ 3 files changed, 20 insertions(+), 3 deletions(-)
+ create mode 100644 server/src/test/resources/test/keep.txt
+
+diff --git a/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala b/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
+index 524fdadd637..4c81265dff6 100644
+--- a/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
++++ b/server/src/main/scala/org/http4s/server/staticcontent/FileService.scala
+@@ -55,7 +55,7 @@ object FileService {
+   private[staticcontent] def apply[F[_]](config: Config[F])(
+       implicit F: Effect[F]): HttpService[F] = {
+     object BadTraversal extends Exception with NoStackTrace
+-    Try(Paths.get(config.systemPath)) match {
++    Try(Paths.get(config.systemPath).toRealPath()) match {
+       case Success(rootPath) =>
+         TranslateUri(config.pathPrefix)(Kleisli {
+           case request =>
+@@ -81,9 +81,14 @@ object FileService {
+             }
+         })
+ 
++      case Failure(_: NoSuchFileException) =>
++        logger.error(
++          s"Could not find root path from FileService config: systemPath = ${config.systemPath}, pathPrefix = ${config.pathPrefix}. All requests will return none.")
++        Kleisli(_ => OptionT.none)
++
+       case Failure(e) =>
+         logger.error(e)(
+-          s"Could not get root path from FileService config: systemPath = ${config.systemPath}, pathPrefix = ${config.pathPrefix}. All requests will fail.")
++          s"Could not resolve root path from FileService config: systemPath = ${config.systemPath}, pathPrefix = ${config.pathPrefix}. All requests will fail with a 500.")
+         Kleisli(_ => OptionT.pure(Response(Status.InternalServerError)))
+     }
+   }
+diff --git a/server/src/test/resources/test/keep.txt b/server/src/test/resources/test/keep.txt
+new file mode 100644
+index 00000000000..9c558e357c4
+--- /dev/null
++++ b/server/src/test/resources/test/keep.txt
+@@ -0,0 +1 @@
++.
+diff --git a/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala b/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
+index a1068176f3d..9887c4b044a 100644
+--- a/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
++++ b/server/src/test/scala/org/http4s/server/staticcontent/FileServiceSpec.scala
+@@ -87,7 +87,7 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+       val req = Request[IO](uri = uri)
+       val s0 = fileService(
+         FileService.Config[IO](
+-          systemPath = Paths.get(defaultSystemPath).resolve("/test").toString
++          systemPath = Paths.get(defaultSystemPath).resolve("test").toString
+         ))
+       s0.orNotFound(req) must returnStatus(Status.NotFound)
+     }
+@@ -184,5 +184,16 @@ class FileServiceSpec extends Http4sSpec with StaticContentShared {
+     "doesn't crash on /" in {
+       s.orNotFound(Request[IO](uri = uri("/"))) must returnStatus(Status.NotFound)
+     }
++
++    "handle a relative system path" in {
++      val s = fileService(FileService.Config[IO]("."))
++      Paths.get(".").resolve("build.sbt").toFile.exists() must beTrue
++      s.orNotFound(Request[IO](uri = uri("/build.sbt"))) must returnStatus(Status.Ok)
++    }
++
++    "404 if system path is not found" in {
++      val s = fileService(FileService.Config[IO]("./does-not-exist"))
++      s.orNotFound(Request[IO](uri = uri("/build.sbt"))) must returnStatus(Status.NotFound)
++    }
+   }
+ }
+
+From 21f7ee4fe3127a893f98ee9d2ba69eac8d379205 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 01:02:20 -0400
+Subject: [PATCH 44/49] Changelog for GHSA-66q9-f7ff-mmx6
+
+---
+ website/src/hugo/content/changelog.md | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/website/src/hugo/content/changelog.md b/website/src/hugo/content/changelog.md
+index 9c431aa2206..4fa6e868092 100644
+--- a/website/src/hugo/content/changelog.md
++++ b/website/src/hugo/content/changelog.md
+@@ -8,6 +8,15 @@ Maintenance branches are merged before each new release. This change log is
+ ordered chronologically, so each release contains all changes described below
+ it.
+ 
++# v0.18.26
++
++This release is fully backward compatible with 0.18.25.
++
++## Security fixes
++* [GHSA-66q9-f7ff-mmx6](https://github.com/http4s/http4s/security/advisories/GHSA-66q9-f7ff-mmx6): Fixes a local file inclusion vulnerability in `FileService`, `ResourceService`, and `WebjarService`.
++  * Request paths with `.`, `..`, or empty segments will now return a 400 in all three services.  Combinations of these could formerly be used to escape the configured roots and expose arbitrary local resources.
++  * Request path segments are now percent-decoded to support resources with reserved characters in the name.
++  
+ # v0.18.25 (2020-01-21)
+ 
+ ## Bug fixes
+
+From dd2198715bca5dc3365294f0931d1472a2c984c1 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 17:17:01 -0400
+Subject: [PATCH 45/49] Upgrade to mima-0.7.0
+
+---
+ project/plugins.sbt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/project/plugins.sbt b/project/plugins.sbt
+index ee7e76916d9..d84becc3978 100644
+--- a/project/plugins.sbt
++++ b/project/plugins.sbt
+@@ -4,7 +4,7 @@ addSbtPlugin("com.earldouglas"     %  "xsbt-web-plugin"       % "4.0.2")
+ addSbtPlugin("com.github.tkawachi" %  "sbt-doctest"           % "0.7.2")
+ addSbtPlugin("com.lucidchart"      %  "sbt-scalafmt-coursier" % "1.15")
+ addSbtPlugin("org.scalastyle"      %% "scalastyle-sbt-plugin" % "1.0.0")
+-addSbtPlugin("com.typesafe"        %  "sbt-mima-plugin"       % "0.1.18")
++addSbtPlugin("com.typesafe"        %  "sbt-mima-plugin"       % "0.7.0")
+ addSbtPlugin("com.typesafe.sbt"    %  "sbt-native-packager"   % "1.3.3")
+ addSbtPlugin("com.typesafe.sbt"    %  "sbt-twirl"             % "1.3.15")
+ addSbtPlugin("io.gatling"          %  "gatling-sbt"           % "2.2.2")
+
+From 18b23dea4d2d033540dd100103a8d4cf05ae5171 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 17:01:56 -0400
+Subject: [PATCH 46/49] Release v0.18.26
+
+---
+ version.sbt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/version.sbt b/version.sbt
+index d4a7efe392e..29d996655b0 100644
+--- a/version.sbt
++++ b/version.sbt
+@@ -1 +1 @@
+-version in ThisBuild := "0.18.26-SNAPSHOT"
++version in ThisBuild := "0.18.26"
+
+From 45ea3a08645578be235f4700e4b9dd4fbb056acc Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 20:03:59 -0400
+Subject: [PATCH 47/49] Note #3167, which is already on this branch
+
+---
+ website/src/hugo/content/changelog.md | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/website/src/hugo/content/changelog.md b/website/src/hugo/content/changelog.md
+index 522369267ed..c18f87e52c5 100644
+--- a/website/src/hugo/content/changelog.md
++++ b/website/src/hugo/content/changelog.md
+@@ -8,7 +8,7 @@ Maintenance branches are merged before each new release. This change log is
+ ordered chronologically, so each release contains all changes described below
+ it.
+ 
+-# v0.20.20
++# v0.20.20 (2020-03-24)
+ 
+ This release is fully backward compatible with 0.18.25.
+ 
+@@ -17,7 +17,11 @@ This release is fully backward compatible with 0.18.25.
+   * Request paths with `.`, `..`, or empty segments will now return a 400 in all three services.  Combinations of these could formerly be used to escape the configured roots and expose arbitrary local resources.
+   * Request path segments are now percent-decoded to support resources with reserved characters in the name.
+ 
+-# v0.18.26
++## Enhancements
++
++* [#3167](https://github.com/http4s/http4s/pull/3167): Add `MetricsOps.classifierFMethodWithOptionallyExcludedPath`.name.
++
++# v0.18.26 (2020-03-24)
+ 
+ This release is fully backward compatible with 0.18.25.
+ 
+
+From 4e23069016098b8e36e8f9e0fa42d9b0166bf3b0 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 20:22:31 -0400
+Subject: [PATCH 48/49] No trailing commas in Scala 2.11
+
+---
+ .../org/http4s/server/staticcontent/ResourceServiceSpec.scala   | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala b/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
+index f510c565e16..2f895c8fc98 100644
+--- a/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
++++ b/server/src/test/scala/org/http4s/server/staticcontent/ResourceServiceSpec.scala
+@@ -71,7 +71,7 @@ class ResourceServiceSpec extends Http4sSpec with StaticContentShared {
+       val s0 = resourceService(
+         ResourceService.Config[IO](
+           basePath = "/testDir",
+-          blockingExecutionContext = testBlockingExecutionContext,
++          blockingExecutionContext = testBlockingExecutionContext
+         ))
+       s0.orNotFound(req) must returnStatus(Status.BadRequest)
+     }
+
+From 0a46b00a2c92d848e45ff0455e773dbe1b552858 Mon Sep 17 00:00:00 2001
+From: "Ross A. Baker" <ross@rossabaker.com>
+Date: Tue, 24 Mar 2020 20:51:54 -0400
+Subject: [PATCH 49/49] Note #3253 and #3236
+
+---
+ website/src/hugo/content/changelog.md | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/website/src/hugo/content/changelog.md b/website/src/hugo/content/changelog.md
+index 4f46ac35816..27791ceacb2 100644
+--- a/website/src/hugo/content/changelog.md
++++ b/website/src/hugo/content/changelog.md
+@@ -10,13 +10,21 @@ it.
+ 
+ # v0.21.2 (2020-03-24)
+ 
+-This release is fully backward compatible with 0.21.2.
++This release is fully backward compatible with 0.21.1.
+ 
+ ## Security fixes
+ * [GHSA-66q9-f7ff-mmx6](https://github.com/http4s/http4s/security/advisories/GHSA-66q9-f7ff-mmx6): Fixes a local file inclusion vulnerability in `FileService`, `ResourceService`, and `WebjarService`.
+   * Request paths with `.`, `..`, or empty segments will now return a 400 in all three services.  Combinations of these could formerly be used to escape the configured roots and expose arbitrary local resources.
+   * Request path segments are now percent-decoded to support resources with reserved characters in the name.
+ 
++## Bug fixes
++
++* [#3261](https://github.com/http4s/http4s/pull/3261): In async-http-client, fixed connection release when body isn't run, as well as thread affinity.
++
++## Enhancements
++
++* [#3253](https://github.com/http4s/http4s/pull/3253): Preparation for Dotty support. Should be invisible to end users, but calling out because it touches a lot.
++
+ # v0.20.20 (2020-03-24)
+ 
+ This release is fully backward compatible with 0.18.25.

@@ -1,0 +1,67 @@
+From f4b9e24c7384d882a7f434cc7413925bf871d63e Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Mon, 12 Jun 2017 22:16:12 -0700
+Subject: [PATCH] CVE-2017-13041/ICMP6: Add more bounds checks.
+
+This fixes a buffer over-read discovered by Kim Gwan Yeong.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-icmp6.c                  |   2 ++
+ tests/TESTLIST                 |   1 +
+ tests/icmp6_nodeinfo_oobr.out  |   1 +
+ tests/icmp6_nodeinfo_oobr.pcap | Bin 0 -> 114 bytes
+ 4 files changed, 4 insertions(+)
+ create mode 100644 tests/icmp6_nodeinfo_oobr.out
+ create mode 100644 tests/icmp6_nodeinfo_oobr.pcap
+
+diff --git a/print-icmp6.c b/print-icmp6.c
+index c481e446f..42fe19f29 100644
+--- a/print-icmp6.c
++++ b/print-icmp6.c
+@@ -1699,6 +1699,7 @@ icmp6_nodeinfo_print(netdissect_options *ndo, u_int icmp6len, const u_char *bp,
+ 
+ 		needcomma = 0;
+ 
++		ND_TCHECK2(*dp, sizeof(*ni6));
+ 		ni6 = (const struct icmp6_nodeinfo *)dp;
+ 		ND_PRINT((ndo," node information reply"));
+ 		ND_PRINT((ndo," ("));	/*)*/
+@@ -1753,6 +1754,7 @@ icmp6_nodeinfo_print(netdissect_options *ndo, u_int icmp6len, const u_char *bp,
+ 				ND_PRINT((ndo,", "));
+ 			ND_PRINT((ndo,"DNS name"));
+ 			cp = (const u_char *)(ni6 + 1) + 4;
++			ND_TCHECK(cp[0]);
+ 			if (cp[0] == ep - cp - 1) {
+ 				/* icmp-name-lookup-03, pascal string */
+ 				if (ndo->ndo_vflag)
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index c3f397338..a8811bc69 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -560,6 +560,7 @@ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+ 
+ # bad packets from Kim Gwan Yeong
+ mptcp-dss-oobr		mptcp-dss-oobr.pcap		mptcp-dss-oobr.out	-v
++icmp6_nodeinfo_oobr	icmp6_nodeinfo_oobr.pcap	icmp6_nodeinfo_oobr.out
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/icmp6_nodeinfo_oobr.out b/tests/icmp6_nodeinfo_oobr.out
+new file mode 100644
+index 000000000..0856ea2f0
+--- /dev/null
++++ b/tests/icmp6_nodeinfo_oobr.out
+@@ -0,0 +1 @@
++IP6 a072:7f00:1:7f00:1:e01a:17:6785 > c903::a002:8018:fe30:0:204: ICMP6, who-are-you reply[|icmp6], length 4
+diff --git a/tests/icmp6_nodeinfo_oobr.pcap b/tests/icmp6_nodeinfo_oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..4c3ff04dea98b5ee3589256eac68c4fea39767fc
+GIT binary patch
+literal 114
+zcmca|c+)~A1{MYwumv(WfOv;tLda4e!wbj;VPwF;;3|+{Gsm2P#foh~Q9T0#BM3i`
+nVh~SnJ;@AGxqzub;-3Kn0~1RR0}B%em-6&b6OcF~GcyYS@g5Oh
+
+literal 0
+HcmV?d00001
+

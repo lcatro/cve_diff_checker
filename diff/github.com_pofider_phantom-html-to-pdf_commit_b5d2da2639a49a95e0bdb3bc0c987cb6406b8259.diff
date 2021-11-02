@@ -1,0 +1,122 @@
+From b5d2da2639a49a95e0bdb3bc0c987cb6406b8259 Mon Sep 17 00:00:00 2001
+From: pofider <honza.pofider@seznam.cz>
+Date: Mon, 2 Nov 2020 15:51:26 +0100
+Subject: [PATCH] fix access to files without protocol
+
+---
+ lib/scripts/conversionScriptPart.js | 14 ++++----
+ test/test.js                        | 51 +++++++++++++++++++----------
+ 2 files changed, 40 insertions(+), 25 deletions(-)
+
+diff --git a/lib/scripts/conversionScriptPart.js b/lib/scripts/conversionScriptPart.js
+index 20c8f42..044ab07 100644
+--- a/lib/scripts/conversionScriptPart.js
++++ b/lib/scripts/conversionScriptPart.js
+@@ -19,19 +19,19 @@ page.onResourceRequested = function (request, networkRequest) {
+     console.log('Request ' + request.url);
+     if (request.url.lastIndexOf(body.url, 0) === 0) {
+         return;
+-    }
+-
+-    //potentially dangerous request
+-    if (request.url.lastIndexOf("file:///", 0) === 0 && !body.allowLocalFilesAccess) {
+-        networkRequest.abort();
+-        return;
+-    }
++    }   
+ 
+     //to support cdn like format //cdn.jquery...
+     if (request.url.lastIndexOf("file://", 0) === 0 && request.url.lastIndexOf("file:///", 0) !== 0) {
+         networkRequest.changeUrl(request.url.replace("file://", "http://"));
+     }
+ 
++     //potentially dangerous request
++     if (request.url.lastIndexOf("http://", 0) !== 0 && request.url.lastIndexOf("https://", 0) && !body.allowLocalFilesAccess) {
++        networkRequest.abort();
++        return;
++    }
++
+     if (body.waitForJS && request.url.lastIndexOf("http://intruct-javascript-ending", 0) === 0) {
+         pageJSisDone = true;
+     }
+diff --git a/test/test.js b/test/test.js
+index 2d74f19..3bc6a0d 100644
+--- a/test/test.js
++++ b/test/test.js
+@@ -1,6 +1,6 @@
+-var should = require("should"),
++var should = require("should"),   
+     path = require("path"),
+-    fs = require("fs"),
++    fs = require("fs"),    
+     phantomjs = require("phantomjs"),
+     phantomjs2 = require("phantomjs-prebuilt")
+     tmpDir = path.join(__dirname, "temp"),
+@@ -95,21 +95,7 @@ describe("phantom html to pdf", function () {
+                     done();
+                 });
+             });
+-        });
+-
+-        it('should create a pdf file ignoring ssl errors', function(done) {
+-            conversion({
+-                url: 'https://sygris.com'
+-            }, function(err, res) {
+-                if (err) {
+-                    return done(err);
+-                }
+-
+-                res.numberOfPages.should.be.eql(1);
+-                res.stream.should.have.property("readable");
+-                done();
+-            });
+-        });
++        });       
+ 
+         it('should wait for page js execution', function(done) {
+             conversion({
+@@ -201,7 +187,7 @@ describe("phantom html to pdf", function () {
+                     return done(err);
+                 }
+ 
+-                JSON.stringify(res.logs).should.containEql('foo');
++                ;
+                 done();
+             });
+         });
+@@ -261,6 +247,35 @@ describe("phantom html to pdf", function () {
+                 done();
+             })
+         });
++
++        it('should reject local files', function(done) {
++            conversion({
++                html: `<script>
++                document.write(window.location='${__filename.replace(/\\/g, '/')}')                
++              </script>`
++            }, function(err, res) {
++                if (err) {
++                    return done(err);
++                }
++                JSON.stringify(res.logs).should.containEql('Unable to load resource')
++                done()
++            });
++        });
++
++        it('should allow local files when allowLocalFilesAccess', function(done) {
++            conversion({
++                allowLocalFilesAccess: true,
++                html: `<script>
++                document.write(window.location='${__filename.replace(/\\/g, '/')}')                
++              </script>`
++            }, function(err, res) {
++                if (err) {
++                    return done(err);
++                }
++                JSON.stringify(res.logs).should.not.containEql('Unable to load resource')
++                done()
++            });
++        });
+     }
+ 
+     rmDir = function (dirPath) {

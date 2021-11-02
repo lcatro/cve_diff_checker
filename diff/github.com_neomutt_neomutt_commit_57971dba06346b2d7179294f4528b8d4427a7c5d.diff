@@ -1,0 +1,27 @@
+From 57971dba06346b2d7179294f4528b8d4427a7c5d Mon Sep 17 00:00:00 2001
+From: Richard Russon <rich@flatcap.org>
+Date: Mon, 9 Jul 2018 15:26:26 +0100
+Subject: [PATCH] Selectively cache headers
+
+Co-authored-by: JerikoOne <jeriko.one@gmx.us>
+---
+ imap/util.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/imap/util.c b/imap/util.c
+index 614d87a561..58224fc387 100644
+--- a/imap/util.c
++++ b/imap/util.c
+@@ -245,6 +245,12 @@ header_cache_t *imap_hcache_open(struct ImapData *idata, const char *path)
+     FREE(&mx.mbox);
+   }
+ 
++  if (strstr(mbox, "/../") || (strcmp(mbox, "..") == 0) || (strncmp(mbox, "../", 3) == 0))
++    return NULL;
++  size_t len = strlen(mbox);
++  if ((len > 3) && (strcmp(mbox + len - 3, "/..") == 0))
++    return NULL;
++
+   mutt_account_tourl(&idata->conn->account, &url);
+   url.path = mbox;
+   url_tostring(&url, cachepath, sizeof(cachepath), U_PATH);

@@ -1,0 +1,42 @@
+From 59ce1c67b16967c652765e62aa130b7e43f21dd4 Mon Sep 17 00:00:00 2001
+From: Cyrill Gorcunov <gorcunov@gmail.com>
+Date: Sun, 22 Oct 2017 18:42:07 +0300
+Subject: [PATCH] peproc: Fix sigsevg in smacro expansion
+
+In case if smacro is called with inapropriate
+number of arguments exit early. Actually we have
+to handle this situation more gracefully but
+this requires a way more efforts than two
+line patches (need to refactor macro expansion).
+
+https://bugzilla.nasm.us/show_bug.cgi?id=3392431
+
+Signed-off-by: Cyrill Gorcunov <gorcunov@gmail.com>
+---
+ asm/preproc.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/asm/preproc.c b/asm/preproc.c
+index 404d3ecb..cd4a9494 100644
+--- a/asm/preproc.c
++++ b/asm/preproc.c
+@@ -4430,6 +4430,16 @@ again:
+                                                         ttt->text, 0);
+                                 ptail = &pt->next;
+                                 ttt = ttt->next;
++                                if (!ttt && i > 0) {
++                                    /*
++                                     * FIXME: Need to handle more gracefully,
++                                     * exiting early on agruments analysis.
++                                     */
++                                    nasm_error(ERR_FATAL,
++                                               "macro `%s' expects %d args",
++                                               mstart->text,
++                                               (int)paramsize[t->type - TOK_SMAC_PARAM]);
++                                }
+                             }
+                             tline = pcopy;
+                         } else if (t->type == TOK_PREPROC_Q) {
+-- 
+2.11.4.GIT
+

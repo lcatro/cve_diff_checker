@@ -1,0 +1,62 @@
+From 0d9a4d98bfdf4acd2c0138d4aaeb4e2e0934bd84 Mon Sep 17 00:00:00 2001
+From: Scott Gayou <sgayou@redhat.com>
+Date: Fri, 14 Sep 2018 11:55:11 -0500
+Subject: [PATCH] Fix for CVE-2018-16790 -- Verify bounds before binary length
+ read.
+
+As reported here: https://jira.mongodb.org/browse/CDRIVER-2819,
+a heap overread occurs due a failure to correctly verify data
+bounds.
+
+In the original check, len - o returns the data left including the
+sizeof(l) we just read. Instead, the comparison should check
+against the data left NOT including the binary int32, i.e. just
+subtype (byte*) instead of int32 subtype (byte*).
+
+Added in test for corrupted BSON example.
+---
+ src/libbson/src/bson/bson-iter.c     |   2 +-
+ src/libbson/tests/binary/test59.bson | Bin 0 -> 17 bytes
+ src/libbson/tests/test-bson.c        |   5 +++++
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+ create mode 100644 src/libbson/tests/binary/test59.bson
+
+diff --git a/src/libbson/src/bson/bson-iter.c b/src/libbson/src/bson/bson-iter.c
+index 5b6dad1c5b..820134ea82 100644
+--- a/src/libbson/src/bson/bson-iter.c
++++ b/src/libbson/src/bson/bson-iter.c
+@@ -618,7 +618,7 @@ _bson_iter_next_internal (bson_iter_t *iter,    /* INOUT */
+       memcpy (&l, iter->raw + iter->d1, sizeof (l));
+       l = BSON_UINT32_FROM_LE (l);
+ 
+-      if (l >= (len - o)) {
++      if (l >= (len - o - 4)) {
+          iter->err_off = o;
+          goto mark_invalid;
+       }
+diff --git a/src/libbson/tests/binary/test59.bson b/src/libbson/tests/binary/test59.bson
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fd8be074e0a811e4d4d6004e046aac0c8711fea
+GIT binary patch
+literal 17
+VcmWe+U|?Y7lhk8i0Wz3?7ytz#0CE5T
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/libbson/tests/test-bson.c b/src/libbson/tests/test-bson.c
+index b6e74c67c9..6ac94f3aee 100644
+--- a/src/libbson/tests/test-bson.c
++++ b/src/libbson/tests/test-bson.c
+@@ -1249,6 +1249,11 @@ test_bson_validate (void)
+                   12,
+                   BSON_VALIDATE_NONE,
+                   "corrupt BSON");
++   VALIDATE_TEST ("test59.bson",
++                  BSON_VALIDATE_NONE,
++                  9,
++                  BSON_VALIDATE_NONE,
++                  "corrupt BSON");
+ 
+    /* DBRef validation */
+    b = BCON_NEW ("my_dbref",

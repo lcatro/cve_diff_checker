@@ -1,0 +1,115 @@
+From 9f0730bee3eb65d07b49fd468bc2f269173352fe Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 15 Mar 2017 12:12:21 -0700
+Subject: [PATCH] CVE-2017-13011/Properly check for buffer overflow in
+ bittok2str_internal().
+
+Also, make the buffer bigger.
+
+This fixes a buffer overflow discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ tests/TESTLIST       |   3 +++
+ tests/lldp_asan.out  |  14 ++++++++++++++
+ tests/lldp_asan.pcap | Bin 0 -> 94 bytes
+ util-print.c         |  23 ++++++++++++++++++-----
+ 4 files changed, 35 insertions(+), 5 deletions(-)
+ create mode 100644 tests/lldp_asan.out
+ create mode 100644 tests/lldp_asan.pcap
+
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 080a00fbd..309e896f5 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -507,6 +507,9 @@ juniper_es		juniper_es.pcap			juniper_es.out	-vvv -e
+ l2tp-avp-overflow	l2tp-avp-overflow.pcap		l2tp-avp-overflow.out	-v
+ pktap-heap-overflow	pktap-heap-overflow.pcap	pktap-heap-overflow.out	-v
+ 
++# bad packets from Bhargava Shastry
++lldp_asan		lldp_asan.pcap			lldp_asan.out	-v
++
+ # RTP tests
+ # fuzzed pcap
+ rtp-seg-fault-1  rtp-seg-fault-1.pcap  rtp-seg-fault-1.out  -v -T rtp
+diff --git a/tests/lldp_asan.out b/tests/lldp_asan.out
+new file mode 100644
+index 000000000..dac0f0efe
+--- /dev/null
++++ b/tests/lldp_asan.out
+@@ -0,0 +1,14 @@
++LLDP, length 296
++	Chassis ID TLV (1), length 6
++	  Subtype Network address (5): AFI IPv4 (1): 0.0.32.0
++	Organization specific TLV (127), length 9: OUI IEEE 802.3 Private (0x00120f)
++	  MAC/PHY configuration/status Subtype (1)
++	    autonegotiation [none] (0x00)
++	    PMD autoneg capability [10BASE-T hdx, 10BASE-T fdx, 100BASE-T4, 100BASE-TX hdx, 100BASE-TX fdx, 100BASE-T2 hdx, 100BASE-T2 fdx, Pause for fdx links, Asym PAUSE for fdx, Sym PAUSE for fdx, Asym and Sym PAUSE for fdx, 1000BASE-{X LX SX CX} hdx, 1000BASE-{X LX SX CX} fdx, 1000BASE-T hdx, 1000BASE-T fdx] (0xffff)
++	    MAU type unknown (0x2000)
++	Organization specific TLV (127), length 9: OUI IEEE 802.3 Private (0x00120f)
++	  MAC/PHY configuration/status Subtype (1)
++	    autonegotiation [none] (0x00)
++	    PMD autoneg capability [Pause for fdx links, Asym PAUSE for fdx, Sym PAUSE for fdx, Asym and Sym PAUSE for fdx, 1000BASE-{X LX SX CX} hdx, 1000BASE-{X LX SX CX} fdx, 1000BASE-T hdx] (0x00fe)
++	    MAU type unknown (0x0f00)
++	End TLV (0), length 0
+diff --git a/tests/lldp_asan.pcap b/tests/lldp_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..8dea148b997d5cef59797b0d0f54c2636363b5ea
+GIT binary patch
+literal 94
+zcmca|c+)~A1{MYcU}0bca(I&}gP9ow7|eidGoZkMgO3;({vSAaV1dHijx$VbtUxgZ
+ehJTz4Li~&j|Nq084FC9nI{vY}uMZ6^D+K_kI~KP9
+
+literal 0
+HcmV?d00001
+
+diff --git a/util-print.c b/util-print.c
+index ec3e8de86..7626c5240 100644
+--- a/util-print.c
++++ b/util-print.c
+@@ -523,8 +523,9 @@ static char *
+ bittok2str_internal(register const struct tok *lp, register const char *fmt,
+ 	   register u_int v, const char *sep)
+ {
+-        static char buf[256]; /* our stringbuffer */
+-        int buflen=0;
++        static char buf[1024+1]; /* our string buffer */
++        char *bufp = buf;
++        size_t space_left = sizeof(buf), string_size;
+         register u_int rotbit; /* this is the bit we rotate through all bitpositions */
+         register u_int tokval;
+         const char * sepstr = "";
+@@ -539,8 +540,20 @@ bittok2str_internal(register const struct tok *lp, register const char *fmt,
+                  */
+ 		if (tokval == (v&rotbit)) {
+                     /* ok we have found something */
+-                    buflen+=snprintf(buf+buflen, sizeof(buf)-buflen, "%s%s",
+-                                     sepstr, lp->s);
++                    if (space_left <= 1)
++                        return (buf); /* only enough room left for NUL, if that */
++                    string_size = strlcpy(bufp, sepstr, space_left);
++                    if (string_size >= space_left)
++                        return (buf);    /* we ran out of room */
++                    bufp += string_size;
++                    space_left -= string_size;
++                    if (space_left <= 1)
++                        return (buf); /* only enough room left for NUL, if that */
++                    string_size = strlcpy(bufp, lp->s, space_left);
++                    if (string_size >= space_left)
++                        return (buf);    /* we ran out of room */
++                    bufp += string_size;
++                    space_left -= string_size;
+                     sepstr = sep;
+                     break;
+                 }
+@@ -549,7 +562,7 @@ bittok2str_internal(register const struct tok *lp, register const char *fmt,
+             lp++;
+ 	}
+ 
+-        if (buflen == 0)
++        if (bufp == buf)
+             /* bummer - lets print the "unknown" message as advised in the fmt string if we got one */
+             (void)snprintf(buf, sizeof(buf), fmt == NULL ? "#%08x" : fmt, v);
+         return (buf);

@@ -1,0 +1,30 @@
+From 1786bdd4962ee51544fad537352c2b4223309442 Mon Sep 17 00:00:00 2001
+From: Bernhard Rusch <bernhard.rusch@elements.at>
+Date: Fri, 5 Feb 2021 10:39:02 +0100
+Subject: [PATCH] Fixed LFI in custom report csv download
+
+---
+ .../AdminBundle/Controller/Reports/CustomReportController.php  | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/bundles/AdminBundle/Controller/Reports/CustomReportController.php b/bundles/AdminBundle/Controller/Reports/CustomReportController.php
+index 37a19734fb6..0d859cdb8ac 100644
+--- a/bundles/AdminBundle/Controller/Reports/CustomReportController.php
++++ b/bundles/AdminBundle/Controller/Reports/CustomReportController.php
+@@ -433,7 +433,7 @@ public function createCsvAction(Request $request)
+         $progress = $progress > 1 ? 1 : $progress;
+ 
+         return new JsonResponse([
+-            'exportFile' => $exportFile,
++            'exportFile' => basename($exportFile),
+             'offset' => $offset,
+             'progress' => $progress,
+             'finished' => empty($result['data']) || count($result['data']) < $limit,
+@@ -451,6 +451,7 @@ public function downloadCsvAction(Request $request)
+     {
+         $this->checkPermission('reports');
+         if ($exportFile = $request->get('exportFile')) {
++            $exportFile = PIMCORE_SYSTEM_TEMP_DIRECTORY . '/' . basename($exportFile);
+             $response = new BinaryFileResponse($exportFile);
+             $response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
+             $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_ATTACHMENT, 'export.csv');

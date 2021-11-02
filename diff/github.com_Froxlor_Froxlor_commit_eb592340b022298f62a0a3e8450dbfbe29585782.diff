@@ -1,0 +1,27 @@
+From eb592340b022298f62a0a3e8450dbfbe29585782 Mon Sep 17 00:00:00 2001
+From: Michael Kaufmann <d00p@froxlor.org>
+Date: Mon, 11 Oct 2021 18:33:48 +0200
+Subject: [PATCH] use prepared statement for creating databases to avoid sql
+ injections in custom db-names
+
+Signed-off-by: Michael Kaufmann <d00p@froxlor.org>
+---
+ lib/Froxlor/Database/Manager/DbManagerMySQL.php | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/lib/Froxlor/Database/Manager/DbManagerMySQL.php b/lib/Froxlor/Database/Manager/DbManagerMySQL.php
+index bf2f01ca8..70b6eee4f 100644
+--- a/lib/Froxlor/Database/Manager/DbManagerMySQL.php
++++ b/lib/Froxlor/Database/Manager/DbManagerMySQL.php
+@@ -60,7 +60,10 @@ public function __construct(&$log = null)
+ 	 */
+ 	public function createDatabase($dbname = null)
+ 	{
+-		Database::query("CREATE DATABASE `" . $dbname . "`");
++		$stmt = Database::prepare("CREATE DATABASE :dbname");
++		Database::pexecute($stmt, [
++			'dbname' => $dbname
++		]);
+ 	}
+ 
+ 	/**

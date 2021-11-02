@@ -1,0 +1,83 @@
+From 94f6955fbaee6fda9385a23e505497efe21f5b4f Mon Sep 17 00:00:00 2001
+From: Aris Adamantiadis <aris@0xbadc0de.be>
+Date: Wed, 15 Apr 2015 16:08:37 +0200
+Subject: CVE-2015-3146: Fix state validation in packet handlers
+
+The state validation in the packet handlers for SSH_MSG_NEWKEYS and
+SSH_MSG_KEXDH_REPLY had a bug which did not raise an error.
+
+The issue has been found and reported by Mariusz Ziule.
+
+Signed-off-by: Aris Adamantiadis <aris@0xbadc0de.be>
+Reviewed-by: Andreas Schneider <asn@cryptomilk.org>
+(cherry picked from commit bf0c7ae0aeb0ebe661d11ea6785fff2cbf4f3dbe)
+---
+ src/packet_cb.c | 16 ++++++++++------
+ src/server.c    |  8 +++++---
+ 2 files changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/src/packet_cb.c b/src/packet_cb.c
+index a10dd1ab..e6c613fd 100644
+--- a/src/packet_cb.c
++++ b/src/packet_cb.c
+@@ -94,7 +94,7 @@ SSH_PACKET_CALLBACK(ssh_packet_dh_reply){
+   (void)type;
+   (void)user;
+   SSH_LOG(SSH_LOG_PROTOCOL,"Received SSH_KEXDH_REPLY");
+-  if(session->session_state!= SSH_SESSION_STATE_DH &&
++  if (session->session_state != SSH_SESSION_STATE_DH ||
+ 		session->dh_handshake_state != DH_STATE_INIT_SENT){
+ 	ssh_set_error(session,SSH_FATAL,"ssh_packet_dh_reply called in wrong state : %d:%d",
+ 			session->session_state,session->dh_handshake_state);
+@@ -135,12 +135,16 @@ SSH_PACKET_CALLBACK(ssh_packet_newkeys){
+   (void)user;
+   (void)type;
+   SSH_LOG(SSH_LOG_PROTOCOL, "Received SSH_MSG_NEWKEYS");
+-  if(session->session_state!= SSH_SESSION_STATE_DH &&
+-		session->dh_handshake_state != DH_STATE_NEWKEYS_SENT){
+-	ssh_set_error(session,SSH_FATAL,"ssh_packet_newkeys called in wrong state : %d:%d",
+-			session->session_state,session->dh_handshake_state);
+-	goto error;
++
++  if (session->session_state != SSH_SESSION_STATE_DH ||
++      session->dh_handshake_state != DH_STATE_NEWKEYS_SENT) {
++      ssh_set_error(session,
++                    SSH_FATAL,
++                    "ssh_packet_newkeys called in wrong state : %d:%d",
++                    session->session_state,session->dh_handshake_state);
++      goto error;
+   }
++
+   if(session->server){
+     /* server things are done in server.c */
+     session->dh_handshake_state=DH_STATE_FINISHED;
+diff --git a/src/server.c b/src/server.c
+index 35281caa..1637cce8 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -165,7 +165,7 @@ static int ssh_server_kexdh_init(ssh_session session, ssh_buffer packet){
+ }
+ 
+ SSH_PACKET_CALLBACK(ssh_packet_kexdh_init){
+-  int rc;
++  int rc = SSH_ERROR;
+   (void)type;
+   (void)user;
+ 
+@@ -193,9 +193,11 @@ SSH_PACKET_CALLBACK(ssh_packet_kexdh_init){
+         ssh_set_error(session,SSH_FATAL,"Wrong kex type in ssh_packet_kexdh_init");
+         rc = SSH_ERROR;
+   }
+-  if (rc == SSH_ERROR)
++
++error:
++  if (rc == SSH_ERROR) {
+       session->session_state = SSH_SESSION_STATE_ERROR;
+-  error:
++  }
+ 
+   return SSH_PACKET_USED;
+ }
+-- 
+cgit v1.2.1
+

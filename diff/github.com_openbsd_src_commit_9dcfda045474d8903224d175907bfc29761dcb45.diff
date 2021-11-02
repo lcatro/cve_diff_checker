@@ -1,0 +1,62 @@
+From 9dcfda045474d8903224d175907bfc29761dcb45 Mon Sep 17 00:00:00 2001
+From: gilles <gilles@openbsd.org>
+Date: Tue, 28 Jan 2020 21:35:00 +0000
+Subject: [PATCH] Fix a security vulnerability discovered by Qualys which can
+ lead to a privileges escalation on mbox deliveries and unprivileged code
+ execution on lmtp deliveries, due to a logic issue causing a sanity check to
+ be missed.
+
+ok eric@, millert@
+---
+ usr.sbin/smtpd/smtp_session.c | 30 ++++++++++++++----------------
+ 1 file changed, 14 insertions(+), 16 deletions(-)
+
+diff --git a/usr.sbin/smtpd/smtp_session.c b/usr.sbin/smtpd/smtp_session.c
+index f9cf444786dd..1af4c6f9776d 100644
+--- a/usr.sbin/smtpd/smtp_session.c
++++ b/usr.sbin/smtpd/smtp_session.c
+@@ -1,4 +1,4 @@
+-/*	$OpenBSD: smtp_session.c,v 1.421 2020/01/08 00:05:38 gilles Exp $	*/
++/*	$OpenBSD: smtp_session.c,v 1.422 2020/01/28 21:35:00 gilles Exp $	*/
+ 
+ /*
+  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
+@@ -2236,25 +2236,23 @@ smtp_mailaddr(struct mailaddr *maddr, char *line, int mailfrom, char **args,
+ 		memmove(maddr->user, p, strlen(p) + 1);
+ 	}
+ 
+-	if (!valid_localpart(maddr->user) ||
+-	    !valid_domainpart(maddr->domain)) {
+-		/* accept empty return-path in MAIL FROM, required for bounces */
+-		if (mailfrom && maddr->user[0] == '\0' && maddr->domain[0] == '\0')
+-			return (1);
++	/* accept empty return-path in MAIL FROM, required for bounces */
++	if (mailfrom && maddr->user[0] == '\0' && maddr->domain[0] == '\0')
++		return (1);
+ 
+-		/* no user-part, reject */
+-		if (maddr->user[0] == '\0')
+-			return (0);
+-
+-		/* no domain, local user */
+-		if (maddr->domain[0] == '\0') {
+-			(void)strlcpy(maddr->domain, domain,
+-			    sizeof(maddr->domain));
+-			return (1);
+-		}
++	/* no or invalid user-part, reject */
++	if (maddr->user[0] == '\0' || !valid_localpart(maddr->user))
+ 		return (0);
++
++	/* no domain part, local user */
++	if (maddr->domain[0] == '\0') {
++		(void)strlcpy(maddr->domain, domain,
++			sizeof(maddr->domain));
+ 	}
+ 
++	if (!valid_domainpart(maddr->domain))
++		return (0);
++
+ 	return (1);
+ }
+ 

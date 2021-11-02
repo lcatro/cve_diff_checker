@@ -1,0 +1,115 @@
+From 3b36ec4e713dea9266db11975066c425aa669b6c Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sat, 29 Jul 2017 23:21:00 +0100
+Subject: [PATCH] CVE-2017-13045/VQP: add some bounds checks
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-vqp.c         |  14 +++++++++++++-
+ tests/TESTLIST      |   1 +
+ tests/vqp-oobr.out  |   4 ++++
+ tests/vqp-oobr.pcap | Bin 0 -> 262 bytes
+ 4 files changed, 18 insertions(+), 1 deletion(-)
+ create mode 100644 tests/vqp-oobr.out
+ create mode 100644 tests/vqp-oobr.pcap
+
+diff --git a/print-vqp.c b/print-vqp.c
+index 44a219352..90cf8ddfe 100644
+--- a/print-vqp.c
++++ b/print-vqp.c
+@@ -26,6 +26,7 @@
+ #include "netdissect.h"
+ #include "extract.h"
+ #include "addrtoname.h"
++#include "ether.h"
+ 
+ #define VQP_VERSION            		1
+ #define VQP_EXTRACT_VERSION(x) ((x)&0xFF)
+@@ -105,13 +106,15 @@ vqp_print(netdissect_options *ndo, register const u_char *pptr, register u_int l
+     const u_char *tptr;
+     uint16_t vqp_obj_len;
+     uint32_t vqp_obj_type;
+-    int tlen;
++    u_int tlen;
+     uint8_t nitems;
+ 
+     tptr=pptr;
+     tlen = len;
+     vqp_common_header = (const struct vqp_common_header_t *)pptr;
+     ND_TCHECK(*vqp_common_header);
++    if (sizeof(struct vqp_common_header_t) > tlen)
++        goto trunc;
+ 
+     /*
+      * Sanity checking of the header.
+@@ -151,6 +154,9 @@ vqp_print(netdissect_options *ndo, register const u_char *pptr, register u_int l
+     while (nitems > 0 && tlen > 0) {
+ 
+         vqp_obj_tlv = (const struct vqp_obj_tlv_t *)tptr;
++        ND_TCHECK(*vqp_obj_tlv);
++        if (sizeof(struct vqp_obj_tlv_t) > tlen)
++            goto trunc;
+         vqp_obj_type = EXTRACT_32BITS(vqp_obj_tlv->obj_type);
+         vqp_obj_len = EXTRACT_16BITS(vqp_obj_tlv->obj_length);
+         tptr+=sizeof(struct vqp_obj_tlv_t);
+@@ -167,9 +173,13 @@ vqp_print(netdissect_options *ndo, register const u_char *pptr, register u_int l
+ 
+         /* did we capture enough for fully decoding the object ? */
+         ND_TCHECK2(*tptr, vqp_obj_len);
++        if (vqp_obj_len > tlen)
++            goto trunc;
+ 
+         switch(vqp_obj_type) {
+ 	case VQP_OBJ_IP_ADDRESS:
++            if (vqp_obj_len != 4)
++                goto trunc;
+             ND_PRINT((ndo, "%s (0x%08x)", ipaddr_string(ndo, tptr), EXTRACT_32BITS(tptr)));
+             break;
+             /* those objects have similar semantics - fall through */
+@@ -182,6 +192,8 @@ vqp_print(netdissect_options *ndo, register const u_char *pptr, register u_int l
+             /* those objects have similar semantics - fall through */
+ 	case VQP_OBJ_MAC_ADDRESS:
+ 	case VQP_OBJ_MAC_NULL:
++            if (vqp_obj_len != ETHER_ADDR_LEN)
++                goto trunc;
+ 	      ND_PRINT((ndo, "%s", etheraddr_string(ndo, tptr)));
+               break;
+         default:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index b42ba5b14..687e92f37 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -562,6 +562,7 @@ isakmpv1-attr-oobr	isakmpv1-attr-oobr.pcap		isakmpv1-attr-oobr.out	-v
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ # Same comments apply to the case below.
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
++vqp-oobr		vqp-oobr.pcap			vqp-oobr.out		-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/vqp-oobr.out b/tests/vqp-oobr.out
+new file mode 100644
+index 000000000..3b1f71e36
+--- /dev/null
++++ b/tests/vqp-oobr.out
+@@ -0,0 +1,4 @@
++IP (tos 0x0, ttl 17, id 40207, offset 0, flags [+, DF, rsvd], proto UDP (17), length 46, bad cksum 8f04 (->f897)!)
++    0.0.128.20.1589 > 12.251.167.8.62720: 
++	VQPv1, unknown (127) Message, error-code unknown (31) (31), seq 0x80f90000, items 27, length 18
++	[|VQP]
+diff --git a/tests/vqp-oobr.pcap b/tests/vqp-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..50be013da707b23ca8fab23db30089e7b9265796
+GIT binary patch
+literal 262
+zcmca|c+)~A1{MZR2?mDZw!55W3=9m6Kx}EmyG@vxks}Vs_F-UH&>-*|$f{>JuweCE
+z4hB~S2EDob4;Tam`&k$m8bo-0FXv!0{mNj@z{AH_FE8Ej6KskD@3x5Gn?UnmrZ5Nq
+z4FLk6CWim@KmtXjFazVgSfC)tJ_ewDpBWew;PwFxT*w5pZyNtUn0;SB_VK=~mw(O<
+kcJ@N1=PV4&|6c-)fC7*`Z~*3ff^b<F8X$~kKq_V}0GK>AbN~PV
+
+literal 0
+HcmV?d00001
+

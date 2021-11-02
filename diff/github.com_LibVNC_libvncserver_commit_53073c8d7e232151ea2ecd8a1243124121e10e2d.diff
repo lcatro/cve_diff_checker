@@ -1,0 +1,41 @@
+From 53073c8d7e232151ea2ecd8a1243124121e10e2d Mon Sep 17 00:00:00 2001
+From: Tobias Junghans <tobydox@veyon.io>
+Date: Wed, 27 May 2020 12:22:05 +0200
+Subject: [PATCH] libvncserver: fix pointer aliasing/alignment issue
+
+Accessing byte-aligned data through uint16_t pointers can cause crashes
+on some platforms or reduce the performance. Therefore ensure a proper
+stack alignment.
+---
+ libvncserver/translate.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/libvncserver/translate.c b/libvncserver/translate.c
+index 7c341c2a2..7e6d3d8e0 100644
+--- a/libvncserver/translate.c
++++ b/libvncserver/translate.c
+@@ -360,9 +360,12 @@ rfbSetTranslateFunction(rfbClientPtr cl)
+ static rfbBool
+ rfbSetClientColourMapBGR233(rfbClientPtr cl)
+ {
+-    char buf[sz_rfbSetColourMapEntriesMsg + 256 * 3 * 2];
+-    rfbSetColourMapEntriesMsg *scme = (rfbSetColourMapEntriesMsg *)buf;
+-    uint16_t *rgb = (uint16_t *)(&buf[sz_rfbSetColourMapEntriesMsg]);
++    union {
++        char bytes[sz_rfbSetColourMapEntriesMsg + 256 * 3 * 2];
++        rfbSetColourMapEntriesMsg msg;
++    } buf;
++    rfbSetColourMapEntriesMsg *scme = &buf.msg;
++    uint16_t *rgb = (uint16_t *)(&buf.bytes[sz_rfbSetColourMapEntriesMsg]);
+     int i, len;
+     int r, g, b;
+ 
+@@ -394,7 +397,7 @@ rfbSetClientColourMapBGR233(rfbClientPtr cl)
+ 
+     len += 256 * 3 * 2;
+ 
+-    if (rfbWriteExact(cl, buf, len) < 0) {
++    if (rfbWriteExact(cl, buf.bytes, len) < 0) {
+         rfbLogPerror("rfbSetClientColourMapBGR233: write");
+         rfbCloseClient(cl);
+         return FALSE;

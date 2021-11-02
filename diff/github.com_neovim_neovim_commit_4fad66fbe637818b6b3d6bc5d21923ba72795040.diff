@@ -1,0 +1,128 @@
+From 4fad66fbe637818b6b3d6bc5d21923ba72795040 Mon Sep 17 00:00:00 2001
+From: James McCoy <jamessan@jamessan.com>
+Date: Sun, 20 Nov 2016 08:42:38 -0700
+Subject: [PATCH] vim-patch:8.0.0056
+
+Problem:    When setting 'filetype' there is no check for a valid name.
+Solution:   Only allow valid characters in 'filetype', 'syntax' and 'keymap'.
+
+https://github.com/vim/vim/commit/d0b5138ba4bccff8a744c99836041ef6322ed39a
+---
+ src/nvim/option.c                 | 30 +++++++++++++++++--
+ src/nvim/testdir/test_options.vim | 50 +++++++++++++++++++++++++++++++
+ 2 files changed, 77 insertions(+), 3 deletions(-)
+
+diff --git a/src/nvim/option.c b/src/nvim/option.c
+index 0f95974cb4d0..469aeecc23b7 100644
+--- a/src/nvim/option.c
++++ b/src/nvim/option.c
+@@ -2399,6 +2399,18 @@ static char *set_string_option(const int opt_idx, const char *const value,
+   return r;
+ }
+ 
++/// Return true if "val" is a valid 'filetype' name.
++/// Also used for 'syntax' and 'keymap'.
++static bool valid_filetype(char_u *val)
++{
++  for (char_u *s = val; *s != NUL; s++) {
++    if (!ASCII_ISALNUM(*s) && vim_strchr((char_u *)".-_", *s) == NULL) {
++      return false;
++    }
++  }
++  return true;
++}
++
+ /*
+  * Handle string options that need some action to perform when changed.
+  * Returns NULL for success, or an error message for an error.
+@@ -2623,8 +2635,12 @@ did_set_string_option (
+     xfree(p_penc);
+     p_penc = p;
+   } else if (varp == &curbuf->b_p_keymap) {
+-    /* load or unload key mapping tables */
+-    errmsg = keymap_init();
++    if (!valid_filetype(*varp)) {
++      errmsg = e_invarg;
++    } else {
++      // load or unload key mapping tables
++      errmsg = keymap_init();
++    }
+ 
+     if (errmsg == NULL) {
+       if (*curbuf->b_p_keymap != NUL) {
+@@ -3118,8 +3134,16 @@ did_set_string_option (
+       if (check_opt_strings(p_icm, p_icm_values, false) != OK) {
+         errmsg = e_invarg;
+       }
+-  // Options that are a list of flags.
++  } else if (gvarp == &p_ft) {
++    if (!valid_filetype(*varp)) {
++      errmsg = e_invarg;
++    }
++  } else if (gvarp == &p_syn) {
++    if (!valid_filetype(*varp)) {
++      errmsg = e_invarg;
++    }
+   } else {
++    // Options that are a list of flags.
+     p = NULL;
+     if (varp == &p_ww)
+       p = (char_u *)WW_ALL;
+diff --git a/src/nvim/testdir/test_options.vim b/src/nvim/testdir/test_options.vim
+index cceb180189d7..93657f8fedfa 100644
+--- a/src/nvim/testdir/test_options.vim
++++ b/src/nvim/testdir/test_options.vim
+@@ -38,3 +38,53 @@ function! Test_path_keep_commas()
+ 
+   set path&
+ endfunction
++
++func Test_filetype_valid()
++  set ft=valid_name
++  call assert_equal("valid_name", &filetype)
++  set ft=valid-name
++  call assert_equal("valid-name", &filetype)
++
++  call assert_fails(":set ft=wrong;name", "E474:")
++  call assert_fails(":set ft=wrong\\\\name", "E474:")
++  call assert_fails(":set ft=wrong\\|name", "E474:")
++  call assert_fails(":set ft=wrong/name", "E474:")
++  call assert_fails(":set ft=wrong\\\nname", "E474:")
++  call assert_equal("valid-name", &filetype)
++
++  exe "set ft=trunc\x00name"
++  call assert_equal("trunc", &filetype)
++endfunc
++
++func Test_syntax_valid()
++  set syn=valid_name
++  call assert_equal("valid_name", &syntax)
++  set syn=valid-name
++  call assert_equal("valid-name", &syntax)
++
++  call assert_fails(":set syn=wrong;name", "E474:")
++  call assert_fails(":set syn=wrong\\\\name", "E474:")
++  call assert_fails(":set syn=wrong\\|name", "E474:")
++  call assert_fails(":set syn=wrong/name", "E474:")
++  call assert_fails(":set syn=wrong\\\nname", "E474:")
++  call assert_equal("valid-name", &syntax)
++
++  exe "set syn=trunc\x00name"
++  call assert_equal("trunc", &syntax)
++endfunc
++
++func Test_keymap_valid()
++  call assert_fails(":set kmp=valid_name", "E544:")
++  call assert_fails(":set kmp=valid_name", "valid_name")
++  call assert_fails(":set kmp=valid-name", "E544:")
++  call assert_fails(":set kmp=valid-name", "valid-name")
++
++  call assert_fails(":set kmp=wrong;name", "E474:")
++  call assert_fails(":set kmp=wrong\\\\name", "E474:")
++  call assert_fails(":set kmp=wrong\\|name", "E474:")
++  call assert_fails(":set kmp=wrong/name", "E474:")
++  call assert_fails(":set kmp=wrong\\\nname", "E474:")
++
++  call assert_fails(":set kmp=trunc\x00name", "E544:")
++  call assert_fails(":set kmp=trunc\x00name", "trunc")
++endfunc

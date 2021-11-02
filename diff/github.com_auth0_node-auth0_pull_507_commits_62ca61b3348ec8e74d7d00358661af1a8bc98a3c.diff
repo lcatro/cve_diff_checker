@@ -1,0 +1,144 @@
+From 62ca61b3348ec8e74d7d00358661af1a8bc98a3c Mon Sep 17 00:00:00 2001
+From: James Anderson <jim.anderson@auth0.com>
+Date: Mon, 20 Jul 2020 13:45:36 -0500
+Subject: [PATCH] sanitize auth headers on errors
+
+---
+ src/Auth0RestClient.js          |  4 ++++
+ src/errors.js                   | 25 +++++++++++++++++++------
+ test/auth0-rest-client.tests.js | 18 ++++++++++++++++++
+ test/errors.tests.js            | 20 +++++++++++++++++++-
+ 4 files changed, 60 insertions(+), 7 deletions(-)
+
+diff --git a/src/Auth0RestClient.js b/src/Auth0RestClient.js
+index 48ee840a..019fabe1 100644
+--- a/src/Auth0RestClient.js
++++ b/src/Auth0RestClient.js
+@@ -3,6 +3,7 @@ var Promise = require('bluebird');
+ var ArgumentError = require('rest-facade').ArgumentError;
+ 
+ var utils = require('./utils');
++var SanitizedError = require('./errors').SanitizedError;
+ 
+ var Auth0RestClient = function(resourceUrl, options, provider) {
+   if (resourceUrl === null || resourceUrl === undefined) {
+@@ -17,6 +18,9 @@ var Auth0RestClient = function(resourceUrl, options, provider) {
+     throw new ArgumentError('Must provide options');
+   }
+ 
++  options.errorCustomizer = options.errorCustomizer || SanitizedError;
++  options.errorFormatter = options.errorFormatter || { message: 'message', name: 'error' };
++
+   this.options = options;
+   this.provider = provider;
+   this.restClient = new RestClient(resourceUrl, options);
+diff --git a/src/errors.js b/src/errors.js
+index 02837d6d..861e2fde 100644
+--- a/src/errors.js
++++ b/src/errors.js
+@@ -12,19 +12,32 @@ var errors = (module.exports = {});
+  * @memberOf  module:errors
+  */
+ errors.sanitizeErrorRequestData = function(error) {
+-  if (!error.response || !error.response.request || !error.response.request._data) {
++  if (
++    !error.response ||
++    !error.response.request ||
++    (!error.response.request._data && !error.response.request._header)
++  ) {
+     return error;
+   }
+ 
+-  Object.keys(error.response.request._data).forEach(function(key) {
+-    if (key.toLowerCase().match('password|secret')) {
+-      error.response.request._data[key] = '[SANITIZED]';
+-    }
+-  });
++  sanitizeErrors(error.response.request._header);
++  sanitizeErrors(error.response.request._data);
+ 
+   return error;
+ };
+ 
++var sanitizeErrors = function(collection) {
++  if (!collection) {
++    return;
++  }
++
++  Object.keys(collection).forEach(function(key) {
++    if (key.toLowerCase().match('password|secret|authorization')) {
++      collection[key] = '[SANITIZED]';
++    }
++  });
++};
++
+ /**
+  * Given an Api Error, modify the original error and sanitize
+  * sensitive information using sanitizeErrorRequestData
+diff --git a/test/auth0-rest-client.tests.js b/test/auth0-rest-client.tests.js
+index d9adc0cc..27cea9d0 100644
+--- a/test/auth0-rest-client.tests.js
++++ b/test/auth0-rest-client.tests.js
+@@ -151,6 +151,24 @@ describe('Auth0RestClient', function() {
+     });
+   });
+ 
++  it('should sanitize error when access token is in authorization header', function(done) {
++    nock(API_URL)
++      .get('/some-resource')
++      .reply(401);
++
++    var options = {
++      headers: {}
++    };
++
++    var client = new Auth0RestClient(API_URL + '/some-resource', options, this.providerMock);
++    client.getAll().catch(function(err) {
++      const originalRequestHeader = err.originalError.response.request._header;
++      expect(originalRequestHeader.authorization).to.equal('[SANITIZED]');
++      done();
++      nock.cleanAll();
++    });
++  });
++
+   it('should catch error when provider.getAccessToken throws an error', function(done) {
+     var providerMock = {
+       getAccessToken: function() {
+diff --git a/test/errors.tests.js b/test/errors.tests.js
+index 604dba67..bd13a48a 100644
+--- a/test/errors.tests.js
++++ b/test/errors.tests.js
+@@ -4,7 +4,7 @@ var errors = require('../src/errors');
+ 
+ describe('Errors', function() {
+   describe('sanitizeErrorRequestData', function() {
+-    describe('when passed in error is missing request data', function() {
++    describe('when passed in error is missing request data and headers', function() {
+       var error = { response: { request: {} } };
+       var sanitizedError = errors.sanitizeErrorRequestData(error);
+ 
+@@ -38,6 +38,24 @@ describe('Errors', function() {
+         expect(sanitizedData.USER_NAME).to.equal(sanitizedData.USER_NAME);
+       });
+     });
++
++    describe('when passed in error has header data', function() {
++      const error = {
++        response: {
++          request: {
++            _header: {
++              authorization: 'Bearer xyz'
++            }
++          }
++        }
++      };
++      const sanitizedError = errors.sanitizeErrorRequestData(error);
++      const sanitizedData = sanitizedError.response.request._header;
++
++      it('should return [SANITIZED] for authorization', function() {
++        expect(sanitizedData.authorization).to.equal('[SANITIZED]');
++      });
++    });
+   });
+ 
+   describe('SanitizedError', function() {

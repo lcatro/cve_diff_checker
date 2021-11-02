@@ -1,0 +1,88 @@
+From 335b3d5398079278b8f7094c77bfd148b315b462 Mon Sep 17 00:00:00 2001
+From: Tony George <teejeetech@gmail.com>
+Date: Thu, 5 Mar 2020 08:57:24 +0530
+Subject: [PATCH] Change TEMP_DIR permissions and path; Cleanup on exit;
+
+---
+ src/Core/Main.vala                 |  2 ++
+ src/Utility/TeeJee.FileSystem.vala |  7 +++++++
+ src/Utility/TeeJee.Process.vala    | 13 ++++++++-----
+ 3 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/src/Core/Main.vala b/src/Core/Main.vala
+index 9ce6d62..8b5abc1 100644
+--- a/src/Core/Main.vala
++++ b/src/Core/Main.vala
+@@ -4244,6 +4244,8 @@ public class Main : GLib.Object{
+ 		clean_logs();
+ 
+ 		app_lock.remove();
++		
++		dir_delete(TEMP_DIR);
+ 
+ 		exit(exit_code);
+ 
+diff --git a/src/Utility/TeeJee.FileSystem.vala b/src/Utility/TeeJee.FileSystem.vala
+index 846ada1..890ebeb 100644
+--- a/src/Utility/TeeJee.FileSystem.vala
++++ b/src/Utility/TeeJee.FileSystem.vala
+@@ -344,8 +344,11 @@ namespace TeeJee.FileSystem{
+ 
+ 		try{
+ 			var dir = File.parse_name (dir_path);
++			
+ 			if (dir.query_exists () == false) {
++				
+ 				bool ok = dir.make_directory_with_parents (null);
++				
+ 				if (show_message){
+ 					if (ok){
+ 						log_msg(_("Created directory") + ": %s".printf(dir_path));
+@@ -355,6 +358,7 @@ namespace TeeJee.FileSystem{
+ 					}
+ 				}
+ 			}
++			
+ 			return true;
+ 		}
+ 		catch (Error e) {
+@@ -373,9 +377,12 @@ namespace TeeJee.FileSystem{
+ 		}
+ 		
+ 		string cmd = "rm -rf '%s'".printf(escape_single_quote(dir_path));
++		
+ 		log_debug(cmd);
++		
+ 		string std_out, std_err;
+ 		int status = exec_sync(cmd, out std_out, out std_err);
++		
+ 		if (show_message){
+ 			if (status == 0){
+ 				log_msg(_("Deleted directory") + ": %s".printf(dir_path));
+diff --git a/src/Utility/TeeJee.Process.vala b/src/Utility/TeeJee.Process.vala
+index 70dd934..e31a643 100644
+--- a/src/Utility/TeeJee.Process.vala
++++ b/src/Utility/TeeJee.Process.vala
+@@ -36,14 +36,17 @@ namespace TeeJee.ProcessHelper{
+     public static void init_tmp(string subdir_name){
+ 		string std_out, std_err;
+ 
+-		TEMP_DIR = Environment.get_tmp_dir() + "/" + subdir_name + "/" + random_string();
++		TEMP_DIR = Environment.get_tmp_dir() + "/" + random_string();
+ 		dir_create(TEMP_DIR);
+-
++		chmod(TEMP_DIR, "0750");
++		
+ 		exec_script_sync("echo 'ok'",out std_out,out std_err, true);
+-		if ((std_out == null)||(std_out.strip() != "ok")){
+-			TEMP_DIR = Environment.get_home_dir() + "/.temp/" + subdir_name + "/" + random_string();
+-			exec_sync("rm -rf '%s'".printf(TEMP_DIR), null, null);
++		
++		if ((std_out == null) || (std_out.strip() != "ok")){
++			
++			TEMP_DIR = Environment.get_home_dir() + "/.temp/" + random_string();
+ 			dir_create(TEMP_DIR);
++			chmod(TEMP_DIR, "0750");
+ 		}
+ 
+ 		//log_debug("TEMP_DIR=" + TEMP_DIR);

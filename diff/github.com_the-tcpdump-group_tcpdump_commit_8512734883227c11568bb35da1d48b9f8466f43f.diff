@@ -1,0 +1,68 @@
+From 8512734883227c11568bb35da1d48b9f8466f43f Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Feb 2017 14:10:15 -0800
+Subject: [PATCH] CVE-2017-13000/IEEE 802.15.4: Fix bug introduced two fixes
+ prior.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We've already advanced the pointer past the PAN ID, if present; it now
+points to the address, so don't add 2 to it.
+
+This fixes a buffer over-read discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-802_15_4.c           |   2 +-
+ tests/802_15_4_beacon.out  |   1 +
+ tests/802_15_4_beacon.pcap | Bin 0 -> 79 bytes
+ tests/TESTLIST             |   1 +
+ 4 files changed, 3 insertions(+), 1 deletion(-)
+ create mode 100644 tests/802_15_4_beacon.out
+ create mode 100644 tests/802_15_4_beacon.pcap
+
+diff --git a/print-802_15_4.c b/print-802_15_4.c
+index a7817eb5a..1c77da8af 100644
+--- a/print-802_15_4.c
++++ b/print-802_15_4.c
+@@ -122,7 +122,7 @@ ieee802_15_4_if_print(netdissect_options *ndo,
+ 			return hdrlen;
+ 		}
+ 		if (ndo->ndo_vflag)
+-			ND_PRINT((ndo,"%04x:%04x ", panid, EXTRACT_LE_16BITS(p + 2)));
++			ND_PRINT((ndo,"%04x:%04x ", panid, EXTRACT_LE_16BITS(p)));
+ 		p += 2;
+ 		caplen -= 2;
+ 		hdrlen += 2;
+diff --git a/tests/802_15_4_beacon.out b/tests/802_15_4_beacon.out
+new file mode 100644
+index 000000000..125f46d5c
+--- /dev/null
++++ b/tests/802_15_4_beacon.out
+@@ -0,0 +1 @@
++IEEE 802.15.4 Beacon packet seq cd ffab:cdff < [|802.15.4]
+diff --git a/tests/802_15_4_beacon.pcap b/tests/802_15_4_beacon.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e6aafe1dbec4d718da44607bf4e7dcdc4ed6d3e
+GIT binary patch
+literal 79
+zcmZ3u>F^Z>CI%J;1_uTO1~6a;l7}ON&E7Mx-+KXMtAlXE>$9u>|3AB$5v+vgpn|<%
+W2b&Zd6Nt+w!@zigfl->F>No)OKN3&?
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index be914a4a9..548af8f30 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -489,6 +489,7 @@ pimv2-oobr-4		pimv2-oobr-4.pcap		pimv2-oobr-4.out		-vvv -e
+ 802_15_4-oobr-1		802_15_4-oobr-1.pcap		802_15_4-oobr-1.out	-vvv -e
+ 802_15_4-oobr-2		802_15_4-oobr-2.pcap		802_15_4-oobr-2.out	-vvv -e
+ 802_15_4-data		802_15_4-data.pcap		802_15_4-data.out	-vvv -e
++802_15_4_beacon		802_15_4_beacon.pcap		802_15_4_beacon.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap

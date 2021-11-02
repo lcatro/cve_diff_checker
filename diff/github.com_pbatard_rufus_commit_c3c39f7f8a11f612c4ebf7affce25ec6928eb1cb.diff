@@ -1,0 +1,163 @@
+From c3c39f7f8a11f612c4ebf7affce25ec6928eb1cb Mon Sep 17 00:00:00 2001
+From: Pete Batard <pete@akeo.ie>
+Date: Thu, 31 Aug 2017 12:13:51 +0100
+Subject: [PATCH] [pki] fix https://www.kb.cert.org/vuls/id/403768
+
+* This commit effectively fixes https://www.kb.cert.org/vuls/id/403768 (CVE-2017-13083) as
+  it is described per its revision 11, which is the latest revision at the time of this commit,
+  by disabling Windows prompts, enacted during signature validation, that allow the user to
+  bypass the intended signature verification checks.
+* It needs to be pointed out that the vulnerability ("allow(ing) the use of a self-signed
+  certificate"), which relies on the end-user actively ignoring a Windows prompt that tells
+  them that the update failed the signature validation whilst also advising against running it,
+  is being fully addressed, even as the update protocol remains HTTP.
+* It also need to be pointed out that the extended delay (48 hours) between the time the
+  vulnerability was reported and the moment it is fixed in our codebase has to do with
+  the fact that the reporter chose to deviate from standard security practices by not
+  disclosing the details of the vulnerability with us, be it publicly or privately,
+  before creating the cert.org report. The only advance notification we received was a
+  generic note about the use of HTTP vs HTTPS, which, as have established, is not
+  immediately relevant to addressing the reported vulnerability.
+* Closes #1009
+* Note: The other vulnerability scenario described towards the end of #1009, which
+  doesn't have to do with the "lack of CA checking", will be addressed separately.
+---
+ res/localization/rufus.loc |  3 +++
+ src/pki.c                  | 29 +++++++++++++++++++++++++++--
+ src/rufus.rc               | 10 +++++-----
+ src/stdlg.c                |  6 +++++-
+ 4 files changed, 40 insertions(+), 8 deletions(-)
+
+diff --git a/res/localization/rufus.loc b/res/localization/rufus.loc
+index 0d14eececb..625566fc97 100644
+--- a/res/localization/rufus.loc
++++ b/res/localization/rufus.loc
+@@ -487,6 +487,9 @@ t MSG_237 "Bad Blocks: Testing with pattern 0x%02X"
+ # eg. "Partitioning (MBR)..."
+ t MSG_238 "Partitioning (%s)..."
+ t MSG_239 "Deleting partitions..."
++t MSG_240 "The signature for the downloaded update can not be validated. This could mean that your "
++	"system is improperly configured for signature validation or indicate a malicious download.\n\n"
++	"The download will be deleted. Please check the log for more details."
+ t MSG_241 "Downloading: %0.1f%%"
+ t MSG_242 "Failed to download file."
+ t MSG_243 "Checking for Rufus updates..."
+diff --git a/src/pki.c b/src/pki.c
+index 25de125939..00d0141891 100644
+--- a/src/pki.c
++++ b/src/pki.c
+@@ -53,7 +53,7 @@ const char* WinPKIErrorString(void)
+ 	static char error_string[64];
+ 	DWORD error_code = GetLastError();
+ 
+-	if ((error_code >> 16) != 0x8009)
++	if (((error_code >> 16) != 0x8009) && ((error_code >> 16) != 0x800B))
+ 		return WindowsErrorString();
+ 
+ 	switch (error_code) {
+@@ -113,6 +113,12 @@ const char* WinPKIErrorString(void)
+ 		return "Cannot complete usage check.";
+ 	case CRYPT_E_NO_TRUSTED_SIGNER:
+ 		return "None of the signers of the cryptographic message or certificate trust list is trusted.";
++	case CERT_E_UNTRUSTEDROOT:
++		return "The root certificate is not trusted.";
++	case TRUST_E_NOSIGNATURE:
++		return "Not digitally signed.";
++	case TRUST_E_EXPLICIT_DISTRUST:
++		return "One of the certificates used was marked as untrusted by the user.";
+ 	default:
+ 		static_sprintf(error_string, "Unknown PKI error 0x%08lX", error_code);
+ 		return error_string;
+@@ -268,7 +274,13 @@ LONG ValidateSignature(HWND hDlg, const char* path)
+ 	}
+ 
+ 	trust_data.cbStruct = sizeof(trust_data);
+-	trust_data.dwUIChoice = WTD_UI_ALL;
++	// NB: WTD_UI_ALL can result in ERROR_SUCCESS even if the signature validation fails,
++	// because it still prompts the user to run untrusted software, even after explicitly
++	// notifying them that the signature invalid (and of course Microsoft had to make
++	// that UI prompt a bit too similar to the other benign prompt you get when running
++	// trusted software, which, as per cert.org's assessment, may confuse non-security
++	// conscious-users who decide to gloss over these kind of notifications).
++	trust_data.dwUIChoice = WTD_UI_NONE;
+ 	// We just downloaded from the Internet, so we should be able to check revocation
+ 	trust_data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
+ 	// 0x400 = WTD_MOTW  for Windows 8.1 or later
+@@ -278,6 +290,19 @@ LONG ValidateSignature(HWND hDlg, const char* path)
+ 
+ 	r = WinVerifyTrust(NULL, &guid_generic_verify, &trust_data);
+ 	safe_free(trust_file.pcwszFilePath);
++	switch (r) {
++	case ERROR_SUCCESS:
++		break;
++	case TRUST_E_NOSIGNATURE:
++		// Should already have been reported, but since we have a custom message for it...
++		uprintf("PKI: File does not appear to be signed: %s", WinPKIErrorString());
++		MessageBoxExU(hDlg, lmprintf(MSG_284), lmprintf(MSG_283), MB_OK | MB_ICONERROR | MB_IS_RTL, selected_langid);
++		break;
++	default:
++		uprintf("PKI: Failed to validate signature: %s", WinPKIErrorString());
++		MessageBoxExU(hDlg, lmprintf(MSG_240), lmprintf(MSG_283), MB_OK | MB_ICONERROR | MB_IS_RTL, selected_langid);
++		break;
++	}
+ 
+ 	return r;
+ }
+diff --git a/src/rufus.rc b/src/rufus.rc
+index 3f553eea75..0d0c2a7377 100644
+--- a/src/rufus.rc
++++ b/src/rufus.rc
+@@ -33,7 +33,7 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+ IDD_DIALOG DIALOGEX 12, 12, 242, 376
+ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
+ EXSTYLE WS_EX_ACCEPTFILES
+-CAPTION "Rufus 2.17.1186"
++CAPTION "Rufus 2.17.1187"
+ FONT 8, "Segoe UI Symbol", 400, 0, 0x0
+ BEGIN
+     LTEXT           "Device",IDS_DEVICE_TXT,9,6,200,8
+@@ -366,8 +366,8 @@ END
+ //
+ 
+ VS_VERSION_INFO VERSIONINFO
+- FILEVERSION 2,17,1186,0
+- PRODUCTVERSION 2,17,1186,0
++ FILEVERSION 2,17,1187,0
++ PRODUCTVERSION 2,17,1187,0
+  FILEFLAGSMASK 0x3fL
+ #ifdef _DEBUG
+  FILEFLAGS 0x1L
+@@ -384,13 +384,13 @@ BEGIN
+         BEGIN
+             VALUE "CompanyName", "Akeo Consulting (http://akeo.ie)"
+             VALUE "FileDescription", "Rufus"
+-            VALUE "FileVersion", "2.17.1186"
++            VALUE "FileVersion", "2.17.1187"
+             VALUE "InternalName", "Rufus"
+             VALUE "LegalCopyright", "© 2011-2017 Pete Batard (GPL v3)"
+             VALUE "LegalTrademarks", "http://www.gnu.org/copyleft/gpl.html"
+             VALUE "OriginalFilename", "rufus.exe"
+             VALUE "ProductName", "Rufus"
+-            VALUE "ProductVersion", "2.17.1186"
++            VALUE "ProductVersion", "2.17.1187"
+         END
+     END
+     BLOCK "VarFileInfo"
+diff --git a/src/stdlg.c b/src/stdlg.c
+index 29eccaef78..bdec209f3a 100644
+--- a/src/stdlg.c
++++ b/src/stdlg.c
+@@ -1674,8 +1674,12 @@ INT_PTR CALLBACK NewVersionCallback(HWND hDlg, UINT message, WPARAM wParam, LPAR
+ 			case 2:		// Launch newer version and close this one
+ 				Sleep(1000);	// Add a delay on account of antivirus scanners
+ 
+-				if (ValidateSignature(hDlg, filepath) != NO_ERROR)
++				if (ValidateSignature(hDlg, filepath) != NO_ERROR) {
++					// Unconditionally delete the download and disable the "Launch" control
++					_unlinkU(filepath);
++					EnableWindow(GetDlgItem(hDlg, IDC_DOWNLOAD), FALSE);
+ 					break;
++				}
+ 
+ 				memset(&si, 0, sizeof(si));
+ 				memset(&pi, 0, sizeof(pi));

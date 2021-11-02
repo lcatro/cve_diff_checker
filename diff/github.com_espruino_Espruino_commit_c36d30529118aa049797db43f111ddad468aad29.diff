@@ -1,0 +1,35 @@
+From c36d30529118aa049797db43f111ddad468aad29 Mon Sep 17 00:00:00 2001
+From: Gordon Williams <gw@pur3.co.uk>
+Date: Mon, 21 May 2018 14:30:19 +0100
+Subject: [PATCH] Fix stack overflow if void void void... is repeated many
+ times (fix #1434)
+
+---
+ ChangeLog     | 1 +
+ src/jsparse.c | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index 7b70824bb..31e8560a5 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -4,6 +4,7 @@
+             Fix stack size detection on Linux (fix #1427)
+             Fix strncat/cpy bounding issues (fix #1425)
+             Promises now ignore a second resolve/reject (fix #1433)
++            Fix stack overflow if void void void... is repeated many times (fix #1434)
+ 
+      1v98 : Allow Crypto SHA1 without SHA256/512 (for ESP8266 where flash is scarce)
+             Add better docs for the form of Wifi callback functions
+diff --git a/src/jsparse.c b/src/jsparse.c
+index 63c921b02..1a39d4ca7 100644
+--- a/src/jsparse.c
++++ b/src/jsparse.c
+@@ -1716,6 +1716,7 @@ NO_INLINE JsVar *jspeFactor() {
+     if (!jspCheckStackPosition()) return 0;
+     return jspeFactorTypeOf();
+   } else if (lex->tk==LEX_R_VOID) {
++    if (!jspCheckStackPosition()) return 0;
+     JSP_ASSERT_MATCH(LEX_R_VOID);
+     jsvUnLock(jspeUnaryExpression());
+     return 0;

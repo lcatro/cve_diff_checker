@@ -1,0 +1,30 @@
+From a1c719313d61b07bbe8700005807b8195fdc32f1 Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Tue, 18 Apr 2017 17:49:41 +0200
+Subject: [PATCH] Fix XSS in timeline_inc.php
+
+Use of $_SERVER['PHP_SELF'] and outputting it as-is allows an attacker
+to inject arbitrary JavaScript as part of the URL.
+
+Using SCRIPT_NAME and passing it through string_sanitize_url() instead
+prevents the attack.
+
+Fixes #22742
+Fixes https://github.com/mantisbt/mantisbt/pull/1094
+---
+ core/timeline_inc.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/timeline_inc.php b/core/timeline_inc.php
+index 40fe83037c..952711677d 100644
+--- a/core/timeline_inc.php
++++ b/core/timeline_inc.php
+@@ -46,7 +46,7 @@
+ $t_block_css = $t_collapse_block ? 'collapsed' : '';
+ $t_block_icon = $t_collapse_block ? 'fa-chevron-down' : 'fa-chevron-up';
+ 
+-$t_url_page = $_SERVER["PHP_SELF"];
++$t_url_page = string_sanitize_url( basename( $_SERVER['SCRIPT_NAME'] ) );
+ $t_url_params = $_GET;
+ if( isset( $t_url_params['all'] ) ) {
+ 	unset( $t_url_params['all'] );

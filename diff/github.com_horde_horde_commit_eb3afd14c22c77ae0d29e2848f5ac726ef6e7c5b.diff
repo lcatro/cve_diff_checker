@@ -1,0 +1,47 @@
+From eb3afd14c22c77ae0d29e2848f5ac726ef6e7c5b Mon Sep 17 00:00:00 2001
+From: Thomas Jarosch <thomas.jarosch@intra2net.com>
+Date: Fri, 15 Sep 2017 15:45:55 +0200
+Subject: [PATCH] Fix RCE in _raw() via $index parameter.
+
+$index is passed down from getImageAtIndex($index).
+Luckily the only official horde code calling it
+is the PDF preview code with a fixed index of 0.
+
+Still code from third party vendors using the Horde framework libs
+might expose getImageAtIndex() to the web.
+
+PoC:
+
+----------------
+<?php
+$options = array('index' => "5'$(ls -al )'");
+$max_pages = 10;
+
+// php fun: implicit conversion to integer
+if ($options['index'] < $max_pages)
+{
+    // _raw() call in Im.php might look like
+    //        /usr/bin/convert  "/tmp/img1URPsC"'[0]'  -strip png:"/tmp/img0NgHfI"
+    echo exec('echo \'[' . $options['index'] . ']\' ');
+}
+?>
+----------------
+Signed-off-by: Thomas Jarosch <thomas.jarosch@intra2net.com>
+Signed-off-by: Jan Schneider <jan@horde.org>
+---
+ framework/Image/lib/Horde/Image/Im.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/framework/Image/lib/Horde/Image/Im.php b/framework/Image/lib/Horde/Image/Im.php
+index f5b51f28877..e2c2eb95645 100644
+--- a/framework/Image/lib/Horde/Image/Im.php
++++ b/framework/Image/lib/Horde/Image/Im.php
+@@ -198,7 +198,7 @@ private function _raw($convert = false, $options = array())
+         $tmpin = $this->toFile($this->_data);
+         $tmpout = Horde_Util::getTempFile('img', false, $this->_tmpdir);
+         $command = $this->_convert . ' ' . implode(' ', $this->_operations)
+-            . ' "' . $tmpin . '"\'[' . $options['index'] . ']\' '
++            . ' "' . $tmpin . '"\'[' . (integer)$options['index'] . ']\' '
+             . implode(' ', $this->_postSrcOperations)
+             . ' -strip ' . $this->_type . ':"' . $tmpout . '" 2>&1';
+         $this->_logDebug(sprintf("convert command executed by Horde_Image_im::raw(): %s", $command));

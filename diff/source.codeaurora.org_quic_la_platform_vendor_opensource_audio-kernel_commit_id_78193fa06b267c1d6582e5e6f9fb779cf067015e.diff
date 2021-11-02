@@ -1,0 +1,45 @@
+From 78193fa06b267c1d6582e5e6f9fb779cf067015e Mon Sep 17 00:00:00 2001
+From: Karthikeyan Mani <kmani@codeaurora.org>
+Date: Thu, 15 Feb 2018 17:46:25 -0800
+Subject: dsp: q6asm: check for buffer size before read
+
+Check for debugfs ops buf size passed before reading
+to avoid reading out of bounds.
+
+Change-Id: Idd5e755ac16448af5751e2f3381097f234e74a74
+Signed-off-by: Karthikeyan Mani <kmani@codeaurora.org>
+---
+ dsp/q6asm.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/dsp/q6asm.c b/dsp/q6asm.c
+index 1c9c689..8663f77 100644
+--- a/dsp/q6asm.c
++++ b/dsp/q6asm.c
+@@ -284,6 +284,11 @@ static ssize_t audio_output_latency_dbgfs_read(struct file *file,
+ 		pr_err("%s: out_buffer is null\n", __func__);
+ 		return 0;
+ 	}
++	if (count < OUT_BUFFER_SIZE) {
++		pr_err("%s: read size %d exceeds buf size %zd\n", __func__,
++						OUT_BUFFER_SIZE, count);
++		return 0;
++	}
+ 	snprintf(out_buffer, OUT_BUFFER_SIZE, "%ld,%ld,%ld,%ld,%ld,%ld,",
+ 		out_cold_tv.tv_sec, out_cold_tv.tv_usec, out_warm_tv.tv_sec,
+ 		out_warm_tv.tv_usec, out_cont_tv.tv_sec, out_cont_tv.tv_usec);
+@@ -336,6 +341,11 @@ static ssize_t audio_input_latency_dbgfs_read(struct file *file,
+ 		pr_err("%s: in_buffer is null\n", __func__);
+ 		return 0;
+ 	}
++	if (count < IN_BUFFER_SIZE) {
++		pr_err("%s: read size %d exceeds buf size %zd\n", __func__,
++						IN_BUFFER_SIZE, count);
++		return 0;
++	}
+ 	snprintf(in_buffer, IN_BUFFER_SIZE, "%ld,%ld,",
+ 				in_cont_tv.tv_sec, in_cont_tv.tv_usec);
+ 	return  simple_read_from_buffer(buf, IN_BUFFER_SIZE, ppos,
+-- 
+cgit v1.1
+

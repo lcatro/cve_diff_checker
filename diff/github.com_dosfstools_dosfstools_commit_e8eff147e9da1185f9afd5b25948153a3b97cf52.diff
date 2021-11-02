@@ -1,0 +1,90 @@
+From e8eff147e9da1185f9afd5b25948153a3b97cf52 Mon Sep 17 00:00:00 2001
+From: Andreas Bombe <aeb@debian.org>
+Date: Wed, 27 Apr 2016 21:38:37 +0200
+Subject: [PATCH] read_boot(): Handle excessive FAT size specifications
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The variable used for storing the FAT size (in bytes) was an unsigned
+int. Since the size in sectors read from the BPB was not sufficiently
+checked, this could end up being zero after multiplying it with the
+sector size while some offsets still stayed excessive. Ultimately it
+would cause segfaults when accessing FAT entries for which no memory
+was allocated.
+
+Make it more robust by changing the types used to store FAT size to
+off_t and abort if there is no room for data clusters. Additionally
+check that FAT size is not specified as zero.
+
+Fixes #25 and fixes #26.
+
+Reported-by: Hanno Böck
+Signed-off-by: Andreas Bombe <aeb@debian.org>
+---
+ src/boot.c     | 14 +++++++++++---
+ src/fsck.fat.h |  2 +-
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/boot.c b/src/boot.c
+index 98b5ff9..491ecd9 100644
+--- a/src/boot.c
++++ b/src/boot.c
+@@ -103,8 +103,8 @@ static void dump_boot(DOS_FS * fs, struct boot_sector *b, unsigned lss)
+ 	   (unsigned long long)fs->fat_start,
+ 	   (unsigned long long)fs->fat_start / lss);
+     printf("%10d FATs, %d bit entries\n", b->fats, fs->fat_bits);
+-    printf("%10d bytes per FAT (= %u sectors)\n", fs->fat_size,
+-	   fs->fat_size / lss);
++    printf("%10lld bytes per FAT (= %llu sectors)\n", (long long)fs->fat_size,
++	   (long long)fs->fat_size / lss);
+     if (!fs->root_cluster) {
+ 	printf("Root directory starts at byte %llu (sector %llu)\n",
+ 	       (unsigned long long)fs->root_start,
+@@ -329,7 +329,7 @@ void read_boot(DOS_FS * fs)
+     struct boot_sector b;
+     unsigned total_sectors;
+     unsigned short logical_sector_size, sectors;
+-    unsigned fat_length;
++    off_t fat_length;
+     unsigned total_fat_entries;
+     off_t data_size;
+ 
+@@ -358,8 +358,12 @@ void read_boot(DOS_FS * fs)
+     /* Can't access last odd sector anyway, so round down */
+     fs_test((off_t)((total_sectors & ~1) - 1) * logical_sector_size,
+ 	    logical_sector_size);
++
+     fat_length = le16toh(b.fat_length) ?
+ 	le16toh(b.fat_length) : le32toh(b.fat32_length);
++    if (!fat_length)
++	die("FAT size is zero.");
++
+     fs->fat_start = (off_t)le16toh(b.reserved) * logical_sector_size;
+     fs->root_start = ((off_t)le16toh(b.reserved) + b.fats * fat_length) *
+ 	logical_sector_size;
+@@ -367,7 +371,11 @@ void read_boot(DOS_FS * fs)
+     fs->data_start = fs->root_start + ROUND_TO_MULTIPLE(fs->root_entries <<
+ 							MSDOS_DIR_BITS,
+ 							logical_sector_size);
++
+     data_size = (off_t)total_sectors * logical_sector_size - fs->data_start;
++    if (data_size < fs->cluster_size)
++	die("Filesystem has no space for any data clusters");
++
+     fs->data_clusters = data_size / fs->cluster_size;
+     fs->root_cluster = 0;	/* indicates standard, pre-FAT32 root dir */
+     fs->fsinfo_start = 0;	/* no FSINFO structure */
+diff --git a/src/fsck.fat.h b/src/fsck.fat.h
+index d150ab9..168049e 100644
+--- a/src/fsck.fat.h
++++ b/src/fsck.fat.h
+@@ -152,7 +152,7 @@ typedef struct {
+ typedef struct {
+     int nfats;
+     off_t fat_start;
+-    unsigned int fat_size;	/* unit is bytes */
++    off_t fat_size;		/* unit is bytes */
+     unsigned int fat_bits;	/* size of a FAT entry */
+     unsigned int eff_fat_bits;	/* # of used bits in a FAT entry */
+     uint32_t root_cluster;	/* 0 for old-style root dir */

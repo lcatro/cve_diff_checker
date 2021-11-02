@@ -1,0 +1,246 @@
+From 6b842f4ec001b12a9348e95854e02bbd10a84e20 Mon Sep 17 00:00:00 2001
+From: Eric Soroos <eric-github@soroos.net>
+Date: Fri, 6 Mar 2020 22:59:18 +0000
+Subject: [PATCH 1/5] Ensure that Tiff's concept of Strip and Tilesize matches
+ Pillow's
+
+---
+ src/libImaging/TiffDecode.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/libImaging/TiffDecode.c b/src/libImaging/TiffDecode.c
+index c3df1174eb0..bb5b77804aa 100644
+--- a/src/libImaging/TiffDecode.c
++++ b/src/libImaging/TiffDecode.c
+@@ -363,6 +363,13 @@ int ImagingLibTiffDecode(Imaging im, ImagingCodecState state, UINT8* buffer, Py_
+         
+         state->bytes = row_byte_size * tile_length;
+ 
++        if (TIFFTileSize(tiff) > state->bytes) {
++            // If the strip size as expected by LibTiff isn't we're expecting, abort.
++            state->errcode = IMAGING_CODEC_MEMORY;
++            TIFFClose(tiff);
++            return -1;
++        }
++
+         /* realloc to fit whole tile */
+         /* malloc check above */
+         new_data = realloc (state->buffer, state->bytes);
+@@ -424,11 +431,21 @@ int ImagingLibTiffDecode(Imaging im, ImagingCodecState state, UINT8* buffer, Py_
+             TIFFClose(tiff);
+             return -1;
+         }
+-        
++
+         state->bytes = rows_per_strip * row_byte_size;
+ 
+         TRACE(("StripSize: %d \n", state->bytes));
+ 
++        if (TIFFStripSize(tiff) > state->bytes) {
++            // If the strip size as expected by LibTiff isn't we're expecting, abort.
++            // man:   TIFFStripSize returns the equivalent size for a strip of data as it would be returned in a
++            //        call to TIFFReadEncodedStrip ...
++
++            state->errcode = IMAGING_CODEC_MEMORY;
++            TIFFClose(tiff);
++            return -1;
++        }
++
+         /* realloc to fit whole strip */
+         /* malloc check above */
+         new_data = realloc (state->buffer, state->bytes);
+
+From b8d4ce1a591beda18c2d5c80a9f5a5e4856f6beb Mon Sep 17 00:00:00 2001
+From: Eric Soroos <eric-github@soroos.net>
+Date: Fri, 6 Mar 2020 22:59:43 +0000
+Subject: [PATCH 2/5] Avoid uninitialized read
+
+---
+ src/libImaging/TiffDecode.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/libImaging/TiffDecode.c b/src/libImaging/TiffDecode.c
+index bb5b77804aa..12cf875ef34 100644
+--- a/src/libImaging/TiffDecode.c
++++ b/src/libImaging/TiffDecode.c
+@@ -171,7 +171,7 @@ int ImagingLibTiffInit(ImagingCodecState state, int fp, uint32 offset) {
+ 
+ 
+ int ReadTile(TIFF* tiff, UINT32 col, UINT32 row, UINT32* buffer) {
+-    uint16 photometric;
++    uint16 photometric = 0;
+ 
+     TIFFGetField(tiff, TIFFTAG_PHOTOMETRIC, &photometric);
+ 
+@@ -228,7 +228,7 @@ int ReadTile(TIFF* tiff, UINT32 col, UINT32 row, UINT32* buffer) {
+ }
+ 
+ int ReadStrip(TIFF* tiff, UINT32 row, UINT32* buffer) {
+-    uint16 photometric;
++    uint16 photometric = 0; // init to not PHOTOMETRIC_YCBCR
+     TIFFGetField(tiff, TIFFTAG_PHOTOMETRIC, &photometric);
+ 
+     // To avoid dealing with YCbCr subsampling, let libtiff handle it
+
+From 6e7c0ced684842eb560043790c45dfab560eddf2 Mon Sep 17 00:00:00 2001
+From: Eric Soroos <eric-github@soroos.net>
+Date: Fri, 6 Mar 2020 23:16:14 +0000
+Subject: [PATCH 3/5] Tests for tiff crashes
+
+---
+ Tests/check_tiff_crashes.py |  28 ++++++++++++++++++++++++++++
+ Tests/images/crash_1.tif    | Bin 0 -> 6511 bytes
+ Tests/images/crash_2.tif    | Bin 0 -> 6223 bytes
+ 3 files changed, 28 insertions(+)
+ create mode 100644 Tests/check_tiff_crashes.py
+ create mode 100644 Tests/images/crash_1.tif
+ create mode 100644 Tests/images/crash_2.tif
+
+diff --git a/Tests/check_tiff_crashes.py b/Tests/check_tiff_crashes.py
+new file mode 100644
+index 00000000000..95c81b1bf09
+--- /dev/null
++++ b/Tests/check_tiff_crashes.py
+@@ -0,0 +1,28 @@
++#!/usr/bin/env python
++
++# Reproductions/tests for crashes/read errors in TiffDecode.c
++
++# When run in python, all of these images should fail for
++# one reason or another, either as a buffer overrun,
++# unrecognized datastream, or truncated image file.
++# There shouldn't be any segfaults.
++#
++# if run like
++# `valgrind --tool=memcheck python check_tiff_crashes.py  2>&1 | grep TiffDecode.c`
++# the output should be empty. There may be python issues
++# in the valgrind especially if run in a debug python
++# version.
++
++
++from PIL import Image
++
++repro_read_strip = ('images/crash_1.tif',
++                    'images/crash_2.tif',
++)
++
++for path in repro_read_strip:
++    with Image.open(path) as im:
++        try:
++            im.load()
++        except Exception as msg:
++            print(msg)
+diff --git a/Tests/images/crash_1.tif b/Tests/images/crash_1.tif
+new file mode 100644
+index 0000000000000000000000000000000000000000..230d4439aadb0867d3005e6cec458b69588ecc42
+GIT binary patch
+literal 6511
+zcmebD)M7AVWMHV6(|g&_`>=xu`-lHenXc<+*sg58(KBmF8RG(#Cix`+_6-)6DHftj
+zn&l7jKaz+#xPIbA!=}y8@3wB6{ypl&?N7?z|LN;<URdeAVbZdcX>06e#@g8$?4B4L
+z>-8vd@8*uFRg0I^J<;Ck81HiB+@w9&fVg9BO=v>V?z{z^wa?ESiO|tqd2%-+GXv0Z
+z3^Re45yS>bfW%n^4sJY}@9cYKzgEf-qmPZ8C)Zwl&=Qfhd#*9_uOoMMmh`J0`40gM
+z7AmP))wR;)9*6bz@#Lg%mYqC3moxaFbXnRfGs_Ku{8xgm^Xx3+?lqrSYVDoyEqCWM
+zwnpBE`vS^~1)pj8&tRV>WgmaMCy)QzwcFa>vbV1=F5X>GR@IYw;HaGT4o=@(CeM?6
+z$KB5JZ(Qe79ck_I$K3sh+Qwu3PF26zlUKMiFbFXGV_*S$1LzB&KbRSqe*XWT26Wv&
+zsQ1jVSi*qSmW}+?=Y7_p+Jfu~h&*8rl*2s$3f@f(K!OeEL}pUL62n_4F$FZyoPoiJ
+zfq@C?Nsufvlue$6JURYAGr$qJ2oZsQ7$cCP@H{YB4T+9NP%u!(p><>dd}(x;c#+s}
+zDF-RU$g6}h;y_0rvAzSV!|)xrB*K~H&<h<Leg)<-0(p!9UfBIX$|*!=l45vS0Wa*Z
+z6+^fRJ1nIF%)KBfEM)?utmI{6V(<jY{{X5IWP}u;96<iNe}6ziU`3)XNQDd7G+erb
+zfC`i0+K_ZXEW<3AAmWTSFij;?x`TAUD=Z)z7C}HJ7C?M;IG>d2@br+X4}sx=9Ae<G
+z2L&URXc^G7OneJrG}ADkWW~`;L-j@^TBaFoM3T}2pjYb(+VFP+Mi#WvK`!X1-$F+3
+z-k`OPiLUf<G&cTYDUxwEV37M?K>ve+084d>RJDUDY4kc8VhFh;q!vdhiO}rB-Y6IV
+zr;_7EoV{AI8hW5ON9)y6si6ms1}v31X5$Jec2F96NGSuaCTvLvtN|3Gz!c~J#Ntp(
+zn1O65MphunFxrsBHLfzG8<L}S;%J?SIpjB5Cjv{n(K?Z+k=~J7CxYrsCniwU2n7Pk
+zVW=$>kP4!!V&sa~<Noda3;ti&HUo^W?wb7{*wF_X2C9m&SqoLqAd1um0NH(m0iu3R
+hclrN`tx#vuhe8h-uoLeidkN$ys1GN$g8T?^B>)*Fs4@Tm
+
+literal 0
+HcmV?d00001
+
+diff --git a/Tests/images/crash_2.tif b/Tests/images/crash_2.tif
+new file mode 100644
+index 0000000000000000000000000000000000000000..26c00d0ff1ae8610df40faf6e38cf41afff596d5
+GIT binary patch
+literal 6223
+zcmebD)M7AVWMHV6(|g&_`>=xu`-lHenXc<+*sg58(KBmF8RG(#Cix`+_6-)6DHftj
+zn&l7jKaz+#xPIbA!=}y8@3wB6{ypl&?N7?z|LN;<URdeAVbZdcX>06e#@g8$?4B4L
+z>-8vd@8*uFRg0I^J<;Ck81HiB+@w9&fVg9BO=v>V?z{z^wa?ESiO|tqd2%-+GXv0Z
+z3^Re45yS>bfW%n^4sJY}@9cYKzgEf-qmPZ8C)Zwl&=Qfhd#*9_uOoMMmh`J0`40gM
+z7AmP))wR;)9*6bz@#Lg%mYqC3moxaFbXnRfGs_Ku{8xgm^Xx3+?lqrSYVDoyEqCWM
+zwnpBE`vS^~1)pj8&tRV>WgmaMCy)QzwcFa>vbV1=F5X>GR@IYw;HaGT4o=@(CeM?6
+z$KB5JZ(Qe79ck_I$K3sh+Qwu3PF26zlUKMiFbFXGV_*S$1LzB&KbRSqe*XWT26Wv&
+zsQ1jVSi*qSmW}+?=Y7_p+Jfu~h&*8rl*2s$3f@f(K!OeEL}pUL62n_4F$FZyoPoiJ
+zfq@C?Nsufvlue$6(8ybah`c|H5lGQ@9vGyCM8_d02&m)8I@$y5i5O>Wp{G|IeiZ@6
+z5P|q%fM=9HNFhyhAQ!{a89bw4OTxG^3VMn%Mz|Lwg(W>f@)<896N4vE{s&N%AR{F6
+zaRB-6{`~<7ffb3mASFz&X}EL=0Tm|0wIS((ScaLXA>xcTFij;?GJtfz3p*ei7C}HJ
+z7C?MaI-iuH^z@J_OM&5n5@J*=OQBIcT8>ezfTK-02FoR|Jc=bpQneUk5FIT923Lb>
+zv=A7)jTvGa)l_aPAQcMWdKgQgfLT8eg0=#v;R0^AjJ6f1-tR&yCcy19P$IyRHmF)*
+zfI5hzw0nu~iDJz(%rpV8o~JRv{w*j-QQBlcKC~M+5LxjzuwVG<-=F^=yTSJ3b;M}1
+zoi0Nl=t+daX1f(y|B}{2AUq6^0j1$F2x5kFqy{>0<p#<+Xk&3eA#(?sjPM{0&!LU*
+z5IyjKW5nY>mZBc#C<^lUA<(lxfURsmYBGQZ3Sfl{tcw6Kgj^C*UXea9F#t{_$BQ^S
+z5!eQs81MxHda#3wcu*(+W6c4G#i7x}3}j0&vVz0ai3!Mo0fFQ&R3E@hB+6Q3OFZu1
+z-oN1gg>5sy`0B3N|A7q*pf$Lxg{nvGRDzujaps)v^8XWCVeX_0jUF;!C*DW)639_d
+MA5Lrq`4Qqu07c*)kN^Mx
+
+literal 0
+HcmV?d00001
+
+
+From c00fdc7e30675e5d4d85b8acd206a827da62a0fd Mon Sep 17 00:00:00 2001
+From: Hugo van Kemenade <hugovk@users.noreply.github.com>
+Date: Thu, 26 Mar 2020 21:45:21 +0200
+Subject: [PATCH 4/5] Fix typos
+
+Co-Authored-By: Andrew Murray <3112309+radarhere@users.noreply.github.com>
+---
+ src/libImaging/TiffDecode.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/libImaging/TiffDecode.c b/src/libImaging/TiffDecode.c
+index 12cf875ef34..532db1f685f 100644
+--- a/src/libImaging/TiffDecode.c
++++ b/src/libImaging/TiffDecode.c
+@@ -364,7 +364,7 @@ int ImagingLibTiffDecode(Imaging im, ImagingCodecState state, UINT8* buffer, Py_
+         state->bytes = row_byte_size * tile_length;
+ 
+         if (TIFFTileSize(tiff) > state->bytes) {
+-            // If the strip size as expected by LibTiff isn't we're expecting, abort.
++            // If the strip size as expected by LibTiff isn't what we're expecting, abort.
+             state->errcode = IMAGING_CODEC_MEMORY;
+             TIFFClose(tiff);
+             return -1;
+@@ -437,7 +437,7 @@ int ImagingLibTiffDecode(Imaging im, ImagingCodecState state, UINT8* buffer, Py_
+         TRACE(("StripSize: %d \n", state->bytes));
+ 
+         if (TIFFStripSize(tiff) > state->bytes) {
+-            // If the strip size as expected by LibTiff isn't we're expecting, abort.
++            // If the strip size as expected by LibTiff isn't what we're expecting, abort.
+             // man:   TIFFStripSize returns the equivalent size for a strip of data as it would be returned in a
+             //        call to TIFFReadEncodedStrip ...
+ 
+
+From 2092801e71f008fa3d50cec7afc3ab50a11a14dc Mon Sep 17 00:00:00 2001
+From: Hugo <hugovk@users.noreply.github.com>
+Date: Thu, 26 Mar 2020 21:46:30 +0200
+Subject: [PATCH 5/5] Format with Black
+
+---
+ Tests/check_tiff_crashes.py | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/Tests/check_tiff_crashes.py b/Tests/check_tiff_crashes.py
+index 95c81b1bf09..f4eb0437514 100644
+--- a/Tests/check_tiff_crashes.py
++++ b/Tests/check_tiff_crashes.py
+@@ -16,8 +16,9 @@
+ 
+ from PIL import Image
+ 
+-repro_read_strip = ('images/crash_1.tif',
+-                    'images/crash_2.tif',
++repro_read_strip = (
++    "images/crash_1.tif",
++    "images/crash_2.tif",
+ )
+ 
+ for path in repro_read_strip:

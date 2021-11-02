@@ -1,0 +1,66 @@
+From 11b426ee05eb62ed103218526f1fa616851c43ce Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 21 Mar 2017 19:40:51 -0700
+Subject: [PATCH] CVE-2017-13017/DHCPv6: Add a missing option length check.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-dhcp6.c                |   4 ++++
+ tests/TESTLIST               |   1 +
+ tests/dhcp6_reconf_asan.out  |   2 ++
+ tests/dhcp6_reconf_asan.pcap | Bin 0 -> 132 bytes
+ 4 files changed, 7 insertions(+)
+ create mode 100644 tests/dhcp6_reconf_asan.out
+ create mode 100644 tests/dhcp6_reconf_asan.pcap
+
+diff --git a/print-dhcp6.c b/print-dhcp6.c
+index 762d9187e..cbb6d84a0 100644
+--- a/print-dhcp6.c
++++ b/print-dhcp6.c
+@@ -518,6 +518,10 @@ dhcp6opt_print(netdissect_options *ndo,
+ 			ND_PRINT((ndo, "...)"));
+ 			break;
+ 		case DH6OPT_RECONF_MSG:
++			if (optlen != 1) {
++				ND_PRINT((ndo, " ?)"));
++				break;
++			}
+ 			tp = (const u_char *)(dh6o + 1);
+ 			switch (*tp) {
+ 			case DH6_RENEW:
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index a56c3c950..3f5726601 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -518,6 +518,7 @@ esis_snpa_asan-2	esis_snpa_asan-2.pcap		esis_snpa_asan-2.out	-v
+ esis_snpa_asan-3	esis_snpa_asan-3.pcap		esis_snpa_asan-3.out	-v
+ esis_snpa_asan-4	esis_snpa_asan-4.pcap		esis_snpa_asan-4.out	-v
+ esis_snpa_asan-5	esis_snpa_asan-5.pcap		esis_snpa_asan-5.out	-v
++dhcp6_reconf_asan	dhcp6_reconf_asan.pcap		dhcp6_reconf_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/dhcp6_reconf_asan.out b/tests/dhcp6_reconf_asan.out
+new file mode 100644
+index 000000000..3f3937346
+--- /dev/null
++++ b/tests/dhcp6_reconf_asan.out
+@@ -0,0 +1,2 @@
++IP (tos 0x60, ttl 254, id 21519, offset 0, flags [+, DF, rsvd], proto UDP (17), length 768, options (EOL), bad cksum 9615 (->c6f)!)
++    251.73.86.150.514 > 126.172.217.192.546: dhcp6 relay-reply (linkaddr=300:10ed:ff:f01:f:0:7f:7f peeraddr=ffb6:3a64::c1:2300:581c:d00 (reconfigure-message ?) (reconfigure-message ?))
+diff --git a/tests/dhcp6_reconf_asan.pcap b/tests/dhcp6_reconf_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..3eb6fe02adebff65b0c53c301bd396f27754df01
+GIT binary patch
+literal 132
+zcmca|c+)~A1{Q{GDZvjJfFK5l8G(4BBttMW1A`cduf)K}+_Q4!%4u;24mJS!91QLW
+z%nTv?4;cOlP80p@88)qM&CLT0|Njg9UwxJd2$W2Ks(59Y83f)k{O4z6;0JQ+8S4LU
+Xvq}N77#I#JGepSnGB5}O*+2{cNNgcn
+
+literal 0
+HcmV?d00001
+

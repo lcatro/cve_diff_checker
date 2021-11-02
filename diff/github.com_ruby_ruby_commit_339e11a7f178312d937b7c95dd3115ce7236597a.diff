@@ -1,0 +1,165 @@
+From 339e11a7f178312d937b7c95dd3115ce7236597a Mon Sep 17 00:00:00 2001
+From: usa <usa@b2dd03c8-39d4-4d8f-98ff-823fe69b080e>
+Date: Wed, 16 Dec 2015 12:15:26 +0000
+Subject: [PATCH] merge revision(s): 53153 and 23405@ruby_1_9_1
+
+	* ext/fiddle/handle.c: check tainted string arguments.
+	  Patch provided by tenderlove and nobu.
+
+	* test/fiddle/test_handle.rb (class TestHandle): add test for above.
+
+	* ext/dl/handle.c (rb_dlhandle_initialize): prohibits DL::dlopen
+	  with a tainted name of library.
+	  Patch by sheepman <sheepman AT sheepman.sakura.ne.jp>.
+
+	* ext/dl/handle.c (rb_dlhandle_sym): ditto
+
+
+
+git-svn-id: svn+ssh://ci.ruby-lang.org/ruby/branches/ruby_2_1@53156 b2dd03c8-39d4-4d8f-98ff-823fe69b080e
+---
+ ChangeLog                  | 15 +++++++++++++++
+ ext/fiddle/handle.c        | 17 ++++++++++-------
+ test/fiddle/test_handle.rb | 17 +++++++++++++++++
+ version.h                  |  2 +-
+ 4 files changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index df20a42e1d4f..97e7eb32d89f 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,18 @@
++Wed Dec 16 21:10:03 2015  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
++
++	* ext/fiddle/handle.c: check tainted string arguments.
++	  Patch provided by tenderlove and nobu.
++
++	* test/fiddle/test_handle.rb (class TestHandle): add test for above.
++
++Wed Dec 16 21:10:36 2015  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
++
++	* ext/dl/handle.c (rb_dlhandle_initialize): prohibits DL::dlopen
++	  with a tainted name of library.
++	  Patch by sheepman <sheepman AT sheepman.sakura.ne.jp>.
++
++	* ext/dl/handle.c (rb_dlhandle_sym): ditto
++
+ Wed Dec 16 16:13:04 2015  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+ 
+ 	* io.c (parse_mode_enc): fix buffer overflow.
+diff --git a/ext/fiddle/handle.c b/ext/fiddle/handle.c
+index 36970a224867..fa207ef159f7 100644
+--- a/ext/fiddle/handle.c
++++ b/ext/fiddle/handle.c
+@@ -1,6 +1,8 @@
+ #include <ruby.h>
+ #include <fiddle.h>
+ 
++#define SafeStringValueCStr(v) (rb_check_safe_obj(rb_string_value(&v)), StringValueCStr(v))
++
+ VALUE rb_cHandle;
+ 
+ struct dl_handle {
+@@ -143,11 +145,11 @@ rb_fiddle_handle_initialize(int argc, VALUE argv[], VALUE self)
+ 	cflag = RTLD_LAZY | RTLD_GLOBAL;
+ 	break;
+       case 1:
+-	clib = NIL_P(lib) ? NULL : StringValuePtr(lib);
++	clib = NIL_P(lib) ? NULL : SafeStringValueCStr(lib);
+ 	cflag = RTLD_LAZY | RTLD_GLOBAL;
+ 	break;
+       case 2:
+-	clib = NIL_P(lib) ? NULL : StringValuePtr(lib);
++	clib = NIL_P(lib) ? NULL : SafeStringValueCStr(lib);
+ 	cflag = NUM2INT(flag);
+ 	break;
+       default:
+@@ -263,7 +265,7 @@ rb_fiddle_handle_to_i(VALUE self)
+     return PTR2NUM(fiddle_handle);
+ }
+ 
+-static VALUE fiddle_handle_sym(void *handle, const char *symbol);
++static VALUE fiddle_handle_sym(void *handle, VALUE symbol);
+ 
+ /*
+  * Document-method: sym
+@@ -282,7 +284,7 @@ rb_fiddle_handle_sym(VALUE self, VALUE sym)
+ 	rb_raise(rb_eFiddleError, "closed handle");
+     }
+ 
+-    return fiddle_handle_sym(fiddle_handle->ptr, StringValueCStr(sym));
++    return fiddle_handle_sym(fiddle_handle->ptr, sym);
+ }
+ 
+ #ifndef RTLD_NEXT
+@@ -305,11 +307,11 @@ rb_fiddle_handle_sym(VALUE self, VALUE sym)
+ static VALUE
+ rb_fiddle_handle_s_sym(VALUE self, VALUE sym)
+ {
+-    return fiddle_handle_sym(RTLD_NEXT, StringValueCStr(sym));
++    return fiddle_handle_sym(RTLD_NEXT, sym);
+ }
+ 
+ static VALUE
+-fiddle_handle_sym(void *handle, const char *name)
++fiddle_handle_sym(void *handle, VALUE symbol)
+ {
+ #if defined(HAVE_DLERROR)
+     const char *err;
+@@ -318,6 +320,7 @@ fiddle_handle_sym(void *handle, const char *name)
+ # define CHECK_DLERROR
+ #endif
+     void (*func)();
++    const char *name = SafeStringValueCStr(symbol);
+ 
+     rb_secure(2);
+ #ifdef HAVE_DLERROR
+@@ -367,7 +370,7 @@ fiddle_handle_sym(void *handle, const char *name)
+     }
+ #endif
+     if( !func ){
+-	rb_raise(rb_eFiddleError, "unknown symbol \"%s\"", name);
++	rb_raise(rb_eFiddleError, "unknown symbol \"%"PRIsVALUE"\"", symbol);
+     }
+ 
+     return PTR2NUM(func);
+diff --git a/test/fiddle/test_handle.rb b/test/fiddle/test_handle.rb
+index 2007a191b6b8..8d7589e44ce9 100644
+--- a/test/fiddle/test_handle.rb
++++ b/test/fiddle/test_handle.rb
+@@ -10,6 +10,23 @@ class TestHandle < TestCase
+ 
+     include Test::Unit::Assertions
+ 
++    def test_safe_handle_open
++      t = Thread.new do
++        $SAFE = 1
++        Fiddle::Handle.new(LIBC_SO.taint)
++      end
++      assert_raise(SecurityError) { t.value }
++    end
++
++    def test_safe_function_lookup
++      t = Thread.new do
++        h = Fiddle::Handle.new(LIBC_SO)
++        $SAFE = 1
++        h["qsort".taint]
++      end
++      assert_raise(SecurityError) { t.value }
++    end
++
+     def test_to_i
+       handle = Fiddle::Handle.new(LIBC_SO)
+       assert_kind_of Integer, handle.to_i
+diff --git a/version.h b/version.h
+index f25921ec9fec..31d15f8832c8 100644
+--- a/version.h
++++ b/version.h
+@@ -1,6 +1,6 @@
+ #define RUBY_VERSION "2.1.8"
+ #define RUBY_RELEASE_DATE "2015-12-16"
+-#define RUBY_PATCHLEVEL 438
++#define RUBY_PATCHLEVEL 439
+ 
+ #define RUBY_RELEASE_YEAR 2015
+ #define RUBY_RELEASE_MONTH 12

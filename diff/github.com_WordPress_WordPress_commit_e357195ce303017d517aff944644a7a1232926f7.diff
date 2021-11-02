@@ -1,0 +1,999 @@
+From e357195ce303017d517aff944644a7a1232926f7 Mon Sep 17 00:00:00 2001
+From: Joe Hoyle <joehoyle@gmail.com>
+Date: Thu, 26 Jan 2017 13:39:41 +0000
+Subject: [PATCH] REST API: Unify object access handling for simplicity.
+
+Rather than repeating ourselves, unifying the access into a single method keeps everything tidy. While we're at it, add in additional schema handling for common parameters.
+
+See #38792.
+Built from https://develop.svn.wordpress.org/trunk@39954
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@39891 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/rest-api.php                      |  10 +-
+ .../class-wp-rest-comments-controller.php     | 101 ++++++++++-------
+ ...class-wp-rest-post-statuses-controller.php |   6 +
+ .../class-wp-rest-post-types-controller.php   |   6 +
+ .../class-wp-rest-posts-controller.php        |  86 ++++++++++----
+ .../class-wp-rest-revisions-controller.php    | 107 ++++++++++++++----
+ .../class-wp-rest-taxonomies-controller.php   |   6 +
+ .../class-wp-rest-terms-controller.php        |  92 +++++++++------
+ .../class-wp-rest-users-controller.php        |  86 +++++++++-----
+ wp-includes/version.php                       |   2 +-
+ 10 files changed, 353 insertions(+), 149 deletions(-)
+
+diff --git a/wp-includes/rest-api.php b/wp-includes/rest-api.php
+index 980f4c72a37c..4f9e7e607fe5 100644
+--- a/wp-includes/rest-api.php
++++ b/wp-includes/rest-api.php
+@@ -46,6 +46,13 @@ function register_rest_route( $namespace, $route, $args = array(), $override = f
+ 		return false;
+ 	}
+ 
++	if ( isset( $args['args'] ) ) {
++		$common_args = $args['args'];
++		unset( $args['args'] );
++	} else {
++		$common_args = array();
++	}
++
+ 	if ( isset( $args['callback'] ) ) {
+ 		// Upgrade a single set to multiple.
+ 		$args = array( $args );
+@@ -57,12 +64,13 @@ function register_rest_route( $namespace, $route, $args = array(), $override = f
+ 		'args'            => array(),
+ 	);
+ 	foreach ( $args as $key => &$arg_group ) {
+-		if ( ! is_numeric( $arg_group ) ) {
++		if ( ! is_numeric( $key ) ) {
+ 			// Route option, skip here.
+ 			continue;
+ 		}
+ 
+ 		$arg_group = array_merge( $defaults, $arg_group );
++		$arg_group['args'] = array_merge( $common_args, $arg_group['args'] );
+ 	}
+ 
+ 	$full_route = '/' . trim( $namespace, '/' ) . '/' . trim( $route, '/' );
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-comments-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-comments-controller.php
+index d7a34f330190..117529d19cc0 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-comments-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-comments-controller.php
+@@ -63,6 +63,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<id>[\d]+)', array(
++			'args' => array(
++				'id' => array(
++					'description' => __( 'Unique identifier for the object.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'  => WP_REST_Server::READABLE,
+ 				'callback' => array( $this, 'get_item' ),
+@@ -299,6 +305,36 @@ public function get_items( $request ) {
+ 		return $response;
+ 	}
+ 
++	/**
++	 * Get the comment, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_Comment|WP_Error Comment object if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_comment( $id ) {
++		$error = new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
++		if ( (int) $id <= 0 ) {
++			return $error;
++		}
++
++		$id = (int) $id;
++		$comment = get_comment( $id );
++		if ( empty( $comment ) ) {
++			return $error;
++		}
++
++		if ( ! empty( $comment->comment_post_ID ) ) {
++			$post = get_post( (int) $comment->comment_post_ID );
++			if ( empty( $post ) ) {
++				return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
++			}
++		}
++
++		return $comment;
++	}
++
+ 	/**
+ 	 * Checks if a given request has access to read the comment.
+ 	 *
+@@ -309,12 +345,9 @@ public function get_items( $request ) {
+ 	 * @return WP_Error|bool True if the request has read access for the item, error object otherwise.
+ 	 */
+ 	public function get_item_permissions_check( $request ) {
+-		$id = (int) $request['id'];
+-
+-		$comment = get_comment( $id );
+-
+-		if ( ! $comment ) {
+-			return true;
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
+ 		}
+ 
+ 		if ( ! empty( $request['context'] ) && 'edit' === $request['context'] && ! current_user_can( 'moderate_comments' ) ) {
+@@ -344,18 +377,9 @@ public function get_item_permissions_check( $request ) {
+ 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
+ 	 */
+ 	public function get_item( $request ) {
+-		$id = (int) $request['id'];
+-
+-		$comment = get_comment( $id );
+-		if ( empty( $comment ) ) {
+-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
+-		}
+-
+-		if ( ! empty( $comment->comment_post_ID ) ) {
+-			$post = get_post( $comment->comment_post_ID );
+-			if ( empty( $post ) ) {
+-				return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
+-			}
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
+ 		}
+ 
+ 		$data = $this->prepare_item_for_response( $comment, $request );
+@@ -630,12 +654,12 @@ public function create_item( $request ) {
+ 	 * @return WP_Error|bool True if the request has access to update the item, error object otherwise.
+ 	 */
+ 	public function update_item_permissions_check( $request ) {
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
++		}
+ 
+-		$id = (int) $request['id'];
+-
+-		$comment = get_comment( $id );
+-
+-		if ( $comment && ! $this->check_edit_permission( $comment ) ) {
++		if ( ! $this->check_edit_permission( $comment ) ) {
+ 			return new WP_Error( 'rest_cannot_edit', __( 'Sorry, you are not allowed to edit this comment.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -652,14 +676,13 @@ public function update_item_permissions_check( $request ) {
+ 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
+ 	 */
+ 	public function update_item( $request ) {
+-		$id = (int) $request['id'];
+-
+-		$comment = get_comment( $id );
+-
+-		if ( empty( $comment ) ) {
+-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
+ 		}
+ 
++		$id = $comment->comment_ID;
++
+ 		if ( isset( $request['type'] ) && get_comment_type( $id ) !== $request['type'] ) {
+ 			return new WP_Error( 'rest_comment_invalid_type', __( 'Sorry, you are not allowed to change the comment type.' ), array( 'status' => 404 ) );
+ 		}
+@@ -750,11 +773,9 @@ public function update_item( $request ) {
+ 	 * @return WP_Error|bool True if the request has access to delete the item, error object otherwise.
+ 	 */
+ 	public function delete_item_permissions_check( $request ) {
+-		$id      = (int) $request['id'];
+-		$comment = get_comment( $id );
+-
+-		if ( ! $comment ) {
+-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
+ 		}
+ 
+ 		if ( ! $this->check_edit_permission( $comment ) ) {
+@@ -773,15 +794,13 @@ public function delete_item_permissions_check( $request ) {
+ 	 * @return WP_Error|WP_REST_Response Response object on success, or error object on failure.
+ 	 */
+ 	public function delete_item( $request ) {
+-		$id    = (int) $request['id'];
+-		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
+-
+-		$comment = get_comment( $id );
+-
+-		if ( empty( $comment ) ) {
+-			return new WP_Error( 'rest_comment_invalid_id', __( 'Invalid comment ID.' ), array( 'status' => 404 ) );
++		$comment = $this->get_comment( $request['id'] );
++		if ( is_wp_error( $comment ) ) {
++			return $comment;
+ 		}
+ 
++		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
++
+ 		/**
+ 		 * Filters whether a comment can be trashed.
+ 		 *
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-post-statuses-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-post-statuses-controller.php
+index 0ec4bcd1a13a..59575d566c1c 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-post-statuses-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-post-statuses-controller.php
+@@ -48,6 +48,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<status>[\w-]+)', array(
++			'args' => array(
++				'status' => array(
++					'description' => __( 'An alphanumeric identifier for the status.' ),
++					'type'        => 'string',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_item' ),
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-post-types-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-post-types-controller.php
+index 4da4b5257869..69d221be755f 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-post-types-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-post-types-controller.php
+@@ -48,6 +48,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<type>[\w-]+)', array(
++			'args' => array(
++				'type' => array(
++					'description' => __( 'An alphanumeric identifier for the post type.' ),
++					'type'        => 'string',
++				),
++			),
+ 			array(
+ 				'methods'  => WP_REST_Server::READABLE,
+ 				'callback' => array( $this, 'get_item' ),
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
+index ef34f626e43b..c33b8d1a70d2 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php
+@@ -88,6 +88,12 @@ public function register_routes() {
+ 			);
+ 		}
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<id>[\d]+)', array(
++			'args' => array(
++				'id' => array(
++					'description' => __( 'Unique identifier for the object.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_item' ),
+@@ -349,6 +355,28 @@ public function get_items( $request ) {
+ 		return $response;
+ 	}
+ 
++	/**
++	 * Get the post, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_Post|WP_Error Post object if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_post( $id ) {
++		$error = new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
++		if ( (int) $id <= 0 ) {
++			return $error;
++		}
++
++		$post = get_post( (int) $id );
++		if ( empty( $post ) || empty( $post->ID ) || $this->post_type !== $post->post_type ) {
++			return $error;
++		}
++
++		return $post;
++	}
++
+ 	/**
+ 	 * Checks if a given request has access to read a post.
+ 	 *
+@@ -359,8 +387,10 @@ public function get_items( $request ) {
+ 	 * @return bool|WP_Error True if the request has read access for the item, WP_Error object otherwise.
+ 	 */
+ 	public function get_item_permissions_check( $request ) {
+-
+-		$post = get_post( (int) $request['id'] );
++		$post = $this->get_post( $request['id'] );
++		if ( is_wp_error( $post ) ) {
++			return $post;
++		}
+ 
+ 		if ( 'edit' === $request['context'] && $post && ! $this->check_update_permission( $post ) ) {
+ 			return new WP_Error( 'rest_forbidden_context', __( 'Sorry, you are not allowed to edit this post.' ), array( 'status' => rest_authorization_required_code() ) );
+@@ -428,18 +458,16 @@ public function can_access_password_content( $post, $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function get_item( $request ) {
+-		$id   = (int) $request['id'];
+-		$post = get_post( $id );
+-
+-		if ( empty( $id ) || empty( $post->ID ) || $this->post_type !== $post->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
++		$post = $this->get_post( $request['id'] );
++		if ( is_wp_error( $post ) ) {
++			return $post;
+ 		}
+ 
+ 		$data     = $this->prepare_item_for_response( $post, $request );
+ 		$response = rest_ensure_response( $data );
+ 
+ 		if ( is_post_type_viewable( get_post_type_object( $post->post_type ) ) ) {
+-			$response->link_header( 'alternate',  get_permalink( $id ), array( 'type' => 'text/html' ) );
++			$response->link_header( 'alternate',  get_permalink( $post->ID ), array( 'type' => 'text/html' ) );
+ 		}
+ 
+ 		return $response;
+@@ -455,6 +483,9 @@ public function get_item( $request ) {
+ 	 * @return true|WP_Error True if the request has access to create items, WP_Error object otherwise.
+ 	 */
+ 	public function create_item_permissions_check( $request ) {
++		if ( ! empty( $request['id'] ) ) {
++			return new WP_Error( 'rest_post_exists', __( 'Cannot create existing post.' ), array( 'status' => 400 ) );
++		}
+ 
+ 		$post_type = get_post_type_object( $this->post_type );
+ 
+@@ -591,8 +622,11 @@ public function create_item( $request ) {
+ 	 * @return true|WP_Error True if the request has access to update the item, WP_Error object otherwise.
+ 	 */
+ 	public function update_item_permissions_check( $request ) {
++		$post = $this->get_post( $request['id'] );
++		if ( is_wp_error( $post ) ) {
++			return $post;
++		}
+ 
+-		$post = get_post( $request['id'] );
+ 		$post_type = get_post_type_object( $this->post_type );
+ 
+ 		if ( $post && ! $this->check_update_permission( $post ) ) {
+@@ -624,11 +658,9 @@ public function update_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function update_item( $request ) {
+-		$id   = (int) $request['id'];
+-		$post = get_post( $id );
+-
+-		if ( empty( $id ) || empty( $post->ID ) || $this->post_type !== $post->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
++		$valid_check = $this->get_post( $request['id'] );
++		if ( is_wp_error( $valid_check ) ) {
++			return $valid_check;
+ 		}
+ 
+ 		$post = $this->prepare_item_for_database( $request );
+@@ -714,8 +746,10 @@ public function update_item( $request ) {
+ 	 * @return true|WP_Error True if the request has access to delete the item, WP_Error object otherwise.
+ 	 */
+ 	public function delete_item_permissions_check( $request ) {
+-
+-		$post = get_post( $request['id'] );
++		$post = $this->get_post( $request['id'] );
++		if ( is_wp_error( $post ) ) {
++			return $post;
++		}
+ 
+ 		if ( $post && ! $this->check_delete_permission( $post ) ) {
+ 			return new WP_Error( 'rest_cannot_delete', __( 'Sorry, you are not allowed to delete this post.' ), array( 'status' => rest_authorization_required_code() ) );
+@@ -734,15 +768,14 @@ public function delete_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function delete_item( $request ) {
+-		$id    = (int) $request['id'];
+-		$force = (bool) $request['force'];
+-
+-		$post = get_post( $id );
+-
+-		if ( empty( $id ) || empty( $post->ID ) || $this->post_type !== $post->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid post ID.' ), array( 'status' => 404 ) );
++		$post = $this->get_post( $request['id'] );
++		if ( is_wp_error( $post ) ) {
++			return $post;
+ 		}
+ 
++		$id    = $post->ID;
++		$force = (bool) $request['force'];
++
+ 		$supports_trash = ( EMPTY_TRASH_DAYS > 0 );
+ 
+ 		if ( 'attachment' === $post->post_type ) {
+@@ -901,7 +934,12 @@ protected function prepare_item_for_database( $request ) {
+ 
+ 		// Post ID.
+ 		if ( isset( $request['id'] ) ) {
+-			$prepared_post->ID = absint( $request['id'] );
++			$existing_post = $this->get_post( $request['id'] );
++			if ( is_wp_error( $existing_post ) ) {
++				return $existing_post;
++			}
++
++			$prepared_post->ID = $existing_post->ID;
+ 		}
+ 
+ 		$schema = $this->get_item_schema();
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php
+index 39ef8fe8185e..c38bd45928e6 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-revisions-controller.php
+@@ -71,6 +71,12 @@ public function __construct( $parent_post_type ) {
+ 	public function register_routes() {
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->parent_base . '/(?P<parent>[\d]+)/' . $this->rest_base, array(
++			'args' => array(
++				'parent' => array(
++					'description' => __( 'The ID for the parent of the object.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_items' ),
+@@ -81,6 +87,16 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->parent_base . '/(?P<parent>[\d]+)/' . $this->rest_base . '/(?P<id>[\d]+)', array(
++			'args' => array(
++				'parent' => array(
++					'description' => __( 'The ID for the parent of the object.' ),
++					'type'        => 'integer',
++				),
++				'id' => array(
++					'description' => __( 'Unique identifier for the object.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_item' ),
+@@ -106,6 +122,28 @@ public function register_routes() {
+ 
+ 	}
+ 
++	/**
++	 * Get the parent post, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_Post|WP_Error Post object if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_parent( $parent ) {
++		$error = new WP_Error( 'rest_post_invalid_parent', __( 'Invalid post parent ID.' ), array( 'status' => 404 ) );
++		if ( (int) $parent <= 0 ) {
++			return $error;
++		}
++
++		$parent = get_post( (int) $parent );
++		if ( empty( $parent ) || empty( $parent->ID ) || $this->parent_post_type !== $parent->post_type ) {
++			return $error;
++		}
++
++		return $parent;
++	}
++
+ 	/**
+ 	 * Checks if a given request has access to get revisions.
+ 	 *
+@@ -116,11 +154,11 @@ public function register_routes() {
+ 	 * @return true|WP_Error True if the request has read access, WP_Error object otherwise.
+ 	 */
+ 	public function get_items_permissions_check( $request ) {
+-
+-		$parent = get_post( $request['parent'] );
+-		if ( ! $parent ) {
+-			return true;
++		$parent = $this->get_parent( $request['parent'] );
++		if ( is_wp_error( $parent ) ) {
++			return $parent;
+ 		}
++
+ 		$parent_post_type_obj = get_post_type_object( $parent->post_type );
+ 		if ( ! current_user_can( $parent_post_type_obj->cap->edit_post, $parent->ID ) ) {
+ 			return new WP_Error( 'rest_cannot_read', __( 'Sorry, you are not allowed to view revisions of this post.' ), array( 'status' => rest_authorization_required_code() ) );
+@@ -129,6 +167,28 @@ public function get_items_permissions_check( $request ) {
+ 		return true;
+ 	}
+ 
++	/**
++	 * Get the revision, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_Post|WP_Error Revision post object if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_revision( $id ) {
++		$error = new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision ID.' ), array( 'status' => 404 ) );
++		if ( (int) $id <= 0 ) {
++			return $error;
++		}
++
++		$revision = get_post( (int) $id );
++		if ( empty( $revision ) || empty( $revision->ID ) || 'revision' !== $revision->post_type ) {
++			return $error;
++		}
++
++		return $revision;
++	}
++
+ 	/**
+ 	 * Gets a collection of revisions.
+ 	 *
+@@ -139,9 +199,9 @@ public function get_items_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function get_items( $request ) {
+-		$parent = get_post( $request['parent'] );
+-		if ( ! $request['parent'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_parent', __( 'Invalid post parent ID.' ), array( 'status' => 404 ) );
++		$parent = $this->get_parent( $request['parent'] );
++		if ( is_wp_error( $parent ) ) {
++			return $parent;
+ 		}
+ 
+ 		$revisions = wp_get_post_revisions( $request['parent'] );
+@@ -177,14 +237,14 @@ public function get_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function get_item( $request ) {
+-		$parent = get_post( $request['parent'] );
+-		if ( ! $request['parent'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_parent', __( 'Invalid post parent ID.' ), array( 'status' => 404 ) );
++		$parent = $this->get_parent( $request['parent'] );
++		if ( is_wp_error( $parent ) ) {
++			return $parent;
+ 		}
+ 
+-		$revision = get_post( $request['id'] );
+-		if ( ! $revision || 'revision' !== $revision->post_type ) {
+-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision ID.' ), array( 'status' => 404 ) );
++		$revision = $this->get_revision( $request['id'] );
++		if ( is_wp_error( $revision ) ) {
++			return $revision;
+ 		}
+ 
+ 		$response = $this->prepare_item_for_response( $revision, $request );
+@@ -201,18 +261,23 @@ public function get_item( $request ) {
+ 	 * @return bool|WP_Error True if the request has access to delete the item, WP_Error object otherwise.
+ 	 */
+ 	public function delete_item_permissions_check( $request ) {
++		$parent = $this->get_parent( $request['parent'] );
++		if ( is_wp_error( $parent ) ) {
++			return $parent;
++		}
++
++		$revision = $this->get_revision( $request['id'] );
++		if ( is_wp_error( $revision ) ) {
++			return $revision;
++		}
+ 
+ 		$response = $this->get_items_permissions_check( $request );
+ 		if ( ! $response || is_wp_error( $response ) ) {
+ 			return $response;
+ 		}
+ 
+-		$post = get_post( $request['id'] );
+-		if ( ! $post ) {
+-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision ID.' ), array( 'status' => 404 ) );
+-		}
+ 		$post_type = get_post_type_object( 'revision' );
+-		return current_user_can( $post_type->cap->delete_post, $post->ID );
++		return current_user_can( $post_type->cap->delete_post, $revision->ID );
+ 	}
+ 
+ 	/**
+@@ -225,6 +290,11 @@ public function delete_item_permissions_check( $request ) {
+ 	 * @return true|WP_Error True on success, or WP_Error object on failure.
+ 	 */
+ 	public function delete_item( $request ) {
++		$revision = $this->get_revision( $request['id'] );
++		if ( is_wp_error( $revision ) ) {
++			return $revision;
++		}
++
+ 		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
+ 
+ 		// We don't support trashing for revisions.
+@@ -232,7 +302,6 @@ public function delete_item( $request ) {
+ 			return new WP_Error( 'rest_trash_not_supported', __( 'Revisions do not support trashing. Set force=true to delete.' ), array( 'status' => 501 ) );
+ 		}
+ 
+-		$revision = get_post( $request['id'] );
+ 		$previous = $this->prepare_item_for_response( $revision, $request );
+ 
+ 		$result = wp_delete_post( $request['id'], true );
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-taxonomies-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-taxonomies-controller.php
+index 0fe91ee43223..b46562c9c493 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-taxonomies-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-taxonomies-controller.php
+@@ -48,6 +48,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<taxonomy>[\w-]+)', array(
++			'args' => array(
++				'taxonomy' => array(
++					'description'  => __( 'An alphanumeric identifier for the taxonomy.' ),
++					'type'         => 'string',
++				),
++			),
+ 			array(
+ 				'methods'         => WP_REST_Server::READABLE,
+ 				'callback'        => array( $this, 'get_item' ),
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-terms-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-terms-controller.php
+index 16882522c588..9d33eaa47599 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-terms-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-terms-controller.php
+@@ -96,6 +96,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<id>[\d]+)', array(
++			'args' => array(
++				'id' => array(
++					'description' => __( 'Unique identifier for the term.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_item' ),
+@@ -108,7 +114,7 @@ public function register_routes() {
+ 				'methods'             => WP_REST_Server::EDITABLE,
+ 				'callback'            => array( $this, 'update_item' ),
+ 				'permission_callback' => array( $this, 'update_item_permissions_check' ),
+-				'args'                 => $this->get_endpoint_args_for_item_schema( WP_REST_Server::EDITABLE ),
++				'args'                => $this->get_endpoint_args_for_item_schema( WP_REST_Server::EDITABLE ),
+ 			),
+ 			array(
+ 				'methods'             => WP_REST_Server::DELETABLE,
+@@ -287,6 +293,33 @@ public function get_items( $request ) {
+ 		return $response;
+ 	}
+ 
++	/**
++	 * Get the term, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_Term|WP_Error Term object if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_term( $id ) {
++		$error = new WP_Error( 'rest_term_invalid', __( 'Term does not exist.' ), array( 'status' => 404 ) );
++
++		if ( ! $this->check_is_taxonomy_allowed( $this->taxonomy ) ) {
++			return $error;
++		}
++
++		if ( (int) $id <= 0 ) {
++			return $error;
++		}
++
++		$term = get_term( (int) $id, $this->taxonomy );
++		if ( empty( $term ) || $term->taxonomy !== $this->taxonomy ) {
++			return $error;
++		}
++
++		return $term;
++	}
++
+ 	/**
+ 	 * Checks if a request has access to read or edit the specified term.
+ 	 *
+@@ -297,11 +330,12 @@ public function get_items( $request ) {
+ 	 * @return bool|WP_Error True if the request has read access for the item, otherwise false or WP_Error object.
+ 	 */
+ 	public function get_item_permissions_check( $request ) {
+-		$tax_obj = get_taxonomy( $this->taxonomy );
+-		if ( ! $tax_obj || ! $this->check_is_taxonomy_allowed( $this->taxonomy ) ) {
+-			return false;
++		$term = $this->get_term( $request['id'] );
++		if ( is_wp_error( $term ) ) {
++			return $term;
+ 		}
+-		if ( 'edit' === $request['context'] && ! current_user_can( 'edit_term', (int) $request['id'] ) ) {
++
++		if ( 'edit' === $request['context'] && ! current_user_can( 'edit_term', $term->term_id ) ) {
+ 			return new WP_Error( 'rest_forbidden_context', __( 'Sorry, you are not allowed to edit this term.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 		return true;
+@@ -317,13 +351,7 @@ public function get_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function get_item( $request ) {
+-
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
+-
+-		if ( ! $term || $term->taxonomy !== $this->taxonomy ) {
+-			return new WP_Error( 'rest_term_invalid', __( 'Term does not exist.' ), array( 'status' => 404 ) );
+-		}
+-
++		$term = $this->get_term( $request['id'] );
+ 		if ( is_wp_error( $term ) ) {
+ 			return $term;
+ 		}
+@@ -445,15 +473,9 @@ public function create_item( $request ) {
+ 	 * @return bool|WP_Error True if the request has access to update the item, false or WP_Error object otherwise.
+ 	 */
+ 	public function update_item_permissions_check( $request ) {
+-
+-		if ( ! $this->check_is_taxonomy_allowed( $this->taxonomy ) ) {
+-			return false;
+-		}
+-
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
+-
+-		if ( ! $term ) {
+-			return new WP_Error( 'rest_term_invalid', __( 'Term does not exist.' ), array( 'status' => 404 ) );
++		$term = $this->get_term( $request['id'] );
++		if ( is_wp_error( $term ) ) {
++			return $term;
+ 		}
+ 
+ 		if ( ! current_user_can( 'edit_term', $term->term_id ) ) {
+@@ -473,6 +495,11 @@ public function update_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function update_item( $request ) {
++		$term = $this->get_term( $request['id'] );
++		if ( is_wp_error( $term ) ) {
++			return $term;
++		}
++
+ 		if ( isset( $request['parent'] ) ) {
+ 			if ( ! is_taxonomy_hierarchical( $this->taxonomy ) ) {
+ 				return new WP_Error( 'rest_taxonomy_not_hierarchical', __( 'Can not set parent term, taxonomy is not hierarchical.' ), array( 'status' => 400 ) );
+@@ -487,8 +514,6 @@ public function update_item( $request ) {
+ 
+ 		$prepared_term = $this->prepare_item_for_database( $request );
+ 
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
+-
+ 		// Only update the term if we haz something to update.
+ 		if ( ! empty( $prepared_term ) ) {
+ 			$update = wp_update_term( $term->term_id, $term->taxonomy, wp_slash( (array) $prepared_term ) );
+@@ -498,14 +523,14 @@ public function update_item( $request ) {
+ 			}
+ 		}
+ 
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
++		$term = get_term( $term->term_id, $this->taxonomy );
+ 
+ 		/** This action is documented in wp-includes/rest-api/endpoints/class-wp-rest-terms-controller.php */
+ 		do_action( "rest_insert_{$this->taxonomy}", $term, $request, false );
+ 
+ 		$schema = $this->get_item_schema();
+ 		if ( ! empty( $schema['properties']['meta'] ) && isset( $request['meta'] ) ) {
+-			$meta_update = $this->meta->update_value( $request['meta'], (int) $request['id'] );
++			$meta_update = $this->meta->update_value( $request['meta'], $term->term_id );
+ 
+ 			if ( is_wp_error( $meta_update ) ) {
+ 				return $meta_update;
+@@ -535,14 +560,9 @@ public function update_item( $request ) {
+ 	 * @return bool|WP_Error True if the request has access to delete the item, otherwise false or WP_Error object.
+ 	 */
+ 	public function delete_item_permissions_check( $request ) {
+-		if ( ! $this->check_is_taxonomy_allowed( $this->taxonomy ) ) {
+-			return false;
+-		}
+-
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
+-
+-		if ( ! $term ) {
+-			return new WP_Error( 'rest_term_invalid', __( 'Term does not exist.' ), array( 'status' => 404 ) );
++		$term = $this->get_term( $request['id'] );
++		if ( is_wp_error( $term ) ) {
++			return $term;
+ 		}
+ 
+ 		if ( ! current_user_can( 'delete_term', $term->term_id ) ) {
+@@ -562,6 +582,10 @@ public function delete_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function delete_item( $request ) {
++		$term = $this->get_term( $request['id'] );
++		if ( is_wp_error( $term ) ) {
++			return $term;
++		}
+ 
+ 		$force = isset( $request['force'] ) ? (bool) $request['force'] : false;
+ 
+@@ -570,8 +594,6 @@ public function delete_item( $request ) {
+ 			return new WP_Error( 'rest_trash_not_supported', __( 'Terms do not support trashing. Set force=true to delete.' ), array( 'status' => 501 ) );
+ 		}
+ 
+-		$term = get_term( (int) $request['id'], $this->taxonomy );
+-
+ 		$request->set_param( 'context', 'view' );
+ 
+ 		$previous = $this->prepare_item_for_response( $term, $request );
+diff --git a/wp-includes/rest-api/endpoints/class-wp-rest-users-controller.php b/wp-includes/rest-api/endpoints/class-wp-rest-users-controller.php
+index 4f6c378a1173..802eb649c30a 100644
+--- a/wp-includes/rest-api/endpoints/class-wp-rest-users-controller.php
++++ b/wp-includes/rest-api/endpoints/class-wp-rest-users-controller.php
+@@ -65,6 +65,12 @@ public function register_routes() {
+ 		) );
+ 
+ 		register_rest_route( $this->namespace, '/' . $this->rest_base . '/(?P<id>[\d]+)', array(
++			'args' => array(
++				'id' => array(
++					'description' => __( 'Unique identifier for the user.' ),
++					'type'        => 'integer',
++				),
++			),
+ 			array(
+ 				'methods'             => WP_REST_Server::READABLE,
+ 				'callback'            => array( $this, 'get_item' ),
+@@ -326,6 +332,28 @@ public function get_items( $request ) {
+ 		return $response;
+ 	}
+ 
++	/**
++	 * Get the user, if the ID is valid.
++	 *
++	 * @since 4.7.2
++	 *
++	 * @param int $id Supplied ID.
++	 * @return WP_User|WP_Error True if ID is valid, WP_Error otherwise.
++	 */
++	protected function get_user( $id ) {
++		$error = new WP_Error( 'rest_user_invalid_id', __( 'Invalid user ID.' ), array( 'status' => 404 ) );
++		if ( (int) $id <= 0 ) {
++			return $error;
++		}
++
++		$user = get_userdata( (int) $id );
++		if ( empty( $user ) || ! $user->exists() ) {
++			return $error;
++		}
++
++		return $user;
++	}
++
+ 	/**
+ 	 * Checks if a given request has access to read a user.
+ 	 *
+@@ -336,22 +364,20 @@ public function get_items( $request ) {
+ 	 * @return true|WP_Error True if the request has read access for the item, otherwise WP_Error object.
+ 	 */
+ 	public function get_item_permissions_check( $request ) {
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
++		}
+ 
+-		$id = (int) $request['id'];
+-		$user = get_userdata( $id );
+ 		$types = get_post_types( array( 'show_in_rest' => true ), 'names' );
+ 
+-		if ( empty( $id ) || empty( $user->ID ) ) {
+-			return new WP_Error( 'rest_user_invalid_id', __( 'Invalid user ID.' ), array( 'status' => 404 ) );
+-		}
+-
+-		if ( get_current_user_id() === $id ) {
++		if ( get_current_user_id() === $user->ID ) {
+ 			return true;
+ 		}
+ 
+ 		if ( 'edit' === $request['context'] && ! current_user_can( 'list_users' ) ) {
+ 			return new WP_Error( 'rest_user_cannot_view', __( 'Sorry, you are not allowed to list users.' ), array( 'status' => rest_authorization_required_code() ) );
+-		} elseif ( ! count_user_posts( $id, $types ) && ! current_user_can( 'edit_user', $id ) && ! current_user_can( 'list_users' ) ) {
++		} elseif ( ! count_user_posts( $user->ID, $types ) && ! current_user_can( 'edit_user', $user->ID ) && ! current_user_can( 'list_users' ) ) {
+ 			return new WP_Error( 'rest_user_cannot_view', __( 'Sorry, you are not allowed to list users.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -368,11 +394,9 @@ public function get_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function get_item( $request ) {
+-		$id   = (int) $request['id'];
+-		$user = get_userdata( $id );
+-
+-		if ( empty( $id ) || empty( $user->ID ) ) {
+-			return new WP_Error( 'rest_user_invalid_id', __( 'Invalid user ID.' ), array( 'status' => 404 ) );
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
+ 		}
+ 
+ 		$user = $this->prepare_item_for_response( $user, $request );
+@@ -542,10 +566,12 @@ public function create_item( $request ) {
+ 	 * @return true|WP_Error True if the request has access to update the item, WP_Error object otherwise.
+ 	 */
+ 	public function update_item_permissions_check( $request ) {
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
++		}
+ 
+-		$id = (int) $request['id'];
+-
+-		if ( ! current_user_can( 'edit_user', $id ) ) {
++		if ( ! current_user_can( 'edit_user', $user->ID ) ) {
+ 			return new WP_Error( 'rest_cannot_edit', __( 'Sorry, you are not allowed to edit this user.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -566,8 +592,12 @@ public function update_item_permissions_check( $request ) {
+ 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
+ 	 */
+ 	public function update_item( $request ) {
+-		$id   = (int) $request['id'];
+-		$user = get_userdata( $id );
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
++		}
++
++		$id = $user->ID;
+ 
+ 		if ( ! $user ) {
+ 			return new WP_Error( 'rest_user_invalid_id', __( 'Invalid user ID.' ), array( 'status' => 404 ) );
+@@ -682,10 +712,12 @@ function update_current_item( $request ) {
+ 	 * @return true|WP_Error True if the request has access to delete the item, WP_Error object otherwise.
+ 	 */
+ 	public function delete_item_permissions_check( $request ) {
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
++		}
+ 
+-		$id = (int) $request['id'];
+-
+-		if ( ! current_user_can( 'delete_user', $id ) ) {
++		if ( ! current_user_can( 'delete_user', $user->ID ) ) {
+ 			return new WP_Error( 'rest_user_cannot_delete', __( 'Sorry, you are not allowed to delete this user.' ), array( 'status' => rest_authorization_required_code() ) );
+ 		}
+ 
+@@ -706,8 +738,12 @@ public function delete_item( $request ) {
+ 		if ( is_multisite() ) {
+ 			return new WP_Error( 'rest_cannot_delete', __( 'The user cannot be deleted.' ), array( 'status' => 501 ) );
+ 		}
++		$user = $this->get_user( $request['id'] );
++		if ( is_wp_error( $user ) ) {
++			return $user;
++		}
+ 
+-		$id       = (int) $request['id'];
++		$id       = $user->ID;
+ 		$reassign = false === $request['reassign'] ? null : absint( $request['reassign'] );
+ 		$force    = isset( $request['force'] ) ? (bool) $request['force'] : false;
+ 
+@@ -716,12 +752,6 @@ public function delete_item( $request ) {
+ 			return new WP_Error( 'rest_trash_not_supported', __( 'Users do not support trashing. Set force=true to delete.' ), array( 'status' => 501 ) );
+ 		}
+ 
+-		$user = get_userdata( $id );
+-
+-		if ( ! $user ) {
+-			return new WP_Error( 'rest_user_invalid_id', __( 'Invalid user ID.' ), array( 'status' => 404 ) );
+-		}
+-
+ 		if ( ! empty( $reassign ) ) {
+ 			if ( $reassign === $id || ! get_userdata( $reassign ) ) {
+ 				return new WP_Error( 'rest_user_invalid_reassign', __( 'Invalid user ID for reassignment.' ), array( 'status' => 400 ) );
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index fc69fd2007b5..c26e7a0fee7f 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.8-alpha-39952';
++$wp_version = '4.8-alpha-39954';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

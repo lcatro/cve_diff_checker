@@ -1,0 +1,25 @@
+From 31bd5026304677faa8a0b77602c6154171b9aec1 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 4 May 2021 17:42:54 -0700
+Subject: [PATCH] Prevent check fail in FFT
+
+PiperOrigin-RevId: 372031044
+Change-Id: I50994e3e8a5d1342d01bde80256f6bf2730ca299
+---
+ tensorflow/core/kernels/fft_ops.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/fft_ops.cc b/tensorflow/core/kernels/fft_ops.cc
+index 29ca0d2f546a0..fc29f49d223be 100644
+--- a/tensorflow/core/kernels/fft_ops.cc
++++ b/tensorflow/core/kernels/fft_ops.cc
+@@ -222,6 +222,9 @@ class FFTCPU : public FFTBase {
+       input_slice_sizes[i] = fft_shape[i - 1];
+       temp_shape.AddDim(fft_shape[i - 1]);
+     }
++    OP_REQUIRES(ctx, temp_shape.num_elements() > 0,
++                errors::InvalidArgument("Obtained a FFT shape of 0 elements: ",
++                                        temp_shape.DebugString()));
+ 
+     auto output = out->flat_inner_dims<ComplexT, FFTRank + 1>();
+     const Eigen::DSizes<Eigen::DenseIndex, FFTRank + 1> zero_start_indices;

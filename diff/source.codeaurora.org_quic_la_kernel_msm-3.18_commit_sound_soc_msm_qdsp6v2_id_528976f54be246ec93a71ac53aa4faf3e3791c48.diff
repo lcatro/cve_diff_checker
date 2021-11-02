@@ -1,0 +1,45 @@
+From 0a9fb0f516ac59067af8e4c3c9c1fff5eac5ba55 Mon Sep 17 00:00:00 2001
+From: Ben Romberger <bromberg@codeaurora.org>
+Date: Thu, 14 Jul 2016 18:36:56 -0700
+Subject: ASoC: msm: qdsp6v2: Add size check in audio cal ioctl
+
+For the audio get calibration ioctl compare the allocated
+buffer size to the size of the header and cal type header
+to ensure the buffer is big enough.
+
+Change-Id: I851b4454e8420706ad3263d67e892720d46e5718
+Signed-off-by: Ben Romberger <bromberg@codeaurora.org>
+---
+ sound/soc/msm/qdsp6v2/audio_calibration.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+(limited to 'sound/soc/msm/qdsp6v2')
+
+diff --git a/sound/soc/msm/qdsp6v2/audio_calibration.c b/sound/soc/msm/qdsp6v2/audio_calibration.c
+index c4ea4ed..60d09df 100644
+--- a/sound/soc/msm/qdsp6v2/audio_calibration.c
++++ b/sound/soc/msm/qdsp6v2/audio_calibration.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2014, 2016 The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -490,7 +490,13 @@ static long audio_cal_shared_ioctl(struct file *file, unsigned int cmd,
+ 			goto unlock;
+ 		if (data == NULL)
+ 			goto unlock;
+-		if (copy_to_user((void *)arg, data,
++		if ((sizeof(data->hdr) + data->hdr.cal_type_size) > size) {
++			pr_err("%s: header size %zd plus cal type size %d are greater than data buffer size %d\n",
++				__func__, sizeof(data->hdr),
++				data->hdr.cal_type_size, size);
++			ret = -EFAULT;
++			goto unlock;
++		} else if (copy_to_user((void *)arg, data,
+ 			sizeof(data->hdr) + data->hdr.cal_type_size)) {
+ 			pr_err("%s: Could not copy cal type to user\n",
+ 				__func__);
+-- 
+cgit v1.1
+

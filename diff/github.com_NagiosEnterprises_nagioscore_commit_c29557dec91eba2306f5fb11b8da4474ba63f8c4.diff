@@ -1,0 +1,148 @@
+From ff22fd0de4938781edcbd48512d2494ca3c9c41a Mon Sep 17 00:00:00 2001
+From: "John C. Frickson" <jfrickson@nagios.com>
+Date: Wed, 23 Nov 2016 09:22:55 -0600
+Subject: [PATCH 1/2] Fixed another root privilege escalation (CVE-2016-9566)
+
+---
+ Changelog      |  6 ++++++
+ THANKS         |  1 +
+ base/logging.c | 50 ++++++++++++++++++++++++++++++++++++++++++++------
+ 3 files changed, 51 insertions(+), 6 deletions(-)
+
+diff --git a/Changelog b/Changelog
+index 44b8ac7b0..000df72c8 100644
+--- a/Changelog
++++ b/Changelog
+@@ -2,6 +2,12 @@
+ Nagios Core 4 Change Log
+ ########################
+ 
++4.2.x - xxxx-xx-xx
++------------------
++SECURITY FIXES
++* Fixed another root privilege escalation (CVE-2016-9566) Thanks for bringing this
++  to our attention go to Dawid Golunski (http://legalhackers.com).
++
+ 
+ 4.2.3 - 2016-11-21
+ -------------------
+diff --git a/THANKS b/THANKS
+index 28c0c7614..e4f112cec 100644
+--- a/THANKS
++++ b/THANKS
+@@ -70,6 +70,7 @@ wrong, please let me know.
+ * David Kmoch
+ * David Schlecht
+ * David Tilloy
++* Dawid Golunski
+ * Dean Lane
+ * Denis Seleznyov
+ * Dennis Biringer
+diff --git a/base/logging.c b/base/logging.c
+index fe29bc0ec..bca1c6f30 100644
+--- a/base/logging.c
++++ b/base/logging.c
+@@ -112,17 +112,39 @@ static void write_to_all_logs_with_timestamp(char *buffer, unsigned long data_ty
+ 
+ static FILE *open_log_file(void)
+ {
++	int fh;
++	struct stat st;
++
+ 	if(log_fp) /* keep it open unless we rotate */
+ 		return log_fp;
+ 
+-	log_fp = fopen(log_file, "a+");
++	if ((fh = open(log_file, O_RDWR|O_APPEND|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR)) == -1) {
++		if (daemon_mode == FALSE)
++			printf("Warning: Cannot open log file '%s' for writing\n", log_file);
++		return NULL;
++	}
++	log_fp = fdopen(fh, "a+");
+ 	if(log_fp == NULL) {
+-		if (daemon_mode == FALSE) {
++		if (daemon_mode == FALSE)
+ 			printf("Warning: Cannot open log file '%s' for writing\n", log_file);
+-			}
+ 		return NULL;
+ 		}
+ 
++	if ((fstat(fh, &st)) == -1) {
++		log_fp = NULL;
++		close(fh);
++		if (daemon_mode == FALSE)
++			printf("Warning: Cannot fstat log file '%s'\n", log_file);
++		return NULL;
++	}
++	if (st.st_nlink != 1 || (st.st_mode & S_IFMT) != S_IFREG) {
++		log_fp = NULL;
++		close(fh);
++		if (daemon_mode == FALSE)
++			printf("Warning: log file '%s' has an invalid mode\n", log_file);
++		return NULL;
++	}
++
+ 	(void)fcntl(fileno(log_fp), F_SETFD, FD_CLOEXEC);
+ 	return log_fp;
+ }
+@@ -447,7 +469,10 @@ int write_log_file_info(time_t *timestamp) {
+ 
+ 
+ /* opens the debug log for writing */
+-int open_debug_log(void) {
++int open_debug_log(void)
++{
++	int fh;
++	struct stat st;
+ 
+ 	/* don't do anything if we're not actually running... */
+ 	if(verify_config || test_scheduling == TRUE)
+@@ -457,10 +482,23 @@ int open_debug_log(void) {
+ 	if(debug_level == DEBUGL_NONE)
+ 		return OK;
+ 
+-	if((debug_file_fp = fopen(debug_file, "a+")) == NULL)
++	if ((fh = open(log_file, O_RDWR|O_APPEND|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR)) == -1)
++		return ERROR;
++	if((debug_file_fp = fdopen(fh, "a+")) == NULL)
++		return ERROR;
++
++	if ((fstat(fh, &st)) == -1) {
++		debug_file_fp = NULL;
++		close(fh);
++		return ERROR;
++	}
++	if (st.st_nlink != 1 || (st.st_mode & S_IFMT) != S_IFREG) {
++		debug_file_fp = NULL;
++		close(fh);
+ 		return ERROR;
++	}
+ 
+-	(void)fcntl(fileno(debug_file_fp), F_SETFD, FD_CLOEXEC);
++	(void)fcntl(fh, F_SETFD, FD_CLOEXEC);
+ 
+ 	return OK;
+ 	}
+
+From 8e6e1cb29f3c1b933b0e13fb937ad5ca8b448ccc Mon Sep 17 00:00:00 2001
+From: "John C. Frickson" <jfrickson@nagios.com>
+Date: Tue, 29 Nov 2016 09:37:53 -0600
+Subject: [PATCH 2/2] Wrong filename variable used
+
+---
+ base/logging.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/base/logging.c b/base/logging.c
+index bca1c6f30..96c3d97fc 100644
+--- a/base/logging.c
++++ b/base/logging.c
+@@ -482,7 +482,7 @@ int open_debug_log(void)
+ 	if(debug_level == DEBUGL_NONE)
+ 		return OK;
+ 
+-	if ((fh = open(log_file, O_RDWR|O_APPEND|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR)) == -1)
++	if ((fh = open(debug_file, O_RDWR|O_APPEND|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR)) == -1)
+ 		return ERROR;
+ 	if((debug_file_fp = fdopen(fh, "a+")) == NULL)
+ 		return ERROR;

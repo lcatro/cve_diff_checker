@@ -1,0 +1,28 @@
+From 75293ed4e5f31f04e54689bfe2c647e3e3f5e1a9 Mon Sep 17 00:00:00 2001
+From: Boone B Gorges <boonebgorges@gmail.com>
+Date: Mon, 13 Mar 2017 14:23:59 -0500
+Subject: [PATCH] Improved permission check when processing a Doc save request.
+
+---
+ includes/component.php | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/includes/component.php b/includes/component.php
+index f52f0812..ec05a320 100644
+--- a/includes/component.php
++++ b/includes/component.php
+@@ -381,6 +381,14 @@ function catch_page_load() {
+ 
+ 		if ( !empty( $_POST['doc-edit-submit'] ) ) {
+ 
++			// Existing Docs have a more specific permission check.
++			$doc = bp_docs_get_current_doc();
++			if ( $doc && ! current_user_can( 'bp_docs_edit', $doc->ID ) ) {
++				return;
++			} elseif ( ! $doc && ! current_user_can( 'bp_docs_create' ) ) {
++				return;
++			}
++
+ 			check_admin_referer( 'bp_docs_save' );
+ 
+ 			$this_doc = new BP_Docs_Query;

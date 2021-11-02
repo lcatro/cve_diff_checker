@@ -1,0 +1,110 @@
+From 43f5a2739dbf8f5c4c16a79f98e2630888f6b5d1 Mon Sep 17 00:00:00 2001
+From: DJ Mountney <dj@gitlab.com>
+Date: Sat, 18 Mar 2017 04:23:15 +0000
+Subject: [PATCH] Merge branch 'render-json-leak' into 'security'
+
+fix for render json include leaks
+
+See merge request !2074
+Conflicts:
+	app/controllers/projects/merge_requests_controller.rb
+	spec/controllers/projects/issues_controller_spec.rb
+---
+ app/controllers/projects/issues_controller.rb |  2 +-
+ .../projects/merge_requests_controller.rb     |  2 +-
+ .../projects/issues_controller_spec.rb        | 23 +++++++++++++++++++
+ .../merge_requests_controller_spec.rb         | 18 +++++++++++++++
+ 4 files changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/app/controllers/projects/issues_controller.rb b/app/controllers/projects/issues_controller.rb
+index 4f66e01e0f7..dee6eef0967 100644
+--- a/app/controllers/projects/issues_controller.rb
++++ b/app/controllers/projects/issues_controller.rb
+@@ -115,7 +115,7 @@ def update
+       end
+ 
+       format.json do
+-        render json: @issue.to_json(include: { milestone: {}, assignee: { methods: :avatar_url }, labels: { methods: :text_color } }, methods: [:task_status, :task_status_short])
++        render json: @issue.to_json(include: { milestone: {}, assignee: { only: [:name, :username], methods: [:avatar_url] }, labels: { methods: :text_color } }, methods: [:task_status, :task_status_short])
+       end
+     end
+ 
+diff --git a/app/controllers/projects/merge_requests_controller.rb b/app/controllers/projects/merge_requests_controller.rb
+index f0cb5a9d4b4..7e634fa9364 100644
+--- a/app/controllers/projects/merge_requests_controller.rb
++++ b/app/controllers/projects/merge_requests_controller.rb
+@@ -277,7 +277,7 @@ def update
+                        @merge_request.target_project, @merge_request])
+         end
+         format.json do
+-          render json: @merge_request.to_json(include: { milestone: {}, assignee: { methods: :avatar_url }, labels: { methods: :text_color } }, methods: [:task_status, :task_status_short])
++          render json: @merge_request.to_json(include: { milestone: {}, assignee: { only: [:name, :username], methods: [:avatar_url] }, labels: { methods: :text_color } }, methods: [:task_status, :task_status_short])
+         end
+       end
+     else
+diff --git a/spec/controllers/projects/issues_controller_spec.rb b/spec/controllers/projects/issues_controller_spec.rb
+index dbe5ddccbcf..ddcf46311ac 100644
+--- a/spec/controllers/projects/issues_controller_spec.rb
++++ b/spec/controllers/projects/issues_controller_spec.rb
+@@ -93,6 +93,29 @@
+   end
+ 
+   describe 'PUT #update' do
++    before do
++      sign_in(user)
++      project.team << [user, :developer]
++    end
++
++    context 'changing the assignee' do
++      it 'limits the attributes exposed on the assignee' do
++        assignee = create(:user)
++        project.add_developer(assignee)
++
++        put :update,
++          namespace_id: project.namespace.to_param,
++          project_id: project,
++          id: issue.iid,
++          issue: { assignee_id: assignee.id },
++          format: :json
++        body = JSON.parse(response.body)
++
++        expect(body['assignee'].keys)
++          .to match_array(%w(name username avatar_url))
++      end
++    end
++
+     context 'when moving issue to another private project' do
+       let(:another_project) { create(:project, :private) }
+ 
+diff --git a/spec/controllers/projects/merge_requests_controller_spec.rb b/spec/controllers/projects/merge_requests_controller_spec.rb
+index 9e0b80205d8..59585f8a2b7 100644
+--- a/spec/controllers/projects/merge_requests_controller_spec.rb
++++ b/spec/controllers/projects/merge_requests_controller_spec.rb
+@@ -159,6 +159,24 @@ def get_merge_requests
+   end
+ 
+   describe 'PUT update' do
++    context 'changing the assignee' do
++      it 'limits the attributes exposed on the assignee' do
++        assignee = create(:user)
++        project.add_developer(assignee)
++
++        put :update,
++          namespace_id: project.namespace.to_param,
++          project_id: project,
++          id: merge_request.iid,
++          merge_request: { assignee_id: assignee.id },
++          format: :json
++        body = JSON.parse(response.body)
++
++        expect(body['assignee'].keys)
++          .to match_array(%w(name username avatar_url))
++      end
++    end
++
+     context 'there is no source project' do
+       let(:project)       { create(:project) }
+       let(:fork_project)  { create(:forked_project_with_submodules) }
+-- 
+GitLab
+

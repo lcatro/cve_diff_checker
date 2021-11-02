@@ -1,0 +1,34 @@
+From bd61c45157c53a1698ff23770160cf4783e9ea4a Mon Sep 17 00:00:00 2001
+From: Matt Broadstone <mbroadst@gmail.com>
+Date: Mon, 26 Feb 2018 15:09:27 -0500
+Subject: [PATCH] fix(decimal128): add basic guard against REDOS attacks
+
+This is a naive approach to reducing the efficacy of a REDOS attack
+against this module. A refactor of the regular expression or a
+custom parser substitute would be ideal, however this solution
+suffices as a stopgap until such work is completed.
+
+Many thanks to James Davis who graciously alterted us to the
+attack
+---
+ lib/bson/decimal128.js | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/lib/bson/decimal128.js b/lib/bson/decimal128.js
+index 6cf24331..1dc2f003 100644
+--- a/lib/bson/decimal128.js
++++ b/lib/bson/decimal128.js
+@@ -235,6 +235,13 @@ Decimal128.fromString = function(string) {
+   // Trim the string
+   string = string.trim();
+ 
++  // Naively prevent against REDOS attacks.
++  // TODO: implementing a custom parsing for this, or refactoring the regex would yield
++  //       further gains.
++  if (string.length >= 7000) {
++    throw new Error('' + string + ' not a valid Decimal128 string');
++  }
++
+   // Results
+   var stringMatch = string.match(PARSE_STRING_REGEXP);
+   var infMatch = string.match(PARSE_INF_REGEXP);

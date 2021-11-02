@@ -1,0 +1,33 @@
+From 21a6f570ba33fa9f52f1bba87f07acc4e8c178f4 Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Sat, 14 Oct 2017 18:35:39 +0200
+Subject: [PATCH] Fix #8685 - Crash in ELF version parsing
+
+---
+ libr/bin/format/elf/elf.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/libr/bin/format/elf/elf.c b/libr/bin/format/elf/elf.c
+index 0235e0c5e46..90f6acd301b 100644
+--- a/libr/bin/format/elf/elf.c
++++ b/libr/bin/format/elf/elf.c
+@@ -731,7 +731,7 @@ static Sdb *store_versioninfo_gnu_verdef(ELFOBJ *bin, Elf_(Shdr) *shdr, int sz)
+ 	sdb_num_set (sdb, "link", shdr->sh_link, 0);
+ 	sdb_set (sdb, "link_section_name", link_section_name, 0);
+ 
+-	for (cnt = 0, i = 0; cnt < shdr->sh_info && ((char *)defs + i < end); ++cnt) {
++	for (cnt = 0, i = 0; i >= 0 && cnt < shdr->sh_info && ((char *)defs + i < end); ++cnt) {
+ 		Sdb *sdb_verdef = sdb_new0 ();
+ 		char *vstart = ((char*)defs) + i;
+ 		char key[32] = {0};
+@@ -802,6 +802,10 @@ static Sdb *store_versioninfo_gnu_verdef(ELFOBJ *bin, Elf_(Shdr) *shdr, int sz)
+ 			sdb_free (sdb_verdef);
+ 			goto out_error;
+ 		}
++		if ((st32)verdef->vd_next < 1) {
++			eprintf ("Warning: Invalid vd_next in the ELF version\n");
++			break;
++		}
+ 		i += verdef->vd_next;
+ 	}
+ 	free (defs);

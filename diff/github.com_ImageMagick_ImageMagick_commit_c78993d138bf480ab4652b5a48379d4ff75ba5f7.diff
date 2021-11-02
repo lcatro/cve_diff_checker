@@ -1,0 +1,61 @@
+From c78993d138bf480ab4652b5a48379d4ff75ba5f7 Mon Sep 17 00:00:00 2001
+From: Cristy <mikayla-grace@urban-warrior.org>
+Date: Sat, 20 Apr 2019 09:40:12 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/1553
+
+---
+ coders/xwd.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/coders/xwd.c b/coders/xwd.c
+index 236fbdb5ab..0074811a06 100644
+--- a/coders/xwd.c
++++ b/coders/xwd.c
+@@ -238,6 +238,8 @@ static Image *ReadXWDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     ThrowReaderException(CorruptImageError,"FileFormatVersionMismatch");
+   if (header.header_size < sz_XWDheader)
+     ThrowReaderException(CorruptImageError,"ImproperImageHeader");
++  if ((MagickSizeType) header.xoffset >= GetBlobSize(image))
++    ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   switch (header.visual_class)
+   {
+     case StaticGray:
+@@ -251,7 +253,7 @@ static Image *ReadXWDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     case PseudoColor:
+     {
+       if ((header.bits_per_pixel < 1) || (header.bits_per_pixel > 15) ||
+-          (header.ncolors == 0))
++          (header.colormap_entries == 0))
+         ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+       break;
+     }
+@@ -318,8 +320,6 @@ static Image *ReadXWDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     default:
+       ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   }
+-  if (header.ncolors > 65535)
+-    ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   if (((header.bitmap_pad % 8) != 0) || (header.bitmap_pad > 32))
+     ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   length=(size_t) (header.header_size-sz_XWDheader);
+@@ -387,8 +387,10 @@ static Image *ReadXWDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       XWDColor
+         color;
+ 
+-      colors=(XColor *) AcquireQuantumMemory((size_t) header.ncolors,
+-        sizeof(*colors));
++      length=(size_t) header.ncolors;
++      if (length > ((~0UL)/sizeof(*colors)))
++        ThrowReaderException(CorruptImageError,"ImproperImageHeader");
++      colors=(XColor *) AcquireQuantumMemory(length,sizeof(*colors));
+       if (colors == (XColor *) NULL)
+         {
+           ximage=(XImage *) RelinquishMagickMemory(ximage);
+@@ -689,6 +691,7 @@ ModuleExport size_t RegisterXWDImage(void)
+   entry->encoder=(EncodeImageHandler *) WriteXWDImage;
+ #endif
+   entry->magick=(IsImageFormatHandler *) IsXWD;
++  entry->flags|=CoderDecoderSeekableStreamFlag;
+   entry->flags^=CoderAdjoinFlag;
+   (void) RegisterMagickInfo(entry);
+   return(MagickImageCoderSignature);

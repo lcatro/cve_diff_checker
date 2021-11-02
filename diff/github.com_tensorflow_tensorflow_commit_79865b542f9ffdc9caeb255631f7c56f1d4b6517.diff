@@ -1,0 +1,29 @@
+From 79865b542f9ffdc9caeb255631f7c56f1d4b6517 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 4 May 2021 18:05:46 -0700
+Subject: [PATCH] Fix memory corruption issue with
+ `tf.raw_ops.DrawBoundingBoxesV2`.
+
+PiperOrigin-RevId: 372033910
+Change-Id: I8a9f4efc1c8ddaacbc26ec1fbe4bfdd6791c226d
+---
+ tensorflow/core/kernels/image/draw_bounding_box_op.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tensorflow/core/kernels/image/draw_bounding_box_op.cc b/tensorflow/core/kernels/image/draw_bounding_box_op.cc
+index 73db76333f086..926ea368a58ba 100644
+--- a/tensorflow/core/kernels/image/draw_bounding_box_op.cc
++++ b/tensorflow/core/kernels/image/draw_bounding_box_op.cc
+@@ -73,6 +73,12 @@ class DrawBoundingBoxesOp : public OpKernel {
+         errors::InvalidArgument("Channel depth should be either 1 (GRY), "
+                                 "3 (RGB), or 4 (RGBA)"));
+ 
++    OP_REQUIRES(
++        context, boxes.dim_size(2) == 4,
++        errors::InvalidArgument(
++            "The size of the third dimension of the box must be 4. Received: ",
++            boxes.dim_size(2)));
++
+     const int64 batch_size = images.dim_size(0);
+     const int64 height = images.dim_size(1);
+     const int64 width = images.dim_size(2);

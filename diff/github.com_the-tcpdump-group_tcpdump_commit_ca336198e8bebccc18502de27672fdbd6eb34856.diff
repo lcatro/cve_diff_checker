@@ -1,0 +1,86 @@
+From ca336198e8bebccc18502de27672fdbd6eb34856 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sun, 5 Mar 2017 20:21:48 -0800
+Subject: [PATCH] CVE-2017-13007/PKTAP: Pass a properly updated struct
+ pcap_pkthdr to the sub-dissector.
+
+The sub-dissector expects that the length and captured length will
+reflect the actual remaining data in the packet, not the raw amount
+including the PKTAP header; pass an updated header, just as we do for
+PPI.
+
+This fixes a buffer over-read discovered by Yannick Formaggio.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-pktap.c                  |   6 +++++-
+ tests/TESTLIST                 |   1 +
+ tests/pktap-heap-overflow.out  |   3 +++
+ tests/pktap-heap-overflow.pcap | Bin 0 -> 3216 bytes
+ 4 files changed, 9 insertions(+), 1 deletion(-)
+ create mode 100644 tests/pktap-heap-overflow.out
+ create mode 100644 tests/pktap-heap-overflow.pcap
+
+diff --git a/print-pktap.c b/print-pktap.c
+index 7144f3c6e..4a295fdf6 100644
+--- a/print-pktap.c
++++ b/print-pktap.c
+@@ -104,6 +104,7 @@ pktap_if_print(netdissect_options *ndo,
+ 	u_int length = h->len;
+ 	if_printer printer;
+ 	const pktap_header_t *hdr;
++	struct pcap_pkthdr nhdr;
+ 
+ 	if (caplen < sizeof(pktap_header_t) || length < sizeof(pktap_header_t)) {
+ 		ND_PRINT((ndo, "[|pktap]"));
+@@ -144,7 +145,10 @@ pktap_if_print(netdissect_options *ndo,
+ 
+ 	case PKT_REC_PACKET:
+ 		if ((printer = lookup_printer(dlt)) != NULL) {
+-			hdrlen += printer(ndo, h, p);
++			nhdr = *h;
++			nhdr.caplen = caplen;
++			nhdr.len = length;
++			hdrlen += printer(ndo, &nhdr, p);
+ 		} else {
+ 			if (!ndo->ndo_eflag)
+ 				pktap_header_print(ndo, (const u_char *)hdr,
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index f9ae40dda..5f18a0574 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -502,6 +502,7 @@ juniper_es		juniper_es.pcap			juniper_es.out	-vvv -e
+ 
+ # bad packets from Yannick Formaggio
+ l2tp-avp-overflow	l2tp-avp-overflow.pcap		l2tp-avp-overflow.out	-v
++pktap-heap-overflow	pktap-heap-overflow.pcap	pktap-heap-overflow.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/pktap-heap-overflow.out b/tests/pktap-heap-overflow.out
+new file mode 100644
+index 000000000..e23ed9193
+--- /dev/null
++++ b/tests/pktap-heap-overflow.out
+@@ -0,0 +1,3 @@
++[|pktap]
++[|ppp]
++EXIT CODE 00000100
+diff --git a/tests/pktap-heap-overflow.pcap b/tests/pktap-heap-overflow.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..e8b0f216f2fa6724a62aa491cebbe9ccdec56317
+GIT binary patch
+literal 3216
+zcmeHJu}T9$5S>drI1ot$A(a>uJHa6!*a&IF53tDx+<)X+?JO)T6)j}Dw6U{GZJS20
+zu?U!;*j?W4-sSc-o0v-#Fb{5aW_D)w?M`xgZ?B#E5^WGG#0-^giTFZ0xJ5)Q=ol30
+zkO7^m*(UKe@3e`$(@*l4KTeXQ1M=t_MK~$TzM3ejI!7`Ts41yMg9n>LgAf^5-@_UW
+zJU-T;IteGbhF7LY^HGQ^<N-B3Wb!>WdCTCQ6hhd%shaVYWI%8c-d`4P=1V?AZX7{W
+zm_zJMB4d<lzi|w1Ip8eXwl5bjWym8-q4#CTVL`~$v{*I<b34%#6=Ox&iK!Bit|dE>
+zz+|2JCgVO)b7GhZPFf<!>S%|OX9XdX?r6`bkf^g8P(?%?&sGw-{D96Un{e)BvBCp{
+zg_BT8&J8pqGFz1X0krS<DL3ab+-39Lk~Viuud5b({eIs)<HxaY&peB3xLz`MG~=}(
+zBf6sC4<6y=QSqF0hIImgWv{&11H*8ISaw#3%bLpi1ct*O`w$4Pc-yzET^{Kd`h%e4
+l!)WdofqAL?sjJ($$hF#Y-6%KNjpNc#f7!kNlf0r=!Wc#5`hx%f
+
+literal 0
+HcmV?d00001
+

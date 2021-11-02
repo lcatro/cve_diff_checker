@@ -1,0 +1,93 @@
+From 94e538aebbc9f9c529e8b1f2eda860cfb8c473b1 Mon Sep 17 00:00:00 2001
+From: Rostislav Pehlivanov <atomnuker@gmail.com>
+Date: Wed, 8 Nov 2017 23:50:04 +0000
+Subject: [PATCH] vc2enc_dwt: pad the temporary buffer by the slice size
+
+Since non-Haar wavelets need to look into pixels outside the frame, we
+need to pad the buffer. The old factor of two seemed to be a workaround
+that fact and only padded to the left and bottom. This correctly pads
+by the slice size and as such reduces memory usage and potential
+exploits.
+Reported by Liu Bingchang.
+
+Ideally, there should be no temporary buffer but the encoder is designed
+to deinterleave the coefficients into the classical wavelet structure
+with the lower frequency values in the top left corner.
+
+Signed-off-by: Rostislav Pehlivanov <atomnuker@gmail.com>
+(cherry picked from commit 3228ac730c11eca49d5680d5550128e397061c85)
+---
+ libavcodec/vc2enc.c     |  5 +++--
+ libavcodec/vc2enc_dwt.c | 12 +++++++++---
+ libavcodec/vc2enc_dwt.h |  4 +++-
+ 3 files changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/libavcodec/vc2enc.c b/libavcodec/vc2enc.c
+index bf3f3a980d23..eb4e1e3c7e13 100644
+--- a/libavcodec/vc2enc.c
++++ b/libavcodec/vc2enc.c
+@@ -1106,8 +1106,9 @@ static av_cold int vc2_encode_init(AVCodecContext *avctx)
+ 
+         /* DWT init */
+         if (ff_vc2enc_init_transforms(&s->transform_args[i].t,
+-                                        s->plane[0].coef_stride,
+-                                        s->plane[0].dwt_height))
++                                      s->plane[i].coef_stride,
++                                      s->plane[i].dwt_height,
++                                      s->slice_width, s->slice_height))
+             goto alloc_fail;
+     }
+ 
+diff --git a/libavcodec/vc2enc_dwt.c b/libavcodec/vc2enc_dwt.c
+index eb341684cd68..0265db8dac3b 100644
+--- a/libavcodec/vc2enc_dwt.c
++++ b/libavcodec/vc2enc_dwt.c
+@@ -211,19 +211,25 @@ static void vc2_subband_dwt_53(VC2TransformContext *t, dwtcoef *data,
+     deinterleave(data, stride, width, height, synth);
+ }
+ 
+-av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_width, int p_height)
++av_cold int ff_vc2enc_init_transforms(VC2TransformContext *s, int p_stride,
++                                      int p_height, int slice_w, int slice_h)
+ {
+     s->vc2_subband_dwt[VC2_TRANSFORM_9_7]    = vc2_subband_dwt_97;
+     s->vc2_subband_dwt[VC2_TRANSFORM_5_3]    = vc2_subband_dwt_53;
+ 
+-    s->buffer = av_malloc(2*p_width*p_height*sizeof(dwtcoef));
++    /* Pad by the slice size, only matters for non-Haar wavelets */
++    s->buffer = av_calloc((p_stride + slice_w)*(p_height + slice_h), sizeof(dwtcoef));
+     if (!s->buffer)
+         return 1;
+ 
++    s->padding = (slice_h >> 1)*p_stride + (slice_w >> 1);
++    s->buffer += s->padding;
++
+     return 0;
+ }
+ 
+ av_cold void ff_vc2enc_free_transforms(VC2TransformContext *s)
+ {
+-    av_freep(&s->buffer);
++    av_free(s->buffer - s->padding);
++    s->buffer = NULL;
+ }
+diff --git a/libavcodec/vc2enc_dwt.h b/libavcodec/vc2enc_dwt.h
+index 8e1b61498e7d..7be682bcd9d5 100644
+--- a/libavcodec/vc2enc_dwt.h
++++ b/libavcodec/vc2enc_dwt.h
+@@ -44,12 +44,14 @@ enum VC2TransformType {
+ 
+ typedef struct VC2TransformContext {
+     dwtcoef *buffer;
++    int padding;
+     void (*vc2_subband_dwt[VC2_TRANSFORMS_NB])(struct VC2TransformContext *t,
+                                                dwtcoef *data, ptrdiff_t stride,
+                                                int width, int height);
+ } VC2TransformContext;
+ 
+-int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_width, int p_height);
++int  ff_vc2enc_init_transforms(VC2TransformContext *t, int p_stride, int p_height,
++                               int slice_w, int slice_h);
+ void ff_vc2enc_free_transforms(VC2TransformContext *t);
+ 
+ #endif /* AVCODEC_VC2ENC_DWT_H */

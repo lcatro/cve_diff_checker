@@ -1,0 +1,122 @@
+From e3cacae7b1bfda0d839c280494f23284a1187adf Mon Sep 17 00:00:00 2001
+From: Ran Benita <ran234@gmail.com>
+Date: Sat, 10 Mar 2018 23:32:12 +0200
+Subject: [PATCH] xkbcomp: fix crashes in the parser when geometry tokens
+ appear
+
+In the XKB format, floats and various keywords can only be used in the
+xkb_geometry section. xkbcommon removed support xkb_geometry, but still
+parses it for backward compatibility. As part of ignoring it, the float
+AST node and various keywords were removed, and instead NULL was
+returned by their parsing actions. However, the rest of the code does
+not handle NULLs, and so when they appear crashes usually ensue.
+
+To fix this, restore the float AST node and the ignored keywords. None
+of the evaluating code expects them, so nice error are displayed.
+
+Caught with the afl fuzzer.
+
+Signed-off-by: Ran Benita <ran234@gmail.com>
+---
+ src/xkbcomp/ast-build.c |  8 ++++++++
+ src/xkbcomp/ast-build.h |  3 +++
+ src/xkbcomp/ast.h       |  7 +++++++
+ src/xkbcomp/parser.y    | 10 +++++-----
+ 4 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/src/xkbcomp/ast-build.c b/src/xkbcomp/ast-build.c
+index 58f97f93..9c6ccd44 100644
+--- a/src/xkbcomp/ast-build.c
++++ b/src/xkbcomp/ast-build.c
+@@ -105,6 +105,13 @@ ExprCreateInteger(int ival)
+     return expr;
+ }
+ 
++ExprDef *
++ExprCreateFloat(void)
++{
++    EXPR_CREATE(ExprFloat, expr, EXPR_VALUE, EXPR_TYPE_FLOAT);
++    return expr;
++}
++
+ ExprDef *
+ ExprCreateBoolean(bool set)
+ {
+@@ -783,6 +790,7 @@ static const char *expr_value_type_strings[_EXPR_TYPE_NUM_VALUES] = {
+     [EXPR_TYPE_UNKNOWN] = "unknown",
+     [EXPR_TYPE_BOOLEAN] = "boolean",
+     [EXPR_TYPE_INT] = "int",
++    [EXPR_TYPE_FLOAT] = "float",
+     [EXPR_TYPE_STRING] = "string",
+     [EXPR_TYPE_ACTION] = "action",
+     [EXPR_TYPE_KEYNAME] = "keyname",
+diff --git a/src/xkbcomp/ast-build.h b/src/xkbcomp/ast-build.h
+index b57e4cdc..6c76f381 100644
+--- a/src/xkbcomp/ast-build.h
++++ b/src/xkbcomp/ast-build.h
+@@ -36,6 +36,9 @@ ExprCreateString(xkb_atom_t str);
+ ExprDef *
+ ExprCreateInteger(int ival);
+ 
++ExprDef *
++ExprCreateFloat(void);
++
+ ExprDef *
+ ExprCreateBoolean(bool set);
+ 
+diff --git a/src/xkbcomp/ast.h b/src/xkbcomp/ast.h
+index 97788840..49c5ada4 100644
+--- a/src/xkbcomp/ast.h
++++ b/src/xkbcomp/ast.h
+@@ -95,6 +95,7 @@ enum expr_value_type {
+     EXPR_TYPE_UNKNOWN = 0,
+     EXPR_TYPE_BOOLEAN,
+     EXPR_TYPE_INT,
++    EXPR_TYPE_FLOAT,
+     EXPR_TYPE_STRING,
+     EXPR_TYPE_ACTION,
+     EXPR_TYPE_KEYNAME,
+@@ -186,6 +187,12 @@ typedef struct {
+     int ival;
+ } ExprInteger;
+ 
++typedef struct {
++    ExprCommon expr;
++    /* We don't support floats, but we still represnt them in the AST, in
++     * order to provide proper error messages. */
++} ExprFloat;
++
+ typedef struct {
+     ExprCommon expr;
+     xkb_atom_t key_name;
+diff --git a/src/xkbcomp/parser.y b/src/xkbcomp/parser.y
+index ead20165..d15d24b3 100644
+--- a/src/xkbcomp/parser.y
++++ b/src/xkbcomp/parser.y
+@@ -591,13 +591,13 @@ Element         :       ACTION_TOK
+                 |       INDICATOR
+                         { $$ = xkb_atom_intern_literal(param->ctx, "indicator"); }
+                 |       SHAPE
+-                        { $$ = XKB_ATOM_NONE; }
++                        { $$ = xkb_atom_intern_literal(param->ctx, "shape"); }
+                 |       ROW
+-                        { $$ = XKB_ATOM_NONE; }
++                        { $$ = xkb_atom_intern_literal(param->ctx, "row"); }
+                 |       SECTION
+-                        { $$ = XKB_ATOM_NONE; }
++                        { $$ = xkb_atom_intern_literal(param->ctx, "section"); }
+                 |       TEXT
+-                        { $$ = XKB_ATOM_NONE; }
++                        { $$ = xkb_atom_intern_literal(param->ctx, "text"); }
+                 ;
+ 
+ OptMergeMode    :       MergeMode       { $$ = $1; }
+@@ -687,7 +687,7 @@ Terminal        :       String
+                 |       Integer
+                         { $$ = ExprCreateInteger($1); }
+                 |       Float
+-                        { $$ = NULL; }
++                        { $$ = ExprCreateFloat(/* Discard $1 */); }
+                 |       KEYNAME
+                         { $$ = ExprCreateKeyName($1); }
+                 ;

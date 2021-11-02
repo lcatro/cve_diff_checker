@@ -1,0 +1,189 @@
+From cbaf86a93014a969b8accf39301932c17d0d73f9 Mon Sep 17 00:00:00 2001
+From: Fernandez Ludovic <ludovic@containo.us>
+Date: Thu, 29 Jul 2021 16:42:45 +0200
+Subject: [PATCH] fix: remove hop-by-hop headers define in connection header.
+
+---
+ pkg/middlewares/auth/forward.go               |  3 +-
+ .../connectionheader/connectionheader.go      | 44 ++++++++++++
+ .../connectionheader/connectionheader_test.go | 71 +++++++++++++++++++
+ pkg/middlewares/headers/headers.go            |  6 +-
+ 4 files changed, 121 insertions(+), 3 deletions(-)
+ create mode 100644 pkg/middlewares/connectionheader/connectionheader.go
+ create mode 100644 pkg/middlewares/connectionheader/connectionheader_test.go
+
+diff --git a/pkg/middlewares/auth/forward.go b/pkg/middlewares/auth/forward.go
+index ed9e7d2ef6d..0ffd0e8095a 100644
+--- a/pkg/middlewares/auth/forward.go
++++ b/pkg/middlewares/auth/forward.go
+@@ -15,6 +15,7 @@ import (
+ 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
+ 	"github.com/traefik/traefik/v2/pkg/log"
+ 	"github.com/traefik/traefik/v2/pkg/middlewares"
++	"github.com/traefik/traefik/v2/pkg/middlewares/connectionheader"
+ 	"github.com/traefik/traefik/v2/pkg/tracing"
+ 	"github.com/vulcand/oxy/forward"
+ 	"github.com/vulcand/oxy/utils"
+@@ -89,7 +90,7 @@ func NewForward(ctx context.Context, next http.Handler, config dynamic.ForwardAu
+ 		fa.authResponseHeadersRegex = re
+ 	}
+ 
+-	return fa, nil
++	return connectionheader.Remove(fa), nil
+ }
+ 
+ func (fa *forwardAuth) GetTracingInformation() (string, ext.SpanKindEnum) {
+diff --git a/pkg/middlewares/connectionheader/connectionheader.go b/pkg/middlewares/connectionheader/connectionheader.go
+new file mode 100644
+index 00000000000..8bc38e1e984
+--- /dev/null
++++ b/pkg/middlewares/connectionheader/connectionheader.go
+@@ -0,0 +1,44 @@
++package connectionheader
++
++import (
++	"net/http"
++	"net/textproto"
++	"strings"
++
++	"golang.org/x/net/http/httpguts"
++)
++
++// Remove removes hop-by-hop headers listed in the "Connection" header of h.
++// See RFC 7230, section 6.1.
++func Remove(next http.Handler) http.HandlerFunc {
++	return func(rw http.ResponseWriter, req *http.Request) {
++		reqUpType := upgradeType(req.Header)
++		removeConnectionHeaders(req.Header)
++
++		if reqUpType != "" {
++			req.Header.Set("Connection", "Upgrade")
++			req.Header.Set("Upgrade", reqUpType)
++		} else {
++			req.Header.Del("Connection")
++		}
++
++		next.ServeHTTP(rw, req)
++	}
++}
++
++func removeConnectionHeaders(h http.Header) {
++	for _, f := range h["Connection"] {
++		for _, sf := range strings.Split(f, ",") {
++			if sf = textproto.TrimString(sf); sf != "" {
++				h.Del(sf)
++			}
++		}
++	}
++}
++
++func upgradeType(h http.Header) string {
++	if !httpguts.HeaderValuesContainsToken(h["Connection"], "Upgrade") {
++		return ""
++	}
++	return h.Get("Upgrade")
++}
+diff --git a/pkg/middlewares/connectionheader/connectionheader_test.go b/pkg/middlewares/connectionheader/connectionheader_test.go
+new file mode 100644
+index 00000000000..850ca8e6961
+--- /dev/null
++++ b/pkg/middlewares/connectionheader/connectionheader_test.go
+@@ -0,0 +1,71 @@
++package connectionheader
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++func TestRemove(t *testing.T) {
++	testCases := []struct {
++		desc       string
++		reqHeaders map[string]string
++		expected   http.Header
++	}{
++		{
++			desc: "simple remove",
++			reqHeaders: map[string]string{
++				"Foo":        "bar",
++				"Connection": "foo",
++			},
++			expected: http.Header{},
++		},
++		{
++			desc: "remove and Upgrade",
++			reqHeaders: map[string]string{
++				"Upgrade":    "test",
++				"Foo":        "bar",
++				"Connection": "Upgrade,foo",
++			},
++			expected: http.Header{
++				"Upgrade":    []string{"test"},
++				"Connection": []string{"Upgrade"},
++			},
++		},
++		{
++			desc: "no remove",
++			reqHeaders: map[string]string{
++				"Foo":        "bar",
++				"Connection": "fii",
++			},
++			expected: http.Header{
++				"Foo": []string{"bar"},
++			},
++		},
++	}
++
++	for _, test := range testCases {
++		test := test
++		t.Run(test.desc, func(t *testing.T) {
++			t.Parallel()
++
++			next := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {})
++
++			h := Remove(next)
++
++			req := httptest.NewRequest(http.MethodGet, "https://localhost", nil)
++
++			for k, v := range test.reqHeaders {
++				req.Header.Set(k, v)
++			}
++
++			rw := httptest.NewRecorder()
++
++			h.ServeHTTP(rw, req)
++
++			assert.Equal(t, test.expected, req.Header)
++		})
++	}
++}
+diff --git a/pkg/middlewares/headers/headers.go b/pkg/middlewares/headers/headers.go
+index 39594494a8e..6e8cafd1a73 100644
+--- a/pkg/middlewares/headers/headers.go
++++ b/pkg/middlewares/headers/headers.go
+@@ -10,6 +10,7 @@ import (
+ 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
+ 	"github.com/traefik/traefik/v2/pkg/log"
+ 	"github.com/traefik/traefik/v2/pkg/middlewares"
++	"github.com/traefik/traefik/v2/pkg/middlewares/connectionheader"
+ 	"github.com/traefik/traefik/v2/pkg/tracing"
+ )
+ 
+@@ -58,11 +59,12 @@ func New(ctx context.Context, next http.Handler, cfg dynamic.Headers, name strin
+ 
+ 	if hasCustomHeaders || hasCorsHeaders {
+ 		logger.Debugf("Setting up customHeaders/Cors from %v", cfg)
+-		var err error
+-		handler, err = NewHeader(nextHandler, cfg)
++		h, err := NewHeader(nextHandler, cfg)
+ 		if err != nil {
+ 			return nil, err
+ 		}
++
++		handler = connectionheader.Remove(h)
+ 	}
+ 
+ 	return &headers{

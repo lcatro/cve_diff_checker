@@ -1,0 +1,31 @@
+From 8986422c21fbd9a7bf6561cae65aae42077447e8 Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@gpac.io>
+Date: Thu, 11 Mar 2021 15:37:21 +0100
+Subject: [PATCH] fixed #1703
+
+---
+ src/isomedia/box_code_drm.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/isomedia/box_code_drm.c b/src/isomedia/box_code_drm.c
+index dd867f2f5..6ffc99b0f 100644
+--- a/src/isomedia/box_code_drm.c
++++ b/src/isomedia/box_code_drm.c
+@@ -876,8 +876,17 @@ GF_Err tenc_box_read(GF_Box *s, GF_BitStream *bs)
+ 		ISOM_DECREASE_SIZE(ptr, 1);
+ 		iv_size = ptr->key_info[20] = gf_bs_read_u8(bs);
+ 		ISOM_DECREASE_SIZE(ptr, ptr->key_info[20]);
++		if ((iv_size!=8) && (iv_size!=16)) {
++			GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[iso file] Invalid constant IV size %d, must be 8 or 16\n", (u32) iv_size));
++			ptr->key_info[20] = 16;
++			return GF_NON_COMPLIANT_BITSTREAM;
++		}
+ 		gf_bs_read_data(bs, ptr->key_info+21, iv_size);
+ 	}
++	else if ((iv_size!=0) && (iv_size!=8) && (iv_size!=16)) {
++		GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[iso file] Invalid IV size %d, must be 0, 8 or 16\n", (u32) iv_size));
++		return GF_NON_COMPLIANT_BITSTREAM;
++	}
+ 	return GF_OK;
+ }
+ 

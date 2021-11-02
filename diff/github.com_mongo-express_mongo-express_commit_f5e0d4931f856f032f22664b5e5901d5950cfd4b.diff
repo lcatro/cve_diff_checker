@@ -1,0 +1,186 @@
+From b3de06874e58dd8765f429923bfa520c77cde2a6 Mon Sep 17 00:00:00 2001
+From: JafarAkhondali <jafar.akhondali@yahoo.com>
+Date: Tue, 23 Feb 2021 03:14:25 +0330
+Subject: [PATCH 1/3] - Fix several XSS vulnerabilities
+
+---
+ lib/filters.js | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/lib/filters.js b/lib/filters.js
+index b785a55d..9fcb247a 100755
+--- a/lib/filters.js
++++ b/lib/filters.js
+@@ -65,7 +65,7 @@ exports.to_display = function (input) {
+     retHTML += '<div class="tooDamnBig" doc_id="' + encodeURIComponent(JSON.stringify(input._id)) + '" ' +
+       'doc_prop="' + input.attribu + '" title="Max prop size: ' + input.maxSize + '">';
+     retHTML += input.display + '<br>~' + input.humanSz;
+-    retHTML += '<br>Preview:' + input.preview;
++    retHTML += '<br>Preview:' + entifyGTLTAmp(input.preview);
+     retHTML += '<br>Click to fetch this property';
+     retHTML += '</div>';
+     return retHTML;
+@@ -86,7 +86,7 @@ exports.to_display = function (input) {
+     retHTML += '<div class="tooDamnBig" doc_id="' + encodeURIComponent(JSON.stringify(input._id)) + '" ' +
+       'doc_prop="' + input.attribu + '" title="Max row size: ' + input.maxSize + '">';
+     retHTML += input.display + '<br>' + input.attribu + ': ~' + input.humanSz;
+-    retHTML += '<br>Preview:' + input.preview;
++    retHTML += '<br>Preview:' + entifyGTLTAmp(input.preview);
+     retHTML += '<br>Click to fetch this property';
+     retHTML += '</div>';
+     return retHTML;
+@@ -102,7 +102,7 @@ exports.to_display = function (input) {
+       input.substr(0, 23) === 'data:image/jpeg;base64,'
+     )
+   )  {
+-    return '<img src="' + input + '" style="max-height:100%; max-width:100%; "/>';
++    return '<img src="' + entifyGTLTAmp(input) + '" style="max-height:100%; max-width:100%; "/>';
+   }
+ 
+   // Audio inline
+@@ -113,7 +113,7 @@ exports.to_display = function (input) {
+       input.substr(0, 22) === 'data:audio/mp3;base64,'
+     )
+   )  {
+-    return '<audio controls style="width:45px;" src="' + input + '">Your browser does not support the audio element.</audio>';
++    return '<audio controls style="width:45px;" src="' + entifyGTLTAmp(input) + '">Your browser does not support the audio element.</audio>';
+   }
+ 
+   // Video inline
+@@ -125,7 +125,8 @@ exports.to_display = function (input) {
+       input.substr(0, 22) === 'data:video/ogv;base64,'
+     )
+   )  {
+-    return '<video controls><source type="' + input.substring(input.indexOf(':') + 1, input.indexOf(';')) + '" src="' + input + '"/>' +
++    const videoFormat = input.match(/^data:(.*);base64/)[1];
++    return '<video controls><source type="' + videoFormat + '" src="' + entifyGTLTAmp(input) + '"/>' +
+       'Your browser does not support the video element.</video>';
+   }
+ 
+
+From c0c4d0c4431f6cfaf808cf00813de3cf587010c2 Mon Sep 17 00:00:00 2001
+From: JafarAkhondali <jafar.akhondali@yahoo.com>
+Date: Tue, 23 Feb 2021 03:32:02 +0330
+Subject: [PATCH 2/3] - Fix XSS in `input.attribu`
+
+---
+ lib/filters.js | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/filters.js b/lib/filters.js
+index 9fcb247a..850c45e2 100755
+--- a/lib/filters.js
++++ b/lib/filters.js
+@@ -63,7 +63,7 @@ exports.to_display = function (input) {
+     input._id
+   ) {
+     retHTML += '<div class="tooDamnBig" doc_id="' + encodeURIComponent(JSON.stringify(input._id)) + '" ' +
+-      'doc_prop="' + input.attribu + '" title="Max prop size: ' + input.maxSize + '">';
++      'doc_prop="' + entifyGTLTAmp(input.attribu) + '" title="Max prop size: ' + input.maxSize + '">';
+     retHTML += input.display + '<br>~' + input.humanSz;
+     retHTML += '<br>Preview:' + entifyGTLTAmp(input.preview);
+     retHTML += '<br>Click to fetch this property';
+@@ -84,8 +84,8 @@ exports.to_display = function (input) {
+     input._id
+   ) {
+     retHTML += '<div class="tooDamnBig" doc_id="' + encodeURIComponent(JSON.stringify(input._id)) + '" ' +
+-      'doc_prop="' + input.attribu + '" title="Max row size: ' + input.maxSize + '">';
+-    retHTML += input.display + '<br>' + input.attribu + ': ~' + input.humanSz;
++      'doc_prop="' + entifyGTLTAmp(input.attribu) + '" title="Max row size: ' + input.maxSize + '">';
++    retHTML += input.display + '<br>' + entifyGTLTAmp(input.attribu) + ': ~' + input.humanSz;
+     retHTML += '<br>Preview:' + entifyGTLTAmp(input.preview);
+     retHTML += '<br>Click to fetch this property';
+     retHTML += '</div>';
+
+From 0fa67c7517b2ac65d96dcd093b7b7c7848bf9682 Mon Sep 17 00:00:00 2001
+From: JafarAkhondali <jafar.akhondali@yahoo.com>
+Date: Sun, 28 Feb 2021 05:23:23 +0330
+Subject: [PATCH 3/3] - Fix several XSS bugs in dynamically loaded data
+
+---
+ lib/scripts/collection.js | 23 +++++++++++++++--------
+ lib/scripts/escapeHtml.js |  8 ++++++++
+ 2 files changed, 23 insertions(+), 8 deletions(-)
+ create mode 100644 lib/scripts/escapeHtml.js
+
+diff --git a/lib/scripts/collection.js b/lib/scripts/collection.js
+index 5a3ff578..98d72ee4 100644
+--- a/lib/scripts/collection.js
++++ b/lib/scripts/collection.js
+@@ -1,6 +1,7 @@
+ import $ from 'jquery';
+ import renderjson from 'renderjson';
+ import CodeMirror from './codeMirrorLoader';
++import escapeHtml from './escapeHtml';
+ 
+ function getParameterByName(name) {
+   name = name.replace(/\[/, '\\[').replace(/[\]]/, '\\]');
+@@ -137,7 +138,7 @@ $(() => {
+     // Set the element with spinner for now
+     target.html(spinner);
+ 
+-    $.get(`${makeCollectionUrl()}${encodeURIComponent(_id)}/${prop}`, function (input) {
++    function renderProp(input) {
+       // Images inline
+       if (
+         typeof input === 'string'
+@@ -148,7 +149,7 @@ $(() => {
+           || input.substr(0, 23) === 'data:image/jpeg;base64,'
+         )
+       )  {
+-        input = '<img src="' + input + '" style="max-height:100%; max-width:100%; "/>';
++        return `<img src="${escapeHtml(input)}" style="max-height:100%; max-width:100%; "/>`;
+       }
+ 
+       // Audio inline
+@@ -160,7 +161,7 @@ $(() => {
+           || input.substr(0, 22) === 'data:audio/mp3;base64,'
+         )
+       )  {
+-        input = '<audio controls style="width:45px;" src="' + input + '">Your browser does not support the audio element.</audio>';
++        return `<audio controls style="width:45px;" src="${escapeHtml(input)}">Your browser does not support the audio element.</audio>`;
+       }
+ 
+       // Video inline
+@@ -172,16 +173,22 @@ $(() => {
+           ||  input.substr(0, 22) === 'data:video/ogv;base64,'
+         )
+       )  {
+-        input = '<video controls><source type="' + input.substring(input.indexOf(':') + 1, input.indexOf(';')) + '" src="' + input + '"/>'
+-          + 'Your browser does not support the video element.</video>';
++        const videoFormat = input.match(/^data:(.*);base64/)[1];
++        return `<video controls><source type="${escapeHtml(videoFormat)}" src="${escapeHtml(input)}"/>
++          + 'Your browser does not support the video element.</video>`;
+       }
+-
+       if (typeof input === 'object' && (input.toString() === '[object Object]' || input.toString().substr(0, 7) === '[object')) {
+-        input = renderjson(input);
++        return renderjson(input);
+       }
+ 
++      // treat unknown data as escaped string
++      return escapeHtml(input.toString());
++    }
++
++    $.get(`${makeCollectionUrl()}${encodeURIComponent(_id)}/${prop}`, function (prop) {
++      prop = renderProp(prop);
+       // Set the element with gotten datas
+-      target.parent().html(input);
++      target.parent().html(prop);
+ 
+       // Set original scroll position
+       $('.tableWrapper').scrollLeft(leftScroll);
+diff --git a/lib/scripts/escapeHtml.js b/lib/scripts/escapeHtml.js
+new file mode 100644
+index 00000000..026c8e0d
+--- /dev/null
++++ b/lib/scripts/escapeHtml.js
+@@ -0,0 +1,8 @@
++export default function (html) {
++  // Turn < ? > into HTML entities, so data doesn't get interpreted by the browser
++  return html.replace(/&/g, '&amp;')
++    .replace(/</g, '&lt;')
++    .replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;')
++    .replace(/'/g, '&apos;');
++}

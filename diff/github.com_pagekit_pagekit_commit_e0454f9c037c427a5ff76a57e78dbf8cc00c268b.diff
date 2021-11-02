@@ -1,0 +1,209 @@
+From 17cc46211ccb3588cc83be96ffa1b971e38d26f0 Mon Sep 17 00:00:00 2001
+From: Steffan <steffan@schiewe.biz>
+Date: Fri, 20 Jan 2017 11:57:45 +0100
+Subject: [PATCH 1/5] update user password reset
+
+---
+ .../Controller/ResetPasswordController.php    | 33 ++++++++++++-------
+ .../modules/user/views/reset-confirm.php      |  2 +-
+ 2 files changed, 22 insertions(+), 13 deletions(-)
+
+diff --git a/app/system/modules/user/src/Controller/ResetPasswordController.php b/app/system/modules/user/src/Controller/ResetPasswordController.php
+index 5874d7993..2d0a613db 100644
+--- a/app/system/modules/user/src/Controller/ResetPasswordController.php
++++ b/app/system/modules/user/src/Controller/ResetPasswordController.php
+@@ -25,7 +25,7 @@ public function indexAction()
+     }
+ 
+     /**
+-     * @Request({"email": "string"})
++     * @Request({"email"})
+      */
+     public function requestAction($email)
+     {
+@@ -51,9 +51,8 @@ public function requestAction($email)
+                 throw new Exception(__('Your account has not been activated or is blocked.'));
+             }
+ 
+-            $user->activation = App::get('auth.random')->generateString(32);
+-
+-            $url = App::url('@user/resetpassword/confirm', ['user' => $user->username, 'key' => $user->activation], 0);
++            $key = App::get('auth.random')->generateString(32);
++            $url = App::url('@user/resetpassword/confirm', compact('key'), 0);
+ 
+             try {
+ 
+@@ -67,6 +66,7 @@ public function requestAction($email)
+                 throw new Exception(__('Unable to send confirmation link.'));
+             }
+ 
++            $user->activation = $key;
+             $user->save();
+ 
+             App::message()->success(__('Check your email for the confirmation link.'));
+@@ -85,15 +85,26 @@ public function requestAction($email)
+     }
+ 
+     /**
+-     * @Request({"user", "key"})
++     * @Request({"key", "password"})
+      */
+-    public function confirmAction($username = "", $activation = "")
++    public function confirmAction($activation = "", $password = "")
+     {
+-        if (empty($username) || empty($activation) || !$user = User::where(compact('username', 'activation'))->first()) {
++        if ($activation and $user = User::where(compact('activation'))->first()) {
++
++            App::session()->set('activation', [
++                'key' => $activation,
++                'user' => $user->id,
++            ]);
++
++            $user->activation = null;
++            $user->save();
++        }
++
++        if (!$data = App::session()->get('activation') or $data['key'] != $activation) {
+             App::abort(400, __('Invalid key.'));
+         }
+ 
+-        if ($user->isBlocked()) {
++        if (!$user = User::find($data['user']) or $user->isBlocked()) {
+             App::abort(400, __('Your account has not been activated or is blocked.'));
+         }
+ 
+@@ -105,8 +116,6 @@ public function confirmAction($username = "", $activation = "")
+                     throw new Exception(__('Invalid token. Please try again.'));
+                 }
+ 
+-                $password = App::request()->request->get('password');
+-
+                 if (empty($password)) {
+                     throw new Exception(__('Enter password.'));
+                 }
+@@ -115,10 +124,11 @@ public function confirmAction($username = "", $activation = "")
+                     throw new Exception(__('Invalid password.'));
+                 }
+ 
+-                $user->password = App::get('auth.password')->hash($password);
+                 $user->activation = null;
++                $user->password = App::get('auth.password')->hash($password);
+                 $user->save();
+ 
++                App::session()->remove('activation');
+                 App::message()->success(__('Your password has been reset.'));
+ 
+                 return App::redirect('@user/login');
+@@ -133,7 +143,6 @@ public function confirmAction($username = "", $activation = "")
+                 'title' => __('Reset Confirm'),
+                 'name' => 'system/user/reset-confirm.php'
+             ],
+-            'username' => $username,
+             'activation' => $activation,
+             'error' => isset($error) ? $error : ''
+         ];
+diff --git a/app/system/modules/user/views/reset-confirm.php b/app/system/modules/user/views/reset-confirm.php
+index 59917f9d4..906888522 100644
+--- a/app/system/modules/user/views/reset-confirm.php
++++ b/app/system/modules/user/views/reset-confirm.php
+@@ -1,6 +1,6 @@
+ <?php $view->script('uikit-form-password') ?>
+ 
+-<form class="pk-user pk-user-reset uk-form uk-form-stacked uk-width-medium-1-2 uk-width-large-1-3 uk-container-center" action="<?= $view->url('@user/resetpassword/confirm', ['user' => $username, 'key' => $activation]) ?>" method="post">
++<form class="pk-user pk-user-reset uk-form uk-form-stacked uk-width-medium-1-2 uk-width-large-1-3 uk-container-center" action="<?= $view->url('@user/resetpassword/confirm', ['key' => $activation]) ?>" method="post">
+ 
+     <?php if($error): ?>
+     <div class="uk-alert uk-alert-danger">
+
+From 88527da9c5d50a267cd031b472d2d31045320705 Mon Sep 17 00:00:00 2001
+From: Steffan <steffan@schiewe.biz>
+Date: Fri, 20 Jan 2017 12:00:38 +0100
+Subject: [PATCH 2/5] cleanup
+
+---
+ .../modules/user/src/Controller/ResetPasswordController.php     | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/app/system/modules/user/src/Controller/ResetPasswordController.php b/app/system/modules/user/src/Controller/ResetPasswordController.php
+index 2d0a613db..834e300c6 100644
+--- a/app/system/modules/user/src/Controller/ResetPasswordController.php
++++ b/app/system/modules/user/src/Controller/ResetPasswordController.php
+@@ -87,7 +87,7 @@ public function requestAction($email)
+     /**
+      * @Request({"key", "password"})
+      */
+-    public function confirmAction($activation = "", $password = "")
++    public function confirmAction($activation = '', $password = '')
+     {
+         if ($activation and $user = User::where(compact('activation'))->first()) {
+ 
+
+From 9714b8588cfbc30aeb0bbad33114b790d2f20b7e Mon Sep 17 00:00:00 2001
+From: Malte <malte@yootheme.com>
+Date: Fri, 20 Jan 2017 13:55:35 +0100
+Subject: [PATCH 3/5] system settings - add debug warning
+
+---
+ app/system/modules/settings/app/components/system.vue | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/app/system/modules/settings/app/components/system.vue b/app/system/modules/settings/app/components/system.vue
+index c3d1b1017..67d4240e7 100644
+--- a/app/system/modules/settings/app/components/system.vue
++++ b/app/system/modules/settings/app/components/system.vue
+@@ -34,6 +34,7 @@
+                 <label><input type="checkbox" value="1" v-model="$root.config.debug.enabled" :disabled="!sqlite"> {{ 'Enable debug toolbar' | trans }}</label>
+             </p>
+             <p class="uk-form-help-block" v-if="!sqlite">{{ 'Please enable the SQLite database extension.' | trans }}</p>
++            <p class="uk-form-help-block" v-if="$root.config.application.debug || $root.config.debug.enabled">{{ 'Please note that enabling debug mode or toolbar has serious security implications.' | trans }}</p>
+         </div>
+     </div>
+ 
+
+From ac1db63e421d1b06fb83e46488522e0ad270e6e6 Mon Sep 17 00:00:00 2001
+From: Malte <malte@yootheme.com>
+Date: Fri, 20 Jan 2017 14:04:36 +0100
+Subject: [PATCH 4/5] update changelog
+
+---
+ CHANGELOG.md | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index fe086b4e0..f3688e51c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,10 @@
+ # Changelog
+ 
++## 1.0.11 (January 20, 2017)
++
++### Security
++- Fixed replay attack with password reset links when debug toolbar is enabled, discovered by SecureLayer7 
++
+ ## 1.0.10 (December 22, 2016)
+ 
+ ### Fixed
+
+From ffe454ab9bcb65f8d84a00d99f37f92a54bf56be Mon Sep 17 00:00:00 2001
+From: Malte <malte@yootheme.com>
+Date: Fri, 20 Jan 2017 14:13:17 +0100
+Subject: [PATCH 5/5] bump version
+
+---
+ app/system/config.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/app/system/config.php b/app/system/config.php
+index 5df7e791c..d1c00b09f 100644
+--- a/app/system/config.php
++++ b/app/system/config.php
+@@ -4,7 +4,7 @@
+ 
+     'application' => [
+ 
+-        'version' => '1.0.10'
++        'version' => '1.0.11'
+ 
+     ],
+ 

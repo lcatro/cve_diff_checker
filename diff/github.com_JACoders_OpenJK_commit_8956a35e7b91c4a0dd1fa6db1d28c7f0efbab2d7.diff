@@ -1,0 +1,125 @@
+From 8956a35e7b91c4a0dd1fa6db1d28c7f0efbab2d7 Mon Sep 17 00:00:00 2001
+From: Ensiform <ensiform@gmail.com>
+Date: Mon, 13 Mar 2017 22:20:58 -0500
+Subject: [PATCH] Shared: Merge
+ ioquake/ioq3@376267d534476a875d8b9228149c4ee18b74a4fd
+
+Don't load .pk3s as .dlls, and don't load user config files from .pk3s.
+---
+ code/client/cl_main.cpp   | 2 +-
+ code/qcommon/files.cpp    | 8 ++++++++
+ codemp/client/cl_main.cpp | 2 +-
+ codemp/qcommon/files.cpp  | 8 ++++++++
+ shared/sys/sys_main.cpp   | 7 +++++++
+ 5 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/code/client/cl_main.cpp b/code/client/cl_main.cpp
+index 43e36de4a2..bac6e4c528 100644
+--- a/code/client/cl_main.cpp
++++ b/code/client/cl_main.cpp
+@@ -1084,7 +1084,7 @@ void CL_InitRef( void ) {
+ 	GetRefAPI_t	GetRefAPI;
+ 
+ 	Com_Printf( "----- Initializing Renderer ----\n" );
+-    cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH );
++    cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH|CVAR_PROTECTED );
+ 
+ 	Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, cl_renderer->string );
+ 
+diff --git a/code/qcommon/files.cpp b/code/qcommon/files.cpp
+index 24e9290891..c35d0e00f5 100644
+--- a/code/qcommon/files.cpp
++++ b/code/qcommon/files.cpp
+@@ -1258,6 +1258,7 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 	long			hash;
+ 	//unz_s			*zfi;
+ 	//void			*temp;
++	bool			isUserConfig = false;
+ 
+ 	hash = 0;
+ 
+@@ -1291,6 +1292,8 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 		return -1;
+ 	}
+ 
++	isUserConfig = !Q_stricmp( filename, "autoexec_sp.cfg" ) || !Q_stricmp( filename, Q3CONFIG_NAME );
++
+ 	//
+ 	// search through the path, one element at a time
+ 	//
+@@ -1316,6 +1319,11 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 			}
+ 			// is the element a pak file?
+ 			if ( search->pack && search->pack->hashTable[hash] ) {
++				// autoexec_sp.cfg and openjk_sp.cfg can only be loaded outside of pk3 files.
++				if ( isUserConfig ) {
++					continue;
++				}
++
+ 				// look through all the pak file elements
+ 				pak = search->pack;
+ 				pakFile = pak->hashTable[hash];
+diff --git a/codemp/client/cl_main.cpp b/codemp/client/cl_main.cpp
+index 07d85dbca8..3de7f1aed6 100644
+--- a/codemp/client/cl_main.cpp
++++ b/codemp/client/cl_main.cpp
+@@ -2364,7 +2364,7 @@ void CL_InitRef( void ) {
+ 
+ 	Com_Printf( "----- Initializing Renderer ----\n" );
+ 
+-	cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH, "Which renderer library to use" );
++	cl_renderer = Cvar_Get( "cl_renderer", DEFAULT_RENDER_LIBRARY, CVAR_ARCHIVE|CVAR_LATCH|CVAR_PROTECTED, "Which renderer library to use" );
+ 
+ 	Com_sprintf( dllName, sizeof( dllName ), "%s_" ARCH_STRING DLL_EXT, cl_renderer->string );
+ 
+diff --git a/codemp/qcommon/files.cpp b/codemp/qcommon/files.cpp
+index cd4b5ee67e..4fb8b4a9fd 100644
+--- a/codemp/qcommon/files.cpp
++++ b/codemp/qcommon/files.cpp
+@@ -1267,6 +1267,7 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 	//unz_s			*zfi;
+ 	//void			*temp;
+ 	int				l;
++	bool			isUserConfig = false;
+ 
+ 	hash = 0;
+ 
+@@ -1300,6 +1301,8 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 		return -1;
+ 	}
+ 
++	isUserConfig = !Q_stricmp( filename, "autoexec.cfg" ) || !Q_stricmp( filename, Q3CONFIG_CFG );
++
+ 	//
+ 	// search through the path, one element at a time
+ 	//
+@@ -1330,6 +1333,11 @@ long FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean unique
+ 					continue;
+ 				}
+ 
++				// autoexec.cfg and openjk.cfg can only be loaded outside of pk3 files.
++				if ( isUserConfig ) {
++					continue;
++				}
++
+ 				// look through all the pak file elements
+ 				pak = search->pack;
+ 				pakFile = pak->hashTable[hash];
+diff --git a/shared/sys/sys_main.cpp b/shared/sys/sys_main.cpp
+index dafe319576..ac50708cc4 100644
+--- a/shared/sys/sys_main.cpp
++++ b/shared/sys/sys_main.cpp
+@@ -298,6 +298,13 @@ void *Sys_LoadDll( const char *name, qboolean useSystemLib )
+ {
+ 	void *dllhandle = NULL;
+ 
++	// Don't load any DLLs that end with the pk3 extension
++	if ( COM_CompareExtension( name, ".pk3" ) )
++	{
++		Com_Printf( S_COLOR_YELLOW "WARNING: Rejecting DLL named \"%s\"", name );
++		return NULL;
++	}
++
+ 	if ( useSystemLib )
+ 	{
+ 		Com_Printf( "Trying to load \"%s\"...\n", name );

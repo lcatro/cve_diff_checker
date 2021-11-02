@@ -1,0 +1,84 @@
+From 30b0025e19bd95ba28f4eff4d259671e7bb6bb86 Mon Sep 17 00:00:00 2001
+From: Thorsten Rinne <thorsten@phpmyfaq.de>
+Date: Thu, 14 Sep 2017 21:10:24 +0200
+Subject: [PATCH] Added some more protection against possible XSS attacks
+
+---
+ phpmyfaq/admin/configuration.php | 9 +++++++--
+ phpmyfaq/inc/PMF/Faq.php         | 2 +-
+ phpmyfaq/index.php               | 6 +++---
+ phpmyfaq/main.php                | 2 +-
+ 4 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/phpmyfaq/admin/configuration.php b/phpmyfaq/admin/configuration.php
+index 68e94a9bda..e376a8002f 100644
+--- a/phpmyfaq/admin/configuration.php
++++ b/phpmyfaq/admin/configuration.php
+@@ -46,7 +46,12 @@
+         // Set the new values
+         $forbiddenValues = ['{', '}', '$'];
+         $newConfigValues = [];
+-        $escapeValues = ['main.contactInformations', 'main.customPdfHeader', 'main.customPdfFooter'];
++        $escapeValues = [
++            'main.contactInformations',
++            'main.customPdfHeader',
++            'main.customPdfFooter',
++            'main.titleFAQ'
++        ];
+ 
+         // Special checks
+         if (isset($editData['edit']['main.enableMarkdownEditor'])) {
+@@ -58,7 +63,7 @@
+             $newConfigValues[$key] = str_replace($forbiddenValues, '', $value);
+             // Escape some values
+             if (isset($escapeValues[$key])) {
+-                $newConfigValues[$key] = PMF_String::htmlspecialchars($value, ENT_HTML5);
++                $newConfigValues[$key] = PMF_String::htmlspecialchars($value, ENT_QUOTES);
+             }
+             $keyArray = array_values(explode('.', $key));
+             $newConfigClass = array_shift($keyArray);
+diff --git a/phpmyfaq/inc/PMF/Faq.php b/phpmyfaq/inc/PMF/Faq.php
+index e2e7d3b019..5a29f3cd2c 100755
+--- a/phpmyfaq/inc/PMF/Faq.php
++++ b/phpmyfaq/inc/PMF/Faq.php
+@@ -1602,7 +1602,7 @@ public function getRecordTitle($id)
+ 
+         if ($this->_config->getDb()->numRows($result) > 0) {
+             while ($row = $this->_config->getDb()->fetchObject($result)) {
+-                $question = $row->question;
++                $question = PMF_String::htmlspecialchars($row->question);
+             }
+         } else {
+             $question = $this->pmf_lang['no_cats'];
+diff --git a/phpmyfaq/index.php b/phpmyfaq/index.php
+index 411f97212e..5aa75d71cb 100755
+--- a/phpmyfaq/index.php
++++ b/phpmyfaq/index.php
+@@ -479,11 +479,11 @@
+ 
+ $tplMainPage = array(
+     'msgLoginUser' => $user->isLoggedIn() ? $user->getUserData('display_name') : $PMF_LANG['msgLoginUser'],
+-    'title' => $faqConfig->get('main.titleFAQ').$title,
++    'title' => PMF_String::htmlspecialchars($faqConfig->get('main.titleFAQ').$title),
+     'baseHref' => $faqSystem->getSystemUri($faqConfig),
+     'version' => $faqConfig->get('main.currentVersion'),
+-    'header' => str_replace('"', '', $faqConfig->get('main.titleFAQ')),
+-    'metaTitle' => str_replace('"', '', $faqConfig->get('main.titleFAQ').$title),
++    'header' => PMF_String::htmlspecialchars(str_replace('"', '', $faqConfig->get('main.titleFAQ'))),
++    'metaTitle' => PMF_String::htmlspecialchars(str_replace('"', '', $faqConfig->get('main.titleFAQ').$title)),
+     'metaDescription' => $metaDescription,
+     'metaKeywords' => $keywords,
+     'metaPublisher' => $faqConfig->get('main.metaPublisher'),
+diff --git a/phpmyfaq/main.php b/phpmyfaq/main.php
+index 302e2ff224..baf66c5b73 100755
+--- a/phpmyfaq/main.php
++++ b/phpmyfaq/main.php
+@@ -77,6 +77,6 @@
+     'index',
+     'breadcrumb',
+     [
+-        'breadcrumbHeadline' => $faqConfig->get('main.titleFAQ')
++        'breadcrumbHeadline' => PMF_String::htmlspecialchars($faqConfig->get('main.titleFAQ'))
+     ]
+ );
+\ No newline at end of file

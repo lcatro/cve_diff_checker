@@ -1,0 +1,40 @@
+From 29ab5eb75bc9ed01466ab1a98e932e59fe27ad42 Mon Sep 17 00:00:00 2001
+From: Mukesh Ojha <mojha@codeaurora.org>
+Date: Tue, 10 Apr 2018 14:32:26 +0530
+Subject: QcomModulePkg: Adds OOB check on partition count
+
+Calculation of partition count while patching GPT could go
+beyond limit. So adds a check to maintain sanity.
+
+Change-Id: I454a044b24a46d2f4a841088231a5ba918861c0b
+---
+ QcomModulePkg/Library/BootLib/PartitionTableUpdate.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/PartitionTableUpdate.c b/QcomModulePkg/Library/BootLib/PartitionTableUpdate.c
+index e0625e5..d5d3874 100755
+--- a/QcomModulePkg/Library/BootLib/PartitionTableUpdate.c
++++ b/QcomModulePkg/Library/BootLib/PartitionTableUpdate.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -751,8 +751,11 @@ STATIC UINT32 PatchGpt (
+ 	PUT_LONG_LONG(SecondaryGptHeader + PARTITION_ENTRIES_OFFSET, (UINT64) (NumSectors - 33));
+ 
+ 	/* Patch the last partition */
+-	while (*(PrimaryGptHeader + BlkSz + TotalPart * PARTITION_ENTRY_SIZE) != 0)
++	while ((TotalPart < GptHeader->MaxPtCnt) &&
++		(*(PrimaryGptHeader + BlkSz + TotalPart * PARTITION_ENTRY_SIZE)
++		!= 0)) {
+ 		TotalPart++;
++	}
+ 
+ 	LastPartOffset = (TotalPart - 1) * PARTITION_ENTRY_SIZE + PARTITION_ENTRY_LAST_LBA;
+ 
+-- 
+cgit v1.1
+

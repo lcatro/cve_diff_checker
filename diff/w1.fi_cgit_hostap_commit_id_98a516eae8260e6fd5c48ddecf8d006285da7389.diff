@@ -1,0 +1,181 @@
+From 98a516eae8260e6fd5c48ddecf8d006285da7389 Mon Sep 17 00:00:00 2001
+From: Nick Lowe <nick.lowe@lugatech.com>
+Date: Tue, 9 Feb 2016 14:47:47 +0000
+Subject: WPS: Use only os_get_random() for PIN generation
+
+Remove the fallback dependency on os_random() when generating a WPS pin.
+This is exceptionally unlikely to ever be called as the call to
+os_get_random() is unlikely to fail. The intention is to facilitate
+future removal of os_random() as it uses a low quality PRNG.
+
+Signed-off-by: Nick Lowe <nick.lowe@lugatech.com>
+---
+ src/ap/wps_hostapd.c            |  3 ++-
+ src/wps/wps.h                   |  2 +-
+ src/wps/wps_common.c            | 12 +++++-------
+ wpa_supplicant/ap.c             |  8 ++++++--
+ wpa_supplicant/ctrl_iface.c     |  3 ++-
+ wpa_supplicant/p2p_supplicant.c | 19 ++++++++++++++++---
+ wpa_supplicant/wps_supplicant.c |  5 ++++-
+ 7 files changed, 36 insertions(+), 16 deletions(-)
+
+diff --git a/src/ap/wps_hostapd.c b/src/ap/wps_hostapd.c
+index ba58f3e..faf38c9 100644
+--- a/src/ap/wps_hostapd.c
++++ b/src/ap/wps_hostapd.c
+@@ -1627,7 +1627,8 @@ const char * hostapd_wps_ap_pin_random(struct hostapd_data *hapd, int timeout)
+ 	unsigned int pin;
+ 	struct wps_ap_pin_data data;
+ 
+-	pin = wps_generate_pin();
++	if (wps_generate_pin(&pin) < 0)
++		return NULL;
+ 	os_snprintf(data.pin_txt, sizeof(data.pin_txt), "%08u", pin);
+ 	data.timeout = timeout;
+ 	hostapd_wps_for_each(hapd, wps_ap_pin_set, &data);
+diff --git a/src/wps/wps.h b/src/wps/wps.h
+index ff4dd10..2505d2d 100644
+--- a/src/wps/wps.h
++++ b/src/wps/wps.h
+@@ -837,7 +837,7 @@ int wps_build_credential_wrap(struct wpabuf *msg,
+ 
+ unsigned int wps_pin_checksum(unsigned int pin);
+ unsigned int wps_pin_valid(unsigned int pin);
+-unsigned int wps_generate_pin(void);
++int wps_generate_pin(unsigned int *pin);
+ int wps_pin_str_valid(const char *pin);
+ void wps_free_pending_msgs(struct upnp_pending_message *msgs);
+ 
+diff --git a/src/wps/wps_common.c b/src/wps/wps_common.c
+index 88f85fe..c6a1cfd 100644
+--- a/src/wps/wps_common.c
++++ b/src/wps/wps_common.c
+@@ -235,20 +235,18 @@ unsigned int wps_pin_valid(unsigned int pin)
+  * wps_generate_pin - Generate a random PIN
+  * Returns: Eight digit PIN (i.e., including the checksum digit)
+  */
+-unsigned int wps_generate_pin(void)
++int wps_generate_pin(unsigned int *pin)
+ {
+ 	unsigned int val;
+ 
+ 	/* Generate seven random digits for the PIN */
+-	if (random_get_bytes((unsigned char *) &val, sizeof(val)) < 0) {
+-		struct os_time now;
+-		os_get_time(&now);
+-		val = os_random() ^ now.sec ^ now.usec;
+-	}
++	if (random_get_bytes((unsigned char *) &val, sizeof(val)) < 0)
++		return -1;
+ 	val %= 10000000;
+ 
+ 	/* Append checksum digit */
+-	return val * 10 + wps_pin_checksum(val);
++	*pin = val * 10 + wps_pin_checksum(val);
++	return 0;
+ }
+ 
+ 
+diff --git a/wpa_supplicant/ap.c b/wpa_supplicant/ap.c
+index 03c3fab..60f8c0d 100644
+--- a/wpa_supplicant/ap.c
++++ b/wpa_supplicant/ap.c
+@@ -915,7 +915,10 @@ int wpa_supplicant_ap_wps_pin(struct wpa_supplicant *wpa_s, const u8 *bssid,
+ 		return -1;
+ 
+ 	if (pin == NULL) {
+-		unsigned int rpin = wps_generate_pin();
++		unsigned int rpin;
++
++		if (wps_generate_pin(&rpin) < 0)
++			return -1;
+ 		ret_len = os_snprintf(buf, buflen, "%08d", rpin);
+ 		if (os_snprintf_error(buflen, ret_len))
+ 			return -1;
+@@ -981,7 +984,8 @@ const char * wpas_wps_ap_pin_random(struct wpa_supplicant *wpa_s, int timeout)
+ 	if (wpa_s->ap_iface == NULL)
+ 		return NULL;
+ 	hapd = wpa_s->ap_iface->bss[0];
+-	pin = wps_generate_pin();
++	if (wps_generate_pin(&pin) < 0)
++		return NULL;
+ 	os_snprintf(pin_txt, sizeof(pin_txt), "%08u", pin);
+ 	os_free(hapd->conf->ap_pin);
+ 	hapd->conf->ap_pin = os_strdup(pin_txt);
+diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
+index a377eb3..1057a84 100644
+--- a/wpa_supplicant/ctrl_iface.c
++++ b/wpa_supplicant/ctrl_iface.c
+@@ -956,7 +956,8 @@ static int wpa_supplicant_ctrl_iface_wps_pin(struct wpa_supplicant *wpa_s,
+ 	if (os_strcmp(cmd, "any") == 0)
+ 		_bssid = NULL;
+ 	else if (os_strcmp(cmd, "get") == 0) {
+-		ret = wps_generate_pin();
++		if (wps_generate_pin((unsigned int *) &ret) < 0)
++			return -1;
+ 		goto done;
+ 	} else if (hwaddr_aton(cmd, bssid)) {
+ 		wpa_printf(MSG_DEBUG, "CTRL_IFACE WPS_PIN: invalid BSSID '%s'",
+diff --git a/wpa_supplicant/p2p_supplicant.c b/wpa_supplicant/p2p_supplicant.c
+index bf8f394..4c54b46 100644
+--- a/wpa_supplicant/p2p_supplicant.c
++++ b/wpa_supplicant/p2p_supplicant.c
+@@ -2578,7 +2578,13 @@ static void wpas_prov_disc_req(void *ctx, const u8 *peer, u16 config_methods,
+ 	params[sizeof(params) - 1] = '\0';
+ 
+ 	if (config_methods & WPS_CONFIG_DISPLAY) {
+-		generated_pin = wps_generate_pin();
++		if (wps_generate_pin(&generated_pin) < 0) {
++			wpa_printf(MSG_DEBUG, "P2P: Could not generate PIN");
++			wpas_notify_p2p_provision_discovery(
++				wpa_s, peer, 0 /* response */,
++				P2P_PROV_DISC_INFO_UNAVAILABLE, 0, 0);
++			return;
++		}
+ 		wpas_prov_disc_local_display(wpa_s, peer, params,
+ 					     generated_pin);
+ 	} else if (config_methods & WPS_CONFIG_KEYPAD)
+@@ -2623,7 +2629,13 @@ static void wpas_prov_disc_resp(void *ctx, const u8 *peer, u16 config_methods)
+ 	if (config_methods & WPS_CONFIG_DISPLAY)
+ 		wpas_prov_disc_local_keypad(wpa_s, peer, params);
+ 	else if (config_methods & WPS_CONFIG_KEYPAD) {
+-		generated_pin = wps_generate_pin();
++		if (wps_generate_pin(&generated_pin) < 0) {
++			wpa_printf(MSG_DEBUG, "P2P: Could not generate PIN");
++			wpas_notify_p2p_provision_discovery(
++				wpa_s, peer, 0 /* response */,
++				P2P_PROV_DISC_INFO_UNAVAILABLE, 0, 0);
++			return;
++		}
+ 		wpas_prov_disc_local_display(wpa_s, peer, params,
+ 					     generated_pin);
+ 	} else if (config_methods & WPS_CONFIG_PUSHBUTTON)
+@@ -5366,7 +5378,8 @@ int wpas_p2p_connect(struct wpa_supplicant *wpa_s, const u8 *peer_addr,
+ 	if (pin)
+ 		os_strlcpy(wpa_s->p2p_pin, pin, sizeof(wpa_s->p2p_pin));
+ 	else if (wps_method == WPS_PIN_DISPLAY) {
+-		ret = wps_generate_pin();
++		if (wps_generate_pin((unsigned int *) &ret) < 0)
++			return -1;
+ 		res = os_snprintf(wpa_s->p2p_pin, sizeof(wpa_s->p2p_pin),
+ 				  "%08d", ret);
+ 		if (os_snprintf_error(sizeof(wpa_s->p2p_pin), res))
+diff --git a/wpa_supplicant/wps_supplicant.c b/wpa_supplicant/wps_supplicant.c
+index a39897d..07452ad 100644
+--- a/wpa_supplicant/wps_supplicant.c
++++ b/wpa_supplicant/wps_supplicant.c
+@@ -1236,7 +1236,10 @@ static int wpas_wps_start_dev_pw(struct wpa_supplicant *wpa_s,
+ 		os_snprintf(val, sizeof(val), "\"dev_pw_id=%u%s\"",
+ 			    dev_pw_id, hash);
+ 	} else {
+-		rpin = wps_generate_pin();
++		if (wps_generate_pin(&rpin) < 0) {
++			wpa_printf(MSG_DEBUG, "WPS: Could not generate PIN");
++			return -1;
++		}
+ 		os_snprintf(val, sizeof(val), "\"pin=%08d dev_pw_id=%u%s\"",
+ 			    rpin, dev_pw_id, hash);
+ 	}
+-- 
+cgit v0.12
+

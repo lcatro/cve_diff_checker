@@ -1,0 +1,36 @@
+From 14ac462a32ca4b3b78f56502ac976d5b0222ce3d Mon Sep 17 00:00:00 2001
+From: Mikhail Cheshkov <mcheshkov@gmail.com>
+Date: Thu, 6 Aug 2020 03:45:40 +0300
+Subject: [PATCH] Handle image size overflow
+
+---
+ src/PngImg.cc | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/PngImg.cc b/src/PngImg.cc
+index 17968ae..5a554a7 100644
+--- a/src/PngImg.cc
++++ b/src/PngImg.cc
+@@ -60,10 +60,20 @@ void PngImg::ReadInfo_(PngReadStruct& rs) {
+ ///
+ void PngImg::InitStorage_() {
+     rowPtrs_.resize(info_.height, nullptr);
+-    data_ = new png_byte[info_.height * info_.rowbytes];
++    // Extend height and rowbytes from uint32_t to size_t to avoid multiplication overflow when size_t is larger
++    size_t h = info_.height;
++    size_t rb = info_.rowbytes;
++    // We need to make sure that info_.height * info_.rowbytes will not overflow size_t
++    // Unfotunately, there's no simple and portable way to do this in C++
++    // For integer division of positive numbers a * b > c <==> a > c / b holds
++    if (h > std::numeric_limits<size_t>::max() / rb) {
++        // TODO Propagate this exception to JS, and test it
++        throw std::runtime_error("Image is too large to allocate single buffer");
++    }
++    data_ = new png_byte[h * rb];
+ 
+     for(size_t i = 0; i < info_.height; ++i) {
+-        rowPtrs_[i] = data_ + i * info_.rowbytes;
++        rowPtrs_[i] = data_ + i * rb;
+     }
+ }
+ 

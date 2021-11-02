@@ -1,0 +1,34 @@
+From f231ec511b9a09f43f49b2c7bb7c60b8046276b1 Mon Sep 17 00:00:00 2001
+From: Tobias Junghans <tobydox@veyon.io>
+Date: Tue, 1 Sep 2020 10:09:31 +0200
+Subject: [PATCH] WindowsServiceControl: quote service binary path
+
+Fix unquoted service path vulnerability.
+
+Closes #657.
+---
+ plugins/platform/windows/WindowsServiceControl.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/platform/windows/WindowsServiceControl.cpp b/plugins/platform/windows/WindowsServiceControl.cpp
+index be047a998..ea505d8fa 100644
+--- a/plugins/platform/windows/WindowsServiceControl.cpp
++++ b/plugins/platform/windows/WindowsServiceControl.cpp
+@@ -158,6 +158,8 @@ bool WindowsServiceControl::stop()
+ 
+ bool WindowsServiceControl::install( const QString& filePath, const QString& displayName  )
+ {
++	const auto binaryPath = QStringLiteral("\"%1\"").arg( QString( filePath ).replace( QLatin1Char('"'), QString() ) );
++
+ 	m_serviceHandle = CreateService(
+ 				m_serviceManager,		// SCManager database
+ 				WindowsCoreFunctions::toConstWCharArray( m_name ),	// name of service
+@@ -167,7 +169,7 @@ bool WindowsServiceControl::install( const QString& filePath, const QString& dis
+ 				// service type
+ 				SERVICE_AUTO_START,	// start type
+ 				SERVICE_ERROR_NORMAL,	// error control type
+-				WindowsCoreFunctions::toConstWCharArray( filePath ),		// service's binary
++				WindowsCoreFunctions::toConstWCharArray( binaryPath ),		// service's binary
+ 				nullptr,			// no load ordering group
+ 				nullptr,			// no tag identifier
+ 				L"Tcpip\0RpcSs\0\0",		// dependencies

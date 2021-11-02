@@ -1,0 +1,56 @@
+From 01191c7a1b8d5032991ed9d88e0db8d3dbec744d Mon Sep 17 00:00:00 2001
+From: Adam Warner <me@adamwarner.co.uk>
+Date: Sat, 23 Oct 2021 19:26:07 +0100
+Subject: [PATCH] Merge pull request from GHSA-mhr8-7rvg-8r43
+
+* Prevent possible XSS attack vector on add_client
+Update JS code to prevent possible XSS vector
+
+Co-authored-by: Harold Kim <root@stypr.com>
+Signed-off-by: Adam Warner <me@adamwarner.co.uk>
+
+* Fix both addClient and deleteClient to prevent XSS
+
+Signed-off-by: Harold Kim <root@stypr.com>
+
+Co-authored-by: Harold Kim <root@stypr.com>
+---
+ scripts/pi-hole/js/groups-clients.js | 4 ++--
+ scripts/pi-hole/php/groups.php       | 2 ++
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/pi-hole/js/groups-clients.js b/scripts/pi-hole/js/groups-clients.js
+index 07432638c..268017d59 100644
+--- a/scripts/pi-hole/js/groups-clients.js
++++ b/scripts/pi-hole/js/groups-clients.js
+@@ -260,7 +260,7 @@ function initTable() {
+ }
+ 
+ function addClient() {
+-  var ip = $("#select").val().trim();
++  var ip = utils.escapeHtml($("#select").val().trim());
+   var comment = utils.escapeHtml($("#new_comment").val());
+ 
+   utils.disableAll();
+@@ -385,7 +385,7 @@ function editClient() {
+ function deleteClient() {
+   var tr = $(this).closest("tr");
+   var id = tr.attr("data-id");
+-  var ip = tr.find("#ip_" + id).text();
++  var ip = utils.escapeHtml(tr.find("#ip_" + id).text());
+   var name = utils.escapeHtml(tr.find("#name_" + id).text());
+ 
+   if (name.length > 0) {
+diff --git a/scripts/pi-hole/php/groups.php b/scripts/pi-hole/php/groups.php
+index c7d61d811..29b8b5c86 100644
+--- a/scripts/pi-hole/php/groups.php
++++ b/scripts/pi-hole/php/groups.php
+@@ -347,6 +347,8 @@ function JSON_error($message = null)
+         }
+ 
+         foreach ($ips as $ip) {
++            // Encode $ip variable to prevent XSS
++            $ip = htmlspecialchars($ip);
+             // Silently skip this entry when it is empty or not a string (e.g. NULL)
+             if(!is_string($ip) || strlen($ip) == 0) {
+                 continue;

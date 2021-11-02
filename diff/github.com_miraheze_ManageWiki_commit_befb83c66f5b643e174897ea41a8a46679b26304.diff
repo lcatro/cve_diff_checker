@@ -1,0 +1,39 @@
+From befb83c66f5b643e174897ea41a8a46679b26304 Mon Sep 17 00:00:00 2001
+From: Universal Omega <54654040+Universal-Omega@users.noreply.github.com>
+Date: Wed, 28 Apr 2021 13:33:37 -0600
+Subject: [PATCH] Merge pull request from GHSA-jmc9-rv2f-g8vv
+
+The ManageWiki API currently allows viewing of sensitive information set as visible to only ManageWiki right users, such as Discord and Slack webhooks. This fixes it by adding a check to the API, to hide it if the config has set `$wgManageWikiSettings[SETTING]['requires']['visibility']['permissions']` so information on sensitive settings are never displayed via the API.
+
+See https://phabricator.miraheze.org/T7213
+---
+ includes/api/ApiQueryWikiConfig.php | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/includes/api/ApiQueryWikiConfig.php b/includes/api/ApiQueryWikiConfig.php
+index 187972052..19394a7b2 100644
+--- a/includes/api/ApiQueryWikiConfig.php
++++ b/includes/api/ApiQueryWikiConfig.php
+@@ -1,4 +1,7 @@
+ <?php
++
++use MediaWiki\MediaWikiServices;
++
+ class ApiQueryWikiConfig extends ApiQueryBase {
+ 	public function __construct( $query, $moduleName ) {
+ 		parent::__construct( $query, $moduleName, 'wcf' );
+@@ -31,6 +34,14 @@ public function execute() {
+ 			$mwSet = new ManageWikiSettings( $wiki );
+ 			if ( isset( $prop['settings'] ) ) {
+ 				$wikiData['settings'] = $mwSet->list();
++				
++				$config = MediaWikiServices::getInstance()->getConfigFactory()->makeConfig( 'managewiki' );
++	
++				foreach ( $config->get( 'ManageWikiSettings' ) as $setting => $options ) {
++					if ( isset( $options['requires']['visibility']['permissions'] ) ) {
++						unset( $wikiData['settings'][$setting] );
++					}
++				}
+ 			}
+ 
+ 			$mwExt = new ManageWikiExtensions( $wiki );

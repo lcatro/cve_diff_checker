@@ -1,0 +1,1205 @@
+From c2808a0493243f618bbbb3459af23c7da3dc5485 Mon Sep 17 00:00:00 2001
+From: Brady Miller <brady.g.miller@gmail.com>
+Date: Sun, 8 Jul 2018 22:50:15 -0700
+Subject: [PATCH] security fixes
+
+---
+ ccdaservice/ccda_gateway.php                  |   4 +-
+ interface/billing/sl_eob_search.php           |  30 +-
+ .../de_identification_screen2.php             |   6 +-
+ .../find_code_popup.php                       |  18 +-
+ .../find_drug_popup.php                       |  44 +--
+ .../find_immunization_popup.php               |   8 +-
+ interface/fax/fax_dispatch.php                |   2 +-
+ interface/fax/faxq.php                        |   2 +-
+ interface/main/daemon_frame.php               |   2 +-
+ .../patient_file/encounter/search_code.php    |  14 +-
+ interface/super/manage_site_files.php         |   5 +
+ library/forms.inc                             |   4 +-
+ library/registry.inc                          |   4 +-
+ patients/add_edit_event_user.php              |  24 +-
+ patients/find_appt_popup_user.php             |  12 +-
+ portal/add_edit_event_user.php                | 283 +++++++++---------
+ portal/find_appt_popup_user.php               |  26 +-
+ 17 files changed, 246 insertions(+), 242 deletions(-)
+
+diff --git a/ccdaservice/ccda_gateway.php b/ccdaservice/ccda_gateway.php
+index fee7faeae22..6efc575bec3 100644
+--- a/ccdaservice/ccda_gateway.php
++++ b/ccdaservice/ccda_gateway.php
+@@ -128,10 +128,10 @@ function checkService($ip = "localhost", $port = '6661')
+     if ($result === false) {
+         $path = $GLOBALS['fileroot'] . "/ccdaservice";
+         if (IS_WINDOWS) {
+-            $cmd = "node " . $path . "/serveccda.js";
++            $cmd = "node " . escapeshellarg($path . "/serveccda.js");
+             pclose(popen("start /B " . $cmd, "r"));
+         } else {
+-            $cmd = "nodejs " . $path . "/serveccda.js";
++            $cmd = "nodejs " . escapeshellarg($path . "/serveccda.js");
+             exec($cmd . " > /dev/null &");
+         }
+         sleep(2); // give cpu a rest
+diff --git a/interface/billing/sl_eob_search.php b/interface/billing/sl_eob_search.php
+index cc520babfb4..b7ec69064be 100644
+--- a/interface/billing/sl_eob_search.php
++++ b/interface/billing/sl_eob_search.php
+@@ -560,7 +560,7 @@ function upload_file_to_client_pdf($file_to_send, $aPatFirstName = '', $aPatID =
+         if ($DEBUG) {
+             $alertmsg = xl("Printing skipped; see test output in") .' '. $STMT_TEMP_FILE;
+         } else {
+-            exec("$STMT_PRINT_CMD $STMT_TEMP_FILE");
++            exec(escapeshellcmd($STMT_PRINT_CMD) . " " . escapeshellarg($STMT_TEMP_FILE));
+             if ($_POST['form_without']) {
+                 $alertmsg = xl('Now printing') .' '. $stmt_count .' '. xl('statements; invoices will not be updated.');
+             } else {
+@@ -705,13 +705,13 @@ function npopup(pid) {
+                         &nbsp;<span><?php echo xlt('Select Method');?></span>&nbsp;<i id='select-method-tooltip' class="fa fa-info-circle oe-superscript" aria-hidden="true"></i>
+                         <div id="radio-div" class="pull-right oe-legend-radio">
+                                 <label class="radio-inline">
+-                                  <input type="radio" id="invoice_search" name="radio-search" onclick="" value="inv-search"><?php echo xlt('Invoice Search'); ?> 
++                                  <input type="radio" id="invoice_search" name="radio-search" onclick="" value="inv-search"><?php echo xlt('Invoice Search'); ?>
+                                 </label>
+                                 <label class="radio-inline">
+                                   <input type="radio" id="era_upload" name="radio-search" onclick=""  value="era-upld"><?php echo xlt('ERA Upload'); ?>
+                                 </label>
+                         </div>
+-                        
++
+                         <input type="hidden" id="hid1" value="<?php echo xlt('Invoice Search');?>">
+                         <input type="hidden" id="hid2" value="<?php echo xlt('ERA Upload');?>">
+                         <input type="hidden" id="hid3" value="<?php echo xlt('Select Method');?>">
+@@ -755,11 +755,11 @@ function npopup(pid) {
+                     </div>
+                     <div class="col-xs-12 .oe-custom-line oe-show-hide" id = 'era-upld'>
+                         <div class="form-group col-xs9 oe-file-div">
+-                            <div class="input-group"> 
++                            <div class="input-group">
+                                 <label class="input-group-btn">
+                                     <span class="btn btn-default">
+                                         Browse&hellip;<input type="file" id="uploadedfile" name="form_erafile" style="display: none;" >
+-                                        <input name="MAX_FILE_SIZE" type="hidden" value="5000000"> 
++                                        <input name="MAX_FILE_SIZE" type="hidden" value="5000000">
+                                     </span>
+                                 </label>
+                                 <input type="text" class="form-control" placeholder="<?php echo xlt('Click Browse and select one Electronic Remittance Advice (ERA) file...'); ?>" readonly>
+@@ -771,9 +771,9 @@ function npopup(pid) {
+                 <div class="form-group clearfix">
+                     <div class="col-sm-12 position-override oe-show-hide" id="search-btn">
+                         <div class="btn-group" role="group">
+-                            <button type='submit' class="btn btn-default btn-search oe-show-hide" name='form_search' 
++                            <button type='submit' class="btn btn-default btn-search oe-show-hide" name='form_search'
+                             id="btn-inv-search" value='<?php echo xla("Search"); ?>'><?php echo xlt("Search"); ?></button>
+-                            <button type='submit' class="btn btn-default btn-save oe-show-hide" name='form_search' 
++                            <button type='submit' class="btn btn-default btn-save oe-show-hide" name='form_search'
+                             id="btn-era-upld" value='<?php echo xla("Upload"); ?>'><?php echo xlt("Upload"); ?></button>
+                         </div>
+                     </div>
+@@ -802,7 +802,7 @@ function npopup(pid) {
+                                     exec("unzip -p $tmp_name.zip > $tmp_name");
+                                     unlink("$tmp_name.zip");
+                                 }
+-                                
++
+                                 echo "<!-- Notes from ERA upload processing:\n";
+                                 $alertmsg .= parse_era($tmp_name, 'era_callback');
+                                 echo "-->\n";
+@@ -1055,14 +1055,14 @@ function npopup(pid) {
+                                 <button type="button" class="btn btn-default btn-undo" name="Submit2"
+                                 onclick='checkAll(false)'><?php echo xlt('Clear All');?></button>
+                                 <?php if ($GLOBALS['statement_appearance'] != '1') { ?>
+-                                    <button type="submit" class="btn btn-default btn-print" name='form_print' 
++                                    <button type="submit" class="btn btn-default btn-print" name='form_print'
+                                     value="<?php echo xla('Print Selected Statements'); ?>">
+                                     <?php echo xlt('Print Selected Statements');?></button>
+-                                    <button type="submit" class="btn btn-default btn-download" name='form_download' 
++                                    <button type="submit" class="btn btn-default btn-download" name='form_download'
+                                     value="<?php echo xla('Download Selected Statements'); ?>">
+                                     <?php echo xlt('Download Selected Statements');?></button>
+                                 <?php } ?>
+-                                    <button type="submit" class="btn btn-default btn-download" name='form_pdf' 
++                                    <button type="submit" class="btn btn-default btn-download" name='form_pdf'
+                                     value="<?php echo xla('PDF Download Selected Statements'); ?>">
+                                     <?php echo xlt('PDF Download Selected Statements');?></button>
+                                     <button type="submit" class="btn btn-default btn-mail" name='form_download'
+@@ -1093,7 +1093,7 @@ function npopup(pid) {
+         //help_modal.php lives in interface, set path accordingly
+         require_once "../help_modal.php";
+     }
+-    ?> 
++    ?>
+     <script language="JavaScript">
+     function processERA() {
+      var f = document.forms[0];
+@@ -1117,10 +1117,10 @@ function processERA() {
+             $(':file').on('fileselect', function(event, numFiles, label) {
+                 var input = $(this).parents('.input-group').find(':text'),
+                 log = numFiles > 1 ? numFiles + ' files selected' : label;
+-                
++
+                 if( input.length ) {
+                 input.val(log);
+-                } 
++                }
+                 else {
+                 if( log ) alert(log);
+                 }
+@@ -1196,6 +1196,6 @@ function processERA() {
+     <?php
+     }
+     ?>
+-    
++
+ </body>
+ </html>
+diff --git a/interface/de_identification_forms/de_identification_screen2.php b/interface/de_identification_forms/de_identification_screen2.php
+index 6ba69287187..5f436517c30 100644
+--- a/interface/de_identification_forms/de_identification_screen2.php
++++ b/interface/de_identification_forms/de_identification_screen2.php
+@@ -106,9 +106,9 @@
+     if ($row = sqlFetchArray($res)) {
+         $no_of_items = addslashes($row['count']);
+         if ($no_of_items == 0) {
+-            $cmd="cp ".$GLOBALS['webserver_root']."/sql/metadata_de_identification.txt ".$GLOBALS['temporary_files_dir']."/metadata_de_identification.txt";
++            $cmd="cp " . escapeshellarg($GLOBALS['webserver_root']."/sql/metadata_de_identification.txt") . " " . escapeshellarg($GLOBALS['temporary_files_dir']."/metadata_de_identification.txt");
+             $output3=shell_exec($cmd);
+-            $query = "LOAD DATA INFILE '".$GLOBALS['temporary_files_dir']."/metadata_de_identification.txt' INTO TABLE metadata_de_identification FIELDS TERMINATED BY ','  LINES TERMINATED BY '\n'";
++            $query = "LOAD DATA INFILE '" . add_escape_custom($GLOBALS['temporary_files_dir']) ."/metadata_de_identification.txt' INTO TABLE metadata_de_identification FIELDS TERMINATED BY ','  LINES TERMINATED BY '\n'";
+             $res = sqlStatement($query);
+         }
+     }
+@@ -202,7 +202,7 @@
+ 
+                         $timestamp = str_replace(" ", "_", $timestamp);
+                         $de_identified_file = $GLOBALS['temporary_files_dir']."/de_identified_data".$timestamp.".xls";
+-                        $query = "update de_identification_status set last_available_de_identified_data_file = '" . $de_identified_file . "'";
++                        $query = "update de_identification_status set last_available_de_identified_data_file = '" . add_escape_custom($de_identified_file) . "'";
+                         $res = sqlStatement($query);
+                         $query = "select * from de_identified_data into outfile '$de_identified_file' ";
+                         $res = sqlStatement($query);
+diff --git a/interface/de_identification_forms/find_code_popup.php b/interface/de_identification_forms/find_code_popup.php
+index 16c40086735..ebedfaaaf03 100644
+--- a/interface/de_identification_forms/find_code_popup.php
++++ b/interface/de_identification_forms/find_code_popup.php
+@@ -172,11 +172,11 @@ function check_search_str()
+     if ($form_code_type == 'PROD') {
+         $query = "SELECT dt.drug_id, dt.selector, d.name " .
+         "FROM drug_templates AS dt, drugs AS d WHERE " .
+-        "( d.name LIKE '%$search_term%' OR " .
+-        "dt.selector LIKE '%$search_term%' ) " .
++        "( d.name LIKE ? OR " .
++        "dt.selector LIKE ? ) " .
+         "AND d.drug_id = dt.drug_id " .
+         "ORDER BY d.name, dt.selector, dt.drug_id";
+-        $res = sqlStatement($query);
++        $res = sqlStatement($query, array('%'.$search_term.'%', '%'.$search_term.'%'));
+         $row_count = 0;
+         while ($row = sqlFetchArray($res)) {
+             $row_count = $row_count + 1;
+@@ -188,9 +188,9 @@ function check_search_str()
+         }
+     } else {
+         $query = "SELECT count(*) as count FROM codes " .
+-        "WHERE (code_text LIKE '%$search_term%' OR " .
+-        "code LIKE '%$search_term%') " ;
+-        $res = sqlStatement($query);
++        "WHERE (code_text LIKE ? OR " .
++        "code LIKE ?) " ;
++        $res = sqlStatement($query, array('%'.$search_term.'%', '%'.$search_term.'%'));
+         if ($row = sqlFetchArray($res)) {
+             $no_of_items = addslashes($row['count']);
+             if ($no_of_items < 1) {
+@@ -206,11 +206,11 @@ function check_search_str()
+             }
+ 
+             $query = "SELECT code_type, code, modifier, code_text FROM codes " .
+-            "WHERE (code_text LIKE '%$search_term%' OR " .
+-            "code LIKE '%$search_term%') " .
++            "WHERE (code_text LIKE ? OR " .
++            "code LIKE ?) " .
+             "ORDER BY code";
+           // echo "\n<!-- $query -->\n"; // debugging
+-            $res = sqlStatement($query);
++            $res = sqlStatement($query, array('%'.$search_term.'%', '%'.$search_term.'%'));
+             $row_count = 0;
+             while ($row = sqlFetchArray($res)) {
+                 $row_count = $row_count + 1;
+diff --git a/interface/de_identification_forms/find_drug_popup.php b/interface/de_identification_forms/find_drug_popup.php
+index e405cef8f18..82fde32770c 100644
+--- a/interface/de_identification_forms/find_drug_popup.php
++++ b/interface/de_identification_forms/find_drug_popup.php
+@@ -38,14 +38,14 @@
+ <script language="JavaScript">
+ //pass value selected to the parent window
+  function window_submit(chk)
+- { 
++ {
+   var str;
+   var len=chk.length;
+-  if (len==undefined && chk.checked==1) 
++  if (len==undefined && chk.checked==1)
+   {
+     if(!str)
+       str = chk.value;
+-    else  
++    else
+     str = "#"+chk.value;
+   }
+   else
+@@ -56,7 +56,7 @@ function window_submit(chk)
+     {
+      if(!str)
+       str = chk[pr].value;
+-     else 
++     else
+       str = str+"#"+chk[pr].value;
+     }
+    }
+@@ -67,16 +67,16 @@ function window_submit(chk)
+    alert("<?php echo xl('The destination form was closed')?>");
+   else
+    opener.set_related(str,"drugs");
+-   
++
+   window.close();
+-  
++
+  }
+- 
++
+ function window_close(chk)
+ {
+  window.close();
+ }
+- 
++
+ function chkbox_select_none(chk)
+ {
+  var len=chk.length;
+@@ -112,8 +112,8 @@ function check_search_str()
+   return false;
+  }
+  top.restoreSession();
+- return true; 
+-}   
++ return true;
++}
+ 
+ </script>
+ </head>
+@@ -133,7 +133,7 @@ function check_search_str()
+    <input type='text' name='search_term' id='search_term' size='12' value='<?php echo $_REQUEST['search_term']; ?>'
+     title='<?php xl('Any part of the drug id or drug name', 'e'); ?>' />
+    &nbsp;
+-   <input type='submit' name='bn_search' id='bn_search' value='<?php xl('Search', 'e'); ?>' />  
++   <input type='submit' name='bn_search' id='bn_search' value='<?php xl('Search', 'e'); ?>' />
+    </b>
+   </td>
+  </tr>
+@@ -152,9 +152,9 @@ function check_search_str()
+     $search_term = $_REQUEST['search_term'];
+     {
+     $query = "SELECT count(*) as count FROM drugs " .
+-      "WHERE (drug_id LIKE '%$search_term%' OR " .
+-      "name LIKE '%$search_term%') ";
+-    $res = sqlStatement($query);
++      "WHERE (drug_id LIKE ? OR " .
++      "name LIKE ?) ";
++    $res = sqlStatement($query, array('%'.$search_term.'%', '%'.$search_term.'%'));
+     if ($row = sqlFetchArray($res)) {
+         $no_of_items = addslashes($row['count']);
+         if ($no_of_items < 1) {
+@@ -165,15 +165,15 @@ function check_search_str()
+             echo xl('Please enter new search string');?>");
+         document.theform.search_term.value=" ";
+         document.theform.search_term.focus();
+-        </script>    
++        </script>
+         <?php
+         }
+ 
+         $query = "SELECT drug_id, name FROM drugs " .
+-        "WHERE (drug_id LIKE '%$search_term%' OR " .
+-        "name LIKE '%$search_term%') " .
++        "WHERE (drug_id LIKE ? OR " .
++        "name LIKE ?) " .
+         "ORDER BY drug_id";
+-        $res = sqlStatement($query);
++        $res = sqlStatement($query, array('%'.$search_term.'%', '%'.$search_term.'%'));
+         $row_count = 0;
+         while ($row = sqlFetchArray($res)) {
+               $row_count = $row_count + 1;
+@@ -191,13 +191,13 @@ function check_search_str()
+  </table>
+ <center>
+  <input type='button' name='select_all' value='<?php xl('Select All', 'e'); ?>' onclick="chkbox_select_all(document.select_drug.chkbox);"/>
+- 
++
+  <input type='button' name='unselect_all' value='<?php xl('Unselect All', 'e'); ?>' onclick="chkbox_select_none(document.select_drug.chkbox);"/>
+- 
++
+  <input type='button' name='submit' value='<?php xl('Submit', 'e'); ?>' onclick="window_submit(document.select_drug.chkbox);"/>
+- 
++
+  <input type='button' name='cancel' value='<?php xl('Cancel', 'e'); ?>' onclick="window_close();"/>
+-</center> 
++</center>
+ <?php } ?>
+ </form>
+ </body>
+diff --git a/interface/de_identification_forms/find_immunization_popup.php b/interface/de_identification_forms/find_immunization_popup.php
+index f03e17614dc..85e57565cc6 100644
+--- a/interface/de_identification_forms/find_immunization_popup.php
++++ b/interface/de_identification_forms/find_immunization_popup.php
+@@ -144,8 +144,8 @@ function check_search_str()
+   $search_term = $_REQUEST['search_term'];
+   {
+     $query = "SELECT count(*) as count FROM list_options " .
+-      "WHERE (list_id = 'immunizations' and title LIKE '%$search_term%' AND activity = 1) " ;
+-    $res = sqlStatement($query);
++      "WHERE (list_id = 'immunizations' and title LIKE ? AND activity = 1) " ;
++    $res = sqlStatement($query, array('%'.$search_term.'%'));
+ if ($row = sqlFetchArray($res)) {
+     $no_of_items = addslashes($row['count']);
+     if ($no_of_items < 1) {
+@@ -161,9 +161,9 @@ function check_search_str()
+     }
+ 
+     $query = "SELECT option_id,title FROM list_options " .
+-    "WHERE (list_id = 'immunizations' and title LIKE '%$search_term%' AND activity = 1) " .
++    "WHERE (list_id = 'immunizations' and title LIKE ? AND activity = 1) " .
+     "ORDER BY title";
+-    $res = sqlStatement($query);
++    $res = sqlStatement($query, array('%'.$search_term.'%'));
+     $row_count = 0;
+     while ($row = sqlFetchArray($res)) {
+         $row_count = $row_count + 1;
+diff --git a/interface/fax/fax_dispatch.php b/interface/fax/fax_dispatch.php
+index c4eeff9a4a2..4cc71a070e6 100644
+--- a/interface/fax/fax_dispatch.php
++++ b/interface/fax/fax_dispatch.php
+@@ -314,7 +314,7 @@ function mergeTiffs()
+         $cpstring = str_replace('{MESSAGE}', $form_message, $cpstring);
+         fwrite($tmph, $cpstring);
+         fclose($tmph);
+-        $tmp0 = exec("cd $webserver_root/custom; " . $GLOBALS['hylafax_enscript'] .
++        $tmp0 = exec("cd $webserver_root/custom; " . escapeshellcmd($GLOBALS['hylafax_enscript']) .
+         " -o $tmpfn2 $tmpfn1", $tmp1, $tmp2);
+         if ($tmp2) {
+               $info_msg .= "enscript returned $tmp2: $tmp0 ";
+diff --git a/interface/fax/faxq.php b/interface/fax/faxq.php
+index 6b6ad130909..947281ecfb9 100644
+--- a/interface/fax/faxq.php
++++ b/interface/fax/faxq.php
+@@ -29,7 +29,7 @@
+ if ($GLOBALS['enable_hylafax']) {
+ // Get the recvq entries, parse and sort by filename.
+     $statlines = array();
+-    exec("faxstat -r -l -h " . $GLOBALS['hylafax_server'], $statlines);
++    exec("faxstat -r -l -h " . escapeshellarg($GLOBALS['hylafax_server']), $statlines);
+     foreach ($statlines as $line) {
+         // This gets pagecount, sender, time, filename.  We are expecting the
+         // string to start with "-rw-rw-" so as to exclude faxes not yet fully
+diff --git a/interface/main/daemon_frame.php b/interface/main/daemon_frame.php
+index bee67e1894e..13f4d754750 100644
+--- a/interface/main/daemon_frame.php
++++ b/interface/main/daemon_frame.php
+@@ -24,7 +24,7 @@
+  $faxcount = 0;
+ if ($GLOBALS['enable_hylafax']) {
+     $statlines = array();
+-    exec("faxstat -r -l -h " . $GLOBALS['hylafax_server'], $statlines);
++    exec("faxstat -r -l -h " . escapeshellarg($GLOBALS['hylafax_server']), $statlines);
+     foreach ($statlines as $line) {
+         if (substr($line, 0, 1) == '-') {
+             ++$faxcount;
+diff --git a/interface/patient_file/encounter/search_code.php b/interface/patient_file/encounter/search_code.php
+index 4e8d038be16..f94c53256ff 100644
+--- a/interface/patient_file/encounter/search_code.php
++++ b/interface/patient_file/encounter/search_code.php
+@@ -4,8 +4,8 @@
+ // THIS MODULE REPLACES cptcm_codes.php, hcpcs_codes.php AND icd9cm_codes.php.
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-include_once("../../globals.php");
+-include_once("../../../custom/code_types.inc.php");
++require_once("../../globals.php");
++require_once("../../../custom/code_types.inc.php");
+ 
+ //the maximum number of records to pull out with the search:
+ $M = 30;
+@@ -58,18 +58,18 @@
+ 
+   // The above is obsolete now, fees come from the prices table:
+     $sql = "SELECT codes.*, prices.pr_price FROM codes " .
+-    "LEFT OUTER JOIN patient_data ON patient_data.pid = '$pid' " .
++    "LEFT OUTER JOIN patient_data ON patient_data.pid = ? " .
+     "LEFT OUTER JOIN prices ON prices.pr_id = codes.id AND " .
+     "prices.pr_selector = '' AND " .
+     "prices.pr_level = patient_data.pricelevel " .
+-    "WHERE (code_text LIKE '%" . $_POST["text"] . "%' OR " .
+-    "code LIKE '%" . $_POST["text"] . "%') AND " .
+-    "code_type = '" . $code_types[$code_type]['id'] . "' " .
++    "WHERE (code_text LIKE ? OR " .
++    "code LIKE ?) AND " .
++    "code_type = ? " .
+     "ORDER BY code ".
+     " LIMIT " . ($M + 1).
+     "";
+ 
+-    if ($res = sqlStatement($sql)) {
++    if ($res = sqlStatement($sql, array($pid, "%".$_POST["text"]."%", "%".$_POST["text"]."%", $code_types[$code_type]['id']))) {
+         for ($iter=0; $row=sqlFetchArray($res); $iter++) {
+             $result[$iter] = $row;
+         }
+diff --git a/interface/super/manage_site_files.php b/interface/super/manage_site_files.php
+index 2543d7a4df0..c0b5b4e7bba 100644
+--- a/interface/super/manage_site_files.php
++++ b/interface/super/manage_site_files.php
+@@ -70,6 +70,11 @@
+             die(htmlspecialchars(xl('Cannot find a destination filename')));
+         }
+ 
++        $path_parts = pathinfo($form_dest_filename);
++        if (in_array(strtolower($path_parts['extension']), array('gif','jpg','jpe','jpeg','png','svg'))) {
++            die(xl('Only images files are accepted'));
++        }
++
+         $imagepath = "$imagedir/$form_dest_filename";
+         // If the site's image directory does not yet exist, create it.
+         if (!is_dir($imagedir)) {
+diff --git a/library/forms.inc b/library/forms.inc
+index df91b37d432..abf79c15eb4 100644
+--- a/library/forms.inc
++++ b/library/forms.inc
+@@ -164,8 +164,8 @@ function getProviderIdOfEncounter($encounter)
+ {
+         global $attendant_type;
+         $table = $attendant_type == 'pid' ? 'form_encounter' : 'form_groups_encounter';
+-        $sql = "select provider_id from $table where encounter='$encounter' order by date";
+-        $res = sqlQuery($sql);
++        $sql = "select provider_id from $table where encounter=? order by date";
++        $res = sqlQuery($sql, array($encounter));
+         return $res['provider_id'];
+ }
+ 
+diff --git a/library/registry.inc b/library/registry.inc
+index ede859aac94..c4e81ac8304 100644
+--- a/library/registry.inc
++++ b/library/registry.inc
+@@ -58,8 +58,8 @@ function getRegistered($state = "1", $limit = "unlimited", $offset = "0")
+ 
+ function getRegistryEntry($id, $cols = "*")
+ {
+-    $sql = "select $cols from registry where id='$id'";
+-    return sqlQuery($sql);
++    $sql = "select $cols from registry where id=?";
++    return sqlQuery($sql, array($id));
+ }
+ 
+ function getRegistryEntryByDirectory($directory, $cols = "*")
+diff --git a/patients/add_edit_event_user.php b/patients/add_edit_event_user.php
+index 874cd198d12..b267a229bd8 100644
+--- a/patients/add_edit_event_user.php
++++ b/patients/add_edit_event_user.php
+@@ -127,7 +127,7 @@
+     $facility = sqlQuery("SELECT pc_facility, pc_multiple, pc_aid, facility.name
+                             FROM openemr_postcalendar_events
+                               LEFT JOIN facility ON (openemr_postcalendar_events.pc_facility = facility.id)
+-                              WHERE pc_eid = $eid");
++                              WHERE pc_eid = ?", array($eid));
+     if (!$facility['pc_facility']) {
+         $qmin = sqlQuery("SELECT facility_id as minId, facility FROM users WHERE id = ".$facility['pc_aid']);
+         $min  = $qmin['minId'];
+@@ -141,7 +141,7 @@
+ 
+         // EOS multiple
+ 
+-        sqlStatement("UPDATE openemr_postcalendar_events SET pc_facility = $min WHERE pc_eid = $eid");
++        sqlStatement("UPDATE openemr_postcalendar_events SET pc_facility = ? WHERE pc_eid = ?", array($min, $eid));
+         $e2f = $min;
+         $e2f_name = $min_name;
+     } else {
+@@ -298,7 +298,7 @@
+ ========================================================*/
+     if ($eid) {
+         // what is multiple key around this $eid?
+-        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+ 
+         if ($GLOBALS['select_multi_providers'] && $row['pc_multiple']) {
+             /* ==========================================
+@@ -408,7 +408,7 @@
+                 "pc_apptstatus = '"  . $_POST['form_apptstatus']           . "', "  .
+                 "pc_prefcatid = '"   . $_POST['form_prefcat']              . "' ,"  .
+                  "pc_facility = '"   .(int)$_POST['facility']               ."' "  . // FF stuff
+-                "WHERE pc_eid = '$eid'");
++                "WHERE pc_eid = '" . add_escape_custom($eid) . "'");
+         }
+ 
+     // =======================================
+@@ -546,18 +546,18 @@
+       // =======================================
+     if ($GLOBALS['select_multi_providers']) {
+         // what is multiple key around this $eid?
+-        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+         if ($row['pc_multiple']) {
+             sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_multiple = {$row['pc_multiple']}");
+         } else {
+-                        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++                        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+         }
+ 
+         // =======================================
+         //  EOS multi providers case
+         // =======================================
+     } else {
+-        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = '$eid'");
++        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+     }
+ }
+ 
+@@ -603,7 +603,7 @@
+ 
+ // If we are editing an existing event, then get its data.
+ if ($eid) {
+-    $row = sqlQuery("SELECT * FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++    $row = sqlQuery("SELECT * FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+     $date = $row['pc_eventDate'];
+     $userid = $row['pc_aid'];
+     $patientid = $row['pc_pid'];
+@@ -631,7 +631,7 @@
+  // If we have a patient ID, get the name and phone numbers to display.
+ if ($patientid) {
+     $prow = sqlQuery("SELECT lname, fname, phone_home, phone_biz, DOB " .
+-        "FROM patient_data WHERE pid = '" . $patientid . "'");
++        "FROM patient_data WHERE pid = ?", array($patientid));
+     $patientname = $prow['lname'] . ", " . $prow['fname'];
+     if ($prow['phone_home']) {
+         $patienttitle .= " H=" . $prow['phone_home'];
+@@ -650,7 +650,7 @@
+ //(CHEMED)
+ //Set default facility for a new event based on the given 'userid'
+ if ($userid) {
+-    $pref_facility = sqlFetchArray(sqlStatement("SELECT facility_id, facility FROM users WHERE id = $userid"));
++    $pref_facility = sqlFetchArray(sqlStatement("SELECT facility_id, facility FROM users WHERE id = ?", array($userid)));
+     $e2f = $pref_facility['facility_id'];
+     $e2f_name = $pref_facility['facility'];
+ }
+@@ -941,7 +941,7 @@ function deleteEvent() {
+ 
+ <body class="body_top" onunload='imclosing()' onload='categoryChanged()'>
+ 
+-<form method='post' name='theform' id='theform' action='add_edit_event_user.php?eid=<?php echo $eid ?>' />
++<form method='post' name='theform' id='theform' action='add_edit_event_user.php?eid=<?php echo attr($eid); ?>' />
+ <input type="hidden" name="form_action" id="form_action" value="">
+ <center>
+ 
+@@ -995,7 +995,7 @@ function deleteEvent() {
+   </td>
+   <td nowrap>
+    <input type='text' size='10' id='form_patient' name='form_patient' style='width:100%;' value='<?php echo $patientname ?>' title='Patient' readonly />
+-   <input type='hidden' name='form_pid' value='<?php echo $patientid ?>' />
++   <input type='hidden' name='form_pid' value='<?php echo attr($patientid); ?>' />
+   </td>
+   <td nowrap>
+    &nbsp;
+diff --git a/patients/find_appt_popup_user.php b/patients/find_appt_popup_user.php
+index a543d1aff0b..97dbd7931e3 100644
+--- a/patients/find_appt_popup_user.php
++++ b/patients/find_appt_popup_user.php
+@@ -97,7 +97,7 @@ function doOneDay($catid, $udate, $starttime, $duration, $prefcatid)
+ 
+  $catslots = 1;
+ if ($input_catid) {
+-    $srow = sqlQuery("SELECT pc_duration FROM openemr_postcalendar_categories WHERE pc_catid = '$input_catid'");
++    $srow = sqlQuery("SELECT pc_duration FROM openemr_postcalendar_categories WHERE pc_catid = ?", array($input_catid));
+     if ($srow['pc_duration']) {
+         $catslots = ceil($srow['pc_duration'] / $slotsecs);
+     }
+@@ -158,10 +158,10 @@ function doOneDay($catid, $udate, $starttime, $duration, $prefcatid)
+     $query = "SELECT pc_eventDate, pc_endDate, pc_startTime, pc_duration, " .
+     "pc_recurrtype, pc_recurrspec, pc_alldayevent, pc_catid, pc_prefcatid, pc_title " .
+     "FROM openemr_postcalendar_events " .
+-    "WHERE pc_aid = '$providerid' AND " .
+-    "((pc_endDate >= '$sdate' AND pc_eventDate < '$edate') OR " .
+-    "(pc_endDate = '0000-00-00' AND pc_eventDate >= '$sdate' AND pc_eventDate < '$edate'))";
+-    $res = sqlStatement($query);
++    "WHERE pc_aid = ? AND " .
++    "((pc_endDate >= ? AND pc_eventDate < ?) OR " .
++    "(pc_endDate = '0000-00-00' AND pc_eventDate >= ? AND pc_eventDate < ?))";
++    $res = sqlStatement($query, array($providerid, $sdate, $edate, $sdate, $edate));
+ //  print_r($res);
+ 
+     while ($row = sqlFetchArray($res)) {
+@@ -391,7 +391,7 @@ function setappt(year,mon,mday,hours,minutes) {
+ <body class="body_top">
+ 
+ <div id="searchCriteria">
+-<form method='post' name='theform' action='find_appt_popup.php?providerid=<?php echo $providerid ?>&catid=<?php echo $input_catid ?>'>
++<form method='post' name='theform' action='find_appt_popup.php?providerid=<?php echo attr($providerid); ?>&catid=<?php echo attr($input_catid); ?>'>
+    <input type="hidden" name='bypatient' />
+ 
+     <?php xl('Start date:', 'e'); ?>
+diff --git a/portal/add_edit_event_user.php b/portal/add_edit_event_user.php
+index b3bb7add1d0..057143190b6 100644
+--- a/portal/add_edit_event_user.php
++++ b/portal/add_edit_event_user.php
+@@ -262,7 +262,7 @@
+ ========================================================*/
+     if ($eid) {
+         // what is multiple key around this $eid?
+-        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+ 
+         if ($GLOBALS['select_multi_providers'] && $row['pc_multiple']) {
+             /* ==========================================
+@@ -270,7 +270,7 @@
+             ==========================================*/
+ 
+             // obtain current list of providers regarding the multiple key
+-            $up = sqlStatement("SELECT pc_aid FROM openemr_postcalendar_events WHERE pc_multiple={$row['pc_multiple']}");
++            $up = sqlStatement("SELECT pc_aid FROM openemr_postcalendar_events WHERE pc_multiple = ?", array($row['pc_multiple']));
+             while ($current = sqlFetchArray($up)) {
+                 $providers_current[] = $current['pc_aid'];
+             }
+@@ -282,7 +282,7 @@
+             $r1 = array_diff($providers_current, $providers_new);
+             if (count($r1)) {
+                 foreach ($r1 as $to_be_removed) {
+-                    sqlQuery("DELETE FROM openemr_postcalendar_events WHERE pc_aid='$to_be_removed' AND pc_multiple={$row['pc_multiple']}");
++                    sqlQuery("DELETE FROM openemr_postcalendar_events WHERE pc_aid = ? AND pc_multiple = ?", array($to_be_removed, $row['pc_multiple']));
+                 }
+             }
+ 
+@@ -293,25 +293,25 @@
+                 foreach ($r2 as $to_be_inserted) {
+                     sqlInsert("INSERT INTO openemr_postcalendar_events ( pc_catid, pc_multiple, pc_aid, pc_pid, pc_title, pc_time, pc_hometext, pc_informant, pc_eventDate, pc_endDate, pc_duration, pc_recurrtype, pc_recurrspec, pc_startTime, pc_endTime, pc_alldayevent, pc_apptstatus, pc_prefcatid, pc_location, pc_eventstatus, pc_sharing, pc_facility)
+                 VALUES ( " .
+-                    "'" . $_POST['form_category']             . "', " .
+-                    "'" . $row['pc_multiple']             . "', " .
+-                    "'" . $to_be_inserted            . "', " .
+-                    "'" . $_POST['form_pid']                  . "', " .
+-                    "'" . add_escape_custom($_POST['form_title'])               . "', " .
+-                    "NOW(), "                                         .
+-                    "'" . add_escape_custom($_POST['form_comments'])             . "', " .
+-                    "'" . $_SESSION['providerId']             . "', " .
+-                    "'" . $event_date                         . "', " .
+-                    "'" . fixDate($_POST['form_enddate'])     . "', " .
+-                    "'" . ($duration * 60)                    . "', " .
+-                    "'" . ($_POST['form_repeat'] ? '1' : '0') . "', " .
+-                    "'$recurrspec', "                                 .
+-                    "'$starttime', "                                  .
+-                    "'$endtime', "                                    .
+-                    "'" . $_POST['form_allday']               . "', " .
+-                    "'" . $_POST['form_apptstatus']           . "', " .
+-                    "'" . $_POST['form_prefcat']              . "', " .
+-                    "'$locationspec', "                               .
++                    "'" . add_escape_custom($_POST['form_category'])         . "', " .
++                    "'" . add_escape_custom($row['pc_multiple'])             . "', " .
++                    "'" . add_escape_custom($to_be_inserted)                 . "', " .
++                    "'" . add_escape_custom($_POST['form_pid'])              . "', " .
++                    "'" . add_escape_custom($_POST['form_title'])            . "', " .
++                    "NOW(), "                                                .
++                    "'" . add_escape_custom($_POST['form_comments'])         . "', " .
++                    "'" . add_escape_custom($_SESSION['providerId'])         . "', " .
++                    "'" . add_escape_custom($event_date)                     . "', " .
++                    "'" . add_escape_custom(fixDate($_POST['form_enddate'])) . "', " .
++                    "'" . add_escape_custom(($duration * 60))                . "', " .
++                    "'" . ($_POST['form_repeat'] ? '1' : '0')                . "', " .
++                    "'" . add_escape_custom($recurrspec)                     . "', " .
++                    "'" . add_escape_custom($starttime)                      . "', " .
++                    "'" . add_escape_custom($endtime)                        . "', " .
++                    "'" . add_escape_custom($_POST['form_allday'])           . "', " .
++                    "'" . add_escape_custom($_POST['form_apptstatus'])       . "', " .
++                    "'" . add_escape_custom($_POST['form_prefcat'])          . "', " .
++                    "'" . add_escape_custom($locationspec)                   . "', " .
+                     "1, " .
+                     "1, " .(int)$_POST['facility']. " )"); // FF stuff
+                 } // foreach
+@@ -322,24 +322,24 @@
+          // those who are intersected in $providers_current and $providers_new
+             foreach ($_POST['form_provider_ae'] as $provider) {
+                      sqlStatement("UPDATE openemr_postcalendar_events SET " .
+-                     "pc_catid = '"       . $_POST['form_category']             . "', " .
+-                     "pc_pid = '"         . $_POST['form_pid']                  . "', " .
+-                     "pc_title = '"       . add_escape_custom($_POST['form_title'])               . "', " .
+-                     "pc_time = NOW(), "                                                .
+-                     "pc_hometext = '"    . add_escape_custom($_POST['form_comments'])             . "', " .
+-                     "pc_informant = '"   . $_SESSION['providerId']             . "', " .
+-                     "pc_eventDate = '"   . $event_date                         . "', " .
+-                     "pc_endDate = '"     . fixDate($_POST['form_enddate'])     . "', " .
+-                     "pc_duration = '"    . ($duration * 60)                    . "', " .
+-                     "pc_recurrtype = '"  . ($_POST['form_repeat'] ? '1' : '0') . "', " .
+-                     "pc_recurrspec = '$recurrspec', "                                  .
+-                     "pc_startTime = '$starttime', "                                    .
+-                     "pc_endTime = '$endtime', "                                        .
+-                     "pc_alldayevent = '" . $_POST['form_allday']               . "', " .
+-                     "pc_apptstatus = '"  . $_POST['form_apptstatus']           . "', "  .
+-                     "pc_prefcatid = '"   . $_POST['form_prefcat']              . "' ,"  .
+-                      "pc_facility = '"   .(int)$_POST['facility']               ."' "  . // FF stuff
+-                       "WHERE pc_aid = '$provider' AND pc_multiple={$row['pc_multiple']}");
++                     "pc_catid = '"       . add_escape_custom($_POST['form_category'])   . "', " .
++                     "pc_pid = '"         . add_escape_custom($_POST['form_pid'])        . "', " .
++                     "pc_title = '"       . add_escape_custom($_POST['form_title'])      . "', " .
++                     "pc_time = NOW(), "                                                 .
++                     "pc_hometext = '"    . add_escape_custom($_POST['form_comments'])   . "', " .
++                     "pc_informant = '"   . add_escape_custom($_SESSION['providerId'])   . "', " .
++                     "pc_eventDate = '"   . add_escape_custom($event_date)               . "', " .
++                     "pc_endDate = '"     . add_escape_custom(fixDate($_POST['form_enddate'])) . "', " .
++                     "pc_duration = '"    . add_escape_custom(($duration * 60))          . "', " .
++                     "pc_recurrtype = '"  . ($_POST['form_repeat'] ? '1' : '0')          . "', "  .
++                     "pc_recurrspec = '"  . add_escape_custom($recurrspec)               . "', " .
++                     "pc_startTime = '"   . add_escape_custom($starttime)                . "', " .
++                     "pc_endTime = '"     . add_escape_custom($endtime)                  . "', " .
++                     "pc_alldayevent = '" . add_escape_custom($_POST['form_allday'])     . "', " .
++                     "pc_apptstatus = '"  . add_escape_custom($_POST['form_apptstatus']) . "', "  .
++                     "pc_prefcatid = '"   . add_escape_custom($_POST['form_prefcat'])    . "', "  .
++                     "pc_facility = '"    . (int)$_POST['facility']                      . "' "  . // FF stuff
++                     "WHERE pc_aid = '"   . add_escape_custom($provider) . "' AND pc_multiple='" . add_escape_custom($row['pc_multiple']) . "'");
+             } // foreach
+ 
+       /* ==========================================
+@@ -354,25 +354,25 @@
+ 
+                 // simple provider case
+                 sqlStatement("UPDATE openemr_postcalendar_events SET " .
+-                "pc_catid = '"       . $_POST['form_category']             . "', " .
+-                "pc_aid = '"         . $prov            . "', " .
+-                "pc_pid = '"         . $_POST['form_pid']                  . "', " .
+-                "pc_title = '"       . add_escape_custom($_POST['form_title'])               . "', " .
+-                "pc_time = NOW(), "                                                .
+-                "pc_hometext = '"    . add_escape_custom($_POST['form_comments'])          . "', " .
+-                "pc_informant = '"   . $_SESSION['providerId']             . "', " .
+-                "pc_eventDate = '"   . $event_date                         . "', " .
+-                "pc_endDate = '"     . fixDate($_POST['form_enddate'])     . "', " .
+-                "pc_duration = '"    . ($duration * 60)                    . "', " .
+-                "pc_recurrtype = '"  . ($_POST['form_repeat'] ? '1' : '0') . "', " .
+-                "pc_recurrspec = '$recurrspec', "                                  .
+-                "pc_startTime = '$starttime', "                                    .
+-                "pc_endTime = '$endtime', "                                        .
+-                "pc_alldayevent = '" . $_POST['form_allday']               . "', " .
+-                "pc_apptstatus = '"  . $_POST['form_apptstatus']           . "', "  .
+-                "pc_prefcatid = '"   . $_POST['form_prefcat']              . "' ,"  .
+-                 "pc_facility = '"   .(int)$_POST['facility']               ."' "  . // FF stuff
+-                "WHERE pc_eid = '$eid'");
++                "pc_catid = '"       . add_escape_custom($_POST['form_category'])   . "', " .
++                "pc_aid = '"         . add_escape_custom($prov)                     . "', " .
++                "pc_pid = '"         . add_escape_custom($_POST['form_pid'])        . "', " .
++                "pc_title = '"       . add_escape_custom($_POST['form_title'])      . "', " .
++                "pc_time = NOW(), "                                                 .
++                "pc_hometext = '"    . add_escape_custom($_POST['form_comments'])   . "', " .
++                "pc_informant = '"   . add_escape_custom($_SESSION['providerId'])   . "', " .
++                "pc_eventDate = '"   . add_escape_custom($event_date)               . "', " .
++                "pc_endDate = '"     . add_escape_custom(fixDate($_POST['form_enddate'])) . "', " .
++                "pc_duration = '"    . add_escape_custom(($duration * 60))          . "', " .
++                "pc_recurrtype = '"  . ($_POST['form_repeat'] ? '1' : '0')          . "', " .
++                "pc_recurrspec = '"  . add_escape_custom($recurrspec)               . "', " .
++                "pc_startTime = '"   . add_escape_custom($starttime)                . "', " .
++                "pc_endTime = '"     . add_escape_custom($endtime)                  . "', " .
++                "pc_alldayevent = '" . add_escape_custom($_POST['form_allday'])     . "', " .
++                "pc_apptstatus = '"  . add_escape_custom($_POST['form_apptstatus']) . "', " .
++                "pc_prefcatid = '"   . add_escape_custom($_POST['form_prefcat'])    . "', " .
++                "pc_facility = '"    . (int)$_POST['facility']                       ."' "  . // FF stuff
++                "WHERE pc_eid = '"   . add_escape_custom($eid) . "'");
+         }
+ 
+     // =======================================
+@@ -404,25 +404,25 @@
+                 "pc_recurrspec, pc_startTime, pc_endTime, pc_alldayevent, " .
+                 "pc_apptstatus, pc_prefcatid, pc_location, pc_eventstatus, pc_sharing, pc_facility " .
+                 ") VALUES ( " .
+-                "'" . $_POST['form_category']             . "', " .
+-                "'" . $new_multiple_value             . "', " .
+-                "'" . $provider                           . "', " .
+-                "'" . $_POST['form_pid']                  . "', " .
+-                "'" . add_escape_custom($_POST['form_title'])               . "', " .
+-                "NOW(), "                                         .
+-                "'" . add_escape_custom($_POST['form_comments'])             . "', " .
+-                "'" . $_SESSION['providerId']             . "', " .
+-                "'" . $event_date                         . "', " .
+-                "'" . fixDate($_POST['form_enddate'])     . "', " .
+-                "'" . ($duration * 60)                    . "', " .
+-                "'" . ($_POST['form_repeat'] ? '1' : '0') . "', " .
+-                "'$recurrspec', "                                 .
+-                "'$starttime', "                                  .
+-                "'$endtime', "                                    .
+-                "'" . $_POST['form_allday']               . "', " .
+-                "'" . $_POST['form_apptstatus']           . "', " .
+-                "'" . $_POST['form_prefcat']              . "', " .
+-                "'$locationspec', "                               .
++                "'" . add_escape_custom($_POST['form_category'])   . "', " .
++                "'" . add_escape_custom($new_multiple_value)       . "', " .
++                "'" . add_escape_custom($provider)                 . "', " .
++                "'" . add_escape_custom($_POST['form_pid'])        . "', " .
++                "'" . add_escape_custom($_POST['form_title'])      . "', " .
++                "NOW(), "                                          .
++                "'" . add_escape_custom($_POST['form_comments'])   . "', " .
++                "'" . add_escape_custom($_SESSION['providerId'])   . "', " .
++                "'" . add_escape_custom($event_date)               . "', " .
++                "'" . add_escape_custom(fixDate($_POST['form_enddate'])) . "', " .
++                "'" . add_escape_custom(($duration * 60))          . "', " .
++                "'" . ($_POST['form_repeat'] ? '1' : '0')          . "', " .
++                "'" . add_escape_custom($recurrspec)               . "', " .
++                "'" . add_escape_custom($starttime)                . "', " .
++                "'" . add_escape_custom($endtime)                  . "', " .
++                "'" . add_escape_custom($_POST['form_allday'])     . "', " .
++                "'" . add_escape_custom($_POST['form_apptstatus']) . "', " .
++                "'" . add_escape_custom($_POST['form_prefcat'])    . "', " .
++                "'" . add_escape_custom($locationspec)             . "', " .
+                 "1, " .
+                 "1, " .(int)$_POST['facility']. " )"); // FF stuff
+             } // foreach
+@@ -434,34 +434,34 @@
+                 "pc_recurrspec, pc_startTime, pc_endTime, pc_alldayevent, " .
+                 "pc_apptstatus, pc_prefcatid, pc_location, pc_eventstatus, pc_sharing, pc_facility " .
+                 ") VALUES ( " .
+-                "'" . $_POST['form_category'] . "', " .
+-                "'" . $_POST['form_provider_ae'] . "', " .
+-                "'" . $_POST['form_pid'] . "', " .
+-                "'" . add_escape_custom($_POST['form_title']) . "', " .
+-                "NOW(), " .
+-                "'" . add_escape_custom($_POST['form_comments']) . "', " .
+-                "'" . $_SESSION['providerId'] . "', " .
+-                "'" . $event_date . "', " .
+-                "'" . fixDate($_POST['form_enddate']) . "', " .
+-                "'" . ($duration * 60) . "', " .
+-                "'" . ($_POST['form_repeat'] ? '1' : '0') . "', " .
+-                "'$recurrspec', " .
+-                "'$starttime', " .
+-                "'$endtime', " .
+-                "'" . $_POST['form_allday'] . "', " .
+-                "'" . $_POST['form_apptstatus'] . "', " .
+-                "'" . $_POST['form_prefcat'] . "', " .
+-                "'$locationspec', " .
++                "'" . add_escape_custom($_POST['form_category'])    . "', " .
++                "'" . add_escape_custom($_POST['form_provider_ae']) . "', " .
++                "'" . add_escape_custom($_POST['form_pid'])         . "', " .
++                "'" . add_escape_custom($_POST['form_title'])       . "', " .
++                "NOW(), "                                           .
++                "'" . add_escape_custom($_POST['form_comments'])    . "', " .
++                "'" . add_escape_custom($_SESSION['providerId'])    . "', " .
++                "'" . add_escape_custom($event_date)                . "', " .
++                "'" . add_escape_custom(fixDate($_POST['form_enddate'])) . "', " .
++                "'" . add_escape_custom(($duration * 60))           . "', " .
++                "'" . ($_POST['form_repeat'] ? '1' : '0')           . "', " .
++                "'" . add_escape_custom($recurrspec)                . "', " .
++                "'" . add_escape_custom($starttime)                 . "', " .
++                "'" . add_escape_custom($endtime)                   . "', " .
++                "'" . add_escape_custom($_POST['form_allday'])      . "', " .
++                "'" . add_escape_custom($_POST['form_apptstatus'])  . "', " .
++                "'" . add_escape_custom($_POST['form_prefcat'])     . "', " .
++                "'" . add_escape_custom($locationspec)              . "', " .
+                 "1, " .
+-                "1," . (int)$_POST['facility'] . ")"); // FF stuff
++                "1, " . (int)$_POST['facility'] . ")"); // FF stuff
+         } // INSERT single
+     } // else - insert
+ 
+   // Save new DOB if it's there.
+     $patient_dob = trim($_POST['form_dob']);
+     if ($patient_dob && $_POST['form_pid']) {
+-        sqlStatement("UPDATE patient_data SET DOB = '$patient_dob' WHERE " .
+-        "pid = '" . $_POST['form_pid'] . "'");
++        sqlStatement("UPDATE patient_data SET DOB = ? WHERE " .
++        "pid = ?", array($patient_dob, $_POST['form_pid']));
+     }
+ 
+   // Auto-create a new encounter if appropriate.
+@@ -476,10 +476,9 @@
+ 
+     if (0) {
+         $tmprow = sqlQuery("SELECT count(*) AS count FROM form_encounter WHERE " .
+-        "pid = '" . $_POST['form_pid'] . "' AND date = '$event_date 00:00:00'");
++        "pid = ? AND date = ?", array($_POST['form_pid'], $event_date." 00:00:00"));
+         if ($tmprow['count'] == 0) {
+-              $tmprow = sqlQuery("SELECT username, facility, facility_id FROM users WHERE id = '" .
+-            $_POST['form_provider_ae'] . "'");
++              $tmprow = sqlQuery("SELECT username, facility, facility_id FROM users WHERE id = ?", array($_POST['form_provider_ae']));
+               $username = $tmprow['username'];
+               $facility = $tmprow['facility'];
+               $facility_id = $tmprow['facility_id'];
+@@ -489,13 +488,13 @@
+                   $encounter,
+                   "New Patient Encounter",
+                   sqlInsert("INSERT INTO form_encounter SET " .
+-                  "date = '$event_date', " .
+-                  "onset_date = '$event_date', " .
++                  "date = '" . add_escape_custom($event_date) . "', " .
++                  "onset_date = '" . add_escape_custom($event_date) . "', " .
+                   "reason = '" . add_escape_custom($_POST['form_comments']) . "', " .
+-                  "facility = '$facility', " .
+-                  "facility_id = '$facility_id', " .
+-                  "pid = '" . $_POST['form_pid'] . "', " .
+-                  "encounter = '$encounter'"),
++                  "facility = '" . add_escape_custom($facility) . "', " .
++                  "facility_id = '" . add_escape_custom($facility_id) . "', " .
++                  "pid = '" . add_escape_custom($_POST['form_pid']) . "', " .
++                  "encounter = '" . add_escape_custom($encounter) . "'"),
+                   "newpatient",
+                   $_POST['form_pid'],
+                   "1",
+@@ -511,18 +510,18 @@
+       // =======================================
+     if ($GLOBALS['select_multi_providers']) {
+         // what is multiple key around this $eid?
+-        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++        $row = sqlQuery("SELECT pc_multiple FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+         if ($row['pc_multiple']) {
+-            sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_multiple = {$row['pc_multiple']}");
++            sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_multiple = ?", array($row['pc_multiple']));
+         } else {
+-                        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = $eid");
++                        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+         }
+ 
+         // =======================================
+         //  EOS multi providers case
+         // =======================================
+     } else {
+-        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = '$eid'");
++        sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = ?", array($eid));
+     }
+ }
+ 
+@@ -631,7 +630,7 @@
+ <html>
+ <head>
+ 
+-<title><?php echo $eid ? "Edit" : "Add New" ?> <?php xl('Event', 'e');?></title>
++<title><?php echo $eid ? xlt("Edit Event") : xlt("Add New Event"); ?></title>
+ 
+     <link href="assets/css/style.css?v=<?php echo $v_js_includes; ?>" rel="stylesheet" type="text/css" />
+     <script type="text/javascript" src="<?php echo $webroot ?>/interface/main/tabs/js/include_opener.js"></script>
+@@ -639,25 +638,25 @@
+ 
+ <body class="skin-blue" >
+ <div class="well">
+-<form class="form-inline" method='post' name='theaddform' id='theaddform' action='add_edit_event_user.php?eid=<?php echo $eid ?>'>
++<form class="form-inline" method='post' name='theaddform' id='theaddform' action='add_edit_event_user.php?eid=<?php echo attr($eid); ?>'>
+ <input type="hidden" name="form_action" id="form_action" value="">
+-   <input type='hidden' name='form_category' id='form_category' value='<?php echo $row['pc_catid'] ? $row['pc_catid'] : '5'; ?>' />
+-   <input type='hidden' name='form_apptstatus' id='form_apptstatus' value='<?php echo $row['pc_apptstatus'] ? $row['pc_apptstatus'] : "^" ?>' />
++   <input type='hidden' name='form_category' id='form_category' value='<?php echo $row['pc_catid'] ? attr($row['pc_catid']) : '5'; ?>' />
++   <input type='hidden' name='form_apptstatus' id='form_apptstatus' value='<?php echo $row['pc_apptstatus'] ? attr($row['pc_apptstatus']) : "^" ?>' />
+ <table border='0' width='100%'>
+  <tr>
+   <td width='1%' nowrap>
+-   <b><?php xl('Visit', 'e'); ?>: </b>
++   <b><?php echo xlt('Visit'); ?>: </b>
+   </td>
+   <td nowrap style='padding:0px 5px 5px 0'>
+-   <input class="form-control" type="text" id='form_title' name='form_title' value='<?php echo ($row['pc_title'] > "") ? htmlspecialchars($row['pc_title'], ENT_QUOTES) : xlt('Office Visit'); ?>' readonly='readonly'/>
++   <input class="form-control" type="text" id='form_title' name='form_title' value='<?php echo ($row['pc_title'] > "") ? attr($row['pc_title']) : xla('Office Visit'); ?>' readonly='readonly'/>
+   </td>
+   <td></td>
+   <td width='1%' nowrap>
+-    <b><?php xl('Date', 'e'); ?>:</b>
++    <b><?php echo xlt('Date'); ?>:</b>
+   </td>
+   <td colspan='2' nowrap id='tdallday1'>
+    <input class="form-control" type='text' size='10' name='form_date' readonly id='form_date'
+-    value='<?php echo (isset($eid) && $eid) ? $row['pc_eventDate'] : $date; ?>'  />
++    value='<?php echo (isset($eid) && $eid) ? attr($row['pc_eventDate']) : attr($date); ?>'  />
+   </td>
+  </tr>
+  <tr>
+@@ -670,31 +669,31 @@
+   <td nowrap>
+   </td>
+   <td width='1%' nowrap id='tdallday2'>
+-   <b><?php xl('Time', 'e');?>:</b>
++   <b><?php echo xlt('Time');?>:</b>
+   </td>
+   <td width='1%' nowrap id='tdallday3'>
+    <input class="form-control inline" type='text' size='2' name='form_hour' value='<?php echo (isset($eid)) ? $starttimeh : ''; ?>'
+-    title='<?php xl('Event start time', 'e'); ?>' readonly/> :
++    title='<?php echo xla('Event start time'); ?>' readonly/> :
+   <input class="form-control inline" type='text' size='2' name='form_minute' value='<?php echo (isset($eid)) ? $starttimem : ''; ?>'
+-    title='<?php  xl('Event start time', 'e'); ?>' readonly/>&nbsp; <!--  -->
++    title='<?php echo xla('Event start time'); ?>' readonly/>&nbsp; <!--  -->
+    <select class="form-control" name='form_ampm' title='Note: 12:00 noon is PM, not AM' readonly >
+-    <option value='1'><?php xl('AM', 'e'); ?></option>
+-    <option value='2'<?php echo ($startampm == '2') ? " selected" : ""; ?>><?php xl('PM', 'e'); ?></option>
++    <option value='1'><?php echo xlt('AM'); ?></option>
++    <option value='2'<?php echo ($startampm == '2') ? " selected" : ""; ?>><?php echo xlt('PM'); ?></option>
+    </select>
+   </td>
+  </tr>
+  <tr>
+   <td nowrap>
+-   <b><?php xl('Patient', 'e'); ?>:</b>
++   <b><?php echo xlt('Patient'); ?>:</b>
+   </td>
+   <td style='padding:0px 5px 5px 0' nowrap>
+-   <input class="form-control" type='text' id='form_patient' name='form_patient' value='<?php echo $patientname ?>' title='Patient' readonly />
+-   <input type='hidden' name='form_pid' value='<?php echo $patientid ?>' />
++   <input class="form-control" type='text' id='form_patient' name='form_patient' value='<?php echo attr($patientname); ?>' title='Patient' readonly />
++   <input type='hidden' name='form_pid' value='<?php echo attr($patientid); ?>' />
+   </td>
+   <td nowrap>
+    &nbsp;
+   </td>
+-  <td nowrap id='tdallday4'><?php xl('Duration', 'e'); ?></td>
++  <td nowrap id='tdallday4'><?php echo xlt('Duration'); ?></td>
+   <td nowrap id='tdallday5'>
+   <input class="form-control input-sm" type='text' size='1' name='form_duration' value='<?php echo $row['pc_duration'] ? ($row['pc_duration']*1/60) : "15" ?>' readonly /><?php echo "&nbsp" . xlt('minutes'); ?>
+   </td>
+@@ -703,7 +702,7 @@
+     </tr>
+  <tr>
+   <td nowrap>
+-   <b><?php xl('Provider', 'e'); ?>:</b>
++   <b><?php echo xlt('Provider'); ?>:</b>
+   </td>
+   <td style='padding:0px 5px 5px 0' nowrap>
+   <select class="form-control" name='form_provider_ae' id='form_provider_ae' onchange='change_provider();'>
+@@ -711,14 +710,14 @@
+         // present a list of providers to choose from
+         // default to the currently logged-in user
+ while ($urow = sqlFetchArray($ures)) {
+-    echo "    <option value='" . $urow['id'] . "'";
++    echo "    <option value='" . attr($urow['id']) . "'";
+     if (($urow['id'] == $_GET['userid'])||($urow['id']== $userid)) {
+         echo " selected";
+     }
+ 
+-    echo ">" . $urow['lname'];
++    echo ">" . text($urow['lname']);
+     if ($urow['fname']) {
+-        echo ", " . $urow['fname'];
++        echo ", " . text($urow['fname']);
+     }
+ 
+     echo "</option>\n";
+@@ -728,20 +727,20 @@
+   </td>
+   <td nowrap style='font-size:8pt'>
+   </td>
+-  <td><input type='button' class='btn btn-danger btn-sm' value='<?php xl('Openings', 'e');?>' onclick='find_available()' /></td>
++  <td><input type='button' class='btn btn-danger btn-sm' value='<?php echo xla('Openings');?>' onclick='find_available()' /></td>
+   <td></td>
+  </tr>
+  <tr>
+   <td nowrap>
+-   <b><?php xl('Reason', 'e'); ?>:</b>
++   <b><?php echo xlt('Reason'); ?>:</b>
+   </td>
+   <td style='padding:0px 5px 5px 0' colspan='4' nowrap>
+-    <input class="form-control" type='text' size='40' name='form_comments' style='width:100%' value='<?php echo htmlspecialchars($hometext, ENT_QUOTES) ?>' title='<?php xl('Optional information about this event', 'e');?>' />
++    <input class="form-control" type='text' size='40' name='form_comments' style='width:100%' value='<?php echo attr($hometext); ?>' title='<?php echo xla('Optional information about this event'); ?>' />
+   </td>
+  </tr>
+ </table>
+ <p>
+-<input type='button' name='form_save' class='btn btn-success btn-md' onsubmit='return false' value='<?php xl('Save', 'e');?>' onclick="validate()" />
++<input type='button' name='form_save' class='btn btn-success btn-md' onsubmit='return false' value='<?php echo xla('Save'); ?>' onclick="validate()" />
+ &nbsp;
+ </p>
+ </form>
+@@ -764,9 +763,9 @@
+         $duration = 1440;
+     }
+ 
+-    echo " durations[" . $crow['pc_catid'] . "] = $duration\n";
++    echo " durations[" . attr($crow['pc_catid']) . "] = " . text($duration) . "\n";
+   // echo " rectypes[" . $crow['pc_catid'] . "] = " . $crow['pc_recurrtype'] . "\n";
+-    $catoptions .= "    <option value='" . $crow['pc_catid'] . "'";
++    $catoptions .= "    <option value='" . attr($crow['pc_catid']) . "'";
+     if ($eid) {
+         if ($crow['pc_catid'] == $row['pc_catid']) {
+             $catoptions .= " selected";
+@@ -778,18 +777,18 @@
+         }
+     }
+ 
+-    $catoptions .= ">" . $crow['pc_catname'] . "</option>\n";
++    $catoptions .= ">" . text($crow['pc_catname']) . "</option>\n";
+ 
+   // This section is to build the list of preferred categories:
+     if ($duration) {
+-        $prefcat_options .= "    <option value='" . $crow['pc_catid'] . "'";
++        $prefcat_options .= "    <option value='" . attr($crow['pc_catid']) . "'";
+         if ($eid) {
+             if ($crow['pc_catid'] == $row['pc_prefcatid']) {
+                 $prefcat_options .= " selected";
+             }
+         }
+ 
+-        $prefcat_options .= ">" . $crow['pc_catname'] . "</option>\n";
++        $prefcat_options .= ">" . text($crow['pc_catname']) . "</option>\n";
+     }
+ }
+ ?>
+diff --git a/portal/find_appt_popup_user.php b/portal/find_appt_popup_user.php
+index 4b5fcb388a4..6dcb3a38999 100644
+--- a/portal/find_appt_popup_user.php
++++ b/portal/find_appt_popup_user.php
+@@ -49,8 +49,8 @@
+ 
+ $ignoreAuth = 1;
+ 
+- include_once("../interface/globals.php");
+- include_once("$srcdir/patient.inc");
++ require_once("../interface/globals.php");
++ require_once("$srcdir/patient.inc");
+ 
+  $input_catid = $_REQUEST['catid'];
+ 
+@@ -318,7 +318,7 @@ function doOneDay($catid, $udate, $starttime, $duration, $prefcatid)
+ <html>
+ <head>
+ <script type="text/javascript" src="<?php echo $webroot ?>/interface/main/tabs/js/include_opener.js"></script>
+-<title><?php xl('Find Available Appointments', 'e'); ?></title>
++<title><?php echo xlt('Find Available Appointments'); ?></title>
+ <link href="<?php echo $GLOBALS['assets_static_relative']; ?>/bootstrap-3-3-4/dist/css/bootstrap.min.css" rel="stylesheet" type="text/css" />
+ <?php if ($_SESSION['language_direction'] == 'rtl') { ?>
+     <link href="<?php echo $GLOBALS['assets_static_relative']; ?>/bootstrap-rtl-3-3-4/dist/css/bootstrap-rtl.min.css" rel="stylesheet" type="text/css" />
+@@ -403,19 +403,19 @@ function setappt(year,mon,mday,hours,minutes) {
+ <body class="body_top">
+ 
+ <div id="searchCriteria">
+-<form method='post' name='theform' action='./find_appt_popup_user.php?providerid=<?php echo $providerid ?>&catid=<?php echo $input_catid ?>'>
++<form method='post' name='theform' action='./find_appt_popup_user.php?providerid=<?php echo attr($providerid); ?>&catid=<?php echo attr($input_catid); ?>'>
+    <input type="hidden" name='bypatient' />
+ 
+-    <?php xl('Start date:', 'e'); ?>
++    <?php echo xlt('Start date:'); ?>
+ 
+-   <input type='text' class='datepicker' name='startdate' id='startdate' size='10' value='<?php echo $sdate ?>'
++   <input type='text' class='datepicker' name='startdate' id='startdate' size='10' value='<?php echo attr($sdate); ?>'
+     title='yyyy-mm-dd starting date for search'/>
+ 
+-    <?php xl('for', 'e'); ?>
+-   <input type='text' name='searchdays' size='3' value='<?php echo $searchdays ?>'
++    <?php echo xlt('for'); ?>
++   <input type='text' name='searchdays' size='3' value='<?php echo attr($searchdays); ?>'
+     title='Number of days to search from the start date' />
+-    <?php xl('days', 'e'); ?>&nbsp;
+-   <input type='submit' value='<?php xl('Search', 'e'); ?>'>
++    <?php echo xlt('days'); ?>&nbsp;
++   <input type='submit' value='<?php echo xla('Search'); ?>'>
+ </div>
+ 
+ <?php if (!empty($slots)) : ?>
+@@ -430,8 +430,8 @@ function setappt(year,mon,mday,hours,minutes) {
+ <table class='table table-inversed table-bordered'>
+     <thead id="searchResultsHeader">
+     <tr>
+-        <th class="srDate"><?php xl('Day', 'e'); ?></th>
+-        <th class="srTimes"><?php xl('Available Times', 'e'); ?></th>
++        <th class="srDate"><?php echo xlt('Day'); ?></th>
++        <th class="srTimes"><?php echo xlt('Available Times'); ?></th>
+     </tr>
+     </thead>
+ <?php
+@@ -496,7 +496,7 @@ function setappt(year,mon,mday,hours,minutes) {
+     echo "</td>\n";
+     echo " </tr>\n";
+ } else {
+-    echo " <tr><td colspan='2'> " . xl('No openings were found for this period.', 'e') . "</td></tr>\n";
++    echo " <tr><td colspan='2'> " . xlt('No openings were found for this period.') . "</td></tr>\n";
+ }
+ ?>
+ </table>

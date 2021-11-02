@@ -1,0 +1,1261 @@
+From d2ce1ac753afc059e32798bac3383b81a6d04456 Mon Sep 17 00:00:00 2001
+From: Nick Fitzgerald <fitzgen@gmail.com>
+Date: Tue, 31 Aug 2021 14:06:02 -0700
+Subject: [PATCH] Fix a use-after-free bug when passing `ExternRef`s to Wasm
+
+We _must not_ trigger a GC when moving refs from host code into
+Wasm (e.g. returned from a host function or passed as arguments to a Wasm
+function). After insertion into the table, this reference is no longer
+rooted. If multiple references are being sent from the host into Wasm and we
+allowed GCs during insertion, then the following events could happen:
+
+* Reference A is inserted into the activations table. This does not trigger a
+  GC, but does fill the table to capacity.
+
+* The caller's reference to A is removed. Now the only reference to A is from
+  the activations table.
+
+* Reference B is inserted into the activations table. Because the table is at
+  capacity, a GC is triggered.
+
+* A is reclaimed because the only reference keeping it alive was the activation
+  table's reference (it isn't inside any Wasm frames on the stack yet, so stack
+  scanning and stack maps don't increment its reference count).
+
+* We transfer control to Wasm, giving it A and B. Wasm uses A. That's a use
+  after free.
+
+To prevent uses after free, we cannot GC when moving refs into the
+`VMExternRefActivationsTable` because we are passing them from the host to Wasm.
+
+On the other hand, when we are *cloning* -- as opposed to moving -- refs from
+the host to Wasm, then it is fine to GC while inserting into the activations
+table, because the original referent that we are cloning from is still alive and
+rooting the ref.
+---
+ cranelift/wasm/src/environ/dummy.rs        |   4 +-
+ crates/cranelift/src/compiler.rs           |   6 +-
+ crates/cranelift/src/lib.rs                |   4 +-
+ crates/environ/src/module_environ.rs       |   2 +-
+ crates/fuzzing/src/generators/table_ops.rs | 242 +++++++++++++++++----
+ crates/fuzzing/src/oracles.rs              | 107 ++++++++-
+ crates/runtime/src/externref.rs            |  57 ++++-
+ crates/types/src/lib.rs                    |  69 ++++--
+ crates/wasmtime/src/func.rs                |  30 ++-
+ crates/wasmtime/src/func/typed.rs          | 101 ++++++++-
+ crates/wasmtime/src/store.rs               |  66 +++++-
+ crates/wasmtime/src/types.rs               |  12 +-
+ crates/wasmtime/src/values.rs              |  18 +-
+ tests/all/gc.rs                            |  53 +++++
+ 14 files changed, 665 insertions(+), 106 deletions(-)
+
+diff --git a/cranelift/wasm/src/environ/dummy.rs b/cranelift/wasm/src/environ/dummy.rs
+index 0974d686611..7b3af0c8969 100644
+--- a/cranelift/wasm/src/environ/dummy.rs
++++ b/cranelift/wasm/src/environ/dummy.rs
+@@ -688,8 +688,8 @@ impl<'data> ModuleEnvironment<'data> for DummyEnvironment {
+                 WasmType::FuncRef | WasmType::ExternRef | WasmType::ExnRef => reference_type,
+             })
+         };
+-        sig.params.extend(wasm.params.iter().map(&mut cvt));
+-        sig.returns.extend(wasm.returns.iter().map(&mut cvt));
++        sig.params.extend(wasm.params().iter().map(&mut cvt));
++        sig.returns.extend(wasm.returns().iter().map(&mut cvt));
+         self.info.signatures.push(sig);
+         Ok(())
+     }
+diff --git a/crates/cranelift/src/compiler.rs b/crates/cranelift/src/compiler.rs
+index a6b8ea74ca2..170b8e841b7 100644
+--- a/crates/cranelift/src/compiler.rs
++++ b/crates/cranelift/src/compiler.rs
+@@ -465,7 +465,7 @@ impl Compiler {
+ 
+         // Compute the size of the values vector. The vmctx and caller vmctx are passed separately.
+         let value_size = mem::size_of::<u128>();
+-        let values_vec_len = (value_size * cmp::max(ty.params.len(), ty.returns.len())) as u32;
++        let values_vec_len = (value_size * cmp::max(ty.params().len(), ty.returns().len())) as u32;
+ 
+         let mut context = Context::new();
+         context.func =
+@@ -486,7 +486,7 @@ impl Compiler {
+ 
+         let values_vec_ptr_val = builder.ins().stack_addr(pointer_type, ss, 0);
+         let mflags = MemFlags::trusted();
+-        for i in 0..ty.params.len() {
++        for i in 0..ty.params().len() {
+             let val = builder.func.dfg.block_params(block0)[i + 2];
+             builder
+                 .ins()
+@@ -508,7 +508,7 @@ impl Compiler {
+ 
+         let mflags = MemFlags::trusted();
+         let mut results = Vec::new();
+-        for (i, r) in ty.returns.iter().enumerate() {
++        for (i, r) in ty.returns().iter().enumerate() {
+             let load = builder.ins().load(
+                 value_type(isa, *r),
+                 mflags,
+diff --git a/crates/cranelift/src/lib.rs b/crates/cranelift/src/lib.rs
+index dccaa383ea9..b361bd0b212 100644
+--- a/crates/cranelift/src/lib.rs
++++ b/crates/cranelift/src/lib.rs
+@@ -220,8 +220,8 @@ fn wasmtime_call_conv(isa: &dyn TargetIsa) -> CallConv {
+ /// above.
+ fn push_types(isa: &dyn TargetIsa, sig: &mut ir::Signature, wasm: &WasmFuncType) {
+     let cvt = |ty: &WasmType| ir::AbiParam::new(value_type(isa, *ty));
+-    sig.params.extend(wasm.params.iter().map(&cvt));
+-    sig.returns.extend(wasm.returns.iter().map(&cvt));
++    sig.params.extend(wasm.params().iter().map(&cvt));
++    sig.returns.extend(wasm.returns().iter().map(&cvt));
+ }
+ 
+ /// Returns the corresponding cranelift type for the provided wasm type.
+diff --git a/crates/environ/src/module_environ.rs b/crates/environ/src/module_environ.rs
+index ea76e5e2995..a4a558e34aa 100644
+--- a/crates/environ/src/module_environ.rs
++++ b/crates/environ/src/module_environ.rs
+@@ -608,7 +608,7 @@ impl<'data> ModuleEnvironment<'data> {
+                         .funcs
+                         .push(FunctionMetadata {
+                             locals: locals.into_boxed_slice(),
+-                            params: sig.params.iter().cloned().map(|i| i.into()).collect(),
++                            params: sig.params().iter().cloned().map(|i| i.into()).collect(),
+                         });
+                 }
+                 body.allow_memarg64(self.features.memory64);
+diff --git a/crates/fuzzing/src/generators/table_ops.rs b/crates/fuzzing/src/generators/table_ops.rs
+index c3e36f5b03e..73e8905ea25 100644
+--- a/crates/fuzzing/src/generators/table_ops.rs
++++ b/crates/fuzzing/src/generators/table_ops.rs
+@@ -18,7 +18,7 @@ pub struct TableOps {
+ 
+ const NUM_PARAMS_RANGE: Range<u8> = 1..10;
+ const TABLE_SIZE_RANGE: Range<u32> = 1..100;
+-const MAX_OPS: usize = 1000;
++const MAX_OPS: usize = 100;
+ 
+ impl TableOps {
+     /// Get the number of parameters this module's "run" function takes.
+@@ -49,9 +49,46 @@ impl TableOps {
+     pub fn to_wasm_binary(&self) -> Vec<u8> {
+         let mut module = Module::new();
+ 
++        // Encode the types for all functions that we are using.
++        let mut types = TypeSection::new();
++
++        // 0: "gc"
++        types.function(
++            vec![],
++            // Return a bunch of stuff from `gc` so that we exercise GCing when
++            // there is return pointer space allocated on the stack. This is
++            // especially important because the x64 backend currently
++            // dynamically adjusts the stack pointer for each call that uses
++            // return pointers rather than statically allocating space in the
++            // stack frame.
++            vec![ValType::ExternRef, ValType::ExternRef, ValType::ExternRef],
++        );
++
++        // 1: "run"
++        let mut params: Vec<ValType> = Vec::with_capacity(self.num_params() as usize);
++        for _i in 0..self.num_params() {
++            params.push(ValType::ExternRef);
++        }
++        let results = vec![];
++        types.function(params, results);
++
++        // 2: `take_refs`
++        types.function(
++            vec![ValType::ExternRef, ValType::ExternRef, ValType::ExternRef],
++            vec![],
++        );
++
++        // 3: `make_refs`
++        types.function(
++            vec![],
++            vec![ValType::ExternRef, ValType::ExternRef, ValType::ExternRef],
++        );
++
+         // Import the GC function.
+         let mut imports = ImportSection::new();
+         imports.import("", Some("gc"), EntityType::Function(0));
++        imports.import("", Some("take_refs"), EntityType::Function(2));
++        imports.import("", Some("make_refs"), EntityType::Function(3));
+ 
+         // Define our table.
+         let mut tables = TableSection::new();
+@@ -61,32 +98,24 @@ impl TableOps {
+             maximum: None,
+         });
+ 
+-        // Encode the types for all functions that we are using.
+-        let mut types = TypeSection::new();
+-        types.function(vec![], vec![]); // 0: "gc"
+-        let mut params: Vec<ValType> = Vec::with_capacity(self.num_params() as usize);
+-        for _i in 0..self.num_params() {
+-            params.push(ValType::ExternRef);
+-        }
+-        let results = vec![];
+-        types.function(params, results); // 1: "run"
+-
+         // Define the "run" function export.
+         let mut functions = FunctionSection::new();
+         functions.function(1);
+ 
+         let mut exports = ExportSection::new();
+-        exports.export("run", Export::Function(1));
++        exports.export("run", Export::Function(3));
+ 
+-        let mut params: Vec<(u32, ValType)> = Vec::with_capacity(self.num_params() as usize);
+-        for _i in 0..self.num_params() {
+-            params.push((0, ValType::ExternRef));
+-        }
+-        let mut func = Function::new(params);
++        // Give ourselves one scratch local that we can use in various `TableOp`
++        // implementations.
++        let mut func = Function::new(vec![(1, ValType::ExternRef)]);
+ 
++        func.instruction(Instruction::Loop(wasm_encoder::BlockType::Empty));
+         for op in self.ops.iter().take(MAX_OPS) {
+-            op.insert(&mut func);
++            op.insert(&mut func, self.num_params() as u32, self.table_size());
+         }
++        func.instruction(Instruction::Br(0));
++        func.instruction(Instruction::End);
++        func.instruction(Instruction::End);
+ 
+         let mut code = CodeSection::new();
+         code.function(&func);
+@@ -105,7 +134,7 @@ impl TableOps {
+ 
+ #[derive(Arbitrary, Debug)]
+ pub(crate) enum TableOp {
+-    // `(call 0)`
++    // `call $gc; drop; drop; drop;`
+     Gc,
+     // `(drop (table.get x))`
+     Get(i32),
+@@ -113,30 +142,102 @@ pub(crate) enum TableOp {
+     SetFromParam(i32, u32),
+     // `(table.set x (table.get y))`
+     SetFromGet(i32, i32),
++    // `call $make_refs; table.set x; table.set y; table.set z`
++    SetFromMake(i32, i32, i32),
++    // `call $make_refs; drop; drop; drop;`
++    Make,
++    // `local.get x; local.get y; local.get z; call $take_refs`
++    TakeFromParams(u32, u32, u32),
++    // `table.get x; table.get y; table.get z; call $take_refs`
++    TakeFromGet(i32, i32, i32),
++    // `call $make_refs; call $take_refs`
++    TakeFromMake,
++    // `call $gc; call $take_refs`
++    TakeFromGc,
+ }
+ 
+ impl TableOp {
+-    fn insert(&self, func: &mut Function) {
++    fn insert(&self, func: &mut Function, num_params: u32, table_size: u32) {
++        assert!(num_params > 0);
++        assert!(table_size > 0);
++
++        // Add one to make sure that out of bounds table accesses are possible,
++        // but still rare.
++        let table_mod = table_size as i32 + 1;
++
+         match self {
+             Self::Gc => {
+                 func.instruction(Instruction::Call(0));
++                func.instruction(Instruction::Drop);
++                func.instruction(Instruction::Drop);
++                func.instruction(Instruction::Drop);
+             }
+             Self::Get(x) => {
+-                func.instruction(Instruction::I32Const(*x));
++                func.instruction(Instruction::I32Const(*x % table_mod));
+                 func.instruction(Instruction::TableGet { table: 0 });
+                 func.instruction(Instruction::Drop);
+             }
+             Self::SetFromParam(x, y) => {
+-                func.instruction(Instruction::I32Const(*x));
+-                func.instruction(Instruction::LocalGet(*y));
++                func.instruction(Instruction::I32Const(*x % table_mod));
++                func.instruction(Instruction::LocalGet(*y % num_params));
+                 func.instruction(Instruction::TableSet { table: 0 });
+             }
+             Self::SetFromGet(x, y) => {
+-                func.instruction(Instruction::I32Const(*x));
+-                func.instruction(Instruction::I32Const(*y));
++                func.instruction(Instruction::I32Const(*x % table_mod));
++                func.instruction(Instruction::I32Const(*y % table_mod));
+                 func.instruction(Instruction::TableGet { table: 0 });
+                 func.instruction(Instruction::TableSet { table: 0 });
+             }
++            Self::SetFromMake(x, y, z) => {
++                func.instruction(Instruction::Call(2));
++
++                func.instruction(Instruction::LocalSet(num_params));
++                func.instruction(Instruction::I32Const(*x % table_mod));
++                func.instruction(Instruction::LocalGet(num_params));
++                func.instruction(Instruction::TableSet { table: 0 });
++
++                func.instruction(Instruction::LocalSet(num_params));
++                func.instruction(Instruction::I32Const(*y % table_mod));
++                func.instruction(Instruction::LocalGet(num_params));
++                func.instruction(Instruction::TableSet { table: 0 });
++
++                func.instruction(Instruction::LocalSet(num_params));
++                func.instruction(Instruction::I32Const(*z % table_mod));
++                func.instruction(Instruction::LocalGet(num_params));
++                func.instruction(Instruction::TableSet { table: 0 });
++            }
++            TableOp::Make => {
++                func.instruction(Instruction::Call(2));
++                func.instruction(Instruction::Drop);
++                func.instruction(Instruction::Drop);
++                func.instruction(Instruction::Drop);
++            }
++            TableOp::TakeFromParams(x, y, z) => {
++                func.instruction(Instruction::LocalGet(x % num_params));
++                func.instruction(Instruction::LocalGet(y % num_params));
++                func.instruction(Instruction::LocalGet(z % num_params));
++                func.instruction(Instruction::Call(1));
++            }
++            TableOp::TakeFromGet(x, y, z) => {
++                func.instruction(Instruction::I32Const(*x % table_mod));
++                func.instruction(Instruction::TableGet { table: 0 });
++
++                func.instruction(Instruction::I32Const(*y % table_mod));
++                func.instruction(Instruction::TableGet { table: 0 });
++
++                func.instruction(Instruction::I32Const(*z % table_mod));
++                func.instruction(Instruction::TableGet { table: 0 });
++
++                func.instruction(Instruction::Call(1));
++            }
++            TableOp::TakeFromMake => {
++                func.instruction(Instruction::Call(2));
++                func.instruction(Instruction::Call(1));
++            }
++            Self::TakeFromGc => {
++                func.instruction(Instruction::Call(0));
++                func.instruction(Instruction::Call(1));
++            }
+         }
+     }
+ }
+@@ -148,38 +249,95 @@ mod tests {
+     #[test]
+     fn test_wat_string() {
+         let ops = TableOps {
+-            num_params: 2,
+-            table_size: 10,
++            num_params: 5,
++            table_size: 20,
+             ops: vec![
+                 TableOp::Gc,
+                 TableOp::Get(0),
+                 TableOp::SetFromParam(1, 2),
+                 TableOp::SetFromGet(3, 4),
++                TableOp::SetFromMake(5, 6, 7),
++                TableOp::Make,
++                TableOp::TakeFromParams(8, 9, 10),
++                TableOp::TakeFromGet(11, 12, 13),
++                TableOp::TakeFromMake,
+             ],
+         };
+ 
+         let expected = r#"
+ (module
+   (type (;0;) (func))
+-  (type (;1;) (func (param externref externref)))
++  (type (;1;) (func (param externref externref externref externref externref)))
++  (type (;2;) (func (param externref externref externref)))
++  (type (;3;) (func (result externref externref externref)))
+   (import "" "gc" (func (;0;) (type 0)))
+-  (func (;1;) (type 1) (param externref externref)
+-    call 0
+-    i32.const 0
+-    table.get 0
+-    drop
+-    i32.const 1
+-    local.get 2
+-    table.set 0
+-    i32.const 3
+-    i32.const 4
+-    table.get 0
+-    table.set 0)
+-  (table (;0;) 10 externref)
+-  (export "run" (func 1)))
++  (import "" "take_refs" (func (;1;) (type 2)))
++  (import "" "make_refs" (func (;2;) (type 3)))
++  (func (;3;) (type 1) (param externref externref externref externref externref)
++    (local externref i32)
++    i32.const 100
++    local.set 6
++    loop  ;; label = @1
++      call 0
++      i32.const 0
++      table.get 0
++      drop
++      i32.const 1
++      local.get 2
++      table.set 0
++      i32.const 3
++      i32.const 4
++      table.get 0
++      table.set 0
++      call 2
++      local.set 5
++      i32.const 5
++      local.get 5
++      table.set 0
++      local.set 5
++      i32.const 6
++      local.get 5
++      table.set 0
++      local.set 5
++      i32.const 7
++      local.get 5
++      table.set 0
++      call 2
++      drop
++      drop
++      drop
++      local.get 3
++      local.get 4
++      local.get 0
++      call 1
++      i32.const 11
++      table.get 0
++      i32.const 12
++      table.get 0
++      i32.const 13
++      table.get 0
++      call 1
++      call 2
++      call 1
++      local.get 6
++      i32.const -1
++      i32.add
++      local.tee 6
++      br_if 0 (;@1;)
++    end)
++  (table (;0;) 20 externref)
++  (export "run" (func 3)))
+ "#;
++        eprintln!("expected WAT = {}", expected);
++
+         let actual = ops.to_wasm_binary();
++        if let Err(e) = wasmparser::validate(&actual) {
++            panic!("TableOps should generate valid Wasm; got error: {}", e);
++        }
++
+         let actual = wasmprinter::print_bytes(&actual).unwrap();
++        eprintln!("actual WAT = {}", actual);
++
+         assert_eq!(actual.trim(), expected.trim());
+     }
+ }
+diff --git a/crates/fuzzing/src/oracles.rs b/crates/fuzzing/src/oracles.rs
+index ba7ab3b2786..d874e8913d3 100644
+--- a/crates/fuzzing/src/oracles.rs
++++ b/crates/fuzzing/src/oracles.rs
+@@ -514,16 +514,17 @@ pub fn table_ops(
+ ) {
+     let _ = env_logger::try_init();
+ 
++    let expected_drops = Arc::new(AtomicUsize::new(ops.num_params() as usize));
+     let num_dropped = Arc::new(AtomicUsize::new(0));
+ 
+     {
+         let mut config = fuzz_config.to_wasmtime();
+         config.wasm_reference_types(true);
++        config.consume_fuel(true);
++
+         let engine = Engine::new(&config).unwrap();
+         let mut store = create_store(&engine);
+-        if fuzz_config.consume_fuel {
+-            store.add_fuel(u64::max_value()).unwrap();
+-        }
++        store.add_fuel(100).unwrap();
+ 
+         let wasm = ops.to_wasm_binary();
+         log_wasm(&wasm);
+@@ -532,18 +533,104 @@ pub fn table_ops(
+             Err(_) => return,
+         };
+ 
++        let mut linker = Linker::new(&engine);
++
+         // To avoid timeouts, limit the number of explicit GCs we perform per
+         // test case.
+         const MAX_GCS: usize = 5;
+ 
+         let num_gcs = AtomicUsize::new(0);
+-        let gc = Func::wrap(&mut store, move |mut caller: Caller<'_, StoreLimits>| {
+-            if num_gcs.fetch_add(1, SeqCst) < MAX_GCS {
+-                caller.gc();
+-            }
+-        });
++        linker
++            .define(
++                "",
++                "gc",
++                // NB: use `Func::new` so that this can still compile on the old x86
++                // backend, where `IntoFunc` isn't implemented for multi-value
++                // returns.
++                Func::new(
++                    &mut store,
++                    FuncType::new(
++                        vec![],
++                        vec![ValType::ExternRef, ValType::ExternRef, ValType::ExternRef],
++                    ),
++                    {
++                        let num_dropped = num_dropped.clone();
++                        let expected_drops = expected_drops.clone();
++                        move |mut caller: Caller<'_, StoreLimits>, _params, results| {
++                            if num_gcs.fetch_add(1, SeqCst) < MAX_GCS {
++                                caller.gc();
++                            }
++
++                            expected_drops.fetch_add(3, SeqCst);
++                            results[0] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            results[1] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            results[2] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            Ok(())
++                        }
++                    },
++                ),
++            )
++            .unwrap();
++
++        linker
++            .func_wrap("", "take_refs", {
++                let expected_drops = expected_drops.clone();
++                move |a: Option<ExternRef>, b: Option<ExternRef>, c: Option<ExternRef>| {
++                    // Do the assertion on each ref's inner data, even though it
++                    // all points to the same atomic, so that if we happen to
++                    // run into a use-after-free bug with one of these refs we
++                    // are more likely to trigger a segfault.
++                    if let Some(a) = a {
++                        let a = a.data().downcast_ref::<CountDrops>().unwrap();
++                        assert!(a.0.load(SeqCst) <= expected_drops.load(SeqCst));
++                    }
++                    if let Some(b) = b {
++                        let b = b.data().downcast_ref::<CountDrops>().unwrap();
++                        assert!(b.0.load(SeqCst) <= expected_drops.load(SeqCst));
++                    }
++                    if let Some(c) = c {
++                        let c = c.data().downcast_ref::<CountDrops>().unwrap();
++                        assert!(c.0.load(SeqCst) <= expected_drops.load(SeqCst));
++                    }
++                }
++            })
++            .unwrap();
++
++        linker
++            .define(
++                "",
++                "make_refs",
++                // NB: use `Func::new` so that this can still compile on the old
++                // x86 backend, where `IntoFunc` isn't implemented for
++                // multi-value returns.
++                Func::new(
++                    &mut store,
++                    FuncType::new(
++                        vec![],
++                        vec![ValType::ExternRef, ValType::ExternRef, ValType::ExternRef],
++                    ),
++                    {
++                        let num_dropped = num_dropped.clone();
++                        let expected_drops = expected_drops.clone();
++                        move |_caller, _params, results| {
++                            expected_drops.fetch_add(3, SeqCst);
++                            results[0] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            results[1] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            results[2] =
++                                Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
++                            Ok(())
++                        }
++                    },
++                ),
++            )
++            .unwrap();
+ 
+-        let instance = Instance::new(&mut store, &module, &[gc.into()]).unwrap();
++        let instance = linker.instantiate(&mut store, &module).unwrap();
+         let run = instance.get_func(&mut store, "run").unwrap();
+ 
+         let args: Vec<_> = (0..ops.num_params())
+@@ -552,7 +639,7 @@ pub fn table_ops(
+         let _ = run.call(&mut store, &args);
+     }
+ 
+-    assert_eq!(num_dropped.load(SeqCst), ops.num_params() as usize);
++    assert_eq!(num_dropped.load(SeqCst), expected_drops.load(SeqCst));
+     return;
+ 
+     struct CountDrops(Arc<AtomicUsize>);
+diff --git a/crates/runtime/src/externref.rs b/crates/runtime/src/externref.rs
+index ecf20c505df..340dcf9f2c6 100644
+--- a/crates/runtime/src/externref.rs
++++ b/crates/runtime/src/externref.rs
+@@ -489,7 +489,7 @@ type TableElem = UnsafeCell<Option<VMExternRef>>;
+ ///
+ /// Under the covers, this is a simple bump allocator that allows duplicate
+ /// entries. Deduplication happens at GC time.
+-#[repr(C)] // `alloc` must be the first member, it's accessed from JIT code
++#[repr(C)] // `alloc` must be the first member, it's accessed from JIT code.
+ pub struct VMExternRefActivationsTable {
+     /// Structures used to perform fast bump allocation of storage of externref
+     /// values.
+@@ -521,9 +521,14 @@ pub struct VMExternRefActivationsTable {
+     /// inside-a-Wasm-frame roots, and doing a GC could lead to freeing one of
+     /// those missed roots, and use after free.
+     stack_canary: Option<usize>,
++
++    /// A debug-only field for asserting that we are in a region of code where
++    /// GC is okay to preform.
++    #[cfg(debug_assertions)]
++    gc_okay: bool,
+ }
+ 
+-#[repr(C)] // this is accessed from JTI code
++#[repr(C)] // This is accessed from JIT code.
+ struct VMExternRefTableAlloc {
+     /// Bump-allocation finger within the `chunk`.
+     ///
+@@ -573,6 +578,8 @@ impl VMExternRefActivationsTable {
+             over_approximated_stack_roots: HashSet::with_capacity(Self::CHUNK_SIZE),
+             precise_stack_roots: HashSet::with_capacity(Self::CHUNK_SIZE),
+             stack_canary: None,
++            #[cfg(debug_assertions)]
++            gc_okay: true,
+         }
+     }
+ 
+@@ -581,6 +588,14 @@ impl VMExternRefActivationsTable {
+         (0..size).map(|_| UnsafeCell::new(None)).collect()
+     }
+ 
++    /// Get the available capacity in the bump allocation chunk.
++    #[inline]
++    pub fn bump_capacity_remaining(&self) -> usize {
++        let end = self.alloc.end.as_ptr() as usize;
++        let next = unsafe { *self.alloc.next.get() };
++        end - next.as_ptr() as usize
++    }
++
+     /// Try and insert a `VMExternRef` into this table.
+     ///
+     /// This is a fast path that only succeeds when the bump chunk has the
+@@ -624,6 +639,9 @@ impl VMExternRefActivationsTable {
+         externref: VMExternRef,
+         module_info_lookup: &dyn ModuleInfoLookup,
+     ) {
++        #[cfg(debug_assertions)]
++        assert!(self.gc_okay);
++
+         if let Err(externref) = self.try_insert(externref) {
+             self.gc_and_insert_slow(externref, module_info_lookup);
+         }
+@@ -644,6 +662,20 @@ impl VMExternRefActivationsTable {
+             .insert(VMExternRefWithTraits(externref));
+     }
+ 
++    /// Insert a reference into the table, without ever performing GC.
++    #[inline]
++    pub fn insert_without_gc(&mut self, externref: VMExternRef) {
++        if let Err(externref) = self.try_insert(externref) {
++            self.insert_slow_without_gc(externref);
++        }
++    }
++
++    #[inline(never)]
++    fn insert_slow_without_gc(&mut self, externref: VMExternRef) {
++        self.over_approximated_stack_roots
++            .insert(VMExternRefWithTraits(externref));
++    }
++
+     fn num_filled_in_bump_chunk(&self) -> usize {
+         let next = unsafe { *self.alloc.next.get() };
+         let bytes_unused = (self.alloc.end.as_ptr() as usize) - (next.as_ptr() as usize);
+@@ -742,6 +774,24 @@ impl VMExternRefActivationsTable {
+     pub fn set_stack_canary(&mut self, canary: Option<usize>) {
+         self.stack_canary = canary;
+     }
++
++    /// Set whether it is okay to GC or not right now.
++    ///
++    /// This is provided as a helper for enabling various debug-only assertions
++    /// and checking places where the `wasmtime-runtime` user expects there not
++    /// to be any GCs.
++    #[inline]
++    pub fn set_gc_okay(&mut self, okay: bool) -> bool {
++        #[cfg(debug_assertions)]
++        {
++            return std::mem::replace(&mut self.gc_okay, okay);
++        }
++        #[cfg(not(debug_assertions))]
++        {
++            let _ = okay;
++            return true;
++        }
++    }
+ }
+ 
+ /// Used by the runtime to lookup information about a module given a
+@@ -807,6 +857,9 @@ pub unsafe fn gc(
+ ) {
+     log::debug!("start GC");
+ 
++    #[cfg(debug_assertions)]
++    assert!(externref_activations_table.gc_okay);
++
+     debug_assert!({
+         // This set is only non-empty within this function. It is built up when
+         // walking the stack and interpreting stack maps, and then drained back
+diff --git a/crates/types/src/lib.rs b/crates/types/src/lib.rs
+index 6201b328d6b..33f1cef8c33 100644
+--- a/crates/types/src/lib.rs
++++ b/crates/types/src/lib.rs
+@@ -71,29 +71,66 @@ impl From<WasmType> for wasmparser::Type {
+ /// WebAssembly function type -- equivalent of `wasmparser`'s FuncType.
+ #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+ pub struct WasmFuncType {
++    params: Box<[WasmType]>,
++    externref_params_count: usize,
++    returns: Box<[WasmType]>,
++    externref_returns_count: usize,
++}
++
++impl WasmFuncType {
++    #[inline]
++    pub fn new(params: Box<[WasmType]>, returns: Box<[WasmType]>) -> Self {
++        let externref_params_count = params.iter().filter(|p| **p == WasmType::ExternRef).count();
++        let externref_returns_count = params.iter().filter(|r| **r == WasmType::ExternRef).count();
++        WasmFuncType {
++            params,
++            externref_params_count,
++            returns,
++            externref_returns_count,
++        }
++    }
++
+     /// Function params types.
+-    pub params: Box<[WasmType]>,
++    #[inline]
++    pub fn params(&self) -> &[WasmType] {
++        &self.params
++    }
++
++    /// How many `externref`s are in this function's params?
++    #[inline]
++    pub fn externref_params_count(&self) -> usize {
++        self.externref_params_count
++    }
++
+     /// Returns params types.
+-    pub returns: Box<[WasmType]>,
++    #[inline]
++    pub fn returns(&self) -> &[WasmType] {
++        &self.returns
++    }
++
++    /// How many `externref`s are in this function's returns?
++    #[inline]
++    pub fn externref_returns_count(&self) -> usize {
++        self.externref_returns_count
++    }
+ }
+ 
+ impl TryFrom<wasmparser::FuncType> for WasmFuncType {
+     type Error = WasmError;
+     fn try_from(ty: wasmparser::FuncType) -> Result<Self, Self::Error> {
+-        Ok(Self {
+-            params: ty
+-                .params
+-                .into_vec()
+-                .into_iter()
+-                .map(WasmType::try_from)
+-                .collect::<Result<_, Self::Error>>()?,
+-            returns: ty
+-                .returns
+-                .into_vec()
+-                .into_iter()
+-                .map(WasmType::try_from)
+-                .collect::<Result<_, Self::Error>>()?,
+-        })
++        let params = ty
++            .params
++            .into_vec()
++            .into_iter()
++            .map(WasmType::try_from)
++            .collect::<Result<_, Self::Error>>()?;
++        let returns = ty
++            .returns
++            .into_vec()
++            .into_iter()
++            .map(WasmType::try_from)
++            .collect::<Result<_, Self::Error>>()?;
++        Ok(Self::new(params, returns))
+     }
+ }
+ 
+diff --git a/crates/wasmtime/src/func.rs b/crates/wasmtime/src/func.rs
+index f11e2011795..4a14aa42468 100644
+--- a/crates/wasmtime/src/func.rs
++++ b/crates/wasmtime/src/func.rs
+@@ -774,6 +774,21 @@ impl Func {
+ 
+             let mut values_vec = vec![0; max(params.len(), ty.results().len())];
+ 
++            // Whenever we pass `externref`s from host code to Wasm code, they
++            // go into the `VMExternRefActivationsTable`. But the table might be
++            // at capacity already, so check for that. If it is at capacity
++            // (unlikely) then do a GC to free up space. This is necessary
++            // because otherwise we would either keep filling up the bump chunk
++            // and making it larger and larger or we would always take the slow
++            // path when inserting references into the table.
++            if ty.as_wasm_func_type().externref_params_count()
++                > store
++                    .externref_activations_table()
++                    .bump_capacity_remaining()
++            {
++                store.gc();
++            }
++
+             // Store the argument values into `values_vec`.
+             let param_tys = ty.params();
+             for ((arg, slot), ty) in params.iter().cloned().zip(&mut values_vec).zip(param_tys) {
+@@ -788,7 +803,7 @@ impl Func {
+                     bail!("cross-`Store` values are not currently supported");
+                 }
+                 unsafe {
+-                    arg.write_value_to(store, slot);
++                    arg.write_value_without_gc(store, slot);
+                 }
+             }
+ 
+@@ -871,6 +886,17 @@ impl Func {
+         let (params, results) = val_vec.split_at_mut(nparams);
+         func(caller.sub_caller(), params, results)?;
+ 
++        // See the comment in `Func::call_impl`'s `write_params` function.
++        if ty.as_wasm_func_type().externref_returns_count()
++            > caller
++                .store
++                .0
++                .externref_activations_table()
++                .bump_capacity_remaining()
++        {
++            caller.store.gc();
++        }
++
+         // Unlike our arguments we need to dynamically check that the return
+         // values produced are correct. There could be a bug in `func` that
+         // produces the wrong number, wrong types, or wrong stores of
+@@ -887,7 +913,7 @@ impl Func {
+                 ));
+             }
+             unsafe {
+-                ret.write_value_to(caller.store.0, values_vec.add(i));
++                ret.write_value_without_gc(caller.store.0, values_vec.add(i));
+             }
+         }
+ 
+diff --git a/crates/wasmtime/src/func/typed.rs b/crates/wasmtime/src/func/typed.rs
+index ad1ad67c0f8..4ddced224d1 100644
+--- a/crates/wasmtime/src/func/typed.rs
++++ b/crates/wasmtime/src/func/typed.rs
+@@ -1,5 +1,5 @@
+ use super::{invoke_wasm_and_catch_traps, HostAbi};
+-use crate::store::StoreOpaque;
++use crate::store::{AutoAssertNoGc, StoreOpaque};
+ use crate::{AsContextMut, ExternRef, Func, StoreContextMut, Trap, ValType};
+ use anyhow::{bail, Result};
+ use std::marker;
+@@ -115,15 +115,33 @@ where
+         store: &mut StoreContextMut<'_, T>,
+         params: Params,
+     ) -> Result<Results, Trap> {
++        // See the comment in `Func::call_impl`'s `write_params` function.
++        if params.externrefs_count()
++            > store
++                .0
++                .externref_activations_table()
++                .bump_capacity_remaining()
++        {
++            store.gc();
++        }
++
+         // Validate that all runtime values flowing into this store indeed
+         // belong within this store, otherwise it would be unsafe for store
+         // values to cross each other.
+-        let params = match params.into_abi(store.0) {
+-            Some(abi) => abi,
+-            None => {
+-                return Err(Trap::new(
+-                    "attempt to pass cross-`Store` value to Wasm as function argument",
+-                ))
++
++        let params = {
++            // GC is not safe here, since we move refs into the activations
++            // table but don't hold a strong reference onto them until we enter
++            // the Wasm frame and they get referenced from the stack maps.
++            let mut store = AutoAssertNoGc::new(&mut **store.as_context_mut().0);
++
++            match params.into_abi(&mut store) {
++                Some(abi) => abi,
++                None => {
++                    return Err(Trap::new(
++                        "attempt to pass cross-`Store` value to Wasm as function argument",
++                    ))
++                }
+             }
+         };
+ 
+@@ -183,6 +201,8 @@ pub unsafe trait WasmTy: Send {
+     #[doc(hidden)]
+     fn compatible_with_store(&self, store: &StoreOpaque) -> bool;
+     #[doc(hidden)]
++    fn is_externref(&self) -> bool;
++    #[doc(hidden)]
+     fn into_abi(self, store: &mut StoreOpaque) -> Self::Abi;
+     #[doc(hidden)]
+     unsafe fn from_abi(abi: Self::Abi, store: &mut StoreOpaque) -> Self;
+@@ -201,6 +221,10 @@ macro_rules! primitives {
+                 true
+             }
+             #[inline]
++            fn is_externref(&self) -> bool {
++                false
++            }
++            #[inline]
+             fn into_abi(self, _store: &mut StoreOpaque) -> Self::Abi {
+                 self
+             }
+@@ -234,12 +258,46 @@ unsafe impl WasmTy for Option<ExternRef> {
+         true
+     }
+ 
++    #[inline]
++    fn is_externref(&self) -> bool {
++        true
++    }
++
+     #[inline]
+     fn into_abi(self, store: &mut StoreOpaque) -> Self::Abi {
+         if let Some(x) = self {
+             let abi = x.inner.as_raw();
+             unsafe {
+-                store.insert_vmexternref(x.inner);
++                // NB: We _must not_ trigger a GC when passing refs from host
++                // code into Wasm (e.g. returned from a host function or passed
++                // as arguments to a Wasm function). After insertion into the
++                // table, this reference is no longer rooted. If multiple
++                // references are being sent from the host into Wasm and we
++                // allowed GCs during insertion, then the following events could
++                // happen:
++                //
++                // * Reference A is inserted into the activations
++                //   table. This does not trigger a GC, but does fill the table
++                //   to capacity.
++                //
++                // * The caller's reference to A is removed. Now the only
++                //   reference to A is from the activations table.
++                //
++                // * Reference B is inserted into the activations table. Because
++                //   the table is at capacity, a GC is triggered.
++                //
++                // * A is reclaimed because the only reference keeping it alive
++                //   was the activation table's reference (it isn't inside any
++                //   Wasm frames on the stack yet, so stack scanning and stack
++                //   maps don't increment its reference count).
++                //
++                // * We transfer control to Wasm, giving it A and B. Wasm uses
++                //   A. That's a use after free.
++                //
++                // In conclusion, to prevent uses after free, we cannot GC
++                // during this insertion.
++                let mut store = AutoAssertNoGc::new(store);
++                store.insert_vmexternref_without_gc(x.inner);
+             }
+             abi
+         } else {
+@@ -276,6 +334,11 @@ unsafe impl WasmTy for Option<Func> {
+         }
+     }
+ 
++    #[inline]
++    fn is_externref(&self) -> bool {
++        false
++    }
++
+     #[inline]
+     fn into_abi(self, store: &mut StoreOpaque) -> Self::Abi {
+         if let Some(f) = self {
+@@ -299,10 +362,16 @@ unsafe impl WasmTy for Option<Func> {
+ pub unsafe trait WasmParams: Send {
+     #[doc(hidden)]
+     type Abi: Copy;
++
+     #[doc(hidden)]
+     fn typecheck(params: impl ExactSizeIterator<Item = crate::ValType>) -> Result<()>;
++
++    #[doc(hidden)]
++    fn externrefs_count(&self) -> usize;
++
+     #[doc(hidden)]
+     fn into_abi(self, store: &mut StoreOpaque) -> Option<Self::Abi>;
++
+     #[doc(hidden)]
+     unsafe fn invoke<R: WasmResults>(
+         func: *const VMFunctionBody,
+@@ -323,10 +392,17 @@ where
+     fn typecheck(params: impl ExactSizeIterator<Item = crate::ValType>) -> Result<()> {
+         <(T,) as WasmParams>::typecheck(params)
+     }
++
++    #[inline]
++    fn externrefs_count(&self) -> usize {
++        T::is_externref(self) as usize
++    }
++
+     #[inline]
+     fn into_abi(self, store: &mut StoreOpaque) -> Option<Self::Abi> {
+         <(T,) as WasmParams>::into_abi((self,), store)
+     }
++
+     unsafe fn invoke<R: WasmResults>(
+         func: *const VMFunctionBody,
+         vmctx1: *mut VMContext,
+@@ -365,6 +441,15 @@ macro_rules! impl_wasm_params {
+                 }
+             }
+ 
++            #[inline]
++            fn externrefs_count(&self) -> usize {
++                let ($(ref $t,)*) = self;
++                0 $(
++                    + $t.is_externref() as usize
++                )*
++            }
++
++
+             #[inline]
+             fn into_abi(self, _store: &mut StoreOpaque) -> Option<Self::Abi> {
+                 let ($($t,)*) = self;
+diff --git a/crates/wasmtime/src/store.rs b/crates/wasmtime/src/store.rs
+index 116d1d5cfde..6c391eaed83 100644
+--- a/crates/wasmtime/src/store.rs
++++ b/crates/wasmtime/src/store.rs
+@@ -290,6 +290,67 @@ unsafe impl Send for AsyncState {}
+ #[cfg(feature = "async")]
+ unsafe impl Sync for AsyncState {}
+ 
++/// An RAII type to automatically mark a region of code as unsafe for GC.
++pub(crate) struct AutoAssertNoGc<T>
++where
++    T: std::ops::DerefMut<Target = StoreOpaque>,
++{
++    #[cfg(debug_assertions)]
++    prev_okay: bool,
++    store: T,
++}
++
++impl<T> AutoAssertNoGc<T>
++where
++    T: std::ops::DerefMut<Target = StoreOpaque>,
++{
++    pub fn new(mut store: T) -> Self {
++        #[cfg(debug_assertions)]
++        {
++            let prev_okay = store.externref_activations_table.set_gc_okay(false);
++            return AutoAssertNoGc { store, prev_okay };
++        }
++        #[cfg(not(debug_assertions))]
++        {
++            return AutoAssertNoGc { store };
++        }
++    }
++}
++
++impl<T> std::ops::Deref for AutoAssertNoGc<T>
++where
++    T: std::ops::DerefMut<Target = StoreOpaque>,
++{
++    type Target = T;
++
++    fn deref(&self) -> &Self::Target {
++        &self.store
++    }
++}
++
++impl<T> std::ops::DerefMut for AutoAssertNoGc<T>
++where
++    T: std::ops::DerefMut<Target = StoreOpaque>,
++{
++    fn deref_mut(&mut self) -> &mut Self::Target {
++        &mut self.store
++    }
++}
++
++impl<T> Drop for AutoAssertNoGc<T>
++where
++    T: std::ops::DerefMut<Target = StoreOpaque>,
++{
++    fn drop(&mut self) {
++        #[cfg(debug_assertions)]
++        {
++            self.store
++                .externref_activations_table
++                .set_gc_okay(self.prev_okay);
++        }
++    }
++}
++
+ /// Used to associate instances with the store.
+ ///
+ /// This is needed to track if the instance was allocated explicitly with the on-demand
+@@ -1039,9 +1100,8 @@ impl StoreOpaque {
+         &*self.interrupts as *const VMInterrupts as *mut VMInterrupts
+     }
+ 
+-    pub unsafe fn insert_vmexternref(&mut self, r: VMExternRef) {
+-        self.externref_activations_table
+-            .insert_with_gc(r, &self.modules)
++    pub unsafe fn insert_vmexternref_without_gc(&mut self, r: VMExternRef) {
++        self.externref_activations_table.insert_without_gc(r);
+     }
+ 
+     #[inline]
+diff --git a/crates/wasmtime/src/types.rs b/crates/wasmtime/src/types.rs
+index 741eabacdbe..479187825cf 100644
+--- a/crates/wasmtime/src/types.rs
++++ b/crates/wasmtime/src/types.rs
+@@ -230,21 +230,21 @@ impl FuncType {
+         results: impl IntoIterator<Item = ValType>,
+     ) -> FuncType {
+         FuncType {
+-            sig: WasmFuncType {
+-                params: params.into_iter().map(|t| t.to_wasm_type()).collect(),
+-                returns: results.into_iter().map(|t| t.to_wasm_type()).collect(),
+-            },
++            sig: WasmFuncType::new(
++                params.into_iter().map(|t| t.to_wasm_type()).collect(),
++                results.into_iter().map(|t| t.to_wasm_type()).collect(),
++            ),
+         }
+     }
+ 
+     /// Returns the list of parameter types for this function.
+     pub fn params(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
+-        self.sig.params.iter().map(ValType::from_wasm_type)
++        self.sig.params().iter().map(ValType::from_wasm_type)
+     }
+ 
+     /// Returns the list of result types for this function.
+     pub fn results(&self) -> impl ExactSizeIterator<Item = ValType> + '_ {
+-        self.sig.returns.iter().map(ValType::from_wasm_type)
++        self.sig.returns().iter().map(ValType::from_wasm_type)
+     }
+ 
+     pub(crate) fn as_wasm_func_type(&self) -> &WasmFuncType {
+diff --git a/crates/wasmtime/src/values.rs b/crates/wasmtime/src/values.rs
+index 623151d9785..c92e511e207 100644
+--- a/crates/wasmtime/src/values.rs
++++ b/crates/wasmtime/src/values.rs
+@@ -93,17 +93,17 @@ impl Val {
+         }
+     }
+ 
+-    pub(crate) unsafe fn write_value_to(&self, store: &mut StoreOpaque, p: *mut u128) {
+-        match self {
+-            Val::I32(i) => ptr::write(p as *mut i32, *i),
+-            Val::I64(i) => ptr::write(p as *mut i64, *i),
+-            Val::F32(u) => ptr::write(p as *mut u32, *u),
+-            Val::F64(u) => ptr::write(p as *mut u64, *u),
+-            Val::V128(b) => ptr::write(p as *mut u128, *b),
++    pub(crate) unsafe fn write_value_without_gc(&self, store: &mut StoreOpaque, p: *mut u128) {
++        match *self {
++            Val::I32(i) => ptr::write(p as *mut i32, i),
++            Val::I64(i) => ptr::write(p as *mut i64, i),
++            Val::F32(u) => ptr::write(p as *mut u32, u),
++            Val::F64(u) => ptr::write(p as *mut u64, u),
++            Val::V128(b) => ptr::write(p as *mut u128, b),
+             Val::ExternRef(None) => ptr::write(p, 0),
+-            Val::ExternRef(Some(x)) => {
++            Val::ExternRef(Some(ref x)) => {
+                 let externref_ptr = x.inner.as_raw();
+-                store.insert_vmexternref(x.inner.clone());
++                store.insert_vmexternref_without_gc(x.clone().inner);
+                 ptr::write(p as *mut *mut u8, externref_ptr)
+             }
+             Val::FuncRef(f) => ptr::write(
+diff --git a/tests/all/gc.rs b/tests/all/gc.rs
+index 6c3854d2b20..0ba46525f30 100644
+--- a/tests/all/gc.rs
++++ b/tests/all/gc.rs
+@@ -424,3 +424,56 @@ fn global_init_no_leak() -> anyhow::Result<()> {
+ 
+     Ok(())
+ }
++
++#[test]
++fn no_gc_middle_of_args() -> anyhow::Result<()> {
++    let (mut store, module) = ref_types_module(
++        r#"
++            (module
++                (import "" "return_some" (func $return (result externref externref externref)))
++                (import "" "take_some" (func $take (param externref externref externref)))
++                (func (export "run")
++                    (local i32)
++                    i32.const 1000
++                    local.set 0
++                    loop
++                        call $return
++                        call $take
++                        local.get 0
++                        i32.const -1
++                        i32.add
++                        local.tee 0
++                        br_if 0
++                    end
++                )
++            )
++        "#,
++    )?;
++
++    let mut linker = Linker::new(store.engine());
++    linker.func_wrap("", "return_some", || {
++        (
++            Some(ExternRef::new("a".to_string())),
++            Some(ExternRef::new("b".to_string())),
++            Some(ExternRef::new("c".to_string())),
++        )
++    })?;
++    linker.func_wrap(
++        "",
++        "take_some",
++        |a: Option<ExternRef>, b: Option<ExternRef>, c: Option<ExternRef>| {
++            let a = a.unwrap();
++            let b = b.unwrap();
++            let c = c.unwrap();
++            assert_eq!(a.data().downcast_ref::<String>().unwrap(), "a");
++            assert_eq!(b.data().downcast_ref::<String>().unwrap(), "b");
++            assert_eq!(c.data().downcast_ref::<String>().unwrap(), "c");
++        },
++    )?;
++
++    let instance = linker.instantiate(&mut store, &module)?;
++    let func = instance.get_typed_func::<(), (), _>(&mut store, "run")?;
++    func.call(&mut store, ())?;
++
++    Ok(())
++}

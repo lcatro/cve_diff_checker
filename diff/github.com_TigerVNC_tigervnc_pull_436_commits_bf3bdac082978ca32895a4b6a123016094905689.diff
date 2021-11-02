@@ -1,0 +1,27 @@
+From bf3bdac082978ca32895a4b6a123016094905689 Mon Sep 17 00:00:00 2001
+From: Michal Srb <michalsrb@gmail.com>
+Date: Mon, 27 Mar 2017 13:37:11 +0300
+Subject: [PATCH] Fix crash from integer overflow in
+ SMsgReader::readClientCutText
+
+The length sent by client is U32, but is converted into int. If it was bigger than 0x7fffffff the resulting int is negative, it passes the check against maxCutText and later throws std::bad_alloc from CharArray which takes down the whole server.
+
+All the Streaming API deals with lengths in ints, so we can't tell it to skip that big amount of data. And it is not realistic to expect more than 2GB of clipboard data anyway. So lets just throw rdr::Exception that will disconnect this client and keep the server alive.
+---
+ common/rfb/SMsgReader.cxx | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/common/rfb/SMsgReader.cxx b/common/rfb/SMsgReader.cxx
+index 89c9a8fde..3c08fd6fd 100644
+--- a/common/rfb/SMsgReader.cxx
++++ b/common/rfb/SMsgReader.cxx
+@@ -200,6 +200,9 @@ void SMsgReader::readClientCutText()
+ {
+   is->skip(3);
+   int len = is->readU32();
++  if (len < 0) {
++    throw Exception("Cut text too long.");
++  }
+   if (len > maxCutText) {
+     is->skip(len);
+     vlog.error("Cut text too long (%d bytes) - ignoring", len);

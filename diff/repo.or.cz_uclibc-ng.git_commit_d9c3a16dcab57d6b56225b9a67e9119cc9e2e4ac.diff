@@ -1,0 +1,45 @@
+From d9c3a16dcab57d6b56225b9a67e9119cc9e2e4ac Mon Sep 17 00:00:00 2001
+From: Waldemar Brodkorb <wbx@openadk.org>
+Date: Sun, 17 Jan 2016 15:47:22 +0100
+Subject: [PATCH] Do not follow compressed items forever.
+
+It is possible to get stuck in an infinite loop when receiving a
+specially crafted DNS reply. Exit the loop after a number of iteration
+and consider the packet invalid.
+
+Signed-off-by: Daniel Fahlgren <daniel@fahlgren.se>
+Signed-off-by: Waldemar Brodkorb <wbx@uclibc-ng.org>
+---
+ libc/inet/resolv.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/libc/inet/resolv.c b/libc/inet/resolv.c
+index eb663ac0f..5dca90746 100644
+--- a/libc/inet/resolv.c
++++ b/libc/inet/resolv.c
+@@ -669,11 +669,12 @@ int __decode_dotted(const unsigned char *packet,
+ 	bool measure = 1;
+ 	unsigned total = 0;
+ 	unsigned used = 0;
++	unsigned maxiter = 256;
+ 
+ 	if (!packet)
+ 		return -1;
+ 
+-	while (1) {
++	while (--maxiter) {
+ 		if (offset >= packet_len)
+ 			return -1;
+ 		b = packet[offset++];
+@@ -710,6 +711,8 @@ int __decode_dotted(const unsigned char *packet,
+ 		else
+ 			dest[used++] = '\0';
+ 	}
++	if (!maxiter)
++		return -1;
+ 
+ 	/* The null byte must be counted too */
+ 	if (measure)
+-- 
+2.11.4.GIT
+

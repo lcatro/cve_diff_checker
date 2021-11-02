@@ -1,0 +1,291 @@
+From b0dc999e0b45355314616321dbb6cb71e729fc9d Mon Sep 17 00:00:00 2001
+From: Romain Perier <mrpouet@gentoo.org>
+Date: Mon, 1 Feb 2010 19:41:57 +0100
+Subject: [PATCH] [gsm] Delay the creation of the GsmXSMPClient until it really
+ exists
+
+We used to create the GsmXSMPClient before the XSMP connection is really
+accepted. This can lead to some issues, though. An example is:
+https://bugzilla.gnome.org/show_bug.cgi?id=598211#c19. Quoting:
+
+ "What is happening is that a new client (probably metacity in your
+ case) is opening an ICE connection in the GSM_MANAGER_PHASE_END_SESSION
+ phase, which causes a new GsmXSMPClient to be added to the client
+ store. The GSM_MANAGER_PHASE_EXIT phase then begins before the client
+ has had a chance to establish a xsmp connection, which means that
+ client->priv->conn will not be initialized at the point that xsmp_stop
+ is called on the new unregistered client."
+
+The fix is to create the GsmXSMPClient object when there's a real XSMP
+connection. This implies moving the timeout that makes sure we don't
+have an empty client to the XSMP server.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=598211
+---
+ gnome-session/gsm-xsmp-client.c |  30 -------
+ gnome-session/gsm-xsmp-server.c | 150 ++++++++++++++++++++++++++------
+ 2 files changed, 124 insertions(+), 56 deletions(-)
+
+diff --git a/gnome-session/gsm-xsmp-client.c b/gnome-session/gsm-xsmp-client.c
+index 8ba1eb7b..9da5fdc0 100644
+--- a/gnome-session/gsm-xsmp-client.c
++++ b/gnome-session/gsm-xsmp-client.c
+@@ -51,7 +51,6 @@ struct GsmXSMPClientPrivate
+         IceConn    ice_connection;
+ 
+         guint      watch_id;
+-        guint      protocol_timeout;
+ 
+         char      *description;
+         GPtrArray *props;
+@@ -115,22 +114,6 @@ client_iochannel_watch (GIOChannel    *channel,
+         return keep_going;
+ }
+ 
+-/* Called if too much time passes between the initial connection and
+- * the XSMP protocol setup.
+- */
+-static gboolean
+-_client_protocol_timeout (GsmXSMPClient *client)
+-{
+-        g_debug ("GsmXSMPClient: client_protocol_timeout for client '%s' in ICE status %d",
+-                 client->priv->description,
+-                 IceConnectionStatus (client->priv->ice_connection));
+-
+-        gsm_client_set_status (GSM_CLIENT (client), GSM_CLIENT_FAILED);
+-        gsm_client_disconnected (GSM_CLIENT (client));
+-
+-        return FALSE;
+-}
+-
+ static SmProp *
+ find_property (GsmXSMPClient *client,
+                const char    *name,
+@@ -193,10 +176,6 @@ setup_connection (GsmXSMPClient *client)
+                                                  client);
+         g_io_channel_unref (channel);
+ 
+-        client->priv->protocol_timeout = g_timeout_add_seconds (5,
+-                                                                (GSourceFunc)_client_protocol_timeout,
+-                                                                client);
+-
+         set_description (client);
+ 
+         g_debug ("GsmXSMPClient: New client '%s'", client->priv->description);
+@@ -869,10 +848,6 @@ gsm_xsmp_client_disconnect (GsmXSMPClient *client)
+                 IceSetShutdownNegotiation (client->priv->ice_connection, FALSE);
+                 IceCloseConnection (client->priv->ice_connection);
+         }
+-
+-        if (client->priv->protocol_timeout > 0) {
+-                g_source_remove (client->priv->protocol_timeout);
+-        }
+ }
+ 
+ static void
+@@ -1305,11 +1280,6 @@ gsm_xsmp_client_connect (GsmXSMPClient *client,
+ {
+         client->priv->conn = conn;
+ 
+-        if (client->priv->protocol_timeout) {
+-                g_source_remove (client->priv->protocol_timeout);
+-                client->priv->protocol_timeout = 0;
+-        }
+-
+         g_debug ("GsmXSMPClient: Initializing client %s", client->priv->description);
+ 
+         *mask_ret = 0;
+diff --git a/gnome-session/gsm-xsmp-server.c b/gnome-session/gsm-xsmp-server.c
+index 991c895f..1f0e0455 100644
+--- a/gnome-session/gsm-xsmp-server.c
++++ b/gnome-session/gsm-xsmp-server.c
+@@ -91,44 +91,134 @@ typedef struct {
+         IceListenObj   listener;
+ } GsmIceConnectionData;
+ 
++typedef struct {
++        guint watch_id;
++        guint protocol_timeout;
++} GsmIceConnectionWatch;
++
++static void
++disconnect_ice_connection (IceConn ice_conn)
++{
++        IceSetShutdownNegotiation (ice_conn, FALSE);
++        IceCloseConnection (ice_conn);
++}
++
++static void
++free_ice_connection_watch (GsmIceConnectionWatch *data)
++{
++        if (data->watch_id) {
++                g_source_remove (data->watch_id);
++                data->watch_id = 0;
++        }
++
++        if (data->protocol_timeout) {
++                g_source_remove (data->protocol_timeout);
++                data->protocol_timeout = 0;
++        }
++
++        g_free (data);
++}
++
++static gboolean
++ice_protocol_timeout (IceConn ice_conn)
++{
++        GsmIceConnectionWatch *data;
++
++        g_debug ("GsmXsmpServer: ice_protocol_timeout for IceConn %p with status %d",
++                 ice_conn, IceConnectionStatus (ice_conn));
++
++        data = ice_conn->context;
++
++        free_ice_connection_watch (data);
++        disconnect_ice_connection (ice_conn);
++
++        return FALSE;
++}
++
++static gboolean
++auth_iochannel_watch (GIOChannel   *source,
++                      GIOCondition  condition,
++                      IceConn       ice_conn)
++{
++
++        GsmIceConnectionWatch *data;
++        gboolean               keep_going;
++
++        data = ice_conn->context;
++
++        switch (IceProcessMessages (ice_conn, NULL, NULL)) {
++        case IceProcessMessagesSuccess:
++                keep_going = TRUE;
++                break;
++        case IceProcessMessagesIOError:
++                g_debug ("GsmXsmpServer: IceProcessMessages returned IceProcessMessagesIOError");
++                free_ice_connection_watch (data);
++                disconnect_ice_connection (ice_conn);
++                keep_going = FALSE;
++                break;
++        case IceProcessMessagesConnectionClosed:
++                g_debug ("GsmXsmpServer: IceProcessMessages returned IceProcessMessagesConnectionClosed");
++                free_ice_connection_watch (data);
++                keep_going = FALSE;
++                break;
++        default:
++                g_assert_not_reached ();
++        }
++
++        return keep_going;
++}
++
++/* IceAcceptConnection returns a new ICE connection that is in a "pending" state,
++ * this is because authentification may be necessary.
++ * So we've to authenticate it, before accept_xsmp_connection() is called.
++ * Then each GsmXSMPClient will have its own IceConn watcher
++ */
++static void
++auth_ice_connection (IceConn ice_conn)
++{
++        GIOChannel            *channel;
++        GsmIceConnectionWatch *data;
++        int                    fd;
++
++        g_debug ("GsmXsmpServer: auth_ice_connection()");
++
++        fd = IceConnectionNumber (ice_conn);
++        fcntl (fd, F_SETFD, fcntl (fd, F_GETFD, 0) | FD_CLOEXEC);
++        channel = g_io_channel_unix_new (fd);
++
++        data = g_new0 (GsmIceConnectionWatch, 1);
++        ice_conn->context = data;
++
++        data->protocol_timeout = g_timeout_add_seconds (5,
++                                                        (GSourceFunc)ice_protocol_timeout,
++                                                        ice_conn);
++        data->watch_id = g_io_add_watch (channel,
++                                         G_IO_IN | G_IO_ERR,
++                                         (GIOFunc)auth_iochannel_watch,
++                                         ice_conn);
++        g_io_channel_unref (channel);
++}
++
+ /* This is called (by glib via xsmp->ice_connection_watch) when a
+- * connection is first received on the ICE listening socket. (We
+- * expect that the client will then initiate XSMP on the connection;
+- * if it does not, GsmXSMPClient will eventually time out and close
+- * the connection.)
+- *
+- * FIXME: it would probably make more sense to not create a
+- * GsmXSMPClient object until accept_xsmp_connection, below (and to do
+- * the timing-out here in xsmp.c).
++ * connection is first received on the ICE listening socket.
+  */
+ static gboolean
+ accept_ice_connection (GIOChannel           *source,
+                        GIOCondition          condition,
+                        GsmIceConnectionData *data)
+ {
+-        IceListenObj    listener;
+         IceConn         ice_conn;
+         IceAcceptStatus status;
+-        GsmClient      *client;
+-        GsmXsmpServer  *server;
+-
+-        listener = data->listener;
+-        server = data->server;
+ 
+         g_debug ("GsmXsmpServer: accept_ice_connection()");
+ 
+-        ice_conn = IceAcceptConnection (listener, &status);
++        ice_conn = IceAcceptConnection (data->listener, &status);
+         if (status != IceAcceptSuccess) {
+                 g_debug ("GsmXsmpServer: IceAcceptConnection returned %d", status);
+                 return TRUE;
+         }
+ 
+-        client = gsm_xsmp_client_new (ice_conn);
+-        ice_conn->context = client;
+-
+-        gsm_store_add (server->priv->client_store, gsm_client_peek_id (client), G_OBJECT (client));
+-        /* the store will own the ref */
+-        g_object_unref (client);
++        auth_ice_connection (ice_conn);
+ 
+         return TRUE;
+ }
+@@ -224,8 +314,9 @@ accept_xsmp_connection (SmsConn        sms_conn,
+                         SmsCallbacks  *callbacks_ret,
+                         char         **failure_reason_ret)
+ {
+-        IceConn        ice_conn;
+-        GsmXSMPClient *client;
++        IceConn                ice_conn;
++        GsmClient             *client;
++        GsmIceConnectionWatch *data;
+ 
+         /* FIXME: what about during shutdown but before gsm_xsmp_shutdown? */
+         if (server->priv->xsmp_sockets == NULL) {
+@@ -236,11 +327,18 @@ accept_xsmp_connection (SmsConn        sms_conn,
+         }
+ 
+         ice_conn = SmsGetIceConnection (sms_conn);
+-        client = ice_conn->context;
++        data = ice_conn->context;
+ 
+-        g_return_val_if_fail (client != NULL, TRUE);
++        /* Each GsmXSMPClient has its own IceConn watcher */
++        free_ice_connection_watch (data);
++
++        client = gsm_xsmp_client_new (ice_conn);
++
++        gsm_store_add (server->priv->client_store, gsm_client_peek_id (client), G_OBJECT (client));
++        /* the store will own the ref */
++        g_object_unref (client);
+ 
+-        gsm_xsmp_client_connect (client, sms_conn, mask_ret, callbacks_ret);
++        gsm_xsmp_client_connect (GSM_XSMP_CLIENT (client), sms_conn, mask_ret, callbacks_ret);
+ 
+         return TRUE;
+ }

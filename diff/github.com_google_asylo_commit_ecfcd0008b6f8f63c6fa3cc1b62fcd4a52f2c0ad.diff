@@ -1,0 +1,35 @@
+From ecfcd0008b6f8f63c6fa3cc1b62fcd4a52f2c0ad Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Fri, 12 Mar 2021 10:43:12 -0800
+Subject: [PATCH] Store untrusted input to enclave variable
+
+The untrusted input pointer should be stored to trusted variable before
+checking to avoid unexpected modifications after checking.
+
+PiperOrigin-RevId: 362553830
+Change-Id: I743f9bd3487de60269e247d74f2188f2ffc06d01
+---
+ asylo/platform/primitives/sgx/trusted_sgx.cc | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/asylo/platform/primitives/sgx/trusted_sgx.cc b/asylo/platform/primitives/sgx/trusted_sgx.cc
+index 34bea2625..3b16e39fb 100644
+--- a/asylo/platform/primitives/sgx/trusted_sgx.cc
++++ b/asylo/platform/primitives/sgx/trusted_sgx.cc
+@@ -281,12 +281,13 @@ PrimitiveStatus TrustedPrimitives::UntrustedCall(uint64_t untrusted_selector,
+     if (sgx_params->input_size > 0) {
+       // Allocate and copy data to |input_buffer|.
+       sgx_params->input = untrusted_cache->Malloc(sgx_params->input_size);
+-      if (!TrustedPrimitives::IsOutsideEnclave(sgx_params->input,
+-                                               sgx_params->input_size)) {
++      const void *input_pointer = sgx_params->input;
++      uint64_t input_size = sgx_params->input_size;
++      if (!TrustedPrimitives::IsOutsideEnclave(input_pointer, input_size)) {
+         TrustedPrimitives::BestEffortAbort(
+             "UntrustedCall: sgx_param input should be in untrusted memory");
+       }
+-      input->Serialize(const_cast<void *>(sgx_params->input));
++      input->Serialize(const_cast<void *>(input_pointer));
+     }
+   }
+   sgx_params->output_size = 0;

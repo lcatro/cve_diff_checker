@@ -1,0 +1,74 @@
+From 3eaddb33619eaaf74a760872850c550ad8f5c52f Mon Sep 17 00:00:00 2001
+From: Subodh Iyengar <subodh@fb.com>
+Date: Thu, 8 Aug 2019 11:38:29 -0700
+Subject: [PATCH] Coalesce handshake buffers
+
+Summary:
+It is possible that a peer might send us records in a manner such
+that there is a 16KB record and only 1 byte of handshake message in
+each record. Since we normally just trim the IOBuf, we would end up
+holding 16K of data per actual byte of data. To prevent this we allocate a contiguous
+buffer to copy over these bytes for handshake messages for now.
+
+This is a partial fix for CVE-2019-11924
+
+Reviewed By: ngoyal
+
+Differential Revision: D16478044
+
+fbshipit-source-id: 464bc68eaefda065d9a327818100427377293fbd
+---
+ fizz/record/EncryptedRecordLayer.cpp |  2 +-
+ fizz/record/RecordLayer.cpp          | 26 +++++++++++++++++++++++++-
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/fizz/record/EncryptedRecordLayer.cpp b/fizz/record/EncryptedRecordLayer.cpp
+index a56b7625..377ae5b3 100644
+--- a/fizz/record/EncryptedRecordLayer.cpp
++++ b/fizz/record/EncryptedRecordLayer.cpp
+@@ -113,7 +113,7 @@ folly::Optional<TLSMessage> EncryptedReadRecordLayer::read(
+     return folly::none;
+   }
+ 
+-  TLSMessage msg;
++  TLSMessage msg{};
+   // Iterate over the buffers while trying to find
+   // the first non-zero octet. This is much faster than
+   // first iterating and then trimming.
+diff --git a/fizz/record/RecordLayer.cpp b/fizz/record/RecordLayer.cpp
+index 0e8136c1..f608d907 100644
+--- a/fizz/record/RecordLayer.cpp
++++ b/fizz/record/RecordLayer.cpp
+@@ -49,7 +49,31 @@ folly::Optional<Param> ReadRecordLayer::readEvent(
+         }
+       }
+       case ContentType::handshake: {
+-        unparsedHandshakeData_.append(std::move(message->fragment));
++        std::unique_ptr<folly::IOBuf> handshakeMessage =
++            unparsedHandshakeData_.move();
++        // It is possible that a peer might send us records in a manner such
++        // that there is a 16KB record and only 1 byte of handshake message in
++        // each record. Since we normally just trim the IOBuf, we would end up
++        // holding 16K of data. To prevent this we allocate a contiguous
++        // buffer to copy over these bytes. We supply kExtraAlloc bytes in
++        // order to avoid needing to re-allocate a lot of times if we receive
++        // a lot of small messages. There might be more optimal reallocation
++        // policies, but this should be fine.
++        message->fragment->coalesce();
++        constexpr size_t kExtraAlloc = 1024;
++        if (!handshakeMessage) {
++          handshakeMessage =
++              folly::IOBuf::create(message->fragment->length() + kExtraAlloc);
++        } else if (handshakeMessage->tailroom() < message->fragment->length()) {
++          handshakeMessage->reserve(
++              0, message->fragment->length() + kExtraAlloc);
++        }
++        memcpy(
++            handshakeMessage->writableTail(),
++            message->fragment->data(),
++            message->fragment->length());
++        handshakeMessage->append(message->fragment->length());
++        unparsedHandshakeData_.append(std::move(handshakeMessage));
+         auto param = decodeHandshakeMessage(unparsedHandshakeData_);
+         if (param) {
+           VLOG(8) << "Received handshake message "

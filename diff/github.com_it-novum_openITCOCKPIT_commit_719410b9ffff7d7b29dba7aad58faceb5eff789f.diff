@@ -1,0 +1,44 @@
+From 719410b9ffff7d7b29dba7aad58faceb5eff789f Mon Sep 17 00:00:00 2001
+From: nook24 <info@nook24.eu>
+Date: Tue, 17 Mar 2020 08:38:29 +0100
+Subject: [PATCH] Debug Mode can now only be enabled by an environment variable
+
+---
+ app/Config/Environments.php | 21 ++++++++++-----------
+ 1 file changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/app/Config/Environments.php b/app/Config/Environments.php
+index bf209889e8..31805bfeee 100644
+--- a/app/Config/Environments.php
++++ b/app/Config/Environments.php
+@@ -47,19 +47,18 @@ protected static function _detectCli() {
+      * @return string
+      */
+     protected static function _detectHttp() {
+-        $host = env('HTTP_HOST');
++        $environment = self::PRODUCTION;
+ 
+-        if (substr($host, 0, 4) == 'dev.') {
+-            $environment = self::DEVELOPMENT;
+-        } else if (substr($host, 0, 4) == 'dev-') {
+-            $environment = self::DEVELOPMENT;
+-        } else if (substr($host, 0, 8) == 'staging.') {
+-            $environment = self::STAGING;
+-        } else {
+-            $environment = self::PRODUCTION;
+-        }
++        // To enable debug mode please add
++        // fastcgi_param OITC_DEBUG 1;
++        // to your nginx config
+ 
++        if (isset($_SERVER['OITC_DEBUG'])) {
++            if ($_SERVER['OITC_DEBUG'] === '1') {
++                $environment = self::DEVELOPMENT;
++            }
++        }
++        
+         return $environment;
+-
+     }
+ }
+\ No newline at end of file

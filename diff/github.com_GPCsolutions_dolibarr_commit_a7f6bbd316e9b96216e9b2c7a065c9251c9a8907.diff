@@ -1,0 +1,410 @@
+From a7f6bbd316e9b96216e9b2c7a065c9251c9a8907 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Rapha=C3=ABl=20Doursenaud?= <rdoursenaud@gpcsolutions.fr>
+Date: Wed, 20 May 2015 17:32:34 +0200
+Subject: [PATCH] Properly escape untrusted data to prevent HTML injection.
+
+First pass for #2857
+---
+ htdocs/adherents/liste.php | 36 ++++++++++++++++++------------------
+ htdocs/contact/list.php    | 36 ++++++++++++++++++------------------
+ htdocs/contrat/liste.php   | 12 ++++++------
+ htdocs/product/liste.php   | 18 +++++++++---------
+ htdocs/societe/societe.php | 36 ++++++++++++++++++------------------
+ 5 files changed, 69 insertions(+), 69 deletions(-)
+
+diff --git a/htdocs/adherents/liste.php b/htdocs/adherents/liste.php
+index 1d80c82a713a..13bd3aee7363 100644
+--- a/htdocs/adherents/liste.php
++++ b/htdocs/adherents/liste.php
+@@ -2,7 +2,7 @@
+ /* Copyright (C) 2001-2003 Rodolphe Quiedeville <rodolphe@quiedeville.org>
+  * Copyright (C) 2002-2003 Jean-Louis Bergamo   <jlb@j1b.org>
+  * Copyright (C) 2004-2014 Laurent Destailleur  <eldy@users.sourceforge.net>
+- * Copyright (C) 2013      Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
++ * Copyright (C) 2013-2015 Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -97,7 +97,7 @@
+ $sql.= " WHERE d.fk_adherent_type = t.rowid ";
+ if ($catid > 0)    $sql.= " AND cm.fk_categorie = ".$catid;
+ if ($catid == -2)  $sql.= " AND cm.fk_categorie IS NULL";
+-if ($search_categ > 0)   $sql.= " AND cm.fk_categorie = ".$search_categ;
++if ($search_categ > 0)   $sql.= " AND cm.fk_categorie = ".$db->escape($search_categ);
+ if ($search_categ == -2) $sql.= " AND cm.fk_categorie IS NULL";
+ $sql.= " AND d.entity = ".$conf->entity;
+ if ($sall)
+@@ -106,15 +106,15 @@
+         $scrit = explode(' ', $sall);
+         foreach ($scrit as $crit) {
+             $sql.=" AND (";
+-            if (is_numeric($sall)) $sql.= "d.rowid = ".$sall." OR ";
+-            $sql.=" d.firstname LIKE '%".$sall."%' OR d.lastname LIKE '%".$sall."%' OR d.societe LIKE '%".$sall."%'";
+-            $sql.=" OR d.email LIKE '%".$sall."%' OR d.login LIKE '%".$sall."%' OR d.address LIKE '%".$sall."%'";
+-            $sql.=" OR d.town LIKE '%".$sall."%' OR d.note LIKE '%".$sall."%')";
++            if (is_numeric($sall)) $sql.= "d.rowid = ".$db->escape($sall)." OR ";
++            $sql.=" d.firstname LIKE '%".$db->escape($sall)."%' OR d.lastname LIKE '%".$db->escape($sall)."%' OR d.societe LIKE '%".$db->escape($sall)."%'";
++            $sql.=" OR d.email LIKE '%".$db->escape($sall)."%' OR d.login LIKE '%".$db->escape($sall)."%' OR d.address LIKE '%".$db->escape($sall)."%'";
++            $sql.=" OR d.town LIKE '%".$db->escape($sall)."%' OR d.note LIKE '%".$db->escape($sall)."%')";
+         }
+ }
+ if ($type > 0)
+ {
+-	$sql.=" AND t.rowid=".$type;
++	$sql.=" AND t.rowid=".$db->escape($type);
+ }
+ if (isset($_GET["statut"]) || isset($_POST["statut"]))
+ {
+@@ -188,17 +188,17 @@
+ 	}
+ 
+ 	$param="";
+-	if ($statut != "") $param.="&statut=".$statut;
+-	if ($search_nom)   $param.="&search_nom=".$search_nom;
+-	if ($search_login) $param.="&search_login=".$search_login;
+-	if ($search_email) $param.="&search_email=".$search_email;
+-	if ($filter)       $param.="&filter=".$filter;
+-	if ($type > 0)     $param.="&type=".$type;
++	if ($statut != "") $param.="&statut=".htmlspecialchars($statut);
++	if ($search_nom)   $param.="&search_nom=".htmlspecialchars($search_nom);
++	if ($search_login) $param.="&search_login=".htmlspecialchars($search_login);
++	if ($search_email) $param.="&search_email=".htmlspecialchars($search_email);
++	if ($filter)       $param.="&filter=".htmlspecialchars($filter);
++	if ($type > 0)     $param.="&type=".htmlspecialchars($type);
+ 	print_barre_liste($titre,$page,$_SERVER["PHP_SELF"],$param,$sortfield,$sortorder,'',$num,$nbtotalofrecords);
+ 
+ 	if ($sall)
+ 	{
+-		print $langs->trans("Filter")." (".$langs->trans("Ref").", ".$langs->trans("Lastname").", ".$langs->trans("Firstname").", ".$langs->trans("EMail").", ".$langs->trans("Address")." ".$langs->trans("or")." ".$langs->trans("Town")."): ".$sall;
++		print $langs->trans("Filter")." (".$langs->trans("Ref").", ".$langs->trans("Lastname").", ".$langs->trans("Firstname").", ".$langs->trans("EMail").", ".$langs->trans("Address")." ".$langs->trans("or")." ".$langs->trans("Town")."): ".htmlspecialchars($sall);
+ 	}
+ 
+ 	print '<form method="POST" action="'.$_SERVER["PHP_SELF"].($param?'?'.$param:'').'">';
+@@ -236,13 +236,13 @@
+ 	print '<tr class="liste_titre">';
+ 
+ 	print '<td class="liste_titre" align="left">';
+-	print '<input class="flat" type="text" name="search_ref" value="'.$search_ref.'" size="4"></td>';
++	print '<input class="flat" type="text" name="search_ref" value="'.htmlspecialchars($search_ref).'" size="4"></td>';
+ 
+ 	print '<td class="liste_titre" align="left">';
+-	print '<input class="flat" type="text" name="search_lastname" value="'.$search_lastname.'" size="12"></td>';
++	print '<input class="flat" type="text" name="search_lastname" value="'.htmlspecialchars($search_lastname).'" size="12"></td>';
+ 
+ 	print '<td class="liste_titre" align="left">';
+-	print '<input class="flat" type="text" name="search_login" value="'.$search_login.'" size="7"></td>';
++	print '<input class="flat" type="text" name="search_login" value="'.htmlspecialchars($search_login).'" size="7"></td>';
+ 
+ 	print '<td class="liste_titre">';
+ 	$listetype=$membertypestatic->liste_array();
+@@ -252,7 +252,7 @@
+ 	print '<td class="liste_titre">&nbsp;</td>';
+ 
+ 	print '<td class="liste_titre" align="left">';
+-	print '<input class="flat" type="text" name="search_email" value="'.$search_email.'" size="12"></td>';
++	print '<input class="flat" type="text" name="search_email" value="'.htmlspecialchars($search_email).'" size="12"></td>';
+ 
+ 	print '<td class="liste_titre">&nbsp;</td>';
+ 
+diff --git a/htdocs/contact/list.php b/htdocs/contact/list.php
+index 234dff307a68..6a2e2a55fe83 100644
+--- a/htdocs/contact/list.php
++++ b/htdocs/contact/list.php
+@@ -3,7 +3,7 @@
+  * Copyright (C) 2003      Eric Seigne          <erics@rycks.com>
+  * Copyright (C) 2004-2012 Laurent Destailleur  <eldy@users.sourceforge.net>
+  * Copyright (C) 2005-2012 Regis Houssin        <regis.houssin@capnetworks.com>
+- * Copyright (C) 2013      Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
++ * Copyright (C) 2013-2015 Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
+  * Copyright (C) 2013      Cédric Salvador      <csalvador@gpcsolutions.fr>
+  * Copyright (C) 2013      Alexandre Spangaro   <alexandre.spangaro@gmail.com> 
+  *
+@@ -151,7 +151,7 @@
+ 	if ($search_priv == '1') $sql .= " AND (p.priv='1' AND p.fk_user_creat=".$user->id.")";
+ }
+ 
+-if ($search_categ > 0)   $sql.= " AND cs.fk_categorie = ".$search_categ;
++if ($search_categ > 0)   $sql.= " AND cs.fk_categorie = ".$db->escape($search_categ);
+ if ($search_categ == -2) $sql.= " AND cs.fk_categorie IS NULL";
+ 
+ if ($search_lastname) {      // filter on lastname
+@@ -245,11 +245,11 @@
+ {
+ 	$contactstatic=new Contact($db);
+ 
+-    $param ='&begin='.urlencode($begin).'&view='.urlencode($view).'&userid='.urlencode($userid).'&contactname='.urlencode($sall);
+-    $param.='&type='.urlencode($type).'&view='.urlencode($view).'&search_lastname='.urlencode($search_lastname).'&search_firstname='.urlencode($search_firstname).'&search_societe='.urlencode($search_societe).'&search_email='.urlencode($search_email);
+-    if (!empty($search_categ)) $param.='&search_categ='.$search_categ;
+-    if ($search_status != '') $param.='&amp;search_status='.$search_status;
+-    if ($search_priv == '0' || $search_priv == '1') $param.="&search_priv=".urlencode($search_priv);
++    $param ='&begin='.htmlspecialchars($begin).'&view='.htmlspecialchars($view).'&userid='.htmlspecialchars($userid).'&contactname='.htmlspecialchars($sall);
++    $param.='&type='.htmlspecialchars($type).'&view='.htmlspecialchars($view).'&search_lastname='.htmlspecialchars($search_lastname).'&search_firstname='.htmlspecialchars($search_firstname).'&search_societe='.htmlspecialchars($search_societe).'&search_email='.htmlspecialchars($search_email);
++    if (!empty($search_categ)) $param.='&search_categ='.htmlspecialchars($search_categ);
++    if ($search_status != '') $param.='&amp;search_status='.htmlspecialchars($search_status);
++    if ($search_priv == '0' || $search_priv == '1') $param.="&search_priv=".htmlspecialchars($search_priv);
+ 
+ 	$num = $db->num_rows($result);
+     $i = 0;
+@@ -258,7 +258,7 @@
+ 
+     print '<form method="post" action="'.$_SERVER["PHP_SELF"].'">';
+     print '<input type="hidden" name="token" value="'.$_SESSION['newtoken'].'">';
+-    print '<input type="hidden" name="view" value="'.$view.'">';
++    print '<input type="hidden" name="view" value="'.htmlspecialchars($view).'">';
+     print '<input type="hidden" name="sortfield" value="'.$sortfield.'">';
+     print '<input type="hidden" name="sortorder" value="'.$sortorder.'">';
+ 
+@@ -277,7 +277,7 @@
+     
+     if ($sall)
+     {
+-        print $langs->trans("Filter")." (".$langs->trans("Lastname").", ".$langs->trans("Firstname")." ".$langs->trans("or")." ".$langs->trans("EMail")."): ".$sall;
++        print $langs->trans("Filter")." (".$langs->trans("Lastname").", ".$langs->trans("Firstname")." ".$langs->trans("or")." ".$langs->trans("EMail")."): ".htmlspecialchars($sall);
+     }
+ 
+     print '<table class="liste" width="100%">';
+@@ -302,36 +302,36 @@
+     // Ligne des champs de filtres
+     print '<tr class="liste_titre">';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_lastname" size="9" value="'.$search_lastname.'">';
++    print '<input class="flat" type="text" name="search_lastname" size="9" value="'.htmlspecialchars($search_lastname).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_firstname" size="9" value="'.$search_firstname.'">';
++    print '<input class="flat" type="text" name="search_firstname" size="9" value="'.htmlspecialchars($search_firstname).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_poste" size="9" value="'.$search_poste.'">';
++    print '<input class="flat" type="text" name="search_poste" size="9" value="'.htmlspecialchars($search_poste).'">';
+     print '</td>';
+     if (empty($conf->global->SOCIETE_DISABLE_CONTACTS))
+     {
+         print '<td class="liste_titre">';
+-        print '<input class="flat" type="text" name="search_societe" size="9" value="'.$search_societe.'">';
++        print '<input class="flat" type="text" name="search_societe" size="9" value="'.htmlspecialchars($search_societe).'">';
+         print '</td>';
+     }
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_phonepro" size="8" value="'.$search_phonepro.'">';
++    print '<input class="flat" type="text" name="search_phonepro" size="8" value="'.htmlspecialchars($search_phonepro).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_phonemob" size="8" value="'.$search_phonemob.'">';
++    print '<input class="flat" type="text" name="search_phonemob" size="8" value="'.htmlspecialchars($search_phonemob).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_fax" size="8" value="'.$search_fax.'">';
++    print '<input class="flat" type="text" name="search_fax" size="8" value="'.htmlspecialchars($search_fax).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input class="flat" type="text" name="search_email" size="8" value="'.$search_email.'">';
++    print '<input class="flat" type="text" name="search_email" size="8" value="'.htmlspecialchars($search_email).'">';
+     print '</td>';
+     if (! empty($conf->skype->enabled))
+     {
+         print '<td class="liste_titre">';
+-        print '<input class="flat" type="text" name="search_skype" size="8" value="'.$search_skype.'">';
++        print '<input class="flat" type="text" name="search_skype" size="8" value="'.htmlspecialchars($search_skype).'">';
+         print '</td>';
+     }    
+ 	print '<td class="liste_titre">&nbsp;</td>';
+diff --git a/htdocs/contrat/liste.php b/htdocs/contrat/liste.php
+index 38576f7e764c..3c350d0de037 100644
+--- a/htdocs/contrat/liste.php
++++ b/htdocs/contrat/liste.php
+@@ -78,7 +78,7 @@
+ $sql.= " LEFT JOIN ".MAIN_DB_PREFIX."contratdet as cd ON c.rowid = cd.fk_contrat";
+ $sql.= " WHERE c.fk_soc = s.rowid ";
+ $sql.= " AND c.entity = ".$conf->entity;
+-if ($socid) $sql.= " AND s.rowid = ".$socid;
++if ($socid) $sql.= " AND s.rowid = ".$db->escape($socid);
+ if (!$user->rights->societe->client->voir && !$socid) $sql.= " AND s.rowid = sc.fk_soc AND sc.fk_user = " .$user->id;
+ if ($search_nom) {
+     $sql .= natural_search('s.nom', $search_nom);
+@@ -100,13 +100,13 @@
+     $num = $db->num_rows($resql);
+     $i = 0;
+ 
+-    print_barre_liste($langs->trans("ListOfContracts"), $page, $_SERVER["PHP_SELF"], '&search_contract='.$search_contract.'&search_nom='.$search_nom, $sortfield, $sortorder,'',$num);
++    print_barre_liste($langs->trans("ListOfContracts"), $page, $_SERVER["PHP_SELF"], '&search_contract='.htmlspecialchars($search_contract).'&search_nom='.htmlspecialchars($search_nom), $sortfield, $sortorder,'',$num);
+ 
+     print '<table class="liste" width="100%">';
+ 
+     print '<tr class="liste_titre">';
+-    $param='&amp;search_contract='.$search_contract;
+-    $param.='&amp;search_nom='.$search_nom;
++    $param='&amp;search_contract='.htmlspecialchars($search_contract);
++    $param.='&amp;search_nom='.htmlspecialchars($search_nom);
+     print_liste_field_titre($langs->trans("Ref"), $_SERVER["PHP_SELF"], "c.rowid","","$param",'',$sortfield,$sortorder);
+     print_liste_field_titre($langs->trans("Company"), $_SERVER["PHP_SELF"], "s.nom","","$param",'',$sortfield,$sortorder);
+     //print_liste_field_titre($langs->trans("DateCreation"), $_SERVER["PHP_SELF"], "c.datec","","$param",'align="center"',$sortfield,$sortorder);
+@@ -122,10 +122,10 @@
+     print '<input type="hidden" name="token" value="'.$_SESSION['newtoken'].'">';
+     print '<tr class="liste_titre">';
+     print '<td class="liste_titre">';
+-    print '<input type="text" class="flat" size="3" name="search_contract" value="'.$search_contract.'">';
++    print '<input type="text" class="flat" size="3" name="search_contract" value="'.htmlspecialchars($search_contract).'">';
+     print '</td>';
+     print '<td class="liste_titre">';
+-    print '<input type="text" class="flat" size="24" name="search_nom" value="'.$search_nom.'">';
++    print '<input type="text" class="flat" size="24" name="search_nom" value="'.htmlspecialchars($search_nom).'">';
+     print '</td>';
+     print '<td class="liste_titre">&nbsp;</td>';
+     //print '<td class="liste_titre">&nbsp;</td>';
+diff --git a/htdocs/product/liste.php b/htdocs/product/liste.php
+index 923b19e3daa0..28563edc5eb6 100644
+--- a/htdocs/product/liste.php
++++ b/htdocs/product/liste.php
+@@ -4,7 +4,7 @@
+  * Copyright (C) 2005-2012 Regis Houssin        <regis.houssin@capnetworks.com>
+  * Copyright (C) 2012-2013 Marcos García        <marcosgdf@gmail.com>
+  * Copyright (C) 2013      Juanjo Menent        <jmenent@2byte.es>
+- * Copyright (C) 2013      Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
++ * Copyright (C) 2013-2015 Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
+  * Copyright (C) 2013      Jean Heimburger   	<jean@tiaris.info>
+  * Copyright (C) 2013      Cédric Salvador      <csalvador@gpcsolutions.fr>
+  * Copyright (C) 2013      Florian Henry        <florian.henry@open-concept.pro>
+@@ -181,7 +181,7 @@
+     if (dol_strlen($canvas) > 0)                    $sql.= " AND p.canvas = '".$db->escape($canvas)."'";
+     if ($catid > 0)    $sql.= " AND cp.fk_categorie = ".$catid;
+     if ($catid == -2)  $sql.= " AND cp.fk_categorie IS NULL";
+-    if ($search_categ > 0)   $sql.= " AND cp.fk_categorie = ".$search_categ;
++    if ($search_categ > 0)   $sql.= " AND cp.fk_categorie = ".$db->escape($search_categ);
+     if ($search_categ == -2) $sql.= " AND cp.fk_categorie IS NULL";
+     if ($fourn_id > 0) $sql.= " AND pfp.fk_soc = ".$fourn_id;
+     $sql.= " GROUP BY p.rowid, p.ref, p.label, p.barcode, p.price, p.price_ttc, p.price_base_type,";
+@@ -233,9 +233,9 @@
+     	// Displays product removal confirmation
+     	if (GETPOST('delprod'))	dol_htmloutput_mesg($langs->trans("ProductDeleted",GETPOST('delprod')));
+ 
+-    	$param="&amp;sref=".$sref.($sbarcode?"&amp;sbarcode=".$sbarcode:"")."&amp;snom=".$snom."&amp;sall=".$sall."&amp;tosell=".$tosell."&amp;tobuy=".$tobuy;
++    	$param="&amp;sref=".htmlspecialchars($sref).($sbarcode?"&amp;sbarcode=".htmlspecialchars($sbarcode):"")."&amp;snom=".htmlspecialchars($snom)."&amp;sall=".htmlspecialchars($sall)."&amp;tosell=".htmlspecialchars($tosell)."&amp;tobuy=".htmlspecialchars($tobuy);
+     	$param.=($fourn_id?"&amp;fourn_id=".$fourn_id:"");
+-    	$param.=($search_categ?"&amp;search_categ=".$search_categ:"");
++    	$param.=($search_categ?"&amp;search_categ=".htmlspecialchars($search_categ):"");
+     	$param.=isset($type)?"&amp;type=".$type:"";
+ 
+     	print_barre_liste($texte, $page, "liste.php", $param, $sortfield, $sortorder, '', $num, $nbtotalofrecords);
+@@ -320,15 +320,15 @@
+     		// Lignes des champs de filtre
+     		print '<tr class="liste_titre">';
+     		print '<td class="liste_titre" align="left">';
+-    		print '<input class="flat" type="text" name="sref" size="8" value="'.$sref.'">';
++    		print '<input class="flat" type="text" name="sref" size="8" value="'.htmlspecialchars($sref).'">';
+     		print '</td>';
+     		print '<td class="liste_titre" align="left">';
+-    		print '<input class="flat" type="text" name="snom" size="12" value="'.$snom.'">';
++    		print '<input class="flat" type="text" name="snom" size="12" value="'.htmlspecialchars($snom).'">';
+     		print '</td>';
+     		if (! empty($conf->barcode->enabled))
+     		{
+     			print '<td class="liste_titre">';
+-    			print '<input class="flat" type="text" name="sbarcode" size="6" value="'.$sbarcode.'">';
++    			print '<input class="flat" type="text" name="sbarcode" size="6" value="'.htmlspecialchars($sbarcode).'">';
+     			print '</td>';
+     		}
+     		print '<td class="liste_titre">';
+@@ -510,9 +510,9 @@
+     			$i++;
+     		}
+ 
+-    		$param="&amp;sref=".$sref.($sbarcode?"&amp;sbarcode=".$sbarcode:"")."&amp;snom=".$snom."&amp;sall=".$sall."&amp;tosell=".$tosell."&amp;tobuy=".$tobuy;
++    		$param="&amp;sref=".htmlspecialchars($sref).($sbarcode?"&amp;sbarcode=".htmlspecialchars($sbarcode):"")."&amp;snom=".htmlspecialchars($snom)."&amp;sall=".htmlspecialchars($sall)."&amp;tosell=".htmlspecialchars($tosell)."&amp;tobuy=".htmlspecialchars($tobuy);
+     		$param.=($fourn_id?"&amp;fourn_id=".$fourn_id:"");
+-    		$param.=($search_categ?"&amp;search_categ=".$search_categ:"");
++    		$param.=($search_categ?"&amp;search_categ=".htmlspecialchars($search_categ):"");
+     		$param.=isset($type)?"&amp;type=".$type:"";
+     		print_barre_liste('', $page, "liste.php", $param, $sortfield, $sortorder,'',$num,$nbtotalofrecords);
+ 
+diff --git a/htdocs/societe/societe.php b/htdocs/societe/societe.php
+index 7d3e2e1a78d4..8957b72581c0 100644
+--- a/htdocs/societe/societe.php
++++ b/htdocs/societe/societe.php
+@@ -3,7 +3,7 @@
+  * Copyright (C) 2004-2013 Laurent Destailleur  <eldy@users.sourceforge.net>
+  * Copyright (C) 2005-2012 Regis Houssin        <regis.houssin@capnetworks.com>
+  * Copyright (C) 2012      Marcos García        <marcosgdf@gmail.com>
+- * Copyright (C) 2013      Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
++ * Copyright (C) 2013-2015 Raphaël Doursenaud   <rdoursenaud@gpcsolutions.fr>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -210,12 +210,12 @@
+ // Insert sale filter
+ if ($search_sale)
+ {
+-    $sql .= " AND sc.fk_user = ".$search_sale;
++    $sql .= " AND sc.fk_user = ".$db->escape($search_sale);
+ }
+ // Insert categ filter
+ if ($search_categ)
+ {
+-    $sql .= " AND cs.fk_categorie = ".$search_categ;
++    $sql .= " AND cs.fk_categorie = ".$db->escape($search_categ);
+ }
+ if ($search_nom_only)
+ {
+@@ -272,12 +272,12 @@
+ 	$num = $db->num_rows($resql);
+ 	$i = 0;
+ 
+-	$params = "&amp;socname=".$socname."&amp;search_nom=".$search_nom."&amp;search_town=".$search_town;
+-	$params.= ($sbarcode?"&amp;sbarcode=".$sbarcode:"");
+-	$params.= '&amp;search_idprof1='.$search_idprof1;
+-	$params.= '&amp;search_idprof2='.$search_idprof2;
+-	$params.= '&amp;search_idprof3='.$search_idprof3;
+-	$params.= '&amp;search_idprof4='.$search_idprof4;
++	$params = "&amp;socname=".htmlspecialchars($socname)."&amp;search_nom=".htmlspecialchars($search_nom)."&amp;search_town=".htmlspecialchars($search_town);
++	$params.= ($sbarcode?"&amp;sbarcode=".htmlspecialchars($sbarcode):"");
++	$params.= '&amp;search_idprof1='.htmlspecialchars($search_idprof1);
++	$params.= '&amp;search_idprof2='.htmlspecialchars($search_idprof2);
++	$params.= '&amp;search_idprof3='.htmlspecialchars($search_idprof3);
++	$params.= '&amp;search_idprof4='.htmlspecialchars($search_idprof4);
+ 
+ 	print_barre_liste($title, $page, $_SERVER["PHP_SELF"],$params,$sortfield,$sortorder,'',$num,$nbtotalofrecords);
+ 
+@@ -348,34 +348,34 @@
+ 	print '<input type="hidden" name="sortfield" value="'.$sortfield.'">';
+ 	print '<input type="hidden" name="sortorder" value="'.$sortorder.'">';
+ 	if (! empty($search_nom_only) && empty($search_nom)) $search_nom=$search_nom_only;
+-	print '<input class="flat" type="text" name="search_nom" value="'.$search_nom.'">';
++	print '<input class="flat" type="text" name="search_nom" value="'.htmlspecialchars($search_nom).'">';
+ 	print '</td>';
+ 	// Barcode
+ 	if (! empty($conf->barcode->enabled))
+ 	{
+-    	print '<td class="liste_titre">';
+-    	print '<input class="flat" type="text" name="sbarcode" size="6" value="'.$sbarcode.'">';
+-    	print '</td>';
++		print '<td class="liste_titre">';
++		print '<input class="flat" type="text" name="sbarcode" size="6" value="'.htmlspecialchars($sbarcode).'">';
++		print '</td>';
+     }
+ 	// Town
+ 	print '<td class="liste_titre">';
+-	print '<input class="flat" size="10" type="text" name="search_town" value="'.$search_town.'">';
++	print '<input class="flat" size="10" type="text" name="search_town" value="'.htmlspecialchars($search_town).'">';
+ 	print '</td>';
+ 	// IdProf1
+ 	print '<td class="liste_titre">';
+-	print '<input class="flat" size="4" type="text" name="search_idprof1" value="'.$search_idprof1.'">';
++	print '<input class="flat" size="4" type="text" name="search_idprof1" value="'.htmlspecialchars($search_idprof1).'">';
+ 	print '</td>';
+ 	// IdProf2
+ 	print '<td class="liste_titre">';
+-	print '<input class="flat" size="4" type="text" name="search_idprof2" value="'.$search_idprof2.'">';
++	print '<input class="flat" size="4" type="text" name="search_idprof2" value="'.htmlspecialchars($search_idprof2).'">';
+ 	print '</td>';
+ 	// IdProf3
+ 	print '<td class="liste_titre">';
+-	print '<input class="flat" size="4" type="text" name="search_idprof3" value="'.$search_idprof3.'">';
++	print '<input class="flat" size="4" type="text" name="search_idprof3" value="'.htmlspecialchars($search_idprof3).'">';
+ 	print '</td>';
+ 	// IdProf4
+ 	print '<td class="liste_titre">';
+-	print '<input class="flat" size="4" type="text" name="search_idprof4" value="'.$search_idprof4.'">';
++	print '<input class="flat" size="4" type="text" name="search_idprof4" value="'.htmlspecialchars($search_idprof4).'">';
+ 	print '</td>';
+ 	// Type (customer/prospect/supplier)
+ 	print '<td class="liste_titre" align="middle">';

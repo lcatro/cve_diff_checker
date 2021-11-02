@@ -1,0 +1,53 @@
+From f33a42f1da9db943a67bda7d29f7dd91957a8e7e Mon Sep 17 00:00:00 2001
+From: Madhura Jayaratne <madhura.cj@gmail.com>
+Date: Thu, 25 Feb 2016 21:38:32 +1100
+Subject: [PATCH] Fix XSS in normalization.js
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+---
+ js/functions.js     | 18 ++++++++++++++++++
+ js/normalization.js |  2 +-
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/js/functions.js b/js/functions.js
+index 13b81468d66..b6a46a39c2a 100644
+--- a/js/functions.js
++++ b/js/functions.js
+@@ -243,6 +243,24 @@ function escapeHtml(unsafe) {
+     }
+ }
+ 
++function escapeJsString(unsafe) {
++    if (typeof(unsafe) != 'undefined') {
++        return unsafe
++            .toString()
++            .replace("\000", '')
++            .replace('\\', '\\\\')
++            .replace('\'', '\\\'')
++            .replace("&#039;", "\\\&#039;")
++            .replace('"', '\"')
++            .replace("&quot;", "\&quot;")
++            .replace("\n", '\n')
++            .replace("\r", '\r')
++            .replace(/<\/script/gi, '</\' + \'script')
++    } else {
++        return false;
++    }
++}
++
+ function PMA_sprintf() {
+     return sprintf.apply(this, arguments);
+ }
+diff --git a/js/normalization.js b/js/normalization.js
+index 196e83aed9d..50ad3ed39f3 100644
+--- a/js/normalization.js
++++ b/js/normalization.js
+@@ -638,7 +638,7 @@ AJAX.registerOnload('normalization.js', function() {
+                 '</ol>';
+             $("#newCols").html(confirmStr);
+             $('.tblFooters').html('<input type="submit" value="' + PMA_messages.strCancel + '" onclick="$(\'#newCols\').html(\'\');$(\'#extra input[type=checkbox]\').removeAttr(\'checked\')"/>' +
+-                '<input type="submit" value="' + PMA_messages.strGo + '" onclick="moveRepeatingGroup(\'' + repeatingCols + '\')"/>');
++                '<input type="submit" value="' + PMA_messages.strGo + '" onclick="moveRepeatingGroup(\'' + escapeJsString(escapeHtml(repeatingCols)) + '\')"/>');
+         }
+     });
+     $("#mainContent p").on("click", "#createPrimaryKey", function(event) {

@@ -1,0 +1,97 @@
+From dc13dfca8fdae5634bb0865f7e9822d2a268ed59 Mon Sep 17 00:00:00 2001
+From: Sitaram Chamarty <sitaramc@gmail.com>
+Date: Sat, 8 Sep 2018 15:38:41 +0530
+Subject: [PATCH] prevent access to repos which are in the process of bring
+ migrated
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Björn Kautler pointed out that, when a repo is being migrated into
+gitolite as per the documentation [1], there is a gap between the actual
+move of the repo and the rest of the process where a user can gain read
+or write access to the repo, which he would *not* have had after the
+completion of the process.
+
+My first thought was to document this, and advise people to use the
+'writable' command to disable writes, but there is nothing as simple and
+painless to prevent reads.  (On the plus side, this kind of racy read
+access can only happen if the conf is using the "deny-rules" option to
+restrict reads; without that, it makes no difference -- i.e., he gets no
+access that he would not have got later anyway).
+
+But eventually I realised that documentation was frustrating, for
+various reasons, and that at least in this case there is a way to fix it
+in the code -- just block all access to a repo that is in
+~/repositories, but which does not yet have the update hook setup
+correctly.  Plus, the code does not impact anything else, and is
+basically just an extra check.
+
+[1]: http://gitolite.com/gitolite/basic-admin/index.html#appendix-1-bringing-existing-repos-into-gitolite
+---
+ src/gitolite-shell         |  7 +++++++
+ src/lib/Gitolite/Common.pm | 20 ++++++++++++++++++--
+ 2 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/src/gitolite-shell b/src/gitolite-shell
+index 072e0ff54..6c4c462fc 100755
+--- a/src/gitolite-shell
++++ b/src/gitolite-shell
+@@ -113,6 +113,13 @@ sub main {
+     $ENV{GL_REPO} = $repo;
+     my $aa = ( $verb =~ 'upload' ? 'R' : 'W' );
+ 
++    # catch rare race when moving repos into gitolite control
++    _die "$aa any $repo $user DENIED by fallthru" .
++            "\n(or you mis-spelled the reponame)"
++        unless update_hook_present($repo);
++    # this error message is exactly the same as that from elsewhere in the
++    # code, for the usual reasons (avoid leaking information)
++
+     # set up env vars from options set for this repo
+     env_options($repo);
+ 
+diff --git a/src/lib/Gitolite/Common.pm b/src/lib/Gitolite/Common.pm
+index 7a52f4b8c..3f47b3733 100644
+--- a/src/lib/Gitolite/Common.pm
++++ b/src/lib/Gitolite/Common.pm
+@@ -19,6 +19,8 @@ package Gitolite::Common;
+ 
+           ssh_fingerprint_file
+           ssh_fingerprint_line
++
++          update_hook_present
+ );
+ #>>>
+ use Exporter 'import';
+@@ -235,14 +237,28 @@ sub cleanup_conf_line {
+             chomp($repo);
+             $repo =~ s/\.git$//;
+             $repo =~ s(^\./)();
+-            push @phy_repos, $repo unless $repo =~ m(/$);
+-                # tolerate bare repos within ~/repositories but silently ignore them
++            next if $repo =~ m(/$);
++                # tolerate non-bare repos within ~/repositories but silently ignore them
++            next unless update_hook_present($repo);
++                # ignore repos that don't yet have the update hook
++            push @phy_repos, $repo;
+         }
+         trace( 3, scalar(@phy_repos) . " physical repos found" );
+         return sort_u( \@phy_repos );
+     }
+ }
+ 
++sub update_hook_present {
++    my $repo = shift;
++
++    return 1 unless -d "$ENV{GL_REPO_BASE}/$repo.git";  # non-existent repo is fine
++
++    my $x = readlink("$ENV{GL_REPO_BASE}/$repo.git/hooks/update");
++    return 1 if $x and $x eq "$ENV{GL_ADMIN_BASE}/hooks/common/update";
++
++    return 0;
++}
++
+ # generate a timestamp
+ sub gen_ts {
+     my ( $s, $min, $h, $d, $m, $y ) = (localtime)[ 0 .. 5 ];

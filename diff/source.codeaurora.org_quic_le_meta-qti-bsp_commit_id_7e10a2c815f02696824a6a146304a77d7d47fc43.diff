@@ -1,0 +1,641 @@
+From 7e10a2c815f02696824a6a146304a77d7d47fc43 Mon Sep 17 00:00:00 2001
+From: Himal Ghimiray <himalg@codeaurora.org>
+Date: Thu, 2 Nov 2017 11:54:10 +0530
+Subject: Run daemons as non-root users, enhance ota tools for non-root support
+
+* le-prop process under leprop user.
+* servicemanager under system user.
+* start logd from inittab
+* Use fsconfig file to set user, group, mode and capabilities
+
+Change-Id: I5361740c64f15e90c33b9fcb803932a6a90065d8
+---
+ conf/distro/include/msm.inc                        | 38 +++++++++++++++
+ conf/distro/msm-perf.conf                          | 25 ----------
+ conf/distro/msm-user.conf                          | 24 +---------
+ conf/distro/msm.conf                               | 25 ----------
+ conf/machine/include/apq8053.inc                   |  3 ++
+ .../files/apq8053/update_file_permissions.sh       | 48 +++++++++++++++++++
+ .../startup-scripts/start-scripts-update-perms.bb  | 19 ++++++++
+ recipes-core/busybox/busybox_1.23.2.bbappend       |  4 ++
+ recipes-core/busybox/files/apq8053/mdev.conf       | 54 ++++++++++++++++++++++
+ .../sysvinit-inittab-2.88dsf/apq8053/inittab       | 21 ++++++---
+ recipes-devtools/releasetools/files/full_ota.sh    | 19 ++++++--
+ .../releasetools/files/incremental_ota.sh          | 16 +++++--
+ recipes-devtools/system-core/system-core_git.bb    | 26 +++++++++--
+ .../images/apq8053/apq8053-base-image.inc          |  6 ++-
+ .../images/apq8053/apq8053-fsconfig.conf           |  4 ++
+ .../images/apq8053/apq8053-minimal-image.inc       |  6 ++-
+ .../images/include/mdm-ota-target-image-ext4.inc   |  4 ++
+ 17 files changed, 246 insertions(+), 96 deletions(-)
+ create mode 100644 recipes-bsp/startup-scripts/files/apq8053/update_file_permissions.sh
+ create mode 100644 recipes-bsp/startup-scripts/start-scripts-update-perms.bb
+ create mode 100644 recipes-core/busybox/files/apq8053/mdev.conf
+ mode change 100755 => 100644 recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
+ create mode 100644 recipes-products/images/apq8053/apq8053-fsconfig.conf
+
+diff --git a/conf/distro/include/msm.inc b/conf/distro/include/msm.inc
+index d6852c1..686e858 100644
+--- a/conf/distro/include/msm.inc
++++ b/conf/distro/include/msm.inc
+@@ -55,3 +55,41 @@ IMAGE_DEPENDS_fastboot = "mkbootimg-native virtual/kernel"
+ IMAGE_CMD_fastboot = "${STAGING_BINDIR_NATIVE}/mkbootimg --kernel ${STAGING_DIR_TARGET}/kernel/arch/arm/boot/Image --ramdisk /dev/null --ramdisk_offset $(awk --non-decimal-data '/ _end/ {end="0x" $1} /_stext/ {beg="0x" $1} END {size1=end-beg+4096; size=and(size1,compl(4095)); printf("%#x",size)}' ${STAGING_DIR_TARGET}/boot/System.map-${MACHINE_KERNEL_VERSION}) --cmdline 'root=${MACHINE_ROOTDEV} rw init=/sbin/init --verbose loglevel=7 rootwait console=${MACHINE_CONSOLE} no_console_suspend=1 androidboot.hardware=qcom log_buf_len=262144' --base ${MACHINE_KERNEL_BASE} ${EXTRA_IMAGECMD} --pagesize ${MACHINE_FLASH_PAGE_SIZE} --output ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.rootfs.fastboot"
+ 
+ PREFERRED_VERSION_readline = "5.2"
++
++EXTRA_USERS_PARAMS = "\
++ useradd -u 1000 -U system; \
++ useradd -u 1001 -U radio; \
++ useradd -u 1002 -U bluetooth; \
++ useradd -u 1003 -U graphics; \
++ useradd -u 1004 -g input input; \
++ useradd -u 1005 -g audio audio; \
++ useradd -u 1006 -U camera;\
++ useradd -u 1036 -U logd;\
++ useradd -u 2000 -U adb; \
++ useradd -u 3011 -U sensors; \
++ useradd -u 4000 -U apps; \
++ useradd -u 9999 -U nobody; \
++ useradd -u 5000 -U qmmfsvr; \
++ useradd -u 5001 -U qmmfwebsvr; \
++ useradd -u 5002 -U leprop; \
++ usermod -L -e 1 system; \
++ usermod -L -e 1 radio; \
++ usermod -L -e 1 bluetooth; \
++ usermod -L -e 1 graphics; \
++ usermod -L -e 1 input; \
++ usermod -L -e 1 audio; \
++ usermod -L -e 1 camera; \
++ usermod -L -e 1 adb; \
++ usermod -L -e 1 sensors; \
++ usermod -L -e 1 Apps; \
++ usermod -L -e 1 nobody; \
++ usermod -L -e 1 qmmfsvr; \
++ usermod -L -e 1 qmmfwebsvr; \
++ usermod -L -e 1 leprop; \
++ usermod -L -e 1 logd; \
++ usermod -a -G system,inet,leprop qmmfwebsvr; \
++ usermod -a -G system,leprop qmmfsvr; \
++ usermod -a -G diag,inet,system,leprop sensors; \
++ usermod -a -G inet,system,leprop camera; \
++ usermod -a -G leprop bluetooth; \
++"
+diff --git a/conf/distro/msm-perf.conf b/conf/distro/msm-perf.conf
+index 18d809e..7b7923d 100644
+--- a/conf/distro/msm-perf.conf
++++ b/conf/distro/msm-perf.conf
+@@ -27,28 +27,3 @@ PERF_BUILD = "1"
+ # Append variants like '-perf', '-user', 'perf-minimal' etc to deploy dir.
+ DEPLOY_NAME ?= "${MACHINE}${@['-' + d.getVar('PRODUCT', True), ''][d.getVar('PRODUCT', True) == ('' or 'base')]}${@['-' + d.getVar('VARIANT', True), ''][d.getVar('VARIANT', True) == ('')]}"
+ DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/${DEPLOY_NAME}"
+-
+-EXTRA_USERS_PARAMS = "\
+- useradd -u 1000 -U system; \
+- useradd -u 1001 -U radio; \
+- useradd -u 1002 -U bluetooth; \
+- useradd -u 1003 -U graphics; \
+- useradd -u 1004 -g input input; \
+- useradd -u 1005 -g audio audio; \
+- useradd -u 1006 -U camera;\
+- useradd -u 2000 -U adb; \
+- useradd -u 3011 -U sensors; \
+- useradd -u 4000 -U apps; \
+- useradd -u 9999 -U nobody; \
+- usermod -L -e 1 system; \
+- usermod -L -e 1 radio; \
+- usermod -L -e 1 bluetooth; \
+- usermod -L -e 1 graphics; \
+- usermod -L -e 1 input; \
+- usermod -L -e 1 audio; \
+- usermod -L -e 1 camera; \
+- usermod -L -e 1 adb; \
+- usermod -L -e 1 sensors; \
+- usermod -L -e 1 Apps; \
+- usermod -L -e 1 nobody; \
+-"
+diff --git a/conf/distro/msm-user.conf b/conf/distro/msm-user.conf
+index 8c64971..ec02be3 100644
+--- a/conf/distro/msm-user.conf
++++ b/conf/distro/msm-user.conf
+@@ -32,26 +32,6 @@ USER_BUILD = "1"
+ DEPLOY_NAME ?= "${MACHINE}${@['-' + d.getVar('PRODUCT', True), ''][d.getVar('PRODUCT', True) == ('' or 'base')]}${@['-' + d.getVar('VARIANT', True), ''][d.getVar('VARIANT', True) == ('')]}"
+ DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/${DEPLOY_NAME}"
+ 
+-EXTRA_USERS_PARAMS = "\
+- useradd -u 1000 -U system; \
+- useradd -u 1001 -U radio; \
+- useradd -u 1002 -U bluetooth; \
+- useradd -u 1003 -U graphics; \
+- useradd -u 1006 -U camera;\
+- useradd -u 2000 -U adb; \
+- useradd -u 3011 -U sensors; \
+- useradd -u 4000 -U apps; \
+- useradd -u 9999 -U nobody; \
+- usermod -L -e 1 system; \
+- usermod -L -e 1 radio; \
+- usermod -L -e 1 bluetooth; \
+- usermod -L -e 1 graphics; \
+- usermod -L -e 1 input; \
+- usermod -L -e 1 audio; \
+- usermod -L -e 1 camera; \
+- usermod -L -e 1 adb; \
+- usermod -L -e 1 sensors; \
+- usermod -L -e 1 Apps; \
+- usermod -L -e 1 nobody; \
+- usermod -L -e 1 root; \
++EXTRA_USERS_PARAMS_append = "\
++  usermod -L -e 1 root; \
+ "
+diff --git a/conf/distro/msm.conf b/conf/distro/msm.conf
+index 7b128e8..c4b2dcf 100644
+--- a/conf/distro/msm.conf
++++ b/conf/distro/msm.conf
+@@ -24,28 +24,3 @@ DISTRO_FEATURES += "emmc-boot"
+ # Append variants like '-perf', '-user', 'perf-minimal' etc to deploy dir.
+ DEPLOY_NAME ?= "${MACHINE}${@['-' + d.getVar('PRODUCT', True), ''][d.getVar('PRODUCT', True) == ('' or 'base')]}${@['-' + d.getVar('VARIANT', True), ''][d.getVar('VARIANT', True) == ('')]}"
+ DEPLOY_DIR_IMAGE = "${DEPLOY_DIR}/images/${DEPLOY_NAME}"
+-
+-EXTRA_USERS_PARAMS = "\
+- useradd -u 1000 -U system; \
+- useradd -u 1001 -U radio; \
+- useradd -u 1002 -U bluetooth; \
+- useradd -u 1003 -U graphics; \
+- useradd -u 1004 -g input input; \
+- useradd -u 1005 -g audio audio; \
+- useradd -u 1006 -U camera;\
+- useradd -u 2000 -U adb; \
+- useradd -u 3011 -U sensors; \
+- useradd -u 4000 -U apps; \
+- useradd -u 9999 -U nobody; \
+- usermod -L -e 1 system; \
+- usermod -L -e 1 radio; \
+- usermod -L -e 1 bluetooth; \
+- usermod -L -e 1 graphics; \
+- usermod -L -e 1 input; \
+- usermod -L -e 1 audio; \
+- usermod -L -e 1 camera; \
+- usermod -L -e 1 adb; \
+- usermod -L -e 1 sensors; \
+- usermod -L -e 1 Apps; \
+- usermod -L -e 1 nobody; \
+-"
+diff --git a/conf/machine/include/apq8053.inc b/conf/machine/include/apq8053.inc
+index a17b8c7..5dfcda0 100644
+--- a/conf/machine/include/apq8053.inc
++++ b/conf/machine/include/apq8053.inc
+@@ -52,3 +52,6 @@ RECOVERY_IMAGE ?= "1"
+ 
+ # Formats of root filesystem images.
+ IMAGE_FSTYPES += "ext4"
++
++#Extra fsconfig related options for ota package generator scripts.
++OTA_EXTRA_OPTS ?= "1"
+diff --git a/recipes-bsp/startup-scripts/files/apq8053/update_file_permissions.sh b/recipes-bsp/startup-scripts/files/apq8053/update_file_permissions.sh
+new file mode 100644
+index 0000000..4210d82
+--- /dev/null
++++ b/recipes-bsp/startup-scripts/files/apq8053/update_file_permissions.sh
+@@ -0,0 +1,48 @@
++#!/bin/sh
++# Copyright (c) 2017 The Linux Foundation. All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of The Linux Foundation nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++# ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++# BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++# IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++#
++# update_file_permissions    init.d script to update file permissions post OTA
++#
++
++set_mode() {
++    if [ -e $1 ]; then
++        chmod $4 $1
++        chown $2:$3 $1
++    fi
++}
++
++if [ -e "/cache/recovery/ota_status" ]; then
++    ota_status=$(cat /cache/recovery/ota_status)
++    if [ $ota_status == "OTA_DONE" ]; then
++        set_mode "/data/misc/camera" 1006 1000 775
++        set_mode "/data/misc/qmmf" 1000 1000 775
++        set_mode "/persist/sensors" 3011 0 755
++        set_mode "/persist/sensors/sensors_settings" 3011 0 640
++        set_mode "/persist/sensors/sns.reg" 3011 0 660
++    fi
++fi
+diff --git a/recipes-bsp/startup-scripts/start-scripts-update-perms.bb b/recipes-bsp/startup-scripts/start-scripts-update-perms.bb
+new file mode 100644
+index 0000000..7f4e38f
+--- /dev/null
++++ b/recipes-bsp/startup-scripts/start-scripts-update-perms.bb
+@@ -0,0 +1,19 @@
++DESCRIPTION = "Start up script for updating a few persist and data file permissions post OTA"
++HOMEPAGE = "http://us.codeaurora.org"
++LICENSE = "BSD-3-Clause"
++LIC_FILES_CHKSUM = "file://${COREBASE}/meta/files/common-licenses/${LICENSE};md5=550794465ba0ec5312d6919e203a55f9"
++
++SRC_URI +="file://${BASEMACHINE}/update_file_permissions.sh"
++
++S = "${WORKDIR}/${BASEMACHINE}"
++
++PR = "r4"
++
++inherit update-rc.d
++
++INITSCRIPT_NAME = "update_file_permissions.sh"
++INITSCRIPT_PARAMS = "start 37 S ."
++
++do_install() {
++    install -m 0500 ${WORKDIR}/${BASEMACHINE}/update_file_permissions.sh -D ${D}${sysconfdir}/init.d/update_file_permissions.sh
++}
+diff --git a/recipes-core/busybox/busybox_1.23.2.bbappend b/recipes-core/busybox/busybox_1.23.2.bbappend
+index ba1315d..899a909 100644
+--- a/recipes-core/busybox/busybox_1.23.2.bbappend
++++ b/recipes-core/busybox/busybox_1.23.2.bbappend
+@@ -21,6 +21,7 @@ SRC_URI += "\
+             file://0001-Fix-file-synchronization-in-mdev.patch \
+             file://fix-mdev-crash.patch \
+ "
++SRC_URI_append_apq8053 += "file://apq8053/mdev.conf"
+ 
+ prefix = ""
+ 
+@@ -45,6 +46,9 @@ do_install_append() {
+         install -m 0755 ${WORKDIR}/usb.sh ${D}${sysconfdir}/mdev/
+         install -m 0755 ${WORKDIR}/iio.sh ${D}${sysconfdir}/mdev/
+     fi
++    if [ ${BASEMACHINE} == "apq8053"];then
++     install -m 0644 ${WORKDIR}/apq8053/mdev.conf ${D}${sysconfdir}/
++    fi
+     chmod -R go-x ${D}${sysconfdir}/mdev/
+     mkdir -p ${D}/usr/bin
+     ln -s /bin/env ${D}/usr/bin/env
+diff --git a/recipes-core/busybox/files/apq8053/mdev.conf b/recipes-core/busybox/files/apq8053/mdev.conf
+new file mode 100644
+index 0000000..9f30564
+--- /dev/null
++++ b/recipes-core/busybox/files/apq8053/mdev.conf
+@@ -0,0 +1,54 @@
++console 0:0 0600
++sensors sensors:system 0660
++jpeg0 camera:system 0660
++media1 camera:system 0660
++video[0-99]* camera:system 0660
++v4l-subdev[0-99]* camera:system 0660
++event-log-tags logd:logd 0644
++logd logd:logd 0666 =socket/
++logdr logd:logd 0666 =socket/
++logdw logd:logd 0222 =socket/
++fb[0-99]* root:graphics 0660 =graphics/
++diag system:radio 0660
++cpu_dma_latency 0:0 0660
++fb0:0 44 0660
++full 0:0 0666
++initctl 0:0 0600
++ircomm[0-9].* 0:20 0660
++kmem 0:15 0640
++kmsg 0:0 0660
++log 0:0 0666
++loop[0-9].* 0:6 0640
++mem 0:15 0640
++network_latency 0:0 0660
++network_throughput 0:0 0660
++null 0:0 0666
++port 0:15 0640
++ptmx 0:5 0666
++ram[0-9].* 0:6 0640
++random 0:0 0666
++sda 0:6 0640
++tty 0:5 0666
++tty.* 0:0 0620
++urandom 0:0 0666
++usbdev.* 0:0 0660 */etc/mdev/usb.sh
++i2c.* 0:0 0660 @/etc/mdev/iio.sh
++vcs.* 0:5 0660
++zero 0:0 0666
++hwrng 10:183 0660 =hw_random
++adsprpc-smd 1000:1000 0666
++
++pcm.* 0:0 0660 =snd/
++control.* 0:0 0660 =snd/
++timer 0:0 0660 =snd/
++
++event.* 0:0 0660 =input/ @/etc/mdev/find-touchscreen.sh
++mice 0:0 0660 =input/
++mouse.* 0:0 0660 =input/
++
++tun[0-9]* 0:0 0660 =net/
++
++mmcblk[0-9]*     0:6     660
++mmcblk[0-9]*p[0-9]* 0:6     660 */etc/mdev/automountsdcard.sh ${MDEV}
++[hs]d[a-z][0-9]* 0:0 660 */etc/mdev/automountsdcard.sh ${MDEV}
++.* 1000:1000 0660
+diff --git a/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab b/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
+old mode 100755
+new mode 100644
+index 1503c28..a8c5475
+--- a/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
++++ b/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
+@@ -11,23 +11,32 @@ si::sysinit:/etc/init.d/rcS
+ # What to do in single-user mode.
+ ~~:S:wait:/sbin/sulogin
+ 
+-sns:2345:respawn:/usr/bin/sensors.qcom
++sns:2345:respawn:start-stop-daemon -c sensors -S -b -a /usr/bin/sensors.qcom
+ 
+ # NOTE: These entries should be above the rc
+ #       run level entries with wait below.
+ dvsk:2345:wait:mkdir -p -m 777 /dev/socket
+-lprp:2345:respawn:/sbin/leprop-service
++lprp:2345:respawn:start-stop-daemon -c leprop -S -b -a /sbin/leprop-service
++
++logd:2345:respawn:/sbin/logd
+ 
+ node:2345:wait:mknod -m 660 /dev/media0 c 251 0
++chug:2345:wait:chown camera:system /dev/media0
+ 
+-qcam:2345:respawn:/system/bin/mm-qcamera-daemon
+-srvm:2345:respawn:/usr/bin/servicemanager
++qcam:2345:respawn:start-stop-daemon -c camera -S -b -a /system/bin/mm-qcamera-daemon
++srvm:2345:respawn:start-stop-daemon -c system -S -b -a /usr/bin/servicemanager
+ qmfs:2345:respawn:/usr/bin/qmmf-server
+ qmfw:2345:respawn:/usr/bin/qmmf-webserver
+ ipcw:2345:respawn:/usr/bin/ipc-webserver
+ 
+ #Set the storage daemons to respawn
+-rmts:2345:respawn:/sbin/rmt_storage
++rmlk:2345:wait:chown -R nobody /sys/power/wake_lock /sys/power/wake_unlock
++rmts:2345:respawn:start-stop-daemon -c nobody -S -b -a /sbin/rmt_storage
++
++log1:2345:wait:echo 600 > /proc/sys/net/unix/max_dgram_qlen
++log2:2345:wait:chmod 0666 /dev/socket/logd
++log3:2345:wait:chmod 0666 /dev/socket/logdr
++log4:2345:wait:chmod 0222 /dev/socket/logdw
+ 
+ # /etc/init.d executes the S and K scripts upon change
+ # of runlevel.
+@@ -51,5 +60,5 @@ z6:6:respawn:/sbin/sulogin
+ #runs reboot daemon
+ #rb:5:respawn:/sbin/reboot-daemon
+ 
+-m1:5:respawn:/usr/bin/diagrebootapp
++m1:5:respawn:start-stop-daemon -c diag -S -b -a /usr/bin/diagrebootapp
+ 
+diff --git a/recipes-devtools/releasetools/files/full_ota.sh b/recipes-devtools/releasetools/files/full_ota.sh
+index b5f4bfa..4361ef2 100644
+--- a/recipes-devtools/releasetools/files/full_ota.sh
++++ b/recipes-devtools/releasetools/files/full_ota.sh
+@@ -31,11 +31,11 @@
+ 
+ set -o xtrace
+ 
+-if [ "$#" -ne 3 ]; then
+-    echo "Usage  : $0 target_files_zipfile rootfs_path ext4_or_ubi"
++if [ "$#" -lt 3 ]; then
++    echo "Usage  : $0 target_files_zipfile rootfs_path ext4_or_ubi [-c fsconfig_file [-p prefix]]"
+     echo "------------------------------------------------------------------"
+     echo "example: $0 target_files_ubi.zip  machine_image/1.0-r0/rootfs ubi"
+-    echo "example: $0 target_files_ext4.zip machine_image/1.0-r0/rootfs ext4"
++    echo "example: $0 target_files_ext4.zip machine_image/1.0-r0/rootfs ext4 -p system/ -c fsconfig.conf"
+     exit 1
+ fi
+ 
+@@ -45,6 +45,15 @@ export LD_LIBRARY_PATH=${STAGING_LIBDIR_NATIVE}
+ export LC_ALL=en_US.UTF-8
+ export LANG=en_US.UTF-8
+ export LANGUAGE=en_US.UTF-8
++export FSCONFIGFOPTS=" "
++
++if [ "$#" -gt 3 ]; then
++    IFS=' ' read -a allopts <<< "$@"
++    i=4
++    for i in $(seq 3 $#); do
++        FSCONFIGFOPTS=$FSCONFIGFOPTS${allopts[${i}]}" "
++    done
++fi
+ 
+ # Specify MMC or MTD type device. MTD by default
+ [[ $3 = "ext4" ]] && device_type="MMC" || device_type="MTD"
+@@ -58,9 +67,9 @@ mkdir -p $target_files/SYSTEM
+ # Generate selabel rules only if file_contexts is packed in target-files
+ if grep "selinux_fc" $target_files/META/misc_info.txt
+ then
+-    zipinfo -1 $1 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config -C -S $target_files/BOOT/RAMDISK/file_contexts -D ${2} > $target_files/META/filesystem_config.txt
++    zipinfo -1 $1 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config ${FSCONFIGFOPTS} -C -S $target_files/BOOT/RAMDISK/file_contexts -D ${2} > $target_files/META/filesystem_config.txt
+ else
+-    zipinfo -1 $1 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config -D ${2} > $target_files/META/filesystem_config.txt
++    zipinfo -1 $1 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config ${FSCONFIGFOPTS} -D ${2} > $target_files/META/filesystem_config.txt
+ fi
+ 
+ cd $target_files && zip -q ../$1 META/*filesystem_config.txt SYSTEM/build.prop && cd ..
+diff --git a/recipes-devtools/releasetools/files/incremental_ota.sh b/recipes-devtools/releasetools/files/incremental_ota.sh
+index 3478654..642d6a1 100644
+--- a/recipes-devtools/releasetools/files/incremental_ota.sh
++++ b/recipes-devtools/releasetools/files/incremental_ota.sh
+@@ -31,8 +31,8 @@
+ 
+ set -o xtrace
+ 
+-if [ "$#" -ne 4 ]; then
+-    echo "Usage  : $0 v1_target_files_zipfile v2_target_files_zipfile rootfs_path ext4_or_ubi"
++if [ "$#" -lt 4 ]; then
++    echo "Usage  : $0 v1_target_files_zipfile v2_target_files_zipfile rootfs_path ext4_or_ubi [-c fsconfig_file [-p prefix]]"
+     echo "----------------------------------------------------------------------------------------------------"
+     echo "example: $0 v1_target_files_ubi.zip  v2_target_files_ubi.zip  machine-image/1.0-r0/rootfs ubi"
+     echo "example: $0 v1_target_files_ext4.zip v2_target_files_ext4.zip machine-image/1.0/rootfs ext4"
+@@ -45,6 +45,14 @@ export LD_LIBRARY_PATH=${STAGING_LIBDIR_NATIVE}
+ export LC_ALL=en_US.UTF-8
+ export LANG=en_US.UTF-8
+ export LANGUAGE=en_US.UTF-8
++export FSCONFIGFOPTS=" "
++
++if [ "$#" -gt 4 ]; then
++    IFS=' ' read -a allopts <<< "$@"
++    for i in $(seq 4 $#); do
++        FSCONFIGFOPTS=$FSCONFIGFOPTS${allopts[${i}]}" "
++    done
++fi
+ 
+ # Specify MMC or MTD type device. MTD by default
+ [[ $4 = "ext4" ]] && device_type="MMC" || device_type="MTD"
+@@ -57,9 +65,9 @@ mkdir -p target_files/SYSTEM
+ # Generate selabel rules only if file_contexts is packed in target-files
+ if grep "selinux_fc" target_files/META/misc_info.txt
+ then
+-    zipinfo -1 $2 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config -C -S target_files/BOOT/RAMDISK/file_contexts -D ${3} > target_files/META/filesystem_config.txt
++    zipinfo -1 $2 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config ${FSCONFIGFOPTS} -C -S target_files/BOOT/RAMDISK/file_contexts -D ${3} > target_files/META/filesystem_config.txt
+ else
+-    zipinfo -1 $2 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config -D ${3} > target_files/META/filesystem_config.txt
++    zipinfo -1 $2 |  awk 'BEGIN { FS="SYSTEM/" } /^SYSTEM\// {print "system/" $2}' | fs_config ${FSCONFIGFOPTS} -D ${3} > target_files/META/filesystem_config.txt
+ fi
+ 
+ 
+diff --git a/recipes-devtools/system-core/system-core_git.bb b/recipes-devtools/system-core/system-core_git.bb
+index fd89b23..3b9a10d 100644
+--- a/recipes-devtools/system-core/system-core_git.bb
++++ b/recipes-devtools/system-core/system-core_git.bb
+@@ -16,6 +16,8 @@ DEPENDS = "virtual/kernel openssl glib-2.0 libselinux safe-iop ext4-utils libunw
+ EXTRA_OECONF = " --with-host-os=${HOST_OS} --with-glib"
+ EXTRA_OECONF_append = " --with-sanitized-headers=${STAGING_KERNEL_BUILDDIR}/usr/include"
+ EXTRA_OECONF_append = " --with-logd-logging"
++EXTRA_OECONF_append = "${@base_conditional('USER_BUILD','1',' --disable-debuggerd','',d)}"
++EXTRA_OECONF_append_apq8053 = " --enable-logd-privs"
+ 
+ # Disable adb root privileges in USER builds for msm targets
+ EXTRA_OECONF_append_msm = "${@base_conditional('USER_BUILD','1',' --disable-adb-root','',d)}"
+@@ -51,6 +53,8 @@ do_install_append() {
+    install -m 0755 ${S}/usb/debuger/debugFiles -D ${D}${base_sbindir}/usb/debuger/
+    install -m 0755 ${S}/usb/debuger/help -D ${D}${base_sbindir}/usb/debuger/
+    install -m 0755 ${S}/usb/debuger/usb_debug -D ${D}${base_sbindir}/
++   install -b -m 0644 /dev/null -D ${D}${sysconfdir}/build.prop
++   chown 5002:5002 ${D}${sysconfdir}/build.prop
+    ln -s  /sbin/usb/compositions/${COMPOSITION} ${D}${userfsdatadir}/usb/boot_hsusb_composition
+    ln -s  /sbin/usb/compositions/empty ${D}${userfsdatadir}/usb/boot_hsic_composition
+    if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'true', 'false', d)}; then
+@@ -87,7 +91,9 @@ do_install_append() {
+           ${D}${systemd_unitdir}/system/ffbm.target.wants/leprop.service
+    else
+       install -m 0755 ${S}/adb/start_adbd -D ${D}${sysconfdir}/init.d/adbd
+-      install -m 0755 ${S}/logd/start_logd -D ${D}${sysconfdir}/init.d/logd
++      if [ ${BASEMACHINE} != "apq8053" ]; then
++          install -m 0755 ${S}/logd/start_logd -D ${D}${sysconfdir}/init.d/logd
++      fi
+       install -m 0755 ${S}/usb/start_usb -D ${D}${sysconfdir}/init.d/usb
+       install -m 0755 ${S}/rootdir/etc/init.qcom.post_boot.sh -D ${D}${sysconfdir}/init.d/init_post_boot
+    fi
+@@ -100,13 +106,20 @@ do_install_append_apq8009() {
+     install -m 0755 ${S}/debuggerd/start_debuggerd -D ${D}${sysconfdir}/initscripts/init_debuggerd
+    fi
+ }
++
++#Install rules specific to apq8053 target
+ do_install_append_apq8053(){
+-  if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
+-   install -m 0755 ${S}/debuggerd/start_debuggerd64 -D ${D}${sysconfdir}/init.d/init_debuggerd
+-  else
+-   install -m 0755 ${S}/debuggerd/start_debuggerd64 -D ${D}${sysconfdir}/initscripts/init_debuggerd
++
++  DEBUGGERD_NO_INSTALL=${@base_conditional('USER_BUILD','1','no-debuggerd','',d)}
++  if [ "x$DEBUGGERD_NO_INSTALL" == "x" ]; then
++    if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
++      install -m 0755 ${S}/debuggerd/start_debuggerd64 -D ${D}${sysconfdir}/init.d/init_debuggerd
++    else
++      install -m 0755 ${S}/debuggerd/start_debuggerd64 -D ${D}${sysconfdir}/initscripts/init_debuggerd
++    fi
+   fi
+ }
++
+ do_install_append_apq8096() {
+   if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'false', 'true', d)}; then
+     install -m 0755 ${S}/debuggerd/start_debuggerd64 -D ${D}${sysconfdir}/init.d/init_debuggerd
+@@ -144,6 +157,9 @@ INITSCRIPT_NAME_${PN}-logd = "logd"
+ INITSCRIPT_PARAMS_${PN}-logd = "start 10  2 3 4 5 ."
+ INITSCRIPT_PARAMS_${PN}-logd += "stop 39  6 ."
+ 
++INITSCRIPT_PACKAGES_remove_apq8053 = "${PN}-logd"
++INITSCRIPT_PACKAGES_remove_apq8053-32 = "${PN}-logd"
++
+ INITSCRIPT_PACKAGES =+ "${PN}-post-boot"
+ INITSCRIPT_NAME_${PN}-post-boot = "init_post_boot"
+ INITSCRIPT_PARAMS_${PN}-post-boot = "start 90 2 3 4 5 ."
+diff --git a/recipes-products/images/apq8053/apq8053-base-image.inc b/recipes-products/images/apq8053/apq8053-base-image.inc
+index b0813a1..5c0562e 100755
+--- a/recipes-products/images/apq8053/apq8053-base-image.inc
++++ b/recipes-products/images/apq8053/apq8053-base-image.inc
+@@ -16,6 +16,7 @@ IMAGE_INSTALL += "${@base_contains('DISTRO_FEATURES','selinux', 'refpolicy-mls',
+ IMAGE_INSTALL += "start-scripts-firmware-links"
+ IMAGE_INSTALL += "start-scripts-find-partitions"
+ IMAGE_INSTALL += "start-scripts-misc-daemon"
++IMAGE_INSTALL += "start-scripts-update-perms"
+ 
+ IMAGE_INSTALL += "base-files"
+ IMAGE_INSTALL += "base-passwd"
+@@ -63,6 +64,7 @@ fi
+ }
+ 
+ do_makesystem() {
+-    make_ext4fs ${IMAGE_EXT4_EXTRA_OPTIONS} -s ${IMAGE_EXT4_SELINUX_OPTIONS} -l ${SYSTEM_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-sysfs.ext4 ${IMAGE_ROOTFS}
+-    make_ext4fs  -l ${SYSTEMRW_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-systemrw.ext4
++    cp ${THISDIR}/${BASEMACHINE}/apq8053-fsconfig.conf ${WORKDIR}/rootfs-fsconfig.conf
++    make_ext4fs -C ${WORKDIR}/rootfs-fsconfig.conf ${IMAGE_EXT4_EXTRA_OPTIONS} -s ${IMAGE_EXT4_SELINUX_OPTIONS} -l ${SYSTEM_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-sysfs.ext4 ${IMAGE_ROOTFS}
++    make_ext4fs -l ${SYSTEMRW_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-systemrw.ext4
+ }
+diff --git a/recipes-products/images/apq8053/apq8053-fsconfig.conf b/recipes-products/images/apq8053/apq8053-fsconfig.conf
+new file mode 100644
+index 0000000..20e19c1
+--- /dev/null
++++ b/recipes-products/images/apq8053/apq8053-fsconfig.conf
+@@ -0,0 +1,4 @@
++etc/sensors/sensor_def_qcomdev.conf 3011 1000 0644
++usr/bin/sensors.qcom 3011 0 0744 capabilities=0x400
++build.prop 5002 5002 644
++etc/build.prop 5002 5002 644
+diff --git a/recipes-products/images/apq8053/apq8053-minimal-image.inc b/recipes-products/images/apq8053/apq8053-minimal-image.inc
+index 90231fe..4768070 100755
+--- a/recipes-products/images/apq8053/apq8053-minimal-image.inc
++++ b/recipes-products/images/apq8053/apq8053-minimal-image.inc
+@@ -16,6 +16,7 @@ IMAGE_INSTALL += "${@base_contains('DISTRO_FEATURES','selinux', 'refpolicy-mls',
+ IMAGE_INSTALL += "start-scripts-firmware-links"
+ IMAGE_INSTALL += "start-scripts-find-partitions"
+ IMAGE_INSTALL += "start-scripts-misc-daemon"
++IMAGE_INSTALL += "start-scripts-update-perms"
+ 
+ IMAGE_INSTALL += "base-files"
+ IMAGE_INSTALL += "base-passwd"
+@@ -30,7 +31,7 @@ IMAGE_INSTALL += "system-core-adbd"
+ IMAGE_INSTALL += "system-core-logd"
+ IMAGE_INSTALL += "system-core-leprop"
+ IMAGE_INSTALL += "system-core-usb"
+-IMAGE_INSTALL += "system-core-debuggerd"
++IMAGE_INSTALL += "${@base_conditional('USER_BUILD','1','','system-core-debuggerd',d)}"
+ IMAGE_INSTALL += "system-core-post-boot"
+ IMAGE_INSTALL += "system-conf"
+ IMAGE_INSTALL += "system-prop"
+@@ -61,6 +62,7 @@ fi
+ }
+ 
+ do_makesystem() {
+-    make_ext4fs ${IMAGE_EXT4_EXTRA_OPTIONS} -s ${IMAGE_EXT4_SELINUX_OPTIONS} -l ${SYSTEM_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-sysfs.ext4 ${IMAGE_ROOTFS}
++    cp ${THISDIR}/${BASEMACHINE}/apq8053-fsconfig.conf ${WORKDIR}/rootfs-fsconfig.conf
++    make_ext4fs -C ${WORKDIR}/rootfs-fsconfig.conf ${IMAGE_EXT4_EXTRA_OPTIONS} -s ${IMAGE_EXT4_SELINUX_OPTIONS} -l ${SYSTEM_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-sysfs.ext4 ${IMAGE_ROOTFS}
+     make_ext4fs  -l ${SYSTEMRW_SIZE_EXT4} ${DEPLOY_DIR_IMAGE}/${MACHINE}-systemrw.ext4
+ }
+diff --git a/recipes-products/images/include/mdm-ota-target-image-ext4.inc b/recipes-products/images/include/mdm-ota-target-image-ext4.inc
+index 235e6b8..2a8fc7e 100644
+--- a/recipes-products/images/include/mdm-ota-target-image-ext4.inc
++++ b/recipes-products/images/include/mdm-ota-target-image-ext4.inc
+@@ -132,6 +132,10 @@ python do_gen_otazip_ext4() {
+     subprocess.call(cmd1, shell=True)
+ 
+     cmd2 = "cd ${TMPDIR}/work/x86_64-linux/releasetools-native/1.0-r0/releasetools && ./full_ota.sh target-files-ext4.zip ${IMAGE_ROOTFS} ext4"
++
++    if (d.getVar('OTA_EXTRA_OPTS', True) == '1'):
++        cmd2 += " -p system/ -c ${WORKDIR}/rootfs-fsconfig.conf"
++
+     subprocess.call(cmd2, shell=True)
+ 
+     cmd3 = "cd ${TMPDIR}/work/x86_64-linux/releasetools-native/1.0-r0/releasetools && cp update_ext4.zip target-files-ext4.zip ${DEPLOY_DIR_IMAGE}"
+-- 
+cgit v1.1
+

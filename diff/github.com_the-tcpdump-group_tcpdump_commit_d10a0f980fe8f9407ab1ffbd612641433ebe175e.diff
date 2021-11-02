@@ -1,0 +1,82 @@
+From d10a0f980fe8f9407ab1ffbd612641433ebe175e Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Thu, 3 Aug 2017 22:34:44 +0100
+Subject: [PATCH] CVE-2017-13046/BGP: fix an existing bounds check for PMSI
+ Tunnel
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-bgp.c                     |   2 +-
+ tests/TESTLIST                  |   1 +
+ tests/bgp_pmsi_tunnel-oobr.out  |  11 +++++++++++
+ tests/bgp_pmsi_tunnel-oobr.pcap | Bin 0 -> 968 bytes
+ 4 files changed, 13 insertions(+), 1 deletion(-)
+ create mode 100644 tests/bgp_pmsi_tunnel-oobr.out
+ create mode 100644 tests/bgp_pmsi_tunnel-oobr.pcap
+
+diff --git a/print-bgp.c b/print-bgp.c
+index 04f0c3fa5..d7a336a46 100644
+--- a/print-bgp.c
++++ b/print-bgp.c
+@@ -2123,11 +2123,11 @@ bgp_attr_print(netdissect_options *ndo,
+         {
+                 uint8_t tunnel_type, flags;
+ 
++                ND_TCHECK2(tptr[0], 5);
+                 tunnel_type = *(tptr+1);
+                 flags = *tptr;
+                 tlen = len;
+ 
+-                ND_TCHECK2(tptr[0], 5);
+                 ND_PRINT((ndo, "\n\t    Tunnel-type %s (%u), Flags [%s], MPLS Label %u",
+                        tok2str(bgp_pmsi_tunnel_values, "Unknown", tunnel_type),
+                        tunnel_type,
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 687e92f37..7532e2403 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -563,6 +563,7 @@ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ # Same comments apply to the case below.
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+ vqp-oobr		vqp-oobr.pcap			vqp-oobr.out		-v -c1
++bgp_pmsi_tunnel-oobr	bgp_pmsi_tunnel-oobr.pcap	bgp_pmsi_tunnel-oobr.out -v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/bgp_pmsi_tunnel-oobr.out b/tests/bgp_pmsi_tunnel-oobr.out
+new file mode 100644
+index 000000000..3b73c7a64
+--- /dev/null
++++ b/tests/bgp_pmsi_tunnel-oobr.out
+@@ -0,0 +1,11 @@
++IP (tos 0x0, ttl 254, id 40207, offset 0, flags [+, DF, rsvd], proto TCP (6), length 296, bad cksum 8e15 (->3eaa)!)
++    241.0.32.19.179 > 239.0.0.1.0: Flags [none], seq 2146695561:2146695813, win 56026, options [unknown-161,eol], length 252: BGP
++	Update Message (2), length: 45
++	  Withdrawn routes: 3 bytes
++	  Attribute Set (128), length: 7, Flags [OTPE+f]: 
++	    Origin AS: 4067
++	      Origin (1), length: 1EGP
++	      Unknown Attribute (19), length: 1, Flags [+1]: 
++	    no Attribute 19 decoder
++	    0x0000:  01
++	      PMSI Tunnel (22), length: 1, Flags [+1]: [|BGP]
+diff --git a/tests/bgp_pmsi_tunnel-oobr.pcap b/tests/bgp_pmsi_tunnel-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..33cf660ce01808405e27a12974e51d8be673ed0d
+GIT binary patch
+literal 968
+zcmcJNF-SsD6o&u%6q9(OU>ejS5+Q-q-q6(G7!fo&7&Hd$y*t*Tw6ug^2rUkhf#4EK
+zOMB5^ix9Pj7?g;;{(DV(g((FcxQ~0!JLmrAeD~a3mQD<~foTMg$Lux$!L_y{7sBGf
+z+vYw5(*v^sOQ2TG6^dT0Ld3HE2HrgBP!o~hlS(=VtXBH~LZ*|b*XQoySzbM9e>21l
+zxZLo0O18uV;J=5U1-Zfk!f4tl+I;Fv-M<K!9myJ?q*1%g!wbkM)FQb;Ru%FZ8xoiq
+zYWoB4i{0UkG6nd`*Xu5}9_2ZzIyXCsqrED{GP~+~O#jv<5P@w&mCKAnI5K9Im~lGD
+zu$W<Y8R}xFjtjuxF7TlNsr(iLs4kO<%JLPkK^OgwsxC%W1-=)Y8d~CKjg>!W=+65Z
+zl+)JYTdH1YQhkb#y@TR0qEEw<s0^>+H}u7L`s%&@o&Fdy8q9zUL3I_WPjX-X_sKnL
+bf@%siSyJYvHzAswrO7)cq}-d${tLYW>e&vA
+
+literal 0
+HcmV?d00001
+

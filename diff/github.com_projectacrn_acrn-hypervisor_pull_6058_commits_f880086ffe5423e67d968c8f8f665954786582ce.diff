@@ -1,0 +1,36 @@
+From f880086ffe5423e67d968c8f8f665954786582ce Mon Sep 17 00:00:00 2001
+From: Li Fei1 <fei1.li@intel.com>
+Date: Mon, 10 May 2021 16:51:14 +0800
+Subject: [PATCH] dm: rb: only free rb_entry when we remove this entry from the
+ rb tree
+
+Only free rb_entry when we remove this entry from the rb tree, otherwise, a
+page fault would trigger when next rb itreation would access the freed rb_entry.
+
+Tracked-On: #6056
+Signed-off-by: Li Fei1 <fei1.li@intel.com>
+---
+ devicemodel/core/mem.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/devicemodel/core/mem.c b/devicemodel/core/mem.c
+index b07c8ca0ef..c203400cb5 100644
+--- a/devicemodel/core/mem.c
++++ b/devicemodel/core/mem.c
+@@ -248,13 +248,13 @@ unregister_mem_int(struct mmio_rb_tree *rbt, struct mem_range *memp)
+ 			/* flush Per-VM cache */
+ 			if (mmio_hint == entry)
+ 				mmio_hint = NULL;
++
++			if (entry)
++				free(entry);
+ 		}
+ 	}
+ 	pthread_rwlock_unlock(&mmio_rwlock);
+ 
+-	if (entry)
+-		free(entry);
+-
+ 	return err;
+ }
+ 

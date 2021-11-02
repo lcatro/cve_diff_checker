@@ -1,0 +1,212 @@
+From bf0261ab128f28763258c620bc95ca379a286b59 Mon Sep 17 00:00:00 2001
+From: jianzhou <jianzhou@codeaurora.org>
+Date: Wed, 11 Apr 2018 15:28:52 +0800
+Subject: QcomModulePkg: Correct the buffer size check while writing data to
+ Partition
+
+ROUND_TO_PAGE can increase 'Size' above 'Image' buffer bound.
+Correct the buffer size check, if the Size is not divisible by
+BlockSize,write the Image data to partition in twice.
+
+Change-Id: I5ca2d9d5c43dd05245acc0e779b40bd6481847ad
+---
+ QcomModulePkg/Include/Library/LinuxLoaderLib.h   |   5 +
+ QcomModulePkg/Library/BootLib/LinuxLoaderLib.c   | 120 ++++++++++++++---------
+ QcomModulePkg/Library/FastbootLib/FastbootCmds.c |   9 +-
+ 3 files changed, 86 insertions(+), 48 deletions(-)
+ mode change 100644 => 100755 QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
+ mode change 100644 => 100755 QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+
+diff --git a/QcomModulePkg/Include/Library/LinuxLoaderLib.h b/QcomModulePkg/Include/Library/LinuxLoaderLib.h
+index 39f9c36..8ecb507 100644
+--- a/QcomModulePkg/Include/Library/LinuxLoaderLib.h
++++ b/QcomModulePkg/Include/Library/LinuxLoaderLib.h
+@@ -165,4 +165,9 @@ EFI_STATUS GetBootDevice(CHAR8 *BootDevBuf, UINT32 Len);
+  * bootloader flows. */
+ EFI_STATUS IsMdtpActive(BOOLEAN *IsActive);
+ 
++EFI_STATUS
++WriteBlockToPartition (EFI_BLOCK_IO_PROTOCOL *BlockIo,
++                   IN UINT64 Offset,
++                   IN UINT64 Size,
++                   IN VOID *Image);
+ #endif
+diff --git a/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c b/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
+old mode 100644
+new mode 100755
+index 7615717..d3355af
+--- a/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
++++ b/QcomModulePkg/Library/BootLib/LinuxLoaderLib.c
+@@ -510,6 +510,79 @@ EFI_STATUS ReadWriteDeviceInfo(vb_device_state_op_t Mode, void *DevInfo, UINT32
+ 	return Status;
+ }
+ 
++EFI_STATUS
++WriteBlockToPartition (EFI_BLOCK_IO_PROTOCOL *BlockIo,
++                   IN UINT64 Offset,
++                   IN UINT64 Size,
++                   IN VOID *Image)
++{
++  EFI_STATUS Status = EFI_SUCCESS;
++  CHAR8 *ImageBuffer = NULL;
++  UINT32 DivMsgBufSize;
++
++  if ((BlockIo == NULL) ||
++    (Image == NULL)) {
++    DEBUG ((EFI_D_ERROR, "NUll BlockIo or Image\n"));
++    return EFI_INVALID_PARAMETER;
++  }
++
++  /* If the Size is not divisible by BlockSize.
++    * Write the Image data to partition in twice.
++    * First, write the divisible Image buffer size to partition
++    * Second, malloc 1 BlockSize buffer for the rest Image data
++    * and then write.
++    */
++  DivMsgBufSize = (Size / BlockIo->Media->BlockSize) *
++                   BlockIo->Media->BlockSize;
++  if (DivMsgBufSize) {
++    Status = BlockIo->WriteBlocks (BlockIo,
++                                   BlockIo->Media->MediaId,
++                                   Offset,
++                                   DivMsgBufSize,
++                                   Image);
++    if (Status != EFI_SUCCESS) {
++      DEBUG ((EFI_D_ERROR, "Write the divisible Image failed :%r\n", Status));
++      return Status;
++    }
++  }
++
++  if (Size - DivMsgBufSize > 0) {
++    ImageBuffer = AllocateZeroPool (BlockIo->Media->BlockSize);
++    if (ImageBuffer == NULL) {
++      DEBUG ((EFI_D_ERROR, "Failed to allocate zero pool for ImageBuffer\n"));
++      return EFI_OUT_OF_RESOURCES;
++    }
++
++    /* Read firstly to ensure the final write is not to change data
++     * in this Block other than "Size - DivMsgBufSize"
++     */
++    Status = BlockIo->ReadBlocks (BlockIo,
++                                 BlockIo->Media->MediaId,
++                                 Offset + Size / BlockIo->Media->BlockSize,
++                                 BlockIo->Media->BlockSize,
++                                 ImageBuffer);
++
++    if (Status != EFI_SUCCESS) {
++      DEBUG ((EFI_D_ERROR, "Reading block failed :%r\n", Status));
++      FreePool (ImageBuffer);
++      ImageBuffer = NULL;
++      return Status;
++    }
++
++    gBS->CopyMem (ImageBuffer, Image + DivMsgBufSize, Size - DivMsgBufSize);
++    Status = BlockIo->WriteBlocks (BlockIo,
++                                 BlockIo->Media->MediaId,
++                                 Offset+ Size / BlockIo->Media->BlockSize,
++                                 BlockIo->Media->BlockSize,
++                                 ImageBuffer);
++
++    FreePool (ImageBuffer);
++    ImageBuffer = NULL;
++  }
++
++  return Status;
++}
++
+ EFI_STATUS WriteToPartition (EFI_GUID *Ptype, VOID *Msg, UINT32 MsgSize)
+ {
+ 	EFI_STATUS Status;
+@@ -518,8 +591,6 @@ EFI_STATUS WriteToPartition (EFI_GUID *Ptype, VOID *Msg, UINT32 MsgSize)
+ 	HandleInfo HandleInfoList[1];
+ 	UINT32 MaxHandles;
+ 	UINT32 BlkIOAttrib = 0;
+-  CHAR8 *MsgBuffer = NULL;
+-  UINT32 DivMsgBufSize;
+ 
+ 	if (Msg == NULL)
+ 		return EFI_INVALID_PARAMETER;
+@@ -549,50 +620,7 @@ EFI_STATUS WriteToPartition (EFI_GUID *Ptype, VOID *Msg, UINT32 MsgSize)
+ 	}
+ 
+   BlkIo = HandleInfoList[0].BlkIo;
+-  if (MsgSize % BlkIo->Media->BlockSize) {
+-    /* If the MsgSize is not divisible by BlockSize.
+-     * Write the Msg data to partition in twice.
+-     * First, write the divisible Msg buffer size to partition
+-     * Second, malloc 1 BlockSize buffer for the rest Msg data
+-     * and then write.
+-     */
+-    DivMsgBufSize = (MsgSize / BlkIo->Media->BlockSize) *
+-                    BlkIo->Media->BlockSize;
+-    if (DivMsgBufSize) {
+-      Status = BlkIo->WriteBlocks (BlkIo,
+-                                   BlkIo->Media->MediaId,
+-                                   0,
+-                                   DivMsgBufSize,
+-                                   Msg);
+-      if (Status != EFI_SUCCESS) {
+-        DEBUG ((EFI_D_ERROR,
+-                "Write the divisible MsgBuffer failed :%r\n", Status));
+-        return Status;
+-      }
+-    }
+-
+-    MsgBuffer = AllocateZeroPool (BlkIo->Media->BlockSize);
+-    if (MsgBuffer == NULL) {
+-      DEBUG ((EFI_D_ERROR, "Failed to allocate zero pool for MsgBuffer\n"));
+-      return EFI_OUT_OF_RESOURCES;
+-    }
+-
+-    gBS->CopyMem (MsgBuffer, Msg + DivMsgBufSize, MsgSize - DivMsgBufSize);
+-    Status = BlkIo->WriteBlocks (BlkIo,
+-                                 BlkIo->Media->MediaId,
+-                                 MsgSize / BlkIo->Media->BlockSize,
+-                                 BlkIo->Media->BlockSize,
+-                                 MsgBuffer);
+-
+-    FreePool (MsgBuffer);
+-    MsgBuffer = NULL;
+-  } else {
+-    Status = BlkIo->WriteBlocks (BlkIo,
+-                                 BlkIo->Media->MediaId,
+-                                 0,
+-                                 MsgSize,
+-                                 Msg);
+-  }
++  Status = WriteBlockToPartition (BlkIo, 0, MsgSize, Msg);
+ 
+   if (Status != EFI_SUCCESS) {
+     DEBUG ((EFI_D_ERROR,
+diff --git a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+old mode 100644
+new mode 100755
+index e26962f..097b2a4
+--- a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
++++ b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+@@ -459,7 +459,7 @@ WriteToDisk (
+ 	IN UINT64 offset
+ 	)
+ {
+-	return BlockIo->WriteBlocks(BlockIo, BlockIo->Media->MediaId, offset, ROUND_TO_PAGE(Size, BlockIo->Media->BlockSize - 1), Image);
++  return WriteBlockToPartition (BlockIo, offset, Size, Image);
+ }
+ 
+ STATIC BOOLEAN GetPartitionHasSlot(CHAR16* PartitionName, UINT32 PnameMaxSize, CHAR16* SlotSuffix, UINT32 SlotSuffixMaxSize) {
+@@ -882,7 +882,12 @@ HandleRawImgFlash(
+ 
+ 		return EFI_VOLUME_FULL;
+ 	}
+-	Status = BlockIo->WriteBlocks(BlockIo, BlockIo->Media->MediaId, 0, ROUND_TO_PAGE(Size, BlockIo->Media->BlockSize - 1), Image);
++
++  Status = WriteBlockToPartition (BlockIo, 0, Size, Image);
++  if (EFI_ERROR (Status)) {
++    DEBUG ((EFI_D_ERROR, "Writing Block to partition Failure\n"));
++  }
++
+ 	if (MultiSlotBoot && HasSlot && !(StrnCmp(PartitionName, L"boot", StrLen(L"boot"))))
+ 		FastbootUpdateAttr(SlotSuffix);
+ 	return Status;
+-- 
+cgit v1.1
+

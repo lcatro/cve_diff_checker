@@ -1,0 +1,87 @@
+From cbddb98484ea8ec1deece351abd56e063d775b38 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sun, 19 Feb 2017 14:19:32 -0800
+Subject: [PATCH] CVE-2017-13002/AODV: Add some missing bounds checks.
+
+In aodv_extension() do a bounds check on the extension header before we
+look at it.
+
+This fixes a buffer over-read discovered by Kamil Frankowicz.
+
+Add a test using the capture file supplied by the reporter(s).
+
+While we're at it, add the RFC number, and check the validity of the
+length for the Hello extension.
+---
+ print-aodv.c                    |   9 ++++++++-
+ tests/TESTLIST                  |   1 +
+ tests/hoobr_aodv_extension.out  |   2 ++
+ tests/hoobr_aodv_extension.pcap | Bin 0 -> 122 bytes
+ 4 files changed, 11 insertions(+), 1 deletion(-)
+ create mode 100644 tests/hoobr_aodv_extension.out
+ create mode 100644 tests/hoobr_aodv_extension.pcap
+
+diff --git a/print-aodv.c b/print-aodv.c
+index 6cd0c9ea1..fe75db863 100644
+--- a/print-aodv.c
++++ b/print-aodv.c
+@@ -42,7 +42,9 @@
+ #include "addrtoname.h"
+ #include "extract.h"
+ 
+-
++/*
++ * RFC 3561
++ */
+ struct aodv_rreq {
+ 	uint8_t		rreq_type;	/* AODV message type (1) */
+ 	uint8_t		rreq_flags;	/* various flags */
+@@ -178,12 +180,17 @@ aodv_extension(netdissect_options *ndo,
+ {
+ 	const struct aodv_hello *ah;
+ 
++	ND_TCHECK(*ep);
+ 	switch (ep->type) {
+ 	case AODV_EXT_HELLO:
+ 		ah = (const struct aodv_hello *)(const void *)ep;
+ 		ND_TCHECK(*ah);
+ 		if (length < sizeof(struct aodv_hello))
+ 			goto trunc;
++		if (ep->length < 4) {
++			ND_PRINT((ndo, "\n\text HELLO - bad length %u", ep->length));
++			break;
++		}
+ 		ND_PRINT((ndo, "\n\text HELLO %ld ms",
+ 		    (unsigned long)EXTRACT_32BITS(&ah->interval)));
+ 		break;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5d164a6bf..358b5c273 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -459,6 +459,7 @@ hoobr_chdlc_print	hoobr_chdlc_print.pcap		hoobr_chdlc_print.out
+ hoobr_lookup_nsap	hoobr_lookup_nsap.pcap		hoobr_lookup_nsap.out
+ hoobr_rt6_print		hoobr_rt6_print.pcap		hoobr_rt6_print.out
+ hoobr_nfs_printfh	hoobr_nfs_printfh.pcap		hoobr_nfs_printfh.out
++hoobr_aodv_extension	hoobr_aodv_extension.pcap	hoobr_aodv_extension.out
+ 
+ # bad packets from Wilfried Kirsch
+ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+diff --git a/tests/hoobr_aodv_extension.out b/tests/hoobr_aodv_extension.out
+new file mode 100644
+index 000000000..79c81f561
+--- /dev/null
++++ b/tests/hoobr_aodv_extension.out
+@@ -0,0 +1,2 @@
++IP 48.48.48.48.654 > 48.48.48.48.12336:  aodv rrep 12308  prefix 16 hops 48
++	dst 48.48.48.48 dseq 808464432 src 48.48.48.48 808464432 ms [|hello]
+diff --git a/tests/hoobr_aodv_extension.pcap b/tests/hoobr_aodv_extension.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..b02ab0507d89b51a1ae6efe21ea54b6f5de5c089
+GIT binary patch
+literal 122
+zcmca|c+)~A1{MYbD6nH-U|?i`a}9!ke3%@J=3sCIGl4RKFfjuIralOp2_b}+1psbR
+B77_pe
+
+literal 0
+HcmV?d00001
+

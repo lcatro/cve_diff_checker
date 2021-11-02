@@ -1,0 +1,58 @@
+From c0aeb159351e5e99d752c27b87133eca299bdfce Mon Sep 17 00:00:00 2001
+From: Zachary Huff <zach.huff.386@gmail.com>
+Date: Wed, 2 Sep 2020 18:51:02 -0400
+Subject: [PATCH] Filter openvpn configuration data
+
+---
+ service/profile/profile.go | 37 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/service/profile/profile.go b/service/profile/profile.go
+index 67b6d375..2ba9ecb3 100644
+--- a/service/profile/profile.go
++++ b/service/profile/profile.go
+@@ -214,8 +214,43 @@ func (p *Profile) write() (pth string, err error) {
+ 
+ 	pth = filepath.Join(rootDir, p.Id)
+ 
++	data := ""
++	for _, line := range strings.Split(p.Data, "\n") {
++		trimLine := strings.TrimSpace(line)
++		trimLine = strings.Trim(trimLine, "#")
++		trimLine = strings.Trim(trimLine, "-")
++		trimLine = strings.Trim(trimLine, "_")
++		trimLine = strings.Trim(trimLine, ":")
++		trimLine = strings.Trim(trimLine, ";")
++		trimLine = strings.Trim(trimLine, "*")
++		trimLine = strings.Trim(trimLine, "%")
++		trimLine = strings.Trim(trimLine, "$")
++		trimLine = strings.Trim(trimLine, "+")
++		trimLine = strings.Trim(trimLine, "=")
++		trimLine = strings.Trim(trimLine, "~")
++		trimLine = strings.Trim(trimLine, "(")
++		trimLine = strings.Trim(trimLine, ")")
++		trimLine = strings.Trim(trimLine, "[")
++		trimLine = strings.Trim(trimLine, "]")
++		trimLine = strings.Trim(trimLine, "{")
++		trimLine = strings.Trim(trimLine, "}")
++
++		if strings.Contains(trimLine, "script-security") ||
++			strings.HasPrefix(trimLine, "log ") ||
++			strings.HasPrefix(trimLine, "up ") ||
++			strings.HasPrefix(trimLine, "down ") ||
++			strings.HasPrefix(trimLine, "route-pre-down ") ||
++			strings.HasPrefix(trimLine, "tls-verify ") ||
++			strings.HasPrefix(trimLine, "ipchange ") ||
++			strings.HasPrefix(trimLine, "route-up ") {
++
++			continue
++		}
++		data += line + "\n"
++	}
++
+ 	_ = os.Remove(pth)
+-	err = ioutil.WriteFile(pth, []byte(p.Data), os.FileMode(0600))
++	err = ioutil.WriteFile(pth, []byte(data), os.FileMode(0600))
+ 	if err != nil {
+ 		err = &WriteError{
+ 			errors.Wrap(err, "profile: Failed to write profile"),

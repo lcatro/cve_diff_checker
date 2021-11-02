@@ -1,0 +1,34 @@
+From 6c016e8f066d2f404b18eaa1af7fa0c7a9651ccd Mon Sep 17 00:00:00 2001
+From: drsassafras <drsassafras@users.sourceforge.net>
+Date: Wed, 5 Apr 2017 13:31:29 +0000
+Subject: [PATCH] [SEC] XSS Bypass - prevents bypassing of the xss filter by
+ padding zeros
+
+git-svn-id: https://svn.code.sf.net/p/tikiwiki/code/branches/17.x@62084 b456876b-0849-0410-b77d-98878d47e9d5
+---
+ lib/core/TikiFilter/PreventXss.php | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/lib/core/TikiFilter/PreventXss.php b/lib/core/TikiFilter/PreventXss.php
+index ff43e6f81e..cefe488d19 100644
+--- a/lib/core/TikiFilter/PreventXss.php
++++ b/lib/core/TikiFilter/PreventXss.php
+@@ -183,14 +183,13 @@ function RemoveXSSchars(&$val)
+ 			$search .= '~`";:?+/={}[]-_|\'\\';
+ 			for ($i = 0, $istrlen_search = strlen($search); $i < $istrlen_search; $i++) {
+ 				// ;? matches the ;, which is optional
+-				// 0{0,8} matches any padded zeros,
+-				// which are optional and go up to 8 chars
++				// 0* matches any padded zeros, which are optional
+ 				// &#x0040 @ search for the hex values
+-				$patterns[] = '/(&#[xX]0{0,8}'.dechex(ord($search[$i])).';?)/i';
++				$patterns[] = '/(&#x0*'.dechex(ord($search[$i])).';?)/i';
+ 				$replacements[] = $search[$i];
+-				// &#00064 @ 0{0,8} matches '0' zero to eight times
++				// &#00064 @ 0* matches padded zeros
+ 				// with a ;
+-				$patterns[] = '/(&#0{0,8}'.ord($search[$i]).';?)/';
++				$patterns[] = '/(&#0*'.ord($search[$i]).';?)/';
+ 				$replacements[] = $search[$i];
+ 			}
+ 		}

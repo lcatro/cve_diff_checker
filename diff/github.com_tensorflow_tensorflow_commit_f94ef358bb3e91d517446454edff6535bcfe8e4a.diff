@@ -1,0 +1,28 @@
+From f94ef358bb3e91d517446454edff6535bcfe8e4a Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 13 Apr 2021 14:54:18 -0700
+Subject: [PATCH] Fix `tf.raw_ops.RaggedTensorToTensor` failing CHECK in
+ `tensor.cc`.
+
+PiperOrigin-RevId: 368300502
+Change-Id: I91255d23c4bfd3aa3c029aac773937c09daf3c64
+---
+ tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc b/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
+index 28898c65ca797..433d910f6090c 100644
+--- a/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
++++ b/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
+@@ -345,6 +345,11 @@ class RaggedTensorToTensorBaseOp : public OpKernel {
+ 
+   void Compute(OpKernelContext* context) override {
+     INDEX_TYPE first_dimension;
++    const Tensor first_partition_tensor =
++        context->input(kFirstPartitionInputIndex);
++    OP_REQUIRES(context, first_partition_tensor.NumElements() > 0,
++                errors::InvalidArgument("Invalid first partition input. Tensor "
++                                        "requires at least one element."));
+     OP_REQUIRES_OK(context, GetFirstDimensionSize(context, &first_dimension));
+     vector<INDEX_TYPE> output_size;
+     OP_REQUIRES_OK(context,

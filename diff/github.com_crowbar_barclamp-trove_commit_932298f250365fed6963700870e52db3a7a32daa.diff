@@ -1,0 +1,177 @@
+From 02f98c1d533c8c2c0bfdfb48b8bb6a37f4fe239f Mon Sep 17 00:00:00 2001
+From: Thomas Bechtold <tbechtold@suse.com>
+Date: Fri, 15 Jul 2016 11:57:00 +0200
+Subject: [PATCH 1/2] trove: Fix initial migration and schema revision
+
+- The schema-revision field was missing in the template schema
+- the attributes passed to the migration are already the attributes
+  for the given proposal. So use the correct key when handling the db
+  attributes.
+  Also check that the db is not already there. Otherwise the password
+  would be overwritten.
+---
+ chef/data_bags/crowbar/bc-template-trove.json        |  1 +
+ chef/data_bags/crowbar/bc-template-trove.schema      |  1 +
+ .../migrate/trove/001_add_configurable_db_attrs.rb   | 12 +++++++-----
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/chef/data_bags/crowbar/bc-template-trove.json b/chef/data_bags/crowbar/bc-template-trove.json
+index 1eccdac..f7b35e6 100644
+--- a/chef/data_bags/crowbar/bc-template-trove.json
++++ b/chef/data_bags/crowbar/bc-template-trove.json
+@@ -22,6 +22,7 @@
+     "trove": {
+       "crowbar-revision": 1,
+       "crowbar-applied": false,
++      "schema-revision": 1,
+       "element_states": {
+         "trove-server": [ "readying", "ready", "applying" ]
+       },
+diff --git a/chef/data_bags/crowbar/bc-template-trove.schema b/chef/data_bags/crowbar/bc-template-trove.schema
+index 3c10f1a..c57b7ad 100644
+--- a/chef/data_bags/crowbar/bc-template-trove.schema
++++ b/chef/data_bags/crowbar/bc-template-trove.schema
+@@ -47,6 +47,7 @@
+             "crowbar-status": { "type": "str" },
+             "crowbar-failed": { "type": "str" },
+             "crowbar-queued": { "type": "bool" },
++            "schema-revision": { "type": "int" },
+             "element_states": {
+               "type": "map",
+               "mapping": {
+diff --git a/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb b/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
+index 2c38ec6..6d56891 100644
+--- a/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
++++ b/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
+@@ -1,12 +1,14 @@
+ def upgrade ta, td, a, d
+-  a['trove']['db'] = {}
+-  a['trove']['db']['password'] = nil
+-  a['trove']['db']['user'] = 'trove'
+-  a['trove']['db']['database'] = 'trove'
++  unless a["trove"].key? "db"
++    a["trove"]["db"] = {}
++    a["trove"]["db"]["password"] = nil
++    a["trove"]["db"]["user"] = "trove"
++    a["trove"]["db"]["database"] = "trove"
++  end
+   return a, d
+ end
+ 
+ def downgrade ta, td, a, d
+-  a['trove'].delete 'db'
++  a["trove"].delete 'db'
+   return a, d
+ end
+
+From 4a778b5f2950856101d04db759b4249f56e65d88 Mon Sep 17 00:00:00 2001
+From: Steve Kowalik <steven@wedontsleep.org>
+Date: Mon, 22 Aug 2016 15:11:24 +1000
+Subject: [PATCH 2/2] Set the trove service password to random (bsc#991729)
+
+Change the schema as well as the model so that trove service
+password is set to a random string when the barclamp is applied.
+Also include a migration so existing trove deployments will
+update their service password.
+---
+ chef/data_bags/crowbar/bc-template-trove.json    |  3 ++-
+ chef/data_bags/crowbar/bc-template-trove.schema  |  2 ++
+ .../trove/001_add_configurable_db_attrs.rb       | 12 ++++++------
+ .../migrate/trove/002_add_service_details.rb     | 16 ++++++++++++++++
+ crowbar_framework/app/models/trove_service.rb    |  1 +
+ 5 files changed, 27 insertions(+), 7 deletions(-)
+ create mode 100644 chef/data_bags/crowbar/migrate/trove/002_add_service_details.rb
+
+diff --git a/chef/data_bags/crowbar/bc-template-trove.json b/chef/data_bags/crowbar/bc-template-trove.json
+index f7b35e6..eaa3f1a 100644
+--- a/chef/data_bags/crowbar/bc-template-trove.json
++++ b/chef/data_bags/crowbar/bc-template-trove.json
+@@ -11,6 +11,7 @@
+       "cinder_instance": "none",
+       "rabbitmq_instance": "none",
+       "volume_support": false,
++      "service_user": "trove",
+       "db": {
+         "password": "",
+         "user": "trove",
+@@ -22,7 +23,7 @@
+     "trove": {
+       "crowbar-revision": 1,
+       "crowbar-applied": false,
+-      "schema-revision": 1,
++      "schema-revision": 2,
+       "element_states": {
+         "trove-server": [ "readying", "ready", "applying" ]
+       },
+diff --git a/chef/data_bags/crowbar/bc-template-trove.schema b/chef/data_bags/crowbar/bc-template-trove.schema
+index c57b7ad..59368ae 100644
+--- a/chef/data_bags/crowbar/bc-template-trove.schema
++++ b/chef/data_bags/crowbar/bc-template-trove.schema
+@@ -20,6 +20,8 @@
+             "swift_instance": { "type": "str", "required": true },
+             "rabbitmq_instance": { "type": "str", "required": true },
+             "volume_support": { "type": "bool", "required": true },
++            "service_user": { "type": "str", "required": true },
++            "service_password": { "type": "str" },
+             "db": {
+               "type": "map",
+               "required": true,
+diff --git a/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb b/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
+index 6d56891..b54b15d 100644
+--- a/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
++++ b/chef/data_bags/crowbar/migrate/trove/001_add_configurable_db_attrs.rb
+@@ -1,14 +1,14 @@
+ def upgrade ta, td, a, d
+-  unless a["trove"].key? "db"
+-    a["trove"]["db"] = {}
+-    a["trove"]["db"]["password"] = nil
+-    a["trove"]["db"]["user"] = "trove"
+-    a["trove"]["db"]["database"] = "trove"
++  unless a.key? "db"
++    a["db"] = {}
++    a["db"]["password"] = nil
++    a["db"]["user"] = "trove"
++    a["db"]["database"] = "trove"
+   end
+   return a, d
+ end
+ 
+ def downgrade ta, td, a, d
+-  a["trove"].delete 'db'
++  a.delete 'db'
+   return a, d
+ end
+diff --git a/chef/data_bags/crowbar/migrate/trove/002_add_service_details.rb b/chef/data_bags/crowbar/migrate/trove/002_add_service_details.rb
+new file mode 100644
+index 0000000..20f1661
+--- /dev/null
++++ b/chef/data_bags/crowbar/migrate/trove/002_add_service_details.rb
+@@ -0,0 +1,16 @@
++def upgrade(ta, td, a, d)
++  # Use a class variable, since migrations are run twice.
++  unless defined?(@@trove_service_password)
++    service = ServiceObject.new "fake-logger"
++    @@trove_service_password = service.random_password
++  end
++  a["service_user"] = ta["service_user"]
++  a["service_password"] = @@trove_service_password
++  return a, d
++end
++
++def downgrade(ta, td, a, d)
++  a.delete("service_user")
++  a.delete("service_password")
++  return a, d
++end
+diff --git a/crowbar_framework/app/models/trove_service.rb b/crowbar_framework/app/models/trove_service.rb
+index cd9f13f..4318c17 100644
+--- a/crowbar_framework/app/models/trove_service.rb
++++ b/crowbar_framework/app/models/trove_service.rb
+@@ -45,6 +45,7 @@ def create_proposal
+     base["attributes"][@bc_name]["swift_instance"] = find_dep_proposal("swift", true)
+     base["attributes"][@bc_name]["rabbitmq_instance"] = find_dep_proposal("rabbitmq")
+     base["attributes"][@bc_name]["db"]["password"] = random_password
++    base["attributes"][@bc_name]["service_password"] = random_password
+ 
+     # assign a default node to the trove-server role
+     nodes = NodeObject.all

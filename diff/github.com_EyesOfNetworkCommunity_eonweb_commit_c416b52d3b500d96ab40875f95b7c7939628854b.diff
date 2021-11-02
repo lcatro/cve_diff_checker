@@ -1,0 +1,30 @@
+From c416b52d3b500d96ab40875f95b7c7939628854b Mon Sep 17 00:00:00 2001
+From: root <root@localhost.localdomain>
+Date: Tue, 16 Jun 2020 16:24:27 +0200
+Subject: [PATCH] FIX 2.4 protect login/logout logs recording
+
+---
+ include/function.php | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/include/function.php b/include/function.php
+index b40da5d..d4a484d 100644
+--- a/include/function.php
++++ b/include/function.php
+@@ -370,10 +370,13 @@ function stripAccents($str, $charset='utf-8'){
+ function logging($module,$command,$user=false){
+ 	global $database_eonweb;
+ 	global $dateformat;
+-	if($user)
++	if($user){
++		$user = htmlspecialchars($user);
+ 		sqlrequest($database_eonweb,"insert into logs values ('','".time()."','$user','$module','$command','".$_SERVER["REMOTE_ADDR"]."');");
+-	elseif(isset($_COOKIE['user_name']))
+-		sqlrequest($database_eonweb,"insert into logs values ('','".time()."','".$_COOKIE['user_name']."','$module','$command','".$_SERVER["REMOTE_ADDR"]."');");
++	}elseif(isset($_COOKIE['user_name'])){
++		$user = htmlspecialchars($_COOKIE['user_name']);
++		sqlrequest($database_eonweb,"insert into logs values ('','".time()."','".$user."','$module','$command','".$_SERVER["REMOTE_ADDR"]."');");
++	}
+ }
+ 
+ // Time

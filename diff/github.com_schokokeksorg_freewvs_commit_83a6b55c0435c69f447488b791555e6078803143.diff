@@ -1,0 +1,26 @@
+From 83a6b55c0435c69f447488b791555e6078803143 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Hanno=20B=C3=B6ck?= <hanno@gentoo.org>
+Date: Tue, 9 Jun 2020 19:12:59 +0200
+Subject: [PATCH] protect against deep recursion of directories
+
+---
+ freewvs | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/freewvs b/freewvs
+index 2c16e23..36f89e7 100755
+--- a/freewvs
++++ b/freewvs
+@@ -109,7 +109,11 @@ if opts.xml:
+ # start the search
+ 
+ for fdir in opts.dirs:
+-    for root, _, files in os.walk(fdir):
++    for root, dirs, files in os.walk(fdir):
++        # this protects us against nested directories causing
++        # an exception
++        if root.count(os.sep) > 500:
++            del dirs[:]
+         for filename in scanfiles.intersection(files):
+             for item in jconfig:
+                 if not opts.thirdparty and 'thirdparty' in item:

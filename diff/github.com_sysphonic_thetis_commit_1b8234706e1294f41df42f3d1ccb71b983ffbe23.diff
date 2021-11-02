@@ -1,0 +1,942 @@
+From 1b8234706e1294f41df42f3d1ccb71b983ffbe23 Mon Sep 17 00:00:00 2001
+From: MORITA Shintaro <shin@sysphonic.com>
+Date: Sun, 12 Jul 2015 22:32:50 +0900
+Subject: [PATCH] Reinforcement of security. Signed-off-by: MORITA Shintaro
+ <shin@sysphonic.com>
+
+---
+ app/controllers/items_controller.rb        |  6 +----
+ app/controllers/locations_controller.rb    |  2 +-
+ app/controllers/templates_controller.rb    |  2 --
+ app/controllers/zeptair_post_controller.rb |  4 +--
+ app/helpers/items_helper.rb                |  8 +++---
+ app/helpers/sql_helper.rb                  | 14 ++++++++++-
+ app/helpers/templates_helper.rb            |  9 ++++---
+ app/helpers/tree_element.rb                |  4 +--
+ app/helpers/zeptair_dist_helper.rb         |  6 ++---
+ app/models/email.rb                        |  8 +++---
+ app/models/folder.rb                       | 14 +++++------
+ app/models/group.rb                        |  2 +-
+ app/models/location.rb                     |  2 +-
+ app/models/mail_account.rb                 |  6 ++---
+ app/models/mail_filter.rb                  |  2 +-
+ app/models/mail_folder.rb                  |  8 +++---
+ app/models/office_map.rb                   |  4 +--
+ app/models/official_title.rb               |  2 +-
+ app/models/paid_holiday.rb                 | 10 ++++----
+ app/models/research.rb                     |  2 +-
+ app/models/setting.rb                      | 14 +++++------
+ app/models/team.rb                         |  4 +--
+ app/models/timecard.rb                     |  4 +--
+ app/models/toy.rb                          |  2 +-
+ app/models/user.rb                         |  4 +--
+ app/views/folders/show_tree.html.erb       | 29 ++++++++++++++++------
+ app/views/frames/_footer.html.erb          |  2 +-
+ app/views/groups/show_tree.html.erb        | 23 +++++++++++++----
+ app/views/mail_filters/list.html.erb       |  3 ++-
+ app/views/mail_folders/show_tree.html.erb  | 22 +++++++++++-----
+ config/locales/de.yml                      |  2 +-
+ config/locales/en.yml                      |  2 +-
+ config/locales/ja.yml                      |  2 +-
+ 33 files changed, 138 insertions(+), 90 deletions(-)
+
+diff --git a/app/controllers/items_controller.rb b/app/controllers/items_controller.rb
+index 7991f79..3168347 100644
+--- a/app/controllers/items_controller.rb
++++ b/app/controllers/items_controller.rb
+@@ -354,12 +354,8 @@ def destroy
+     if params[:from_action].nil?
+       render(:text => params[:id])
+     else
+-      params.delete(:controller)
+-      params.delete(:action)
+-      params.delete(:id)
+       flash[:notice] = t('msg.delete_success')
+-      params[:action] = params[:from_action]
+-      redirect_to(params)
++      self.send(params[:from_action])
+     end
+   end
+ 
+diff --git a/app/controllers/locations_controller.rb b/app/controllers/locations_controller.rb
+index 7342b80..74ecc3e 100644
+--- a/app/controllers/locations_controller.rb
++++ b/app/controllers/locations_controller.rb
+@@ -45,7 +45,7 @@ def open_map
+       con_second = []
+       key_array = params[:keyword].split(nil)
+       key_array.each do |key|
+-        key_quot = ActiveRecord::Base.connection.quote(key)
++        key_quot = SqlHelper.quote(key)
+         con_prim << "(name=#{key_quot} or fullname=#{key_quot} or email=#{key_quot})"
+         con_second << SqlHelper.get_sql_like([:name, :fullname, :email], key)
+       end
+diff --git a/app/controllers/templates_controller.rb b/app/controllers/templates_controller.rb
+index eb226c4..9235c32 100644
+--- a/app/controllers/templates_controller.rb
++++ b/app/controllers/templates_controller.rb
+@@ -170,8 +170,6 @@ def destroy_local
+   def copy
+     Log.add_info(request, params.inspect)
+ 
+-    return unless request.post?
+-
+     tmpl_id = params[:thetisBoxSelKeeper].split(':').last
+     tmpl_item = Item.find(tmpl_id)
+ 
+diff --git a/app/controllers/zeptair_post_controller.rb b/app/controllers/zeptair_post_controller.rb
+index e161143..5bf0c16 100644
+--- a/app/controllers/zeptair_post_controller.rb
++++ b/app/controllers/zeptair_post_controller.rb
+@@ -93,7 +93,7 @@ def query
+     end
+ 
+     unless zeptair_id.blank?
+-      target_user = User.where("zeptair_id=#{zeptair_id}").first
++      target_user = User.where("zeptair_id=#{zeptair_id.to_i}").first
+     end
+ 
+     if target_user.nil?
+@@ -153,7 +153,7 @@ def delete_attachment
+ 
+     unless zeptair_id.blank?
+ 
+-      target_user = User.where("zeptair_id=#{zeptair_id}").first
++      target_user = User.where("zeptair_id=#{zeptair_id.to_i}").first
+ 
+       unless @login_user.admin?(User::AUTH_ZEPTAIR) or @login_user.id == target_user.id
+         target_user = nil
+diff --git a/app/helpers/items_helper.rb b/app/helpers/items_helper.rb
+index 64d3318..691d233 100644
+--- a/app/helpers/items_helper.rb
++++ b/app/helpers/items_helper.rb
+@@ -27,7 +27,7 @@ def self.get_next_revision(user_id, source_id)
+ 
+     SqlHelper.validate_token([user_id, source_id])
+ 
+-    copied_items = Item.where("user_id=#{user_id} and source_id=#{source_id}").order('created_at DESC').to_a
++    copied_items = Item.where("user_id=#{user_id.to_i} and source_id=#{source_id.to_i}").order('created_at DESC').to_a
+ 
+     rev = 0
+     copied_items.each do |item|
+@@ -54,7 +54,8 @@ def self.get_copies_folder(user_id)
+     my_folder = User.get_my_folder(user_id)
+ 
+     unless my_folder.nil?
+-      con = "(parent_id=#{my_folder.id}) and (name='#{Item.copies_folder}')"
++      folder_name_quot = SqlHelper.quote(Item.copies_folder)
++      con = "(parent_id=#{my_folder.id}) and (name=#{folder_name_quot})"
+ 
+       begin
+         copies_folder = Folder.where(con).first
+@@ -89,7 +90,8 @@ def self.exists_copies_folder?(user_id)
+     my_folder = User.get_my_folder(user_id)
+ 
+     unless my_folder.nil?
+-      con = "(parent_id=#{my_folder.id}) and (name='#{Item.copies_folder}')"
++      folder_name_quot = SqlHelper.quote(Item.copies_folder)
++      con = "(parent_id=#{my_folder.id}) and (name=#{folder_name_quot})"
+ 
+       begin
+         copies_folder = Folder.where(con).first
+diff --git a/app/helpers/sql_helper.rb b/app/helpers/sql_helper.rb
+index e6186fb..fa6ba82 100644
+--- a/app/helpers/sql_helper.rb
++++ b/app/helpers/sql_helper.rb
+@@ -51,7 +51,7 @@ def self.validate_token(tokens, extra_chars=nil)
+   #
+   def self.get_sql_like(attr_names, keyword)
+ 
+-    key = ActiveRecord::Base.connection.quote("%#{SqlHelper.escape_for_like(keyword)}%")
++    key = SqlHelper.quote("%#{SqlHelper.escape_for_like(keyword)}%")
+ 
+     con = []
+     attr_names.each do |attr_name|
+@@ -74,4 +74,16 @@ def self.escape_for_like(str)
+     return nil if str.nil?
+     return str.to_s.gsub(/([%_])/){"\\" + $1}
+   end
++
++  #=== self.quote
++  #
++  #Quotes string.
++  #
++  #_str_:: Target string.
++  #return:: Quoted string.
++  #
++  def self.quote(str)
++
++    return ActiveRecord::Base.connection.quote(str)
++  end
+ end
+diff --git a/app/helpers/templates_helper.rb b/app/helpers/templates_helper.rb
+index f76c736..82728d5 100644
+--- a/app/helpers/templates_helper.rb
++++ b/app/helpers/templates_helper.rb
+@@ -31,7 +31,7 @@ module TemplatesHelper
+   def self.setup_tmpl_folder
+ 
+     begin
+-      tmpl_folder = Folder.where("folders.name='#{TMPL_ROOT}'").first
++      tmpl_folder = Folder.where(name: TMPL_ROOT).first
+     rescue
+     end
+     if tmpl_folder.nil?
+@@ -117,7 +117,7 @@ def self.setup_tmpl_folder
+   #
+   def self.get_tmpl_folder
+ 
+-    tmpl_folder = Folder.where("folders.name='#{TMPL_ROOT}'").first
++    tmpl_folder = Folder.where(name: TMPL_ROOT).first
+ 
+     if tmpl_folder.nil?
+ 
+@@ -168,10 +168,11 @@ def self.get_tmpl_subfolder(name)
+ 
+     SqlHelper.validate_token([name])
+ 
+-    tmpl_folder = Folder.where("folders.name='#{TMPL_ROOT}'").first
++    tmpl_folder = Folder.where(name: TMPL_ROOT).first
+ 
+     unless tmpl_folder.nil?
+-      con = "(parent_id=#{tmpl_folder.id}) and (name='#{name}')"
++      name_quot = SqlHelper.quote(name)
++      con = "(parent_id=#{tmpl_folder.id}) and (name=#{name_quot})"
+       begin
+         child = Folder.where(con).first
+       rescue => evar
+diff --git a/app/helpers/tree_element.rb b/app/helpers/tree_element.rb
+index 8dce9d4..45ace7e 100644
+--- a/app/helpers/tree_element.rb
++++ b/app/helpers/tree_element.rb
+@@ -100,7 +100,7 @@ def self.get_childs(klass, node_id, recursive, ret_obj)
+ 
+     else
+ 
+-      nodes = klass.where("parent_id=#{node_id}").order('xorder ASC, id ASC').to_a
++      nodes = klass.where("parent_id=#{node_id.to_i}").order('xorder ASC, id ASC').to_a
+       if ret_obj
+         array = nodes
+       else
+@@ -139,7 +139,7 @@ def self.get_tree(klass, tree, conditions, node_id, order_by)
+     else
+       con = Marshal.load(Marshal.dump(conditions)) + ' and '
+     end
+-    con << "(parent_id=#{node_id})"
++    con << "(parent_id=#{node_id.to_i})"
+ 
+     tree[node_id] = klass.where(con).order(order_by).to_a
+ 
+diff --git a/app/helpers/zeptair_dist_helper.rb b/app/helpers/zeptair_dist_helper.rb
+index 3f44057..a274187 100644
+--- a/app/helpers/zeptair_dist_helper.rb
++++ b/app/helpers/zeptair_dist_helper.rb
+@@ -63,7 +63,7 @@ def self.get_comment_of(item_id, user_id)
+ 
+     SqlHelper.validate_token([item_id, user_id])
+     begin
+-      comment = Comment.where("(user_id=#{user_id}) and (item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").first
++      comment = Comment.where("(user_id=#{user_id.to_i}) and (item_id=#{item_id.to_i}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").first
+     rescue => evar
+       Log.add_error(nil, evar)
+     end
+@@ -145,7 +145,7 @@ def self.completed_ack_message(item_id)
+   #
+   def self.count_ack_users(item_id)
+     SqlHelper.validate_token([item_id])
+-    return Comment.where("(item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").count
++    return Comment.where("(item_id=#{item_id.to_i}) and (xtype='#{Comment::XTYPE_DIST_ACK}')").count
+   end
+ 
+   #=== self.count_completed_users
+@@ -158,7 +158,7 @@ def self.count_ack_users(item_id)
+   def self.count_completed_users(item_id)
+     SqlHelper.validate_token([item_id])
+     ack_msg = ZeptairDistHelper.completed_ack_message(item_id)
+-    return Comment.where("(item_id=#{item_id}) and (xtype='#{Comment::XTYPE_DIST_ACK}') and (message='#{ack_msg}')").count
++    return Comment.where("(item_id=#{item_id.to_i}) and (xtype='#{Comment::XTYPE_DIST_ACK}') and (message='#{ack_msg}')").count
+   end
+ 
+   #=== self.get_feeds
+diff --git a/app/models/email.rb b/app/models/email.rb
+index 0c0c1f6..88c3a91 100644
+--- a/app/models/email.rb
++++ b/app/models/email.rb
+@@ -622,7 +622,7 @@ def self.trim(user_id, mail_account_id, max)
+     SqlHelper.validate_token([user_id, mail_account_id])
+ 
+     begin
+-      count = Email.where("mail_account_id=#{mail_account_id}").count
++      count = Email.where("mail_account_id=#{mail_account_id.to_i}").count
+       if count > max
+ #logger.fatal("[INFO] Email.trim(user_id:#{user_id}, mail_account_id:#{mail_account_id}, max:#{max})")
+         over_num = count - max
+@@ -639,7 +639,7 @@ def self.trim(user_id, mail_account_id, max)
+         # Now, remove others
+         if emails.length < over_num
+           over_num -= emails.length
+-          emails += Email.where("mail_account_id=#{mail_account_id}").order('updated_at ASC').limit(over_num).to_a
++          emails += Email.where("mail_account_id=#{mail_account_id.to_i}").order('updated_at ASC').limit(over_num).to_a
+         end
+ 
+         emails.each do |email|
+@@ -686,7 +686,7 @@ def self.trim_by_capacity(user_id, mail_account_id, capacity_mb)
+ #
+ #      # Now, remove others
+ #      if over_size > 0
+-#        emails = Email.where("mail_account_id=#{mail_account_id}").order('updated_at ASC').to_a
++#        emails = Email.where("mail_account_id=#{mail_account_id.to_i}").order('updated_at ASC').to_a
+ #        emails.each do |email|
+ #          next if email.size.nil?
+ #
+@@ -762,7 +762,7 @@ def self.destroy_by_user(user_id, add_con=nil)
+ 
+     SqlHelper.validate_token([user_id])
+ 
+-    con = "user_id=#{user_id}"
++    con = "(user_id=#{user_id.to_i})"
+     con << " and (#{add_con})" unless add_con.nil? or add_con.empty?
+     emails = Email.where(con).to_a
+ 
+diff --git a/app/models/folder.rb b/app/models/folder.rb
+index 8411290..5bcfee7 100644
+--- a/app/models/folder.rb
++++ b/app/models/folder.rb
+@@ -240,18 +240,18 @@ def self.get_tree_by_group_for_admin(group_id)
+     if group_id.to_s == '0'
+       sql = 'select distinct * from folders'
+ 
+-      where = " where (parent_id = #{tree_id})"
+-      where << " and ((xtype is null) or not(xtype = '#{XTYPE_GROUP}' or xtype = '#{XTYPE_USER}'))"
++      where = " where (parent_id=#{tree_id.to_i})"
++      where << " and ((xtype is null) or not((xtype='#{XTYPE_GROUP}') or (xtype='#{XTYPE_USER}')))"
+ 
+       order_by = ' order by xorder ASC, id ASC'
+     else
+       sql = 'select distinct Folder.* from folders Folder, users User'
+ 
+-      where = " where (Folder.parent_id = #{tree_id})"
++      where = " where (Folder.parent_id=#{tree_id.to_i})"
+       where << ' and ('
+-      where <<      "(Folder.xtype = '#{XTYPE_GROUP}' and Folder.owner_id = #{group_id})"
++      where <<      "((Folder.xtype='#{XTYPE_GROUP}') and (Folder.owner_id=#{group_id.to_i}))"
+       where <<      ' or '
+-      where <<      "(Folder.xtype = '#{XTYPE_USER}' and  Folder.owner_id = User.id and #{SqlHelper.get_sql_like(['User.groups'], "|#{group_id}|")})"
++      where <<      "((Folder.xtype='#{XTYPE_USER}') and (Folder.owner_id=User.id) and #{SqlHelper.get_sql_like(['User.groups'], "|#{group_id}|")})"
+       where <<     ' )'
+ 
+       order_by = ' order by Folder.xorder ASC, Folder.id ASC'
+@@ -324,7 +324,7 @@ def self.get_tree(folder_tree, conditions, parent, admin)
+     else
+       con << ' and '
+     end
+-    con << "parent_id=#{tree_id}"
++    con << "parent_id=#{tree_id.to_i}"
+     folder_tree[tree_id] += Folder.where(con).order('xorder ASC, id ASC').to_a
+ 
+     delete_ary = []
+@@ -668,7 +668,7 @@ def self.get_childs(folder_id, conditions, recursive, admin, ret_obj)
+       else
+         con << ' and '
+       end
+-      con << "parent_id=#{folder_id}"
++      con << "parent_id=#{folder_id.to_i}"
+ 
+       unless admin
+         con << " and (xtype is null or not (xtype='#{Folder::XTYPE_SYSTEM}'))"
+diff --git a/app/models/group.rb b/app/models/group.rb
+index 78b0581..0362389 100644
+--- a/app/models/group.rb
++++ b/app/models/group.rb
+@@ -376,7 +376,7 @@ def self.get_group_folder(group_id)
+ 
+     SqlHelper.validate_token([group_id])
+     begin
+-      return Folder.where("(owner_id=#{group_id}) and (xtype='#{Folder::XTYPE_GROUP}')").first
++      return Folder.where("(owner_id=#{group_id.to_i}) and (xtype='#{Folder::XTYPE_GROUP}')").first
+     rescue => evar
+       Log.add_error(nil, evar)
+       return nil
+diff --git a/app/models/location.rb b/app/models/location.rb
+index 9b34ea6..90d4290 100644
+--- a/app/models/location.rb
++++ b/app/models/location.rb
+@@ -48,7 +48,7 @@ def self.get_for_group(group_id)
+     if group_id.nil?
+       con = 'group_id is null'
+     else
+-      con = "group_id=#{group_id}"
++      con = "group_id=#{group_id.to_i}"
+     end
+ 
+     Location.do_expire(con)
+diff --git a/app/models/mail_account.rb b/app/models/mail_account.rb
+index 7158d7d..529980b 100644
+--- a/app/models/mail_account.rb
++++ b/app/models/mail_account.rb
+@@ -72,7 +72,7 @@ def self.get_using_size(mail_account_id, add_con=nil)
+     SqlHelper.validate_token([mail_account_id])
+ 
+     con = []
+-    con << "(mail_account_id=#{mail_account_id})"
++    con << "(mail_account_id=#{mail_account_id.to_i})"
+     con << "(#{add_con})" unless add_con.nil? or add_con.empty?
+ 
+     return (Email.count_by_sql("select SUM(size) from emails where #{con.join(' and ')}") || 0)
+@@ -156,7 +156,7 @@ def self.destroy_by_user(user_id, add_con=nil)
+ 
+     SqlHelper.validate_token([user_id])
+ 
+-    con = "user_id=#{user_id}"
++    con = "(user_id=#{user_id.to_i})"
+     con << " and (#{add_con})" unless add_con.nil? or add_con.empty?
+     mail_accounts = MailAccount.where(con).to_a
+ 
+@@ -258,7 +258,7 @@ def self.get_default_for(user_id, xtype=nil)
+     SqlHelper.validate_token([user_id, xtype])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
++    con << "(user_id=#{user_id.to_i})"
+     con << '(is_default=1)'
+     con << "(xtype='#{xtype}')" unless xtype.blank?
+ 
+diff --git a/app/models/mail_filter.rb b/app/models/mail_filter.rb
+index 8eb561e..3e8fbf7 100644
+--- a/app/models/mail_filter.rb
++++ b/app/models/mail_filter.rb
+@@ -67,7 +67,7 @@ def self.get_for(mail_account_id, enabled=nil, trigger=nil)
+     SqlHelper.validate_token([mail_account_id, trigger])
+ 
+     con = []
+-    con << "(mail_account_id=#{mail_account_id})"
++    con << "(mail_account_id=#{mail_account_id.to_i})"
+     con << "(enabled=#{(enabled)?(1):(0)})" unless enabled.nil?
+     con << SqlHelper.get_sql_like([:triggers], "|#{trigger}|") unless trigger.nil?
+ 
+diff --git a/app/models/mail_folder.rb b/app/models/mail_folder.rb
+index 9ee5d26..7916ca0 100644
+--- a/app/models/mail_folder.rb
++++ b/app/models/mail_folder.rb
+@@ -122,6 +122,8 @@ def self.sort_tree(folder_tree)
+   #
+   def self.get_condtions_for(user, mail_account_ids)
+ 
++    SqlHelper.validate_token([mail_account_ids])
++
+     if mail_account_ids.nil? or mail_account_ids.empty?
+       return "(user_id=#{user.id} and (mail_account_id is null))"
+     else
+@@ -151,8 +153,8 @@ def self.get_for(user, mail_account_id, xtype)
+     SqlHelper.validate_token([user_id, mail_account_id, xtype])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
+-    con << "(mail_account_id=#{mail_account_id})"
++    con << "(user_id=#{user_id.to_i})"
++    con << "(mail_account_id=#{mail_account_id.to_i})"
+     con << "(xtype='#{xtype}')"
+ 
+     return MailFolder.where(con.join(' and ')).first
+@@ -178,7 +180,7 @@ def self.get_account_roots_for(user)
+     SqlHelper.validate_token([user_id])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
++    con << "(user_id=#{user_id.to_i})"
+     con << "(xtype='#{MailFolder::XTYPE_ACCOUNT_ROOT}')"
+ 
+     order_by = 'xorder ASC, id ASC'
+diff --git a/app/models/office_map.rb b/app/models/office_map.rb
+index fb3a35b..0ecb357 100644
+--- a/app/models/office_map.rb
++++ b/app/models/office_map.rb
+@@ -37,10 +37,10 @@ def self.get_for_group(group_id, incl_img_content=false)
+       office_map = nil
+     else
+       if incl_img_content
+-        office_map = OfficeMap.where("group_id=#{group_id}").first
++        office_map = OfficeMap.where("group_id=#{group_id.to_i}").first
+       else
+         sql = 'select id, group_id, img_enabled, img_name, img_size, img_content_type, created_at, updated_at from office_maps'
+-        sql << " where group_id=#{group_id}"
++        sql << " where group_id=#{group_id.to_i}"
+         begin
+           office_map = OfficeMap.find_by_sql(sql).first
+         rescue
+diff --git a/app/models/official_title.rb b/app/models/official_title.rb
+index 685011c..275c194 100644
+--- a/app/models/official_title.rb
++++ b/app/models/official_title.rb
+@@ -70,7 +70,7 @@ def self.get_for(group_id, include_parents=false, enabled=nil)
+ 
+       con << '(' + group_con + ')'
+     else
+-      con << "(group_id=#{group_id})"
++      con << "(group_id=#{group_id.to_i})"
+     end
+ 
+     order_by = 'order by xorder ASC, id ASC'
+diff --git a/app/models/paid_holiday.rb b/app/models/paid_holiday.rb
+index 7a2a8ff..bfda8d6 100644
+--- a/app/models/paid_holiday.rb
++++ b/app/models/paid_holiday.rb
+@@ -34,11 +34,11 @@ def self.get_for(user_id, fiscal_year=nil)
+ 
+     begin
+       con = []
+-      con << "(user_id=#{user_id})"
++      con << "(user_id=#{user_id.to_i})"
+       if fiscal_year.nil?
+         return PaidHoliday.where(con).order('year ASC').to_a
+       else
+-        con << "(year=#{fiscal_year})"
++        con << "(year=#{fiscal_year.to_i})"
+         return PaidHoliday.where(con.join(' and ')).first
+       end
+     rescue
+@@ -61,8 +61,8 @@ def self.update_for(user_id, fiscal_year, num)
+ 
+     if num <= 0
+       con = []
+-      con << "(user_id=#{user_id})"
+-      con << "(year=#{fiscal_year})"
++      con << "(user_id=#{user_id.to_i})"
++      con << "(year=#{fiscal_year.to_i})"
+       PaidHoliday.destroy_all(con.join(' and '))
+       return
+     end
+@@ -100,7 +100,7 @@ def self.get_carried_over(user_id, year)
+     return 0 if paidhld_carry_over.nil? or paidhld_carry_over.empty? or paidhld_carry_over == PaidHoliday::CARRY_OVER_NONE
+ 
+     begin
+-      con = "(user_id=#{user_id}) and (year < #{year})"
++      con = "(user_id=#{user_id.to_i}) and (year < #{year.to_i})"
+       paidhlds = PaidHoliday.where(con).order('year ASC').to_a
+     rescue
+     end
+diff --git a/app/models/research.rb b/app/models/research.rb
+index 240d189..f9a525c 100644
+--- a/app/models/research.rb
++++ b/app/models/research.rb
+@@ -358,7 +358,7 @@ def self.get_for(user_id)
+ 
+     SqlHelper.validate_token([user_id])
+ 
+-    return Research.where("user_id=#{user_id}").first
++    return Research.where("user_id=#{user_id.to_i}").first
+   end
+ 
+   #=== self.get_q_codes
+diff --git a/app/models/setting.rb b/app/models/setting.rb
+index 6c99ea8..508f314 100644
+--- a/app/models/setting.rb
++++ b/app/models/setting.rb
+@@ -3,7 +3,7 @@
+ #
+ #Original by::   Sysphonic
+ #Authors::   MORITA Shintaro
+-#Copyright:: Copyright (c) 2007-2011 MORITA Shintaro, Sysphonic. All rights reserved.
++#Copyright:: Copyright (c) 2007-2015 MORITA Shintaro, Sysphonic. All rights reserved.
+ #License::   New BSD License (See LICENSE file)
+ #URL::   {http&#58;//sysphonic.com/}[http://sysphonic.com/]
+ #
+@@ -33,7 +33,7 @@ def self.get_for(user_id, category=nil)
+     SqlHelper.validate_token([user_id, category])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
++    con << "(user_id=#{user_id.to_i})"
+     con << "(category='#{category}')" unless category.nil?
+ 
+     settings = Setting.where(con.join(' and ')).to_a
+@@ -63,7 +63,7 @@ def self.get_value(user_id, category, key)
+     SqlHelper.validate_token([user_id, category, key])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
++    con << "(user_id=#{user_id.to_i})"
+     con << "(category='#{category}')"
+     con << "(xkey='#{key}')"
+ 
+@@ -88,7 +88,7 @@ def self.save_value(user_id, category, key, value)
+     SqlHelper.validate_token([user_id, category, key])
+ 
+     con = []
+-    con << "(user_id=#{user_id})"
++    con << "(user_id=#{user_id.to_i})"
+     con << "(category='#{category}')"
+     con << "(xkey='#{key}')"
+ 
+@@ -127,7 +127,7 @@ def self.get_for_group(group_id, category=nil)
+     SqlHelper.validate_token([group_id, category])
+ 
+     con = []
+-    con << "(group_id=#{group_id})"
++    con << "(group_id=#{group_id.to_i})"
+     con << "(category='#{category}')" unless category.nil?
+ 
+     settings = Setting.where(con.join(' and ')).to_a
+@@ -157,7 +157,7 @@ def self.get_group_value(group_id, category, key)
+     SqlHelper.validate_token([group_id, category, key])
+ 
+     con = []
+-    con << "(group_id=#{group_id})"
++    con << "(group_id=#{group_id.to_i})"
+     con << "(category='#{category}')"
+     con << "(xkey='#{key}')"
+ 
+@@ -182,7 +182,7 @@ def self.save_group_value(group_id, category, key, value)
+     SqlHelper.validate_token([group_id, category, key])
+ 
+     con = []
+-    con << "(group_id=#{group_id})"
++    con << "(group_id=#{group_id.to_i})"
+     con << "(category='#{category}')"
+     con << "(xkey='#{key}')"
+ 
+diff --git a/app/models/team.rb b/app/models/team.rb
+index 56ab9b3..ecf0989 100644
+--- a/app/models/team.rb
++++ b/app/models/team.rb
+@@ -367,7 +367,7 @@ def self.get_team_folder(team_id)
+ 
+     SqlHelper.validate_token([team_id])
+     begin
+-      return Folder.where("(owner_id=#{team_id}) and (xtype='#{Folder::XTYPE_TEAM}')").first
++      return Folder.where("(owner_id=#{team_id.to_i}) and (xtype='#{Folder::XTYPE_TEAM}')").first
+     rescue => evar
+       Log.add_error(nil, evar)
+       return nil
+@@ -411,7 +411,7 @@ def remove_application(user_ids)
+ 
+     user_con_a = []
+     user_ids.each do |user_id|
+-      user_con_a << "(user_id=#{user_id})"
++      user_con_a << "(user_id=#{user_id.to_i})"
+     end
+ 
+     con << '(' + user_con_a.join(' or ') + ')'
+diff --git a/app/models/timecard.rb b/app/models/timecard.rb
+index 5c439be..6be1ac5 100644
+--- a/app/models/timecard.rb
++++ b/app/models/timecard.rb
+@@ -429,7 +429,7 @@ def self.get_for(user_id, date_s)
+ 
+     SqlHelper.validate_token([user_id, date_s])
+     begin
+-      con = "(user_id=#{user_id}) and (date='#{date_s}')"
++      con = "(user_id=#{user_id.to_i}) and (date='#{date_s}')"
+       return Timecard.where(con).first
+     rescue
+     end
+@@ -452,7 +452,7 @@ def self.find_term(user_id, start_date, end_date)
+     start_s = start_date.strftime(Schedule::SYS_DATE_FORM)
+     end_s = end_date.strftime(Schedule::SYS_DATE_FORM)
+ 
+-    con = "(user_id=#{user_id}) and (date >= '#{start_s}') and (date <= '#{end_s}')"
++    con = "(user_id=#{user_id.to_i}) and (date >= '#{start_s}') and (date <= '#{end_s}')"
+     ary = Timecard.where(con).order('date ASC').to_a
+     timecards_h = Hash.new
+     unless ary.nil?
+diff --git a/app/models/toy.rb b/app/models/toy.rb
+index dcc5c54..aff57c1 100644
+--- a/app/models/toy.rb
++++ b/app/models/toy.rb
+@@ -196,7 +196,7 @@ def self.on_desktop?(user, xtype, target_id)
+ 
+     SqlHelper.validate_token([xtype, target_id])
+ 
+-    con = "(user_id=#{user.id}) and (xtype='#{xtype}') and (target_id=#{target_id})"
++    con = "(user_id=#{user.id}) and (xtype='#{xtype}') and (target_id=#{target_id.to_i})"
+ 
+     begin
+       toy = Toy.where(con).first
+diff --git a/app/models/user.rb b/app/models/user.rb
+index f620221..a7b6797 100644
+--- a/app/models/user.rb
++++ b/app/models/user.rb
+@@ -780,7 +780,7 @@ def get_my_folder
+   def self.get_my_folder(user_id)
+ 
+    SqlHelper.validate_token([user_id])
+-   return Folder.where("(owner_id=#{user_id}) and (xtype='#{Folder::XTYPE_USER}')").first
++   return Folder.where("(owner_id=#{user_id.to_i}) and (xtype='#{Folder::XTYPE_USER}')").first
+   end
+ 
+   #=== create_my_folder
+@@ -1166,7 +1166,7 @@ def self.update_xorder(title, order)
+     end
+ 
+     SqlHelper.validate_token([order])
+-    User.update_all("xorder=#{order}", con)
++    User.update_all("xorder=#{order.to_i}", con)
+   end
+ 
+   #=== rename_title
+diff --git a/app/views/folders/show_tree.html.erb b/app/views/folders/show_tree.html.erb
+index 5c46ee5..d3472c5 100644
+--- a/app/views/folders/show_tree.html.erb
++++ b/app/views/folders/show_tree.html.erb
+@@ -45,7 +45,7 @@ var modified_teams = 0;
+             <input type="button" value="<%= t('btn.new') %>" onclick="onCreateClicked(getPos(this));" style="width:80px;" />
+             <input type="button" value="<%= t('btn.rename') %>" onclick="onRenameFolderClicked(getPos(this));" style="width:80px;" />
+             <input type="button" value="<%= t('btn.delete') %>" onclick="doDelete();" style="width:80px;" />
+-            <input type="button" value="<%= t('btn.move') %>" onclick="doMove();" style="width:80px;" />
++            <input type="button" value="<%= t('btn.move') %>" onclick="onMoveFolderClicked();" style="width:80px;" />
+           </td>
+         <% else %>
+           <td style="padding:5px 20px; text-align:left;">
+@@ -492,7 +492,7 @@ function _doDelete(folder_id)
+             );
+ }
+ 
+-function doMove()
++function onMoveFolderClicked()
+ {
+   if (document.form_folder_tree.selKeeper.value == "") {
+     msg("<%= t('folder.select') %>");
+@@ -514,13 +514,26 @@ function doMove()
+ 
+   ThetisBox.openTree("folderTree:"+folder_id, true);
+ 
++  var addParams = new Array();
++  addParams.push("id="+folder_id);
++  addParams.push("authenticity_token=<%= form_authenticity_token %>");
++
+   var thetisBox = new ThetisBox;
+-  thetisBox.progress = true;
+-  thetisBox.setAdditionalParams(new Array("id="+folder_id, "authenticity_token=<%= form_authenticity_token %>"));
+-  thetisBox.show("CENTER", "", "TREE", "<%= url_for(:controller => 'folders', :action => 'move') %>", "<%= t('folder.select_dest')%>", "");
++  thetisBox.setAdditionalParams(addParams);
++  thetisBox.setFormTag("<form action=\"\" method=\"post\" onsubmit=\"doMoveFolder(this); return false;\">");
++  thetisBox.show("CENTER", "", "TREE", "", "<%= t('folder.select_dest')%>", "");
+   thetisBox.setTree("<%= url_for(:controller => 'folders', :action => 'ajax_get_tree') %>?id="+folder_id, "0");
+ }
+ 
++function doMoveFolder(frmTree)
++{
++  prog("TOP-RIGHT");
++
++  frmTree.method = "post";
++  frmTree.action = "<%= url_for(:controller => 'folders', :action => 'move') %>";
++  frmTree.submit();
++}
++
+ function selectFolder(folder_id)
+ {
+   var select_opt = _z("select_opt");
+@@ -640,7 +653,7 @@ function doApplyAuthUsers(folder_id)
+   addParams.push("id=" + folder_id);
+   addParams.push(Form.serialize(document.form_folder_auth));
+ 
+-  doUpdateView("get", "<%= url_for(:controller => 'folders', :action => 'set_auth_users') %>", addParams);
++  doUpdateView("post", "<%= url_for(:controller => 'folders', :action => 'set_auth_users') %>", addParams);
+ }
+ 
+ function selectTabGroups(folder_id)
+@@ -669,7 +682,7 @@ function doApplyAuthGroups(folder_id)
+   addParams.push("id=" + folder_id);
+   addParams.push(Form.serialize(document.form_folder_auth));
+ 
+-  doUpdateView("get", "<%= url_for(:controller => 'folders', :action => 'set_auth_groups') %>", addParams);
++  doUpdateView("post", "<%= url_for(:controller => 'folders', :action => 'set_auth_groups') %>", addParams);
+ }
+ 
+ function selectTabTeams(folder_id)
+@@ -698,7 +711,7 @@ function doApplyAuthTeams(folder_id)
+   addParams.push("id=" + folder_id);
+   addParams.push(Form.serialize(document.form_folder_auth));
+ 
+-  doUpdateView("get", "<%= url_for(:controller => 'folders', :action => 'set_auth_teams') %>", addParams);
++  doUpdateView("post", "<%= url_for(:controller => 'folders', :action => 'set_auth_teams') %>", addParams);
+ }
+ 
+ function showGroupTreeToSelect(group_id)
+diff --git a/app/views/frames/_footer.html.erb b/app/views/frames/_footer.html.erb
+index cc4e814..98ab727 100644
+--- a/app/views/frames/_footer.html.erb
++++ b/app/views/frames/_footer.html.erb
+@@ -1,7 +1,7 @@
+ 
+ <table style="width:100%; height:8px; padding:0px; border-spacing:0px;" background="<%= THETIS_RELATIVE_URL_ROOT %>/images/woody.png">
+   <tr>
+-    <td style="text-align:center; color:white; font-size:8px; line-height:1.0;">
++    <td style="text-align:center; color:white; font-size:8px; line-height:1.0; padding:0px;">
+       <a href="javascript:this.onclick()" style="color:white; text-decoration:none; cursor:pointer;" onclick="openWindow('<%= url_for(:controller => 'frames', :action => 'about') %>',600, 360, 'about'); return false;">&copy;2007-2015 Thetis Developers</a>
+     </td>
+   </tr>
+diff --git a/app/views/groups/show_tree.html.erb b/app/views/groups/show_tree.html.erb
+index f14c4b4..4d3bff5 100644
+--- a/app/views/groups/show_tree.html.erb
++++ b/app/views/groups/show_tree.html.erb
+@@ -11,7 +11,7 @@
+             <input type="button" value="<%= t('btn.new') %>" onclick="onCreateGroupClicked(getPos(this));" style="width:80px;" />
+             <input type="button" value="<%= t('btn.rename') %>" onclick="onRenameGroupClicked(getPos(this));" style="width:80px;" />
+             <input type="button" value="<%= t('btn.delete') %>" onclick="doDelete();" style="width:80px;" />
+-            <input type="button" value="<%= t('btn.move') %>" onclick="doMove();" style="width:80px;"/>
++            <input type="button" value="<%= t('btn.move') %>" onclick="onMoveGroupClicked();" style="width:80px;"/>
+           <% else %>
+             <%= t('group.only_admin_can_edit_tree') %>
+           <% end %>
+@@ -279,7 +279,7 @@ function _doDelete(group_id)
+         );
+ }
+ 
+-function doMove()
++function onMoveGroupClicked()
+ {
+   if (document.form_group_tree.selKeeper.value == "") {
+     msg("<%= t('group.select') %>");
+@@ -294,13 +294,26 @@ function doMove()
+ 
+   ThetisBox.openTree("groupTree:"+group_id, true);
+ 
++  var addParams = new Array();
++  addParams.push("id="+group_id);
++  addParams.push("authenticity_token=<%= form_authenticity_token %>");
++
+   var thetisBox = new ThetisBox;
+-  thetisBox.progress = true;
+-  thetisBox.setAdditionalParams(new Array("id="+group_id, "authenticity_token=<%= form_authenticity_token %>"));
+-  thetisBox.show("CENTER", "", "TREE", "<%= url_for(:controller => 'groups', :action => 'move') %>", "<%= t('group.select_dest')%>", "");
++  thetisBox.setAdditionalParams(addParams);
++  thetisBox.setFormTag("<form action=\"\" method=\"post\" onsubmit=\"doMoveGroup(this); return false;\">");
++  thetisBox.show("CENTER", "", "TREE", "", "<%= t('group.select_dest')%>", "");
+   thetisBox.setTree("<%= url_for(:controller => 'groups', :action => 'ajax_get_tree') %>?id="+group_id, "0");
+ }
+ 
++function doMoveGroup(frmTree)
++{
++  prog("TOP-RIGHT");
++
++  frmTree.method = "post";
++  frmTree.action = "<%= url_for(:controller => 'groups', :action => 'move') %>";
++  frmTree.submit();
++}
++
+ function doGetUsers(group_id)
+ {
+   var addParams = new Array();
+diff --git a/app/views/mail_filters/list.html.erb b/app/views/mail_filters/list.html.erb
+index e43f125..07d06bf 100644
+--- a/app/views/mail_filters/list.html.erb
++++ b/app/views/mail_filters/list.html.erb
+@@ -228,12 +228,13 @@ doExecNowFilters = function(mail_account_id, folder_id)
+   var addParams = new Array();
+   addParams.push("mail_account_id="+mail_account_id);
+   addParams.push("mail_folder_id="+folder_id);
++  addParams.push("authenticity_token=<%= form_authenticity_token %>");
+ 
+   var thetisBoxProgress = prog("TOP-RIGHT");
+   new Ajax.Request(
+               "<%= url_for(:controller => 'mail_filters', :action => 'do_execute') %>",
+               {
+-                method:"get",
++                method:"post",
+                 asynchronous:true,
+                 evalScripts:true,
+                 parameters:addParams.join("&"),
+diff --git a/app/views/mail_folders/show_tree.html.erb b/app/views/mail_folders/show_tree.html.erb
+index e138eae..5c65ac8 100644
+--- a/app/views/mail_folders/show_tree.html.erb
++++ b/app/views/mail_folders/show_tree.html.erb
+@@ -88,7 +88,7 @@
+                         <a class="context_menu_item" href="javascript:this.onclick()" onclick="onRenameFolderClicked(); return false;">
+                           <%= t('btn.rename') %>
+                         </a>
+-                        <a class="context_menu_item" href="javascript:this.onclick()" onclick="doMove(); return false;">
++                        <a class="context_menu_item" href="javascript:this.onclick()" onclick="onMoveFolderClicked(); return false;">
+                           <%= t('btn.move') %>
+                         </a>
+                         <a class="context_menu_item" href="javascript:this.onclick()" onclick="doDelete(); return false;">
+@@ -650,7 +650,7 @@ function _doDelete(folder_id)
+     );
+ }
+ 
+-function doMove()
++function onMoveFolderClicked()
+ {
+   if (document.form_folder_tree.selKeeper.value == "") {
+     msg("<%= t('folder.select') %>");
+@@ -671,19 +671,29 @@ function doMove()
+ 
+   ThetisBox.openTree("mailTree:"+folder_id, true);
+ 
+-  var thetisBox = new ThetisBox;
+-  thetisBox.progress = true;
+   var addParams = new Array();
+ <% unless params[:mail_account_xtype].nil? %>
+   addParams.push("mail_account_xtype=<%= params[:mail_account_xtype] %>");
+ <% end %>
+   addParams.push("id="+folder_id);
+   addParams.push("authenticity_token=<%= form_authenticity_token %>");
++
++  var thetisBox = new ThetisBox;
+   thetisBox.setAdditionalParams(addParams);
+-  thetisBox.show("CENTER", "", "TREE", "<%= url_for(:controller => 'mail_folders', :action => 'move') %>", "<%= t('folder.select_dest') %>", "");
++  thetisBox.setFormTag("<form action=\"\" method=\"post\" onsubmit=\"doMoveFolder(this); return false;\">");
++  thetisBox.show("CENTER", "", "TREE", "", "<%= t('folder.select_dest') %>", "");
+   thetisBox.setTree("<%= url_for(:controller => 'mail_folders', :action => 'ajax_get_tree') %>?id="+folder_id, "0");
+ }
+ 
++function doMoveFolder(frmTree)
++{
++  prog("TOP-RIGHT");
++
++  frmTree.method = "post";
++  frmTree.action = "<%= url_for(:controller => 'mail_folders', :action => 'move') %>";
++  frmTree.submit();
++}
++
+ function doSelectTree(folder_id)
+ {
+   var menuId = "a_mailTree:" + folder_id;
+@@ -1008,7 +1018,7 @@ function _doEmpty(folder_id)
+   }
+ 
+   invalidateAccountSummary();
+-  doUpdateViewMails("get", "<%= url_for(:controller => 'mail_folders', :action => 'empty') %>", addParams, folder_id);
++  doUpdateViewMails("post", "<%= url_for(:controller => 'mail_folders', :action => 'empty') %>", addParams, folder_id);
+ }
+ 
+ 
+diff --git a/config/locales/de.yml b/config/locales/de.yml
+index 1e8e7ed..0009865 100644
+--- a/config/locales/de.yml
++++ b/config/locales/de.yml
+@@ -431,7 +431,7 @@ de:
+     select_dest: "Bitte wählen Sie das Ziel zu verschieben aus."
+     delete_info1: "] wird gelöscht."
+     delete_info2: "(Falls Gruppenordner ist nicht leer, wird das mit R/W (Lesen u. Schreiben) Befugnisse der Mitgliedern weiterbleiben. Wenn keine Mitgliedern in Gruppe geben und keine andere Befugnisse zu Gruppenordner angegeben werden, wird das Veröffentlicht.)"
+-    select_to_show: "(Bitte wählen Sie Gruppe zu zeigen aus.)"
++    select_to_show: "Bitte wählen Sie Gruppe zu zeigen aus."
+     select_to_change_to: "Bitte wählen Sie Gruppe zu ersetzen durch aus."
+     select_to_add: "Bitte wählen Sie Gruppe hinzuzufügen."
+     other_group: "Andere Gruppe"
+diff --git a/config/locales/en.yml b/config/locales/en.yml
+index a7c7dde..4651232 100644
+--- a/config/locales/en.yml
++++ b/config/locales/en.yml
+@@ -431,7 +431,7 @@ en:
+     select_dest: "Please select destination group."
+     delete_info1: "] will be deleted."
+     delete_info2: "(If Group Folder is not empty, it will remain with members' R/W authorities. When no members in the Group and no other authorities specified to Group Folder, it will be PUBLIC.)"
+-    select_to_show: "(Please select a group to show.)"
++    select_to_show: "Please select a group to show."
+     select_to_change_to: "Please select group to change to."
+     select_to_add: "Please select group to add."
+     other_group: "Other Group"
+diff --git a/config/locales/ja.yml b/config/locales/ja.yml
+index 74c7860..e9ef5b6 100644
+--- a/config/locales/ja.yml
++++ b/config/locales/ja.yml
+@@ -435,7 +435,7 @@ ja:
+     select_dest: "移動先を選択してください。"
+     delete_info1: "」を削除します。"
+     delete_info2: "（グループフォルダが空でなければメンバーの読み書き権限付きで残されます。グループにメンバーがおらず他に権限が設定されていない時は、グループフォルダは全ユーザーからアクセス可能になります。）"
+-    select_to_show: "（表示するグループを選択してください）"
++    select_to_show: "表示するグループを選択してください。"
+     select_to_change_to: "変更先のグループを選択してください。"
+     select_to_add: "追加するグループを選択してください。"
+     other_group: "他のグループ"

@@ -1,0 +1,34 @@
+From 6e51f4546368d959a1f9f173d16e5f20c55deb56 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E1=B4=9C=C9=B4=E1=B4=8B=C9=B4=E1=B4=A1=E1=B4=8F=C9=B4?=
+ <joe@sourcegraph.com>
+Date: Tue, 20 Jul 2021 21:42:52 +0800
+Subject: [PATCH] security: check site admin before returning site usage stats
+ (#23026)
+
+---
+ cmd/frontend/graphqlbackend/site_usage_stats.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/cmd/frontend/graphqlbackend/site_usage_stats.go b/cmd/frontend/graphqlbackend/site_usage_stats.go
+index 5f049dacb2bc..02b6b74e9fb2 100644
+--- a/cmd/frontend/graphqlbackend/site_usage_stats.go
++++ b/cmd/frontend/graphqlbackend/site_usage_stats.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"time"
+ 
++	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
+ 	"github.com/sourcegraph/sourcegraph/cmd/frontend/internal/usagestatsdeprecated"
+ 	"github.com/sourcegraph/sourcegraph/internal/types"
+ )
+@@ -13,6 +14,10 @@ func (r *siteResolver) UsageStatistics(ctx context.Context, args *struct {
+ 	Weeks  *int32
+ 	Months *int32
+ }) (*siteUsageStatisticsResolver, error) {
++	if err := backend.CheckCurrentUserIsSiteAdmin(ctx, r.db); err != nil {
++		return nil, err
++	}
++
+ 	opt := &usagestatsdeprecated.SiteUsageStatisticsOptions{}
+ 	if args.Days != nil {
+ 		d := int(*args.Days)

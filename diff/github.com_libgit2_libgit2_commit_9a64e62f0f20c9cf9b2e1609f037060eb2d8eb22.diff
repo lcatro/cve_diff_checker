@@ -1,0 +1,29 @@
+From 9a64e62f0f20c9cf9b2e1609f037060eb2d8eb22 Mon Sep 17 00:00:00 2001
+From: Etienne Samson <samson.etienne@gmail.com>
+Date: Wed, 21 Dec 2016 21:24:33 +0100
+Subject: [PATCH] http: check certificate validity before clobbering the error
+ variable
+
+---
+ src/transports/http.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/transports/http.c b/src/transports/http.c
+index ad28c5889c7..155fd7b30b5 100644
+--- a/src/transports/http.c
++++ b/src/transports/http.c
+@@ -624,13 +624,12 @@ static int http_connect(http_subtransport *t)
+ 	if ((!error || error == GIT_ECERTIFICATE) && t->owner->certificate_check_cb != NULL &&
+ 	    git_stream_is_encrypted(t->io)) {
+ 		git_cert *cert;
+-		int is_valid;
++		int is_valid = (error == GIT_OK);
+ 
+ 		if ((error = git_stream_certificate(&cert, t->io)) < 0)
+ 			return error;
+ 
+ 		giterr_clear();
+-		is_valid = error != GIT_ECERTIFICATE;
+ 		error = t->owner->certificate_check_cb(cert, is_valid, t->connection_data.host, t->owner->message_cb_payload);
+ 
+ 		if (error < 0) {

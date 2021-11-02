@@ -1,0 +1,140 @@
+From eed355b798ec77ed8b67555087fc5866b522c5fc Mon Sep 17 00:00:00 2001
+From: Marc Alexander <admin@m-a-styles.de>
+Date: Fri, 10 Apr 2015 18:02:58 +0200
+Subject: [PATCH 1/4] [ticket/security-180] Check if redirect URL contains
+ board URL
+
+SECURITY-180
+---
+ phpBB/includes/functions.php | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/phpBB/includes/functions.php b/phpBB/includes/functions.php
+index f0657b901609..f79a0a9e52db 100644
+--- a/phpBB/includes/functions.php
++++ b/phpBB/includes/functions.php
+@@ -2579,6 +2579,12 @@ function redirect($url, $return = false, $disable_cd_check = false)
+ 		}
+ 	}
+ 
++	// Make sure we don't redirect to external URLs
++	if (!$disable_cd_check && strpos($url, generate_board_url(true)) !== 0)
++	{
++		trigger_error('Tried to redirect to potentially insecure url.', E_USER_ERROR);
++	}
++
+ 	// Make sure no linebreaks are there... to prevent http response splitting for PHP < 4.4.2
+ 	if (strpos(urldecode($url), "\n") !== false || strpos(urldecode($url), "\r") !== false || strpos($url, ';') !== false)
+ 	{
+
+From bca1b96b2e9235bbb4a3e7a104dd79e7f3761679 Mon Sep 17 00:00:00 2001
+From: Marc Alexander <admin@m-a-styles.de>
+Date: Sat, 11 Apr 2015 16:41:20 +0200
+Subject: [PATCH 2/4] [ticket/security-180] Make sure that redirect goes to
+ full URL plus slash
+
+SECURITY-180
+---
+ phpBB/includes/functions.php     | 2 +-
+ tests/security/redirect_test.php | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/phpBB/includes/functions.php b/phpBB/includes/functions.php
+index f79a0a9e52db..a6a98954de77 100644
+--- a/phpBB/includes/functions.php
++++ b/phpBB/includes/functions.php
+@@ -2580,7 +2580,7 @@ function redirect($url, $return = false, $disable_cd_check = false)
+ 	}
+ 
+ 	// Make sure we don't redirect to external URLs
+-	if (!$disable_cd_check && strpos($url, generate_board_url(true)) !== 0)
++	if (!$disable_cd_check && strpos($url, generate_board_url(true) . '/') !== 0)
+ 	{
+ 		trigger_error('Tried to redirect to potentially insecure url.', E_USER_ERROR);
+ 	}
+diff --git a/tests/security/redirect_test.php b/tests/security/redirect_test.php
+index 872a331dc774..46ec5c8edb13 100644
+--- a/tests/security/redirect_test.php
++++ b/tests/security/redirect_test.php
+@@ -24,6 +24,9 @@ static public function provider()
+ 			array("http://localhost/phpBB/memberlist.php\n\rConnection: close", 'Tried to redirect to potentially insecure url.', false),
+ 			array('javascript:test', false, 'http://localhost/phpBB/../javascript:test'),
+ 			array('http://localhost/phpBB/index.php;url=', 'Tried to redirect to potentially insecure url.', false),
++			array('https://foobar.com\@http://localhost/phpBB', false, 'http://localhost/phpBB'),
++			array('https://foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
++			array('http://localhost.foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
+ 		);
+ 	}
+ 
+
+From ee658bfe7bd284573d199c3c2a76007c5509695d Mon Sep 17 00:00:00 2001
+From: Joas Schilling <nickvergessen@gmx.de>
+Date: Sat, 11 Apr 2015 17:08:28 +0200
+Subject: [PATCH 3/4] [ticket/security-180] Always fail when redirecting to an
+ insecure URL
+
+SECURITY-180
+---
+ phpBB/includes/functions.php     | 2 +-
+ tests/security/redirect_test.php | 6 +++---
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/phpBB/includes/functions.php b/phpBB/includes/functions.php
+index a6a98954de77..f2bc63cf2336 100644
+--- a/phpBB/includes/functions.php
++++ b/phpBB/includes/functions.php
+@@ -2492,7 +2492,7 @@ function redirect($url, $return = false, $disable_cd_check = false)
+ 		// Attention: only able to redirect within the same domain if $disable_cd_check is false (yourdomain.com -> www.yourdomain.com will not work)
+ 		if (!$disable_cd_check && $url_parts['host'] !== $user->host)
+ 		{
+-			$url = generate_board_url();
++			trigger_error('Tried to redirect to potentially insecure url.', E_USER_ERROR);
+ 		}
+ 	}
+ 	else if ($url[0] == '/')
+diff --git a/tests/security/redirect_test.php b/tests/security/redirect_test.php
+index 46ec5c8edb13..9161bcbfe8d3 100644
+--- a/tests/security/redirect_test.php
++++ b/tests/security/redirect_test.php
+@@ -18,13 +18,13 @@ static public function provider()
+ 	{
+ 		// array(Input -> redirect(), expected triggered error (else false), expected returned result url (else false))
+ 		return array(
+-			array('data://x', false, 'http://localhost/phpBB'),
++			array('data://x', 'Tried to redirect to potentially insecure url.', false),
+ 			array('bad://localhost/phpBB/index.php', 'Tried to redirect to potentially insecure url.', false),
+-			array('http://www.otherdomain.com/somescript.php', false, 'http://localhost/phpBB'),
++			array('http://www.otherdomain.com/somescript.php', 'Tried to redirect to potentially insecure url.', false),
+ 			array("http://localhost/phpBB/memberlist.php\n\rConnection: close", 'Tried to redirect to potentially insecure url.', false),
+ 			array('javascript:test', false, 'http://localhost/phpBB/../javascript:test'),
+ 			array('http://localhost/phpBB/index.php;url=', 'Tried to redirect to potentially insecure url.', false),
+-			array('https://foobar.com\@http://localhost/phpBB', false, 'http://localhost/phpBB'),
++			array('https://foobar.com\@http://localhost/phpBB', 'Tried to redirect to potentially insecure url.', false),
+ 			array('https://foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
+ 			array('http://localhost.foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
+ 		);
+
+From 18fc621d73757ef793fba08f7da4e048b293a059 Mon Sep 17 00:00:00 2001
+From: Marc Alexander <admin@m-a-styles.de>
+Date: Thu, 23 Apr 2015 15:27:30 +0200
+Subject: [PATCH 4/4] [ticket/security-180] Add tests for redirecting to main
+ URL
+
+SECURITY-180
+---
+ tests/security/redirect_test.php | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tests/security/redirect_test.php b/tests/security/redirect_test.php
+index 9161bcbfe8d3..9a24ba5d65c2 100644
+--- a/tests/security/redirect_test.php
++++ b/tests/security/redirect_test.php
+@@ -27,6 +27,8 @@ static public function provider()
+ 			array('https://foobar.com\@http://localhost/phpBB', 'Tried to redirect to potentially insecure url.', false),
+ 			array('https://foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
+ 			array('http://localhost.foobar.com\@localhost/troll/http://localhost/', 'Tried to redirect to potentially insecure url.', false),
++			array('http://localhost/phpBB', false, 'http://localhost/phpBB'),
++			array('http://localhost/phpBB/', false, 'http://localhost/phpBB/'),
+ 		);
+ 	}
+ 

@@ -1,0 +1,37 @@
+From 5799416ed454aa4ec9afafc895b4e31760ea1abe Mon Sep 17 00:00:00 2001
+From: substack <substack@bits.coop>
+Date: Wed, 20 Oct 2021 20:34:21 -1000
+Subject: [PATCH] fix for security issue with windows drive letter regex
+
+---
+ index.js      | 2 +-
+ test/quote.js | 6 ++++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/index.js b/index.js
+index fac79be..0c0df8d 100644
+--- a/index.js
++++ b/index.js
+@@ -10,7 +10,7 @@ exports.quote = function (xs) {
+             return '"' + s.replace(/(["\\$`!])/g, '\\$1') + '"';
+         }
+         else {
+-            return String(s).replace(/([A-z]:)?([#!"$&'()*,:;<=>?@\[\\\]^`{|}])/g, '$1\\$2');
++            return String(s).replace(/([A-Za-z]:)?([#!"$&'()*,:;<=>?@\[\\\]^`{|}])/g, '$1\\$2');
+         }
+     }).join(' ');
+ };
+diff --git a/test/quote.js b/test/quote.js
+index 7c31f01..214773d 100644
+--- a/test/quote.js
++++ b/test/quote.js
+@@ -40,3 +40,9 @@ test('quote windows paths', { skip: 'breaking change, disabled until 2.x' }, fun
+ 
+     t.end()
+ })
++
++test("chars for windows paths don't break out", function (t) {
++    var x = '`:\\a\\b'
++    t.equal(quote([x]), '\\`\\:\\\\a\\\\b')
++    t.end()
++})

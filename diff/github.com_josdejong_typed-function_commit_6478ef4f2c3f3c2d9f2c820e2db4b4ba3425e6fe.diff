@@ -1,0 +1,77 @@
+From 6478ef4f2c3f3c2d9f2c820e2db4b4ba3425e6fe Mon Sep 17 00:00:00 2001
+From: jos <wjosdejong@gmail.com>
+Date: Sat, 18 Nov 2017 20:13:55 +0100
+Subject: [PATCH] Fixed a security issue allowing to execute aritrary
+ JavaScript code via a specially prepared function name of a typed function
+
+---
+ HISTORY.md            |  6 ++++++
+ test/security.test.js | 17 +++++++++++++++++
+ typed-function.js     | 11 +++++++----
+ 3 files changed, 30 insertions(+), 4 deletions(-)
+ create mode 100644 test/security.test.js
+
+diff --git a/HISTORY.md b/HISTORY.md
+index c7331ec..1dbb4ad 100644
+--- a/HISTORY.md
++++ b/HISTORY.md
+@@ -1,6 +1,12 @@
+ # History
+ 
+ 
++## not yet released, version 0.10.6
++
++- Fixed a security issue allowing to execute aritrary JavaScript code via a 
++  specially prepared function name of a typed function. Thanks Masato Kinugawa.
++
++
+ ## 2016-11-18, version 0.10.5
+ 
+ - Fixed the use of multi-layered use of `any` type. See #8.
+diff --git a/test/security.test.js b/test/security.test.js
+new file mode 100644
+index 0000000..e2b2c8e
+--- /dev/null
++++ b/test/security.test.js
+@@ -0,0 +1,17 @@
++var assert = require('assert');
++var typed = require('../typed-function');
++
++describe('security', function () {
++
++  it ('should not allow bad code in the function name', function () {
++    // simple example:
++    // var fn = typed("(){}+console.log('hacked...');function a", {     
++    //   "": function () {} 
++    // });
++
++    // example resulting in throwing an error
++    var fn = typed("(){}+(function(){throw new Error('Hacked... should not have executed this function!!!')})();function a", { 
++      "": function () {} 
++    });
++  })
++})
+diff --git a/typed-function.js b/typed-function.js
+index 9b84eea..0993c5b 100644
+--- a/typed-function.js
++++ b/typed-function.js
+@@ -1096,12 +1096,15 @@
+       //console.log(util.inspect(node, { depth: null }));
+ 
+       // generate code for the typed function
++      // safeName is a conservative replacement of characters 
++      // to prevend being able to inject JS code at the place of the function name 
++      // the name is useful for stack trackes therefore we want have it there
+       var code = [];
+-      var _name = name || '';
+-      var _args = getArgs(maxParams(_signatures));
+-      code.push('function ' + _name + '(' + _args.join(', ') + ') {');
++      var safeName = (name || '').replace(/[^a-zA-Z0-9_$]/g, '_')
++      var args = getArgs(maxParams(_signatures));
++      code.push('function ' + safeName + '(' + args.join(', ') + ') {');
+       code.push('  "use strict";');
+-      code.push('  var name = \'' + _name + '\';');
++      code.push('  var name = ' + JSON.stringify(name || '') + ';');
+       code.push(node.toCode(refs, '  ', false));
+       code.push('}');
+ 

@@ -1,0 +1,38 @@
+From 350bbe0597d37ad67abe5fef8fba984707b4e9ad Mon Sep 17 00:00:00 2001
+From: dmiller <dmiller@e0a8ed71-7df4-0310-8962-fdc924857419>
+Date: Thu, 29 Nov 2018 17:42:09 +0000
+Subject: [PATCH] Avoid a crash (double-free) when SSH connection fails
+
+---
+ nse_libssh2.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/nse_libssh2.cc b/nse_libssh2.cc
+index 6a18c0c85b..983f83dbdb 100644
+--- a/nse_libssh2.cc
++++ b/nse_libssh2.cc
+@@ -12,7 +12,6 @@ extern "C" {
+ }
+ #include "nse_lua.h"
+ 
+-#include "nse_debug.h"
+ #include "nse_nsock.h"
+ #include "nse_utility.h"
+ 
+@@ -295,6 +294,7 @@ static int do_session_handshake (lua_State *L, int status, lua_KContext ctx) {
+ 
+     if (rc) {
+         libssh2_session_free(sshu->session);
++        sshu->session = NULL;
+         return luaL_error(L, "Unable to complete libssh2 handshake.");
+     }
+ 
+@@ -478,7 +478,7 @@ static int userauth_list (lua_State *L, int status, lua_KContext ctx) {
+ }
+ 
+ /*
+-* Returns list of supported authenication methods
++* Returns list of supported authentication methods
+ */
+ static int l_userauth_list (lua_State *L) {
+     return userauth_list(L, 0, 0);

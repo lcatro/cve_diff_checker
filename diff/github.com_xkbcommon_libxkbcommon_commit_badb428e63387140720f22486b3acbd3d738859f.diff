@@ -1,0 +1,43 @@
+From badb428e63387140720f22486b3acbd3d738859f Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 23 Jul 2018 11:48:35 +1000
+Subject: [PATCH] keycodes: don't try to copy zero key aliases
+
+Move the aliases copy to within the (num_key_aliases > 0) block.
+
+Passing info->aliases into this fuction with invalid aliases will
+cause log messages but num_key_aliases stays on 0. The key_aliases array
+is never allocated and remains NULL. We then loop through the aliases, causing
+a null-pointer dereference.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ src/xkbcomp/keycodes.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/xkbcomp/keycodes.c b/src/xkbcomp/keycodes.c
+index 7f5955ef..491da510 100644
+--- a/src/xkbcomp/keycodes.c
++++ b/src/xkbcomp/keycodes.c
+@@ -596,14 +596,14 @@ CopyKeyAliasesToKeymap(struct xkb_keymap *keymap, KeyNamesInfo *info)
+         key_aliases = calloc(num_key_aliases, sizeof(*key_aliases));
+         if (!key_aliases)
+             return false;
+-    }
+ 
+-    i = 0;
+-    darray_foreach(alias, info->aliases) {
+-        if (alias->real != XKB_ATOM_NONE) {
+-            key_aliases[i].alias = alias->alias;
+-            key_aliases[i].real = alias->real;
+-            i++;
++        i = 0;
++        darray_foreach(alias, info->aliases) {
++            if (alias->real != XKB_ATOM_NONE) {
++                key_aliases[i].alias = alias->alias;
++                key_aliases[i].real = alias->real;
++                i++;
++            }
+         }
+     }
+ 

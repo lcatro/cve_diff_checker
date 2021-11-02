@@ -1,0 +1,41 @@
+From 1b27090ce31543bf39f186c20ea47c8250fca2f0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Janko=20Marohni=C4=87?= <janko.marohnic@gmail.com>
+Date: Sun, 4 Oct 2020 18:19:58 +0200
+Subject: [PATCH] Securely compare signature in derivation_endpoint
+
+Using regular string comparison when comparing signature has different
+performance depending on how much of the string matched, which can make
+derivation_endpoint susceptible to timing attacks. We avoid that by
+using `Rack::Utils.secure_compare` instead.
+
+Big thanks to @esparta for reporting this.
+---
+ CHANGELOG.md                              | 2 ++
+ lib/shrine/plugins/derivation_endpoint.rb | 2 +-
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2692b7ca..1efd854a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,7 @@
+ ## master
+ 
++* `derivation_endpoint` – Avoid possibility of timing attacks when comparing signatures (@esparta)
++
+ * `derivatives` – Avoid downloading the attached file when calling default no-op processor (@janko)
+ 
+ * `derivatives` – Add `:download` processor setting for skipping downloading source file (@jrochkind, @janko)
+diff --git a/lib/shrine/plugins/derivation_endpoint.rb b/lib/shrine/plugins/derivation_endpoint.rb
+index 13f4a4aa..0770cda2 100644
+--- a/lib/shrine/plugins/derivation_endpoint.rb
++++ b/lib/shrine/plugins/derivation_endpoint.rb
+@@ -739,7 +739,7 @@ def verify_url(url)
+     def verify_signature(string, signature)
+       if signature.nil?
+         fail InvalidSignature, "missing \"signature\" param"
+-      elsif signature != generate_signature(string)
++      elsif !Rack::Utils.secure_compare(signature, generate_signature(string))
+         fail InvalidSignature, "provided signature does not match the calculated signature"
+       end
+     end

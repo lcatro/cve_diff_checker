@@ -1,0 +1,94 @@
+From c461c1bd1a3e130b181aa9c854da3030cd4b5156 Mon Sep 17 00:00:00 2001
+From: Nate Mueller <nmueller@fb.com>
+Date: Mon, 25 Feb 2019 08:36:25 -0800
+Subject: [PATCH] Properly error when asked to skip an unknown field type
+
+Summary:
+We weren't returning an error when asked to skip over a field with and
+unknown type.  In this particular test case the code attempts to skip
+over a map with a large number of fields of unknown type and the ~3B
+noop calls take almost 30s.  A misbehaving client could DoS a server
+by sending short messages that take a long time to parse.  There may
+have been other failure modes as well.
+
+The test covers the binary protocol because that is where the issue
+was found.  However, the issue is common to all protocols.
+
+This fixes CVE-2019-3552.
+
+Reviewed By: spalamarchuk
+
+Differential Revision: D14088980
+
+fbshipit-source-id: 8a9d63260db717347217a8d2ac883c4ce331d964
+---
+ thrift/lib/go/thrift/binary_protocol_test.go | 22 ++++++++++++++++++++
+ thrift/lib/go/thrift/protocol.go             |  6 +++---
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/thrift/lib/go/thrift/binary_protocol_test.go b/thrift/lib/go/thrift/binary_protocol_test.go
+index d4dfea7f7a0..806094ea490 100644
+--- a/thrift/lib/go/thrift/binary_protocol_test.go
++++ b/thrift/lib/go/thrift/binary_protocol_test.go
+@@ -21,9 +21,31 @@
+ package thrift
+ 
+ import (
++	"strings"
+ 	"testing"
++	"time"
+ )
+ 
+ func TestReadWriteBinaryProtocol(t *testing.T) {
+ 	ReadWriteProtocolTest(t, NewBinaryProtocolFactoryDefault())
+ }
++
++func TestSkipUnknownTypeBinaryProtocol(t *testing.T) {
++	var m MyTestStruct
++	d := NewDeserializer()
++	f := NewBinaryProtocolFactoryDefault()
++	d.Protocol = f.GetProtocol(d.Transport)
++	// skip over a map with invalid key/value type and 1.7B entries
++	data := []byte("\n\x10\rO\t6\x03\n\n\n\x10\r\n\tslice\x00")
++	start := time.Now()
++	err := d.Read(&m, data)
++	if err == nil {
++		t.Fatalf("Parsed invalid message correctly")
++	} else if !strings.Contains(err.Error(), "unknown type") {
++		t.Fatalf("Failed for reason besides unknown type")
++	}
++
++	if time.Now().Sub(start).Seconds() > 5 {
++		t.Fatalf("It should not take seconds to parse a small message")
++	}
++}
+diff --git a/thrift/lib/go/thrift/protocol.go b/thrift/lib/go/thrift/protocol.go
+index b641767519f..3a1e2547e15 100644
+--- a/thrift/lib/go/thrift/protocol.go
++++ b/thrift/lib/go/thrift/protocol.go
+@@ -22,6 +22,7 @@ package thrift
+ 
+ import (
+ 	"errors"
++	"fmt"
+ )
+ 
+ type ProtocolID int16
+@@ -127,8 +128,6 @@ func Skip(self Protocol, fieldType Type, maxDepth int) (err error) {
+ 	}
+ 
+ 	switch fieldType {
+-	case STOP:
+-		return
+ 	case BOOL:
+ 		_, err = self.ReadBool()
+ 		return
+@@ -206,6 +205,7 @@ func Skip(self Protocol, fieldType Type, maxDepth int) (err error) {
+ 			}
+ 		}
+ 		return self.ReadListEnd()
++	default:
++		return fmt.Errorf("unable to skip over unknown type id %d", fieldType)
+ 	}
+-	return nil
+ }

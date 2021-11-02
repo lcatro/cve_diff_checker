@@ -1,0 +1,55 @@
+From f57b660f49f830006766a8d4abc3b4af6e178063 Mon Sep 17 00:00:00 2001
+From: Marcus Huewe <suse-tux@gmx.de>
+Date: Thu, 5 Jul 2018 12:48:41 +0200
+Subject: [PATCH] Ignore a project link in
+ BsRequestAction.check_action_permission!
+
+This makes sure that we check the permissions of the correct package. For
+instance, assume that the project "Staging" is a link project where the
+link points to the "Base" project. Also, assume that there exists a
+"Base/foo" package, but there exists no explicit "Staging/foo" package.
+Moreover, assume we check the permissions for the following "submit"
+action:
+
+<action type="submit">
+  <source project="Staging" package="foo"/>
+  <target project="an_arbitrary_project" package="foo"/>
+</action>
+
+In this case, the old code checks if request acceptor can modify the
+"Base/foo" package (since it follows the project link). This is wrong
+because the "Staging/foo" package would be turned into a branch during
+accept.
+The new code checks the correct package because it does not follow the
+project link and requires that the source package exists in the source
+project. Requiring the existence of the source package potentially
+breaks artificial requests (for instance, a request where the "submit"
+action from above is preceded by a "submit" action that creates a
+"Staging/foo" package).
+
+Note: so far I was unable to exploit the old code - so this is just
+to avoid a potential future headache.
+
+Fixes: commit 990ef7ccc ("[api][webui] Check access to source package")
+---
+ src/api/app/models/bs_request_action_submit.rb | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/api/app/models/bs_request_action_submit.rb b/src/api/app/models/bs_request_action_submit.rb
+index 7e4f39db1a8..a08110ef40a 100644
+--- a/src/api/app/models/bs_request_action_submit.rb
++++ b/src/api/app/models/bs_request_action_submit.rb
+@@ -115,8 +115,11 @@ def check_action_permission!(skip_source = nil)
+     target_package = target_project.packages.find_by_name(self.target_package)
+     initialize_devel_package = target_project.find_attribute('OBS', 'InitializeDevelPackage')
+     return if target_package || !initialize_devel_package
+-    source_package = Package.get_by_project_and_name(source_project, self.source_package)
+-    return if !source_package || User.current.can_modify?(source_package)
++    opts = { follow_project_links: false }
++    source_package = Package.get_by_project_and_name!(source_project,
++                                                      self.source_package,
++                                                      opts)
++    return if User.current.can_modify?(source_package)
+     msg = 'No permission to initialize the source package as a devel package'
+     raise PostRequestNoPermission, msg
+   end

@@ -1,0 +1,27 @@
+From c876192aa6ce1f67e22b26a4d175b8478615f42d Mon Sep 17 00:00:00 2001
+From: Benjamin Woodruff <benjaminwoodruff@ufl.edu>
+Date: Fri, 14 Jun 2013 23:24:59 -0400
+Subject: [PATCH] Fix string escaping for sqlite
+
+SQLite was defaulting to the MySQL backslash-escaped style, but it uses
+postgres-style escaping. This is a SQL-injection vulnerability, and
+shouldn't be taken lightly (although SQLite is mostly for testing).
+---
+ lib/sql-string.js | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/lib/sql-string.js b/lib/sql-string.js
+index 96be2c7e6a..160dfa428d 100644
+--- a/lib/sql-string.js
++++ b/lib/sql-string.js
+@@ -37,8 +37,9 @@ SqlString.escape = function(val, stringifyObjects, timeZone, dialect) {
+     }
+   }
+ 
+-  if (dialect == "postgres") {
++  if (dialect === "postgres" || dialect === "sqlite") {
+     // http://www.postgresql.org/docs/8.2/static/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS
++    // http://stackoverflow.com/q/603572/130598
+     val = val.replace(/'/g, "''");
+   } else {
+     val = val.replace(/[\0\n\r\b\t\\\'\"\x1a]/g, function(s) {

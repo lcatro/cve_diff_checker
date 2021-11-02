@@ -1,0 +1,40 @@
+From 252e22c9adb9b59c36e59e00d8b43013facec4d6 Mon Sep 17 00:00:00 2001
+From: Kishor PK <kpbhat@codeaurora.org>
+Date: Wed, 30 Aug 2017 17:26:43 +0530
+Subject: platform: msm_shared: Prevent heap OOB in update_gpt
+
+Prevent the heap out of bounds access on max_partition_count
+and partition_entry_size in update_gpt.
+
+Change-Id: I3e56d23510ab63d33ef4a52e0f12ad809c997fa9
+---
+ platform/msm_shared/ab_partition_parser.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/platform/msm_shared/ab_partition_parser.c b/platform/msm_shared/ab_partition_parser.c
+index c224e0f..10169fa 100644
+--- a/platform/msm_shared/ab_partition_parser.c
++++ b/platform/msm_shared/ab_partition_parser.c
+@@ -642,6 +642,19 @@ update_gpt(uint64_t gpt_start_addr,
+ 		    GET_LWORD_FROM_BYTE(&gpt_hdr_ptr[PARTITION_COUNT_OFFSET]);
+ 	partition_entry_size =
+ 		    GET_LWORD_FROM_BYTE(&gpt_hdr_ptr[PENTRY_SIZE_OFFSET]);
++
++	/* Check for partition entry size */
++	if (partition_entry_size != PARTITION_ENTRY_SIZE) {
++		dprintf(CRITICAL,"Invalid parition entry size\n");
++		goto out;
++	}
++
++	/* Check for maximum partition size */
++	if ((max_partition_count) > (MIN_PARTITION_ARRAY_SIZE /(partition_entry_size))) {
++		dprintf(CRITICAL, "Invalid maximum partition count\n");
++		goto out;
++	}
++
+ 	crc_val  = crc32(~0L, gpt_entries_ptr, ((max_partition_count) *
+ 				(partition_entry_size))) ^ (~0L);
+ 	PUT_LONG(&gpt_hdr_ptr[PARTITION_CRC_OFFSET], crc_val);
+-- 
+cgit v1.1
+

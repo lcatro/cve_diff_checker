@@ -1,0 +1,1666 @@
+From f6e9d0d9955e85bdd7540b251cd50d598dacc5e6 Mon Sep 17 00:00:00 2001
+From: cristy <urban-warrior@git.imagemagick.org>
+Date: Sun, 14 Dec 2014 23:36:27 +0000
+Subject: [PATCH]
+
+---
+ ChangeLog           |  2 ++
+ coders/aai.c        |  6 ++++++
+ coders/art.c        |  6 ++++++
+ coders/avs.c        |  6 ++++++
+ coders/bgr.c        |  6 ++++++
+ coders/bmp.c        |  6 ++++++
+ coders/cin.c        |  8 +++++++-
+ coders/clipboard.c  | 10 ++++++++--
+ coders/cmyk.c       |  6 ++++++
+ coders/cut.c        |  8 +++++++-
+ coders/dcm.c        |  6 ++++++
+ coders/dds.c        |  6 ++++++
+ coders/dib.c        |  8 +++++++-
+ coders/djvu.c       |  9 ++++++++-
+ coders/dps.c        |  6 ++++++
+ coders/dpx.c        |  6 ++++++
+ coders/emf.c        |  6 ++++++
+ coders/exr.c        |  6 ++++++
+ coders/fax.c        |  6 ++++++
+ coders/fits.c       |  6 ++++++
+ coders/fpx.c        |  6 ++++++
+ coders/gif.c        |  6 ++++++
+ coders/gray.c       |  6 ++++++
+ coders/hald.c       |  9 +++++++--
+ coders/hdr.c        |  6 ++++++
+ coders/hrz.c        |  6 ++++++
+ coders/icon.c       |  6 ++++++
+ coders/ipl.c        |  8 +++++++-
+ coders/jbig.c       |  6 ++++++
+ coders/jp2.c        |  6 ++++++
+ coders/jpeg.c       |  6 ++++++
+ coders/label.c      |  6 ++++++
+ coders/mac.c        |  6 ++++++
+ coders/map.c        |  6 ++++++
+ coders/mat.c        |  6 ++++++
+ coders/miff.c       |  6 ++++++
+ coders/mono.c       |  6 ++++++
+ coders/mpc.c        |  6 ++++++
+ coders/mtv.c        |  6 ++++++
+ coders/mvg.c        |  6 ++++++
+ coders/null.c       |  9 +++++++++
+ coders/otb.c        |  6 ++++++
+ coders/palm.c       |  6 ++++++
+ coders/pango.c      | 10 ++++++++--
+ coders/pcd.c        |  6 ++++++
+ coders/pcx.c        |  6 ++++++
+ coders/pdb.c        |  6 ++++++
+ coders/pict.c       |  6 ++++++
+ coders/pix.c        |  6 ++++++
+ coders/psd.c        |  6 ++++++
+ coders/raw.c        |  6 ++++++
+ coders/rgb.c        |  6 ++++++
+ coders/rgf.c        |  8 ++++++--
+ coders/rla.c        |  6 ++++++
+ coders/rle.c        |  6 ++++++
+ coders/scr.c        |  6 ++++++
+ coders/screenshot.c | 10 +++++++++-
+ coders/sct.c        |  6 ++++++
+ coders/sgi.c        |  6 ++++++
+ coders/sixel.c      |  7 ++++++-
+ coders/stegano.c    |  6 ++++++
+ coders/sun.c        |  6 ++++++
+ coders/svg.c        |  6 ++++++
+ coders/tga.c        |  6 ++++++
+ coders/tiff.c       |  6 ++++++
+ coders/tile.c       |  9 +++++++++
+ coders/tim.c        |  6 ++++++
+ coders/ttf.c        |  6 ++++++
+ coders/txt.c        | 12 ++++++++++++
+ coders/uyvy.c       |  6 ++++++
+ coders/vicar.c      |  6 ++++++
+ coders/viff.c       |  6 ++++++
+ coders/vips.c       |  6 ++++++
+ coders/wbmp.c       |  6 ++++++
+ coders/webp.c       |  6 ++++++
+ coders/wmf.c        |  9 +++++++++
+ coders/wpg.c        |  6 ++++++
+ coders/xbm.c        |  6 ++++++
+ coders/xc.c         |  6 ++++++
+ coders/xcf.c        |  6 ++++++
+ coders/xpm.c        |  6 ++++++
+ coders/xwd.c        |  6 ++++++
+ coders/ycbcr.c      | 12 ++++++++++++
+ coders/yuv.c        | 12 ++++++++++++
+ 84 files changed, 541 insertions(+), 15 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index b2a9df6f59..ca393265a9 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -22,6 +22,8 @@
+     Mateusz Jurczyk of the Google Security Team).
+   * Additional PNM sanity checks (reference
+     http://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=26682).
++  * The SetImageBias() biad value is no longer ignored (reference
++    http://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=25732).
+ 
+ 2014-11-16  6.9.0-0 Cristy  <quetzlzacatenango@image...>
+   * New version 6.9.0-0, SVN revision 17067.
+diff --git a/coders/aai.c b/coders/aai.c
+index e2a540c228..9af5e1356a 100644
+--- a/coders/aai.c
++++ b/coders/aai.c
+@@ -158,6 +158,12 @@ static Image *ReadAAIImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     pixels=(unsigned char *) AcquireQuantumMemory(image->columns,
+       4*sizeof(*pixels));
+     if (pixels == (unsigned char *) NULL)
+diff --git a/coders/art.c b/coders/art.c
+index 62c7a751b1..162af1a399 100644
+--- a/coders/art.c
++++ b/coders/art.c
+@@ -155,6 +155,12 @@ static Image *ReadARTImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert bi-level image to pixel packets.
+   */
+diff --git a/coders/avs.c b/coders/avs.c
+index ef45b24407..d7a1bbc285 100644
+--- a/coders/avs.c
++++ b/coders/avs.c
+@@ -160,6 +160,12 @@ static Image *ReadAVSImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     pixels=(unsigned char *) AcquireQuantumMemory(image->columns,
+       4*sizeof(*pixels));
+     if (pixels == (unsigned char *) NULL)
+diff --git a/coders/bgr.c b/coders/bgr.c
+index 625a1fe01a..3183bbba97 100644
+--- a/coders/bgr.c
++++ b/coders/bgr.c
+@@ -197,6 +197,12 @@ static Image *ReadBGRImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     switch (image_info->interlace)
+     {
+       case NoInterlace:
+diff --git a/coders/bmp.c b/coders/bmp.c
+index 8f7700bfb2..a608b969ea 100644
+--- a/coders/bmp.c
++++ b/coders/bmp.c
+@@ -928,6 +928,12 @@ static Image *ReadBMPImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Read image data.
+     */
+diff --git a/coders/cin.c b/coders/cin.c
+index cfdc55ecbd..bad3dd89ec 100644
+--- a/coders/cin.c
++++ b/coders/cin.c
+@@ -721,11 +721,17 @@ static Image *ReadCINImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   image->depth=cin.image.channel[0].bits_per_pixel;
+   image->columns=cin.image.channel[0].pixels_per_line;
+   image->rows=cin.image.channel[0].lines_per_image;
+-  if (image_info->ping)
++  if (image_info->ping != MagickFalse)
+     {
+       (void) CloseBlob(image);
+       return(image);
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert CIN raster image to pixel packets.
+   */
+diff --git a/coders/clipboard.c b/coders/clipboard.c
+index 32df24db35..edd34abf5f 100644
+--- a/coders/clipboard.c
++++ b/coders/clipboard.c
+@@ -136,7 +136,7 @@ static Image *ReadCLIPBOARDImage(const ImageInfo *image_info,
+     bitmapH=(HBITMAP) GetClipboardData(CF_BITMAP);
+     hPal=(HPALETTE) GetClipboardData(CF_PALETTE);
+     CloseClipboard();
+-    if ( bitmapH == NULL )
++    if (bitmapH == NULL)
+       ThrowReaderException(CoderError,"NoBitmapOnClipboard");
+     {
+       BITMAPINFO
+@@ -163,8 +163,14 @@ static Image *ReadCLIPBOARDImage(const ImageInfo *image_info,
+       GetObject(bitmapH,sizeof(BITMAP),(LPSTR) &bitmap);
+       if ((image->columns == 0) || (image->rows == 0))
+         {
+-          image->rows=bitmap.bmHeight;
+           image->columns=bitmap.bmWidth;
++          image->rows=bitmap.bmHeight;
++        }
++      status=SetImageExtent(image,image->columns,image->rows);
++      if (status == MagickFalse)
++        {
++          InheritException(exception,&image->exception);
++          return(DestroyImageList(image));
+         }
+       /*
+         Initialize the bitmap header info.
+diff --git a/coders/cmyk.c b/coders/cmyk.c
+index 79d9052c25..68b9e7930f 100644
+--- a/coders/cmyk.c
++++ b/coders/cmyk.c
+@@ -197,6 +197,12 @@ static Image *ReadCMYKImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     SetImageColorspace(image,CMYKColorspace);
+     switch (image_info->interlace)
+     {
+diff --git a/coders/cut.c b/coders/cut.c
+index 2314a6b302..f429827ce4 100644
+--- a/coders/cut.c
++++ b/coders/cut.c
+@@ -371,7 +371,13 @@ static Image *ReadCUTImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   image->depth=8;
+   image->colors=(size_t) (GetQuantumRange(1UL*i)+1);
+ 
+-  if (image_info->ping) goto Finish;
++  if (image_info->ping != MagickFalse) goto Finish;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+ 
+   /* ----- Do something with palette ----- */
+   if ((clone_info=CloneImageInfo(image_info)) == NULL) goto NoPalette;
+diff --git a/coders/dcm.c b/coders/dcm.c
+index f041ba15af..a0a0c7555e 100644
+--- a/coders/dcm.c
++++ b/coders/dcm.c
+@@ -3689,6 +3689,12 @@ static Image *ReadDCMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     image->columns=(size_t) width;
+     image->rows=(size_t) height;
+     image->depth=depth;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        break;
++      }
+     image->colorspace=RGBColorspace;
+     if ((image->colormap == (PixelPacket *) NULL) && (samples_per_pixel == 1))
+       {
+diff --git a/coders/dds.c b/coders/dds.c
+index 6a98799e47..ad21182702 100644
+--- a/coders/dds.c
++++ b/coders/dds.c
+@@ -1834,6 +1834,12 @@ static Image *ReadDDSImage(const ImageInfo *image_info,ExceptionInfo *exception)
+         (void) CloseBlob(image);
+         return(GetFirstImageInList(image));
+       }
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+ 
+     if ((decoder)(image, &dds_info, exception) != MagickTrue)
+       {
+diff --git a/coders/dib.c b/coders/dib.c
+index 507b19224a..88cb56ce33 100644
+--- a/coders/dib.c
++++ b/coders/dib.c
+@@ -520,7 +520,7 @@ static Image *ReadDIBImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   */
+   (void) ResetMagickMemory(&dib_info,0,sizeof(dib_info));
+   dib_info.size=ReadBlobLSBLong(image);
+-  if (dib_info.size!=40)
++  if (dib_info.size != 40)
+     ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   /*
+     Microsoft Windows 3.X DIB image file.
+@@ -573,6 +573,12 @@ static Image *ReadDIBImage(const ImageInfo *image_info,ExceptionInfo *exception)
+         if ((geometry.height != 0) && (geometry.height < image->rows))
+           image->rows=geometry.height;
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (image->storage_class == PseudoClass)
+     {
+       size_t
+diff --git a/coders/djvu.c b/coders/djvu.c
+index 80317d05ac..2f830be1e4 100644
+--- a/coders/djvu.c
++++ b/coders/djvu.c
+@@ -418,7 +418,7 @@ get_page_image(LoadContext *lc, ddjvu_page_t *page, int x, int y, int w, int h,
+                                 if (SyncAuthenticPixels(image,&image->exception) == MagickFalse)
+                                         break;
+                         }
+-                if (!image->ping)
++                if (image->ping == MagickFalse)
+                   SyncImage(image);
+         } else {
+ #if DEBUG
+@@ -577,6 +577,7 @@ static Image *ReadOneDJVUImage(LoadContext* lc,const int pagenum,
+   Image *image;
+   int logging;
+   int tag;
++  MagickBooleanType status;
+ 
+         /* so, we know that the page is there! Get its dimension, and  */
+ 
+@@ -667,6 +668,12 @@ static Image *ReadOneDJVUImage(LoadContext* lc,const int pagenum,
+                 image->matte = MagickTrue;
+                 /* is this useful? */
+         }
++        status=SetImageExtent(image,image->columns,image->rows);
++        if (status == MagickFalse)
++          {
++            InheritException(exception,&image->exception);
++            return(DestroyImageList(image));
++          }
+ #if DEBUG
+         printf("now filling %.20g x %.20g\n",(double) image->columns,(double)
+           image->rows);
+diff --git a/coders/dps.c b/coders/dps.c
+index c03d4ffbb1..68c841acee 100644
+--- a/coders/dps.c
++++ b/coders/dps.c
+@@ -328,6 +328,12 @@ static Image *ReadDPSImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   switch (image->storage_class)
+   {
+     case DirectClass:
+diff --git a/coders/dpx.c b/coders/dpx.c
+index d28edcb1ac..05a4c3f09e 100644
+--- a/coders/dpx.c
++++ b/coders/dpx.c
+@@ -1126,6 +1126,12 @@ static Image *ReadDPXImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   for (n=0; n < (ssize_t) dpx.image.number_elements; n++)
+   {
+     /*
+diff --git a/coders/emf.c b/coders/emf.c
+index fd2824a950..4c4217332c 100644
+--- a/coders/emf.c
++++ b/coders/emf.c
+@@ -507,6 +507,12 @@ static Image *ReadEMFImage(const ImageInfo *image_info,
+       y=0;
+       (void) GetGeometry(image_info->size,&x,&y,&image->columns,&image->rows);
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (image_info->page != (char *) NULL)
+     {
+       char
+diff --git a/coders/exr.c b/coders/exr.c
+index 82f4983f83..ade365835b 100644
+--- a/coders/exr.c
++++ b/coders/exr.c
+@@ -212,6 +212,12 @@ static Image *ReadEXRImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   scanline=(ImfRgba *) AcquireQuantumMemory(image->columns,sizeof(*scanline));
+   if (scanline == (ImfRgba *) NULL)
+     {
+diff --git a/coders/fax.c b/coders/fax.c
+index 4cf9609e3e..40039a382c 100644
+--- a/coders/fax.c
++++ b/coders/fax.c
+@@ -178,6 +178,12 @@ static Image *ReadFAXImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   status=HuffmanDecodeImage(image);
+   if (status == MagickFalse)
+     ThrowReaderException(CorruptImageError,"UnableToReadImageData");
+diff --git a/coders/fits.c b/coders/fits.c
+index 2b979ac879..1bb6e306ea 100644
+--- a/coders/fits.c
++++ b/coders/fits.c
+@@ -423,6 +423,12 @@ static Image *ReadFITSImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Initialize image structure.
+     */
+diff --git a/coders/fpx.c b/coders/fpx.c
+index ccf6950e5d..6e102f2f01 100644
+--- a/coders/fpx.c
++++ b/coders/fpx.c
+@@ -352,6 +352,12 @@ static Image *ReadFPXImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       FPX_ClearSystem();
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Allocate memory for the image and pixel buffer.
+   */
+diff --git a/coders/gif.c b/coders/gif.c
+index 243b89b735..6a2763b3f8 100644
+--- a/coders/gif.c
++++ b/coders/gif.c
+@@ -1350,6 +1350,12 @@ static Image *ReadGIFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Decode image.
+     */
+diff --git a/coders/gray.c b/coders/gray.c
+index d5d5808660..b57a428c7d 100644
+--- a/coders/gray.c
++++ b/coders/gray.c
+@@ -187,6 +187,12 @@ static Image *ReadGRAYImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     SetImageColorspace(image,GRAYColorspace);
+     if (scene == 0)
+       {
+diff --git a/coders/hald.c b/coders/hald.c
+index 1197a68f3b..43b612939c 100644
+--- a/coders/hald.c
++++ b/coders/hald.c
+@@ -125,6 +125,12 @@ static Image *ReadHALDImage(const ImageInfo *image_info,
+   cube_size=level*level;
+   image->columns=(size_t) (level*cube_size);
+   image->rows=(size_t) (level*cube_size);
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   for (y=0; y < (ssize_t) image->rows; y+=(ssize_t) level)
+   {
+     ssize_t
+@@ -137,8 +143,7 @@ static Image *ReadHALDImage(const ImageInfo *image_info,
+ 
+     if (status == MagickFalse)
+       continue;
+-    q=QueueAuthenticPixels(image,0,y,image->columns,(size_t) level,
+-      exception);
++    q=QueueAuthenticPixels(image,0,y,image->columns,(size_t) level,exception);
+     if (q == (PixelPacket *) NULL)
+       {
+         status=MagickFalse;
+diff --git a/coders/hdr.c b/coders/hdr.c
+index 8c83a2eb60..ca27801ddb 100644
+--- a/coders/hdr.c
++++ b/coders/hdr.c
+@@ -382,6 +382,12 @@ static Image *ReadHDRImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Read RGBE (red+green+blue+exponent) pixels.
+   */
+diff --git a/coders/hrz.c b/coders/hrz.c
+index ba2b0bf28f..19d8516fe2 100644
+--- a/coders/hrz.c
++++ b/coders/hrz.c
+@@ -142,6 +142,12 @@ static Image *ReadHRZImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   image->columns=256;
+   image->rows=240;
+   image->depth=8;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   pixels=(unsigned char *) AcquireQuantumMemory(image->columns,3*
+     sizeof(*pixels));
+   if (pixels == (unsigned char *) NULL)
+diff --git a/coders/icon.c b/coders/icon.c
+index 456ec62008..d9572c7e3f 100644
+--- a/coders/icon.c
++++ b/coders/icon.c
+@@ -462,6 +462,12 @@ static Image *ReadICONImage(const ImageInfo *image_info,
+             (image_info->number_scenes != 0))
+           if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+             break;
++        status=SetImageExtent(image,image->columns,image->rows);
++        if (status == MagickFalse)
++          {
++            InheritException(exception,&image->exception);
++            return(DestroyImageList(image));
++          }
+         bytes_per_line=(((image->columns*icon_info.bits_per_pixel)+31) &
+           ~31) >> 3;
+         (void) bytes_per_line;
+diff --git a/coders/ipl.c b/coders/ipl.c
+index d6aa176f4d..70161f77b2 100644
+--- a/coders/ipl.c
++++ b/coders/ipl.c
+@@ -315,9 +315,15 @@ static Image *ReadIPLImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   {
+     SetHeaderFromIPL(image, &ipl_info);
+ 
+-  if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
++    if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+ /*
+    printf("Length: %.20g, Memory size: %.20g\n", (double) length,(double)
+      image->depth);
+diff --git a/coders/jbig.c b/coders/jbig.c
+index 5aea6cc11d..ea7465feb3 100644
+--- a/coders/jbig.c
++++ b/coders/jbig.c
+@@ -219,6 +219,12 @@ static Image *ReadJBIGImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert X bitmap image to pixel packets.
+   */
+diff --git a/coders/jp2.c b/coders/jp2.c
+index 8fa5bee7df..d9314f3e05 100644
+--- a/coders/jp2.c
++++ b/coders/jp2.c
+@@ -398,6 +398,12 @@ static Image *ReadJP2Image(const ImageInfo *image_info,ExceptionInfo *exception)
+   image->columns=(size_t) jp2_image->comps[0].w;
+   image->rows=(size_t) jp2_image->comps[0].h;
+   image->depth=jp2_image->comps[0].prec;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   image->compression=JPEG2000Compression;
+   if (jp2_image->numcomps <= 2)
+     {
+diff --git a/coders/jpeg.c b/coders/jpeg.c
+index 1f0869fa57..8f1b9f5a06 100644
+--- a/coders/jpeg.c
++++ b/coders/jpeg.c
+@@ -1263,6 +1263,12 @@ static Image *ReadJPEGImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   memory_info=AcquireVirtualMemory((size_t) image->columns,
+     jpeg_info.output_components*sizeof(*jpeg_pixels));
+   if (memory_info == (MemoryInfo *) NULL)
+diff --git a/coders/label.c b/coders/label.c
+index c720cb4230..2849276d71 100644
+--- a/coders/label.c
++++ b/coders/label.c
+@@ -213,6 +213,12 @@ static Image *ReadLABELImage(const ImageInfo *image_info,
+       draw_info->stroke_width+0.5);
+   if (image->rows == 0)
+     image->rows=(size_t) (draw_info->pointsize+draw_info->stroke_width+0.5);
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (draw_info->gravity == UndefinedGravity)
+     {
+       (void) FormatLocaleString(geometry,MaxTextExtent,"%+g%+g",
+diff --git a/coders/mac.c b/coders/mac.c
+index 0d3ec18e58..19cd69f0a9 100644
+--- a/coders/mac.c
++++ b/coders/mac.c
+@@ -156,6 +156,12 @@ static Image *ReadMACImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert MAC raster image to pixel packets.
+   */
+diff --git a/coders/map.c b/coders/map.c
+index 11727beced..bef4a9d28e 100644
+--- a/coders/map.c
++++ b/coders/map.c
+@@ -206,6 +206,12 @@ static Image *ReadMAPImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Read image pixels.
+   */
+diff --git a/coders/mat.c b/coders/mat.c
+index a1355ed55b..234eefb2e8 100644
+--- a/coders/mat.c
++++ b/coders/mat.c
+@@ -874,6 +874,12 @@ RestoreMSCWarning
+       image->rows = temp;
+       goto done_reading; /* !!!!!! BAD  !!!! */
+     }
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+ 
+   /* ----- Load raster data ----- */
+     BImgBuff = (unsigned char *) AcquireQuantumMemory((size_t) (ldblk),sizeof(unsigned char));    /* Ldblk was set in the check phase */
+diff --git a/coders/miff.c b/coders/miff.c
+index e515e1b6c4..5ec430472c 100644
+--- a/coders/miff.c
++++ b/coders/miff.c
+@@ -1246,6 +1246,12 @@ static Image *ReadMIFFImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Allocate image pixels.
+     */
+diff --git a/coders/mono.c b/coders/mono.c
+index 110800063d..d9fd11a5b9 100644
+--- a/coders/mono.c
++++ b/coders/mono.c
+@@ -154,6 +154,12 @@ static Image *ReadMONOImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert bi-level image to pixel packets.
+   */
+diff --git a/coders/mpc.c b/coders/mpc.c
+index c45eb65abf..7e9eaab441 100644
+--- a/coders/mpc.c
++++ b/coders/mpc.c
+@@ -929,6 +929,12 @@ static Image *ReadMPCImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Attach persistent pixel cache.
+     */
+diff --git a/coders/mtv.c b/coders/mtv.c
+index b795cc746f..de3efc8fd7 100644
+--- a/coders/mtv.c
++++ b/coders/mtv.c
+@@ -158,6 +158,12 @@ static Image *ReadMTVImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Convert MTV raster image to pixel packets.
+     */
+diff --git a/coders/mvg.c b/coders/mvg.c
+index cbc160aa17..6635797565 100644
+--- a/coders/mvg.c
++++ b/coders/mvg.c
+@@ -190,6 +190,12 @@ static Image *ReadMVGImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     DefaultResolution;
+   image->columns=(size_t) (draw_info->affine.sx*image->columns);
+   image->rows=(size_t) (draw_info->affine.sy*image->rows);
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (SetImageBackgroundColor(image) == MagickFalse)
+     {
+       InheritException(exception,&image->exception);
+diff --git a/coders/null.c b/coders/null.c
+index 6c4919a78b..a0f1086991 100644
+--- a/coders/null.c
++++ b/coders/null.c
+@@ -99,6 +99,9 @@ static Image *ReadNULLImage(const ImageInfo *image_info,
+   Image
+     *image;
+ 
++  MagickBooleanType
++    status;
++
+   MagickPixelPacket
+     background;
+ 
+@@ -129,6 +132,12 @@ static Image *ReadNULLImage(const ImageInfo *image_info,
+     image->columns=1;
+   if (image->rows == 0)
+     image->rows=1;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   image->matte=MagickTrue;
+   GetMagickPixelPacket(image,&background);
+   background.opacity=(MagickRealType) TransparentOpacity;
+diff --git a/coders/otb.c b/coders/otb.c
+index fdcbf38785..5b20164fdd 100644
+--- a/coders/otb.c
++++ b/coders/otb.c
+@@ -168,6 +168,12 @@ static Image *ReadOTBImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert bi-level image to pixel packets.
+   */
+diff --git a/coders/palm.c b/coders/palm.c
+index 864c706327..0d4c4db7c7 100644
+--- a/coders/palm.c
++++ b/coders/palm.c
+@@ -329,6 +329,12 @@ static Image *ReadPALMImage(const ImageInfo *image_info,
+       ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+     if ((image->columns == 0) || (image->rows == 0))
+       ThrowReaderException(CorruptImageError,"NegativeOrZeroImageSize");
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     bytes_per_row=ReadBlobMSBShort(image);
+     flags=ReadBlobMSBShort(image);
+     bits_per_pixel=(size_t) ReadBlobByte(image);
+diff --git a/coders/pango.c b/coders/pango.c
+index d67c037453..3a0779f1f5 100644
+--- a/coders/pango.c
++++ b/coders/pango.c
+@@ -375,11 +375,17 @@ static Image *ReadPANGOImage(const ImageInfo *image_info,
+         (image->y_resolution == 0.0 ? 90.0 : image->y_resolution)+45.0)/90.0+
+         0.5));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Render markup.
+   */
+-  stride=(size_t) cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32,
+-    (int) image->columns);
++  stride=(size_t) cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32,(int)
++    image->columns);
+   pixel_info=AcquireVirtualMemory(image->rows,stride*sizeof(*pixels));
+   if (pixel_info == (MemoryInfo *) NULL)
+     {
+diff --git a/coders/pcd.c b/coders/pcd.c
+index 7367205ad6..c8ed3f1bb2 100644
+--- a/coders/pcd.c
++++ b/coders/pcd.c
+@@ -594,6 +594,12 @@ static Image *ReadPCDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     image->columns<<=1;
+     image->rows<<=1;
+   }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Allocate luma and chroma memory.
+   */
+diff --git a/coders/pcx.c b/coders/pcx.c
+index b30861a269..d2f2c56409 100644
+--- a/coders/pcx.c
++++ b/coders/pcx.c
+@@ -395,6 +395,12 @@ static Image *ReadPCXImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Read image data.
+     */
+diff --git a/coders/pdb.c b/coders/pdb.c
+index 4aadc0f5c7..a65bc9a042 100644
+--- a/coders/pdb.c
++++ b/coders/pdb.c
+@@ -402,6 +402,12 @@ static Image *ReadPDBImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   packets=(bits_per_pixel*image->columns+7)/8;
+   pixels=(unsigned char *) AcquireQuantumMemory(packets+256UL,image->rows*
+     sizeof(*pixels));
+diff --git a/coders/pict.c b/coders/pict.c
+index 2e0d70c368..cad922f93b 100644
+--- a/coders/pict.c
++++ b/coders/pict.c
+@@ -922,6 +922,12 @@ static Image *ReadPICTImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     if ((version == 1) || ((TellBlob(image) % 2) != 0))
+       code=ReadBlobByte(image);
+     if (version == 2)
+diff --git a/coders/pix.c b/coders/pix.c
+index 15d00ada1f..217ccdfc56 100644
+--- a/coders/pix.c
++++ b/coders/pix.c
+@@ -161,6 +161,12 @@ static Image *ReadPIXImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Convert PIX raster image to pixel packets.
+     */
+diff --git a/coders/psd.c b/coders/psd.c
+index b0b9b91e36..945e5f81dc 100644
+--- a/coders/psd.c
++++ b/coders/psd.c
+@@ -1653,6 +1653,12 @@ static Image *ReadPSDImage(const ImageInfo *image_info,
+   image->depth=psd_info.depth;
+   image->columns=psd_info.columns;
+   image->rows=psd_info.rows;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (SetImageBackgroundColor(image) == MagickFalse)
+     {
+       InheritException(exception,&image->exception);
+diff --git a/coders/raw.c b/coders/raw.c
+index 00b6d32afc..8de167a2c7 100644
+--- a/coders/raw.c
++++ b/coders/raw.c
+@@ -180,6 +180,12 @@ static Image *ReadRAWImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     if (scene == 0)
+       {
+         length=GetQuantumExtent(canvas_image,quantum_info,quantum_type);
+diff --git a/coders/rgb.c b/coders/rgb.c
+index 463161cd5f..cb2376cc72 100644
+--- a/coders/rgb.c
++++ b/coders/rgb.c
+@@ -201,6 +201,12 @@ static Image *ReadRGBImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     switch (image_info->interlace)
+     {
+       case NoInterlace:
+diff --git a/coders/rgf.c b/coders/rgf.c
+index ca1c85453e..b3ec2495d8 100644
+--- a/coders/rgf.c
++++ b/coders/rgf.c
+@@ -172,8 +172,12 @@ static Image *ReadRGFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
+-
+-
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Read hex image data.
+   */
+diff --git a/coders/rla.c b/coders/rla.c
+index 89f8440dbe..7145d66dda 100644
+--- a/coders/rla.c
++++ b/coders/rla.c
+@@ -261,6 +261,12 @@ static Image *ReadRLAImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   scanlines=(ssize_t *) AcquireQuantumMemory(image->rows,sizeof(*scanlines));
+   if (scanlines == (ssize_t *) NULL)
+     ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
+diff --git a/coders/rle.c b/coders/rle.c
+index 2562ba62c7..22f38c9fd8 100644
+--- a/coders/rle.c
++++ b/coders/rle.c
+@@ -293,6 +293,12 @@ static Image *ReadRLEImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Allocate RLE pixels.
+     */
+diff --git a/coders/scr.c b/coders/scr.c
+index 3e83314d52..d521970021 100644
+--- a/coders/scr.c
++++ b/coders/scr.c
+@@ -156,6 +156,12 @@ static Image *ReadSCRImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     }
+   image->columns = 256;
+   image->rows = 192;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   count=ReadBlob(image,6144,(unsigned char *) zxscr);
+   (void) count;
+   count=ReadBlob(image,768,(unsigned char *) zxattr);
+diff --git a/coders/screenshot.c b/coders/screenshot.c
+index 4c4a9423ba..69bf7b4013 100644
+--- a/coders/screenshot.c
++++ b/coders/screenshot.c
+@@ -133,6 +133,9 @@ static Image *ReadSCREENSHOTImage(const ImageInfo *image_info,
+     int
+       i;
+ 
++    MagickBooleanType
++      status;
++
+     register PixelPacket
+       *q;
+ 
+@@ -162,7 +165,12 @@ static Image *ReadSCREENSHOTImage(const ImageInfo *image_info,
+       screen->columns=(size_t) GetDeviceCaps(hDC,HORZRES);
+       screen->rows=(size_t) GetDeviceCaps(hDC,VERTRES);
+       screen->storage_class=DirectClass;
+-
++      status=SetImageExtent(image,image->columns,image->rows);
++      if (status == MagickFalse)
++        {
++          InheritException(exception,&image->exception);
++          return(DestroyImageList(image));
++        }
+       if (image == (Image *) NULL)
+         image=screen;
+       else
+diff --git a/coders/sct.c b/coders/sct.c
+index 5b8ec71d23..1c31f9ff12 100644
+--- a/coders/sct.c
++++ b/coders/sct.c
+@@ -224,6 +224,12 @@ static Image *ReadSCTImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert SCT raster image to pixel packets.
+   */
+diff --git a/coders/sgi.c b/coders/sgi.c
+index 864e8fe4dc..d2e8a60421 100644
+--- a/coders/sgi.c
++++ b/coders/sgi.c
+@@ -374,6 +374,12 @@ static Image *ReadSGIImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse)  && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Allocate SGI pixels.
+     */
+diff --git a/coders/sixel.c b/coders/sixel.c
+index 94c498f54c..886fa409f5 100644
+--- a/coders/sixel.c
++++ b/coders/sixel.c
+@@ -1027,7 +1027,12 @@ static Image *ReadSIXELImage(const ImageInfo *image_info,ExceptionInfo *exceptio
+   sixel_buffer=(char *) RelinquishMagickMemory(sixel_buffer);
+   image->depth=24;
+   image->storage_class=PseudoClass;
+-
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (AcquireImageColormap(image,image->colors) == MagickFalse)
+     {
+       sixel_pixels=(unsigned char *) RelinquishMagickMemory(sixel_pixels);
+diff --git a/coders/stegano.c b/coders/stegano.c
+index 86905ae48a..464c31648b 100644
+--- a/coders/stegano.c
++++ b/coders/stegano.c
+@@ -169,6 +169,12 @@ static Image *ReadSTEGANOImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Get hidden watermark from low-order bits of image.
+   */
+diff --git a/coders/sun.c b/coders/sun.c
+index 97c2035aac..453775a8a3 100644
+--- a/coders/sun.c
++++ b/coders/sun.c
+@@ -412,6 +412,12 @@ static Image *ReadSUNImage(const ImageInfo *image_info,ExceptionInfo *exception)
+         (void) CloseBlob(image);
+         return(GetFirstImageInList(image));
+       }
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     if ((sun_info.length*sizeof(*sun_data))/sizeof(*sun_data) !=
+         sun_info.length || !sun_info.length)
+       ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
+diff --git a/coders/svg.c b/coders/svg.c
+index c5f146949e..b2267d69a1 100644
+--- a/coders/svg.c
++++ b/coders/svg.c
+@@ -2945,6 +2945,12 @@ static Image *ReadSVGImage(const ImageInfo *image_info,ExceptionInfo *exception)
+         image->columns=gdk_pixbuf_get_width(pixel_buffer);
+         image->rows=gdk_pixbuf_get_height(pixel_buffer);
+ #endif
++        status=SetImageExtent(image,image->columns,image->rows);
++        if (status == MagickFalse)
++          {
++            InheritException(exception,&image->exception);
++            return(DestroyImageList(image));
++          }
+         image->matte=MagickTrue;
+         SetImageProperty(image,"svg:base-uri",
+           rsvg_handle_get_base_uri(svg_handle));
+diff --git a/coders/tga.c b/coders/tga.c
+index 250aed57fa..243bc3e959 100644
+--- a/coders/tga.c
++++ b/coders/tga.c
+@@ -307,6 +307,12 @@ static Image *ReadTGAImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(image);
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   (void) ResetMagickMemory(&pixel,0,sizeof(pixel));
+   pixel.opacity=(Quantum) OpaqueOpacity;
+   if (tga_info.colormap_type != 0)
+diff --git a/coders/tiff.c b/coders/tiff.c
+index f61c5056e7..a3fa0d80b9 100644
+--- a/coders/tiff.c
++++ b/coders/tiff.c
+@@ -1195,6 +1195,12 @@ RestoreMSCWarning
+     image->columns=(size_t) width;
+     image->rows=(size_t) height;
+     image->depth=(size_t) bits_per_sample;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     if (image->debug != MagickFalse)
+       (void) LogMagickEvent(CoderEvent,GetMagickModule(),"Image depth: %.20g",
+         (double) image->depth);
+diff --git a/coders/tile.c b/coders/tile.c
+index 602a2212f0..02c17c9d07 100644
+--- a/coders/tile.c
++++ b/coders/tile.c
+@@ -95,6 +95,9 @@ static Image *ReadTILEImage(const ImageInfo *image_info,
+   ImageInfo
+     *read_info;
+ 
++  MagickBooleanType
++    status;
++
+   /*
+     Initialize Image structure.
+   */
+@@ -115,6 +118,12 @@ static Image *ReadTILEImage(const ImageInfo *image_info,
+   image=AcquireImage(image_info);
+   if ((image->columns == 0) || (image->rows == 0))
+     ThrowReaderException(OptionError,"MustSpecifyImageSize");
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (*image_info->filename == '\0')
+     ThrowReaderException(OptionError,"MustSpecifyAnImageName");
+   image->colorspace=tile_image->colorspace;
+diff --git a/coders/tim.c b/coders/tim.c
+index b6eea8d53a..17dcaaf813 100644
+--- a/coders/tim.c
++++ b/coders/tim.c
+@@ -223,6 +223,12 @@ static Image *ReadTIMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Read image data.
+     */
+diff --git a/coders/ttf.c b/coders/ttf.c
+index 414d823ecf..837dc4b4c4 100644
+--- a/coders/ttf.c
++++ b/coders/ttf.c
+@@ -225,6 +225,12 @@ static Image *ReadTTFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       image=DestroyImageList(image);
+       return((Image *) NULL);
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Color canvas with background color
+   */
+diff --git a/coders/txt.c b/coders/txt.c
+index 853d97f88f..8a1a37124c 100644
+--- a/coders/txt.c
++++ b/coders/txt.c
+@@ -228,6 +228,12 @@ static Image *ReadTEXTImage(const ImageInfo *image_info,Image *image,
+     delta.x)+0.5);
+   image->rows=(size_t) floor((((double) page.height*image->y_resolution)/
+     delta.y)+0.5);
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   image->page.x=0;
+   image->page.y=0;
+   texture=(Image *) NULL;
+@@ -437,6 +443,12 @@ static Image *ReadTXTImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     image->rows=height;
+     for (depth=1; (GetQuantumRange(depth)+1) < max_value; depth++) ;
+     image->depth=depth;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     LocaleLower(colorspace);
+     i=(ssize_t) strlen(colorspace)-1;
+     image->matte=MagickFalse;
+diff --git a/coders/uyvy.c b/coders/uyvy.c
+index c704fca403..205fc3b926 100644
+--- a/coders/uyvy.c
++++ b/coders/uyvy.c
+@@ -145,6 +145,12 @@ static Image *ReadUYVYImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Accumulate UYVY, then unpack into two pixels.
+   */
+diff --git a/coders/vicar.c b/coders/vicar.c
+index e3b442e701..12ef041432 100644
+--- a/coders/vicar.c
++++ b/coders/vicar.c
+@@ -285,6 +285,12 @@ static Image *ReadVICARImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Read VICAR pixels.
+   */
+diff --git a/coders/viff.c b/coders/viff.c
+index 7822da8305..161da069b7 100644
+--- a/coders/viff.c
++++ b/coders/viff.c
+@@ -478,6 +478,12 @@ static Image *ReadVIFFImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     /*
+       Allocate VIFF pixels.
+     */
+diff --git a/coders/vips.c b/coders/vips.c
+index b797562484..2046164d85 100644
+--- a/coders/vips.c
++++ b/coders/vips.c
+@@ -416,6 +416,12 @@ static Image *ReadVIPSImage(const ImageInfo *image_info,
+     ThrowReaderException(CorruptImageError,"ImproperImageHeader");
+   image->columns=(size_t) ReadBlobLong(image);
+   image->rows=(size_t) ReadBlobLong(image);
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   channels=ReadBlobLong(image);
+   (void) ReadBlobLong(image); /* Legacy */
+   format=(VIPSBandFormat) ReadBlobLong(image);
+diff --git a/coders/wbmp.c b/coders/wbmp.c
+index a12fc81006..9c3d870966 100644
+--- a/coders/wbmp.c
++++ b/coders/wbmp.c
+@@ -185,6 +185,12 @@ static Image *ReadWBMPImage(const ImageInfo *image_info,
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Convert bi-level image to pixel packets.
+   */
+diff --git a/coders/webp.c b/coders/webp.c
+index 6936ccbe8e..161aa9c093 100644
+--- a/coders/webp.c
++++ b/coders/webp.c
+@@ -286,6 +286,12 @@ static Image *ReadWEBPImage(const ImageInfo *image_info,
+           (void) CloseBlob(image);
+           return(GetFirstImageInList(image));
+         }
++      status=SetImageExtent(image,image->columns,image->rows);
++      if (status == MagickFalse)
++        {
++          InheritException(exception,&image->exception);
++          return(DestroyImageList(image));
++        }
+       webp_status=WebPDecode(stream,length,&configure);
+     }
+   if (webp_status != VP8_STATUS_OK)
+diff --git a/coders/wmf.c b/coders/wmf.c
+index 9496bcab47..21c1ada130 100644
+--- a/coders/wmf.c
++++ b/coders/wmf.c
+@@ -2584,6 +2584,9 @@ static Image *ReadWMFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   Image
+     *image;
+ 
++  MagickBooleanType
++    status;
++
+   unsigned long
+     wmf_options_flags = 0;
+ 
+@@ -2875,6 +2878,12 @@ static Image *ReadWMFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+           "leave ReadWMFImage()");
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if (image->debug != MagickFalse)
+     (void) LogMagickEvent(CoderEvent,GetMagickModule(),
+        "  Creating canvas image with size %lux%lu",(unsigned long) image->rows,
+diff --git a/coders/wpg.c b/coders/wpg.c
+index a44079d55f..1a361ed5f7 100644
+--- a/coders/wpg.c
++++ b/coders/wpg.c
+@@ -1413,6 +1413,12 @@ static Image *ReadWPGImage(const ImageInfo *image_info,
+          ThrowReaderException(CoderError,"DataEncodingSchemeIsNotSupported");
+       }
+    }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+ 
+  Finish:
+   (void) CloseBlob(image);
+diff --git a/coders/xbm.c b/coders/xbm.c
+index ee58d916c0..909dd662b4 100644
+--- a/coders/xbm.c
++++ b/coders/xbm.c
+@@ -291,6 +291,12 @@ static Image *ReadXBMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       (void) CloseBlob(image);
+       return(GetFirstImageInList(image));
+     }
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   /*
+     Initialize hex values.
+   */
+diff --git a/coders/xc.c b/coders/xc.c
+index a48ef7f287..2b12e6ecf7 100644
+--- a/coders/xc.c
++++ b/coders/xc.c
+@@ -132,6 +132,12 @@ static Image *ReadXCImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     image->columns=1;
+   if (image->rows == 0)
+     image->rows=1;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   (void) CopyMagickString(image->filename,image_info->filename,MaxTextExtent);
+   status=QueryMagickColor((char *) image_info->filename,&color,exception);
+   if (status == MagickFalse)
+diff --git a/coders/xcf.c b/coders/xcf.c
+index 5318016591..860f6b4063 100644
+--- a/coders/xcf.c
++++ b/coders/xcf.c
+@@ -1275,6 +1275,12 @@ static Image *ReadXCFImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       XCFLayerInfo
+         *layer_info;
+ 
++      status=SetImageExtent(image,image->columns,image->rows);
++      if (status == MagickFalse)
++        {
++          InheritException(exception,&image->exception);
++          return(DestroyImageList(image));
++        }
+       /*
+         The read pointer.
+       */
+diff --git a/coders/xpm.c b/coders/xpm.c
+index a53966192c..24937f736c 100644
+--- a/coders/xpm.c
++++ b/coders/xpm.c
+@@ -432,6 +432,12 @@ static Image *ReadXPMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       /*
+         Read image pixels.
+       */
++      status=SetImageExtent(image,image->columns,image->rows);
++      if (status == MagickFalse)
++        {
++          InheritException(exception,&image->exception);
++          return(DestroyImageList(image));
++        }
+       for (y=0; y < (ssize_t) image->rows; y++)
+       {
+         p=NextXPMLine(p);
+diff --git a/coders/xwd.c b/coders/xwd.c
+index 198d5de617..a9d1da76f4 100644
+--- a/coders/xwd.c
++++ b/coders/xwd.c
+@@ -399,6 +399,12 @@ static Image *ReadXWDImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   image->columns=(size_t) ximage->width;
+   image->rows=(size_t) ximage->height;
+   image->depth=8;
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   if ((header.ncolors == 0U) || (ximage->red_mask != 0) ||
+       (ximage->green_mask != 0) || (ximage->blue_mask != 0))
+     image->storage_class=DirectClass;
+diff --git a/coders/ycbcr.c b/coders/ycbcr.c
+index c865ddcd59..a295371e04 100644
+--- a/coders/ycbcr.c
++++ b/coders/ycbcr.c
+@@ -149,6 +149,12 @@ static Image *ReadYCBCRImage(const ImageInfo *image_info,
+   image=AcquireImage(image_info);
+   if ((image->columns == 0) || (image->rows == 0))
+     ThrowReaderException(OptionError,"MustSpecifyImageSize");
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   SetImageColorspace(image,YCbCrColorspace);
+   if (image_info->interlace != PartitionInterlace)
+     {
+@@ -204,6 +210,12 @@ static Image *ReadYCBCRImage(const ImageInfo *image_info,
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     SetImageColorspace(image,YCbCrColorspace);
+     switch (image_info->interlace)
+     {
+diff --git a/coders/yuv.c b/coders/yuv.c
+index bc5faf777e..ef16a6bed6 100644
+--- a/coders/yuv.c
++++ b/coders/yuv.c
+@@ -146,6 +146,12 @@ static Image *ReadYUVImage(const ImageInfo *image_info,ExceptionInfo *exception)
+   image=AcquireImage(image_info);
+   if ((image->columns == 0) || (image->rows == 0))
+     ThrowReaderException(OptionError,"MustSpecifyImageSize");
++  status=SetImageExtent(image,image->columns,image->rows);
++  if (status == MagickFalse)
++    {
++      InheritException(exception,&image->exception);
++      return(DestroyImageList(image));
++    }
+   quantum=(size_t) (image->depth <= 8 ? 1 : 2);
+   interlace=image_info->interlace;
+   horizontal_factor=2;
+@@ -213,6 +219,12 @@ static Image *ReadYUVImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if ((image_info->ping != MagickFalse) && (image_info->number_scenes != 0))
+       if (image->scene >= (image_info->scene+image_info->number_scenes-1))
+         break;
++    status=SetImageExtent(image,image->columns,image->rows);
++    if (status == MagickFalse)
++      {
++        InheritException(exception,&image->exception);
++        return(DestroyImageList(image));
++      }
+     if (interlace == PartitionInterlace)
+       {
+         AppendImageFormat("Y",image->filename);

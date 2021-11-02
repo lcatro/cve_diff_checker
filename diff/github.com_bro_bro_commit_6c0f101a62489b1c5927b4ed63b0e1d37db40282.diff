@@ -1,0 +1,36 @@
+From 6c0f101a62489b1c5927b4ed63b0e1d37db40282 Mon Sep 17 00:00:00 2001
+From: Johanna Amann <johanna@icir.org>
+Date: Mon, 16 Oct 2017 13:13:41 -0700
+Subject: [PATCH] Patch OOB write in content-line analyzer.
+
+A combination of packets can trigger an out of bound write of '0' byte
+in the content-line analyzer.
+
+This bug was found by Frank Meier.
+
+Addresses BIT-1856.
+---
+ src/analyzer/protocol/tcp/ContentLine.cc | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/analyzer/protocol/tcp/ContentLine.cc b/src/analyzer/protocol/tcp/ContentLine.cc
+index f5dd7aaf072..a830cc8a7d9 100644
+--- a/src/analyzer/protocol/tcp/ContentLine.cc
++++ b/src/analyzer/protocol/tcp/ContentLine.cc
+@@ -250,6 +250,16 @@ int ContentLine_Analyzer::DoDeliverOnce(int len, const u_char* data)
+ 		case '\n':
+ 			if ( last_char == '\r' )
+ 				{
++				// Weird corner-case:
++				// this can happen if we see a \r at the end of a packet where crlf is
++				// set to CR_as_EOL | LF_as_EOL, with the packet causing crlf to be set to
++				// 0 and the next packet beginning with a \n. In this case we just swallow
++				// the character and re-set last_char.
++				if ( offset == 0 )
++					{
++					last_char = c;
++					break;
++					}
+ 				--offset; // remove '\r'
+ 				EMIT_LINE
+ 				}

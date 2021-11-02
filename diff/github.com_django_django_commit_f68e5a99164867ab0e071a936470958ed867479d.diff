@@ -1,0 +1,160 @@
+From f68e5a99164867ab0e071a936470958ed867479d Mon Sep 17 00:00:00 2001
+From: Tim Graham <timograham@gmail.com>
+Date: Wed, 6 Jul 2016 15:41:06 -0400
+Subject: [PATCH] [1.8.x] Fixed XSS in admin's add/change related popup.
+
+This is a security fix.
+---
+ .../admin/js/admin/RelatedObjectLookups.js    |  2 +-
+ django/views/debug.py                         |  4 +-
+ docs/releases/1.8.14.txt                      | 15 +++++++-
+ tests/admin_views/admin.py                    |  3 +-
+ tests/admin_views/models.py                   |  4 ++
+ tests/admin_views/tests.py                    | 38 +++++++++++++++++++
+ 6 files changed, 60 insertions(+), 6 deletions(-)
+
+diff --git a/django/contrib/admin/static/admin/js/admin/RelatedObjectLookups.js b/django/contrib/admin/static/admin/js/admin/RelatedObjectLookups.js
+index d358b208f462..17ff10ff2644 100644
+--- a/django/contrib/admin/static/admin/js/admin/RelatedObjectLookups.js
++++ b/django/contrib/admin/static/admin/js/admin/RelatedObjectLookups.js
+@@ -105,7 +105,7 @@ function dismissChangeRelatedObjectPopup(win, objId, newRepr, newId) {
+     var selects = django.jQuery(selectsSelector);
+     selects.find('option').each(function() {
+         if (this.value == objId) {
+-            this.innerHTML = newRepr;
++            this.textContent = newRepr;
+             this.value = newId;
+         }
+     });
+diff --git a/django/views/debug.py b/django/views/debug.py
+index f352196d3d67..9984f3891d45 100644
+--- a/django/views/debug.py
++++ b/django/views/debug.py
+@@ -704,13 +704,13 @@ def default_urlconf(request):
+       var s = link.getElementsByTagName('span')[0];
+       var uarr = String.fromCharCode(0x25b6);
+       var darr = String.fromCharCode(0x25bc);
+-      s.innerHTML = s.innerHTML == uarr ? darr : uarr;
++      s.textContent = s.textContent == uarr ? darr : uarr;
+       return false;
+     }
+     function switchPastebinFriendly(link) {
+       s1 = "Switch to copy-and-paste view";
+       s2 = "Switch back to interactive view";
+-      link.innerHTML = link.innerHTML.trim() == s1 ? s2: s1;
++      link.textContent = link.textContent.trim() == s1 ? s2: s1;
+       toggle('browserTraceback', 'pastebinTraceback');
+       return false;
+     }
+diff --git a/docs/releases/1.8.14.txt b/docs/releases/1.8.14.txt
+index 6311172abcf9..31a304f7c060 100644
+--- a/docs/releases/1.8.14.txt
++++ b/docs/releases/1.8.14.txt
+@@ -2,9 +2,20 @@
+ Django 1.8.14 release notes
+ ===========================
+ 
+-*Under development*
++*July 18, 2016*
+ 
+-Django 1.8.14 fixes several bugs in 1.8.13.
++Django 1.8.14 fixes a security issue and a bug in 1.8.13.
++
++XSS in admin's add/change related popup
++=======================================
++
++Unsafe usage of JavaScript's ``Element.innerHTML`` could result in XSS in the
++admin's add/change related popup. ``Element.textContent`` is now used to
++prevent execution of the data.
++
++The debug view also used ``innerHTML``. Although a security issue wasn't
++identified there, out of an abundance of caution it's also updated to use
++``textContent``.
+ 
+ Bugfixes
+ ========
+diff --git a/tests/admin_views/admin.py b/tests/admin_views/admin.py
+index 8a980f45d587..a5e33a13bb7c 100644
+--- a/tests/admin_views/admin.py
++++ b/tests/admin_views/admin.py
+@@ -88,7 +88,8 @@ class ChapterXtra1Admin(admin.ModelAdmin):
+ 
+ class ArticleAdmin(admin.ModelAdmin):
+     list_display = ('content', 'date', callable_year, 'model_year',
+-                    'modeladmin_year', 'model_year_reversed')
++                    'modeladmin_year', 'model_year_reversed', 'section')
++    list_editable = ('section',)
+     list_filter = ('date', 'section')
+     view_on_site = False
+     fieldsets = (
+diff --git a/tests/admin_views/models.py b/tests/admin_views/models.py
+index e5f6cc99f233..6fe69662ef87 100644
+--- a/tests/admin_views/models.py
++++ b/tests/admin_views/models.py
+@@ -16,6 +16,7 @@
+ from django.utils.encoding import python_2_unicode_compatible
+ 
+ 
++@python_2_unicode_compatible
+ class Section(models.Model):
+     """
+     A simple section that links to articles, to test linking to related items
+@@ -23,6 +24,9 @@ class Section(models.Model):
+     """
+     name = models.CharField(max_length=100)
+ 
++    def __str__(self):
++        return self.name
++
+     @property
+     def name_property(self):
+         """
+diff --git a/tests/admin_views/tests.py b/tests/admin_views/tests.py
+index 5b60368042c3..11b23d03ba61 100644
+--- a/tests/admin_views/tests.py
++++ b/tests/admin_views/tests.py
+@@ -4056,6 +4056,44 @@ def test_cancel_delete_related_confirmation(self):
+         self.assertEqual(Pizza.objects.count(), 1)
+         self.assertEqual(Topping.objects.count(), 2)
+ 
++    def test_list_editable_popups(self):
++        """
++        list_editable foreign keys have add/change popups.
++        """
++        from selenium.webdriver.support.ui import Select
++        s1 = Section.objects.create(name='Test section')
++        Article.objects.create(
++            title='foo',
++            content='<p>Middle content</p>',
++            date=datetime.datetime(2008, 3, 18, 11, 54, 58),
++            section=s1,
++        )
++        self.admin_login(username='super', password='secret', login_url=reverse('admin:index'))
++        self.selenium.get(self.live_server_url + reverse('admin:admin_views_article_changelist'))
++        # Change popup
++        self.selenium.find_element_by_id('change_id_form-0-section').click()
++        self.wait_for_popup()
++        self.selenium.switch_to.window(self.selenium.window_handles[-1])
++        self.wait_for_text('#content h1', 'Change section')
++        name_input = self.selenium.find_element_by_id('id_name')
++        name_input.clear()
++        name_input.send_keys('<i>edited section</i>')
++        self.selenium.find_element_by_xpath('//input[@value="Save"]').click()
++        self.selenium.switch_to.window(self.selenium.window_handles[0])
++        select = Select(self.selenium.find_element_by_id('id_form-0-section'))
++        self.assertEqual(select.first_selected_option.text, '<i>edited section</i>')
++
++        # Add popup
++        self.selenium.find_element_by_id('add_id_form-0-section').click()
++        self.wait_for_popup()
++        self.selenium.switch_to.window(self.selenium.window_handles[-1])
++        self.wait_for_text('#content h1', 'Add section')
++        self.selenium.find_element_by_id('id_name').send_keys('new section')
++        self.selenium.find_element_by_xpath('//input[@value="Save"]').click()
++        self.selenium.switch_to.window(self.selenium.window_handles[0])
++        select = Select(self.selenium.find_element_by_id('id_form-0-section'))
++        self.assertEqual(select.first_selected_option.text, 'new section')
++
+     def test_list_editable_raw_id_fields(self):
+         parent = ParentWithUUIDPK.objects.create(title='test')
+         parent2 = ParentWithUUIDPK.objects.create(title='test2')

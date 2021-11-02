@@ -1,0 +1,59 @@
+From a67083ff4b8dcbb7ee2839da6338032030d712b0 Mon Sep 17 00:00:00 2001
+From: Yang Chi <yangchi@fb.com>
+Date: Tue, 23 Feb 2021 16:40:17 -0800
+Subject: [PATCH] Close connection if we derive an extra 1-rtt write cipher
+
+Summary: Fixes CVE-2021-24029
+
+Reviewed By: mjoras, lnicco
+
+Differential Revision: D26613890
+
+fbshipit-source-id: 19bb2be2c731808144e1a074ece313fba11f1945
+---
+ quic/server/state/ServerStateMachine.cpp     |  5 ++++-
+ quic/server/test/QuicServerTransportTest.cpp | 15 +++++++++++++++
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/quic/server/state/ServerStateMachine.cpp b/quic/server/state/ServerStateMachine.cpp
+index a5f42f8ef..eaa609e56 100644
+--- a/quic/server/state/ServerStateMachine.cpp
++++ b/quic/server/state/ServerStateMachine.cpp
+@@ -311,7 +311,10 @@ void updateHandshakeState(QuicServerConnectionState& conn) {
+       conn.qLogger->addTransportStateUpdate(kDerivedOneRttWriteCipher);
+     }
+     QUIC_TRACE(fst_trace, conn, "derived 1-rtt write cipher");
+-    CHECK(!conn.oneRttWriteCipher.get());
++    if (conn.oneRttWriteCipher) {
++      throw QuicTransportException(
++          "Duplicate 1-rtt write cipher", TransportErrorCode::CRYPTO_ERROR);
++    }
+     conn.oneRttWriteCipher = std::move(oneRttWriteCipher);
+ 
+     updatePacingOnKeyEstablished(conn);
+diff --git a/quic/server/test/QuicServerTransportTest.cpp b/quic/server/test/QuicServerTransportTest.cpp
+index 07e22bcf9..404a78b80 100644
+--- a/quic/server/test/QuicServerTransportTest.cpp
++++ b/quic/server/test/QuicServerTransportTest.cpp
+@@ -4265,6 +4265,21 @@ TEST_P(QuicServerTransportHandshakeTest, TestD6DStartCallback) {
+   server->removeObserver(mockObserver.get());
+ }
+ 
++TEST_F(QuicUnencryptedServerTransportTest, DuplicateOneRttWriteCipher) {
++  setupClientReadCodec();
++  recvClientHello();
++  recvClientFinished();
++  loopForWrites();
++  try {
++    recvClientHello();
++    recvClientFinished();
++    FAIL();
++  } catch (const std::runtime_error& ex) {
++    EXPECT_THAT(ex.what(), HasSubstr("Crypto error"));
++  }
++  EXPECT_TRUE(server->isClosed());
++}
++
+ TEST_F(QuicServerTransportTest, TestRegisterAndHandleTransportKnobParams) {
+   int flag = 0;
+   server->registerKnobParamHandler(

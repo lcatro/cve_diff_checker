@@ -1,0 +1,33 @@
+From a585eae6e7ada1ca9271607a4f48dfb17868ab7b Mon Sep 17 00:00:00 2001
+From: Roberto Ierusalimschy <roberto@inf.puc-rio.br>
+Date: Mon, 27 Jul 2020 12:01:38 -0300
+Subject: [PATCH] Fixed bug: Negation overflow in getlocal/setlocal
+
+---
+ ldebug.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/ldebug.c b/ldebug.c
+index 0c4439c18..9ff7edeb2 100644
+--- a/ldebug.c
++++ b/ldebug.c
+@@ -188,8 +188,8 @@ static const char *upvalname (const Proto *p, int uv) {
+ static const char *findvararg (CallInfo *ci, int n, StkId *pos) {
+   if (clLvalue(s2v(ci->func))->p->is_vararg) {
+     int nextra = ci->u.l.nextraargs;
+-    if (n <= nextra) {
+-      *pos = ci->func - nextra + (n - 1);
++    if (n >= -nextra) {  /* 'n' is negative */
++      *pos = ci->func - nextra - (n + 1);
+       return "(vararg)";  /* generic name for any vararg */
+     }
+   }
+@@ -202,7 +202,7 @@ const char *luaG_findlocal (lua_State *L, CallInfo *ci, int n, StkId *pos) {
+   const char *name = NULL;
+   if (isLua(ci)) {
+     if (n < 0)  /* access to vararg values? */
+-      return findvararg(ci, -n, pos);
++      return findvararg(ci, n, pos);
+     else
+       name = luaF_getlocalname(ci_func(ci)->p, n, currentpc(ci));
+   }

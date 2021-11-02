@@ -1,0 +1,234 @@
+From 3a76fd7c95fced2c2f8c8148a9055c3a542eff29 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 10 Feb 2017 18:52:17 -0800
+Subject: [PATCH] CVE-2017-12995/Check for DNS compression pointers that don't
+ point backwards.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This is what BIND 9.11.0-P2 does; it not only detects pointers that
+loop, as "point backwards" means "point before anything we've processed
+so far, including what we're processing right now", so the pointer can't
+point to itself (as that's what we're processing right now).
+
+This fixes an infinite loop discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+
+Also, add some infinite-pointer-loop captures.
+
+More checks should be done.  We might, for example, want to make sure
+the upper 2 bits of the label length/pointer byte are 00 or 11, and that
+if we encounter a pointer and jump backwards to what we think is a label
+the label ends before the beginning of the last label we processed, to
+make sure the pointer doesn't point backwards into the *middle* of a
+label, and also make sure the entire name is <= 255 bytes long.
+---
+ print-domain.c        |  37 +++++++++++++++++++------------------
+ tests/TESTLIST        |   9 +++++++++
+ tests/dns-zlip-1.out  |   1 +
+ tests/dns-zlip-1.pcap | Bin 0 -> 117 bytes
+ tests/dns-zlip-2.out  |   1 +
+ tests/dns-zlip-2.pcap | Bin 0 -> 117 bytes
+ tests/dns-zlip-3.out  |   1 +
+ tests/dns-zlip-3.pcap | Bin 0 -> 187 bytes
+ tests/dns_fwdptr.out  |   2 ++
+ tests/dns_fwdptr.pcap | Bin 0 -> 63247 bytes
+ 10 files changed, 33 insertions(+), 18 deletions(-)
+ create mode 100644 tests/dns-zlip-1.out
+ create mode 100644 tests/dns-zlip-1.pcap
+ create mode 100644 tests/dns-zlip-2.out
+ create mode 100644 tests/dns-zlip-2.pcap
+ create mode 100644 tests/dns-zlip-3.out
+ create mode 100644 tests/dns-zlip-3.pcap
+ create mode 100644 tests/dns_fwdptr.out
+ create mode 100644 tests/dns_fwdptr.pcap
+
+diff --git a/print-domain.c b/print-domain.c
+index d0b6996fd..9a2b9e856 100644
+--- a/print-domain.c
++++ b/print-domain.c
+@@ -151,15 +151,14 @@ ns_nprint(netdissect_options *ndo,
+ 	register u_int i, l;
+ 	register const u_char *rp = NULL;
+ 	register int compress = 0;
+-	int chars_processed;
+ 	int elt;
+-	int data_size = ndo->ndo_snapend - bp;
++	u_int offset, max_offset;
+ 
+ 	if ((l = labellen(ndo, cp)) == (u_int)-1)
+ 		return(NULL);
+ 	if (!ND_TTEST2(*cp, 1))
+ 		return(NULL);
+-	chars_processed = 1;
++	max_offset = (u_int)(cp - bp);
+ 	if (((i = *cp++) & INDIR_MASK) != INDIR_MASK) {
+ 		compress = 0;
+ 		rp = cp + l;
+@@ -174,24 +173,28 @@ ns_nprint(netdissect_options *ndo,
+ 				}
+ 				if (!ND_TTEST2(*cp, 1))
+ 					return(NULL);
+-				cp = bp + (((i << 8) | *cp) & 0x3fff);
++				offset = (((i << 8) | *cp) & 0x3fff);
++				/*
++				 * This must move backwards in the packet.
++				 * No RFC explicitly says that, but BIND's
++				 * name decompression code requires it,
++				 * as a way of preventing infinite loops
++				 * and other bad behavior, and it's probably
++				 * what was intended (compress by pointing
++				 * to domain name suffixes already seen in
++				 * the packet).
++				 */
++				if (offset >= max_offset) {
++					ND_PRINT((ndo, "<BAD PTR>"));
++					return(NULL);
++				}
++				max_offset = offset;
++				cp = bp + offset;
+ 				if ((l = labellen(ndo, cp)) == (u_int)-1)
+ 					return(NULL);
+ 				if (!ND_TTEST2(*cp, 1))
+ 					return(NULL);
+ 				i = *cp++;
+-				chars_processed++;
+-
+-				/*
+-				 * If we've looked at every character in
+-				 * the message, this pointer will make
+-				 * us look at some character again,
+-				 * which means we're looping.
+-				 */
+-				if (chars_processed >= data_size) {
+-					ND_PRINT((ndo, "<LOOP>"));
+-					return (NULL);
+-				}
+ 				continue;
+ 			}
+ 			if ((i & INDIR_MASK) == EDNS0_MASK) {
+@@ -212,14 +215,12 @@ ns_nprint(netdissect_options *ndo,
+ 			}
+ 
+ 			cp += l;
+-			chars_processed += l;
+ 			ND_PRINT((ndo, "."));
+ 			if ((l = labellen(ndo, cp)) == (u_int)-1)
+ 				return(NULL);
+ 			if (!ND_TTEST2(*cp, 1))
+ 				return(NULL);
+ 			i = *cp++;
+-			chars_processed++;
+ 			if (!compress)
+ 				rp += l + 1;
+ 		}
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index ec627cb82..0ddc63e39 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -474,6 +474,7 @@ zephyr-oobr		zephyr-oobr.pcap		zephyr-oobr.out		-vvv -e
+ isakmp-no-none-np	isakmp-no-none-np.pcap		isakmp-no-none-np.out	-vvv -e
+ telnet-iac-check-oobr	telnet-iac-check-oobr.pcap	telnet-iac-check-oobr.out	-vvv -e
+ resp_4_infiniteloop	resp_4_infiniteloop.pcap	resp_4_infiniteloop.out	-vvv -e
++dns_fwdptr		dns_fwdptr.pcap			dns_fwdptr.out		-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+@@ -483,3 +484,11 @@ rtp-seg-fault-2  rtp-seg-fault-2.pcap  rtp-seg-fault-2.out  -v -T rtp
+ # NFS tests
+ # fuzzed pcap
+ nfs-seg-fault-1  nfs-seg-fault-1.pcap  nfs-seg-fault-1.out
++
++# DNS infinite loop tests
++#
++# See http://marc.info/?l=tcpdump-workers&m=95552439022555
++#
++dns-zlip-1		dns-zlip-1.pcap		dns-zlip-1.out
++dns-zlip-2		dns-zlip-2.pcap		dns-zlip-2.out
++dns-zlip-3		dns-zlip-3.pcap		dns-zlip-3.out
+diff --git a/tests/dns-zlip-1.out b/tests/dns-zlip-1.out
+new file mode 100644
+index 000000000..ce12748da
+--- /dev/null
++++ b/tests/dns-zlip-1.out
+@@ -0,0 +1 @@
++IP 10.0.0.1.1024 > 146.84.28.88.53: 60777 Type49159 (Class 49168)? <BAD PTR>[|domain]
+diff --git a/tests/dns-zlip-1.pcap b/tests/dns-zlip-1.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ec844c0fc9fd0572e10b1cb91a871e49ce2a80b
+GIT binary patch
+literal 117
+zcmca|c+)~A1{MYwaA0F#U<7jHQ$JhOU*Kf$1+qbyAz{kvP<@62{@L>%a4@(sFxXpn
+zGB7v@wpDNeHB1VTi2#~m%D~aI{cR>tHOL4cIKXp&{eZv$@dFA6)DIXO_<tTK#>l`3
+E0Nt`1ivR!s
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/dns-zlip-2.out b/tests/dns-zlip-2.out
+new file mode 100644
+index 000000000..dbabefbfc
+--- /dev/null
++++ b/tests/dns-zlip-2.out
+@@ -0,0 +1 @@
++IP 10.0.0.1.1024 > 146.84.28.88.53: 18992 Type49164 (Class 49168)? <BAD PTR>[|domain]
+diff --git a/tests/dns-zlip-2.pcap b/tests/dns-zlip-2.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..5f74f226499430dd893fb19b5e3135b491e50385
+GIT binary patch
+literal 117
+zcmca|c+)~A1{MYwaA0F#U<7g^Q$Jh$N#S7d1+qbyAz{kvP<@62{@L>%a4@(sFxcC4
+zGB7v@wpMTfHB1VTi2#~m%D|!e%F6(#8e{|z9N;^^b3ovL_yL6j>IV!C{67yAV`N|i
+E0M$4e)&Kwi
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/dns-zlip-3.out b/tests/dns-zlip-3.out
+new file mode 100644
+index 000000000..beb173045
+--- /dev/null
++++ b/tests/dns-zlip-3.out
+@@ -0,0 +1 @@
++IP 10.0.0.1.1024 > 146.84.28.88.53: 65483 Type49164 (Class 49164)? thisleetostringwillcrashyourlittlenameserverforsurehahahahahah.<BAD PTR>[|domain]
+diff --git a/tests/dns-zlip-3.pcap b/tests/dns-zlip-3.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c0c076a636551554f6553ebe6fe214f0e5202074
+GIT binary patch
+literal 187
+zcmca|c+)~A1{MYwaA0F#U<7iurhc~A_JEOLGLQ|z3<*<Shw3vN@XwzAfP=x6fuYs5
+zlYzlOu*HZAs9{owOa#yjQw9!=^#7-UszF8ofn7;PW^qnxYDs=^Nl|8AdU<9}PI6IV
+oaYki+X;DsQNl8v>USe))acWUnYEfE#QE_QeYDOX)9^k<T0fp^4hyVZp
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/dns_fwdptr.out b/tests/dns_fwdptr.out
+new file mode 100644
+index 000000000..4a37b7fb3
+--- /dev/null
++++ b/tests/dns_fwdptr.out
+@@ -0,0 +1,2 @@
++be:af:ca:ce:ff:ff > de:ad:be:ef:00:01, ethertype IPv4 (0x0800), length 63207: (tos 0x0, ttl 128, id 36039, offset 0, flags [none], proto UDP (17), length 63193)
++    156.118.17.235.53 > 156.118.27.229.500: [udp sum ok] 51584 zoneRef NoChange*|$ [64259q] q: Type507 (Class 769)? M-{.^AM-{^C.M-{.^AM-{^C.M-{.^AM-{^C.M-{.^AM-{^C.M-{.^AM-{ .M-{^C^A.<BAD PTR>[|domain]
+diff --git a/tests/dns_fwdptr.pcap b/tests/dns_fwdptr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..67a8461197684db8a1fc5658aed7a5db3d077af1
+GIT binary patch
+literal 63247
+zcmeIuF=_%q6b9foZUVN}HeMnJun1{$6FX~r1uw8o4iEw!Ko&v>Nnw>DNns}z7Td@c
+zT1)~#urui-e8UWnfuEnp_x3ouYsEzzPR<eO@cEwW=I1T%=XIp{!|NjFc3emEF?o&{
+zb#ABSu(K(L-BnzrZS(a0`7+A&zDTEUuQ;7K>e)?y(Rq~rQ@Jn!0t5&UAV7cs0RjXF
+z5FkK+009C72oNAZfB*pk1PBlyK!5-N0t5&UAV7cs0RjXF5FkK+009C72oNAZfB*pk
+z1PBlyK!5-N0t5&UAV7cs0RjXF5FkK+009C72oNAZfB*pk1PBlyK!5-N0t5&UAV7cs
+z0RjXF5FkK+009C72oNAZfB*pk1PBlyK!5-N0t5&UAV7cs0RjXF5FkK+009C72oNAZ
+zfB*pk1PBlyK!5-N0t5&UAV7cs0RjXF5FkK+009C72oNAZ;EV+>cSSnm_3TD~009C7
+z2oNAZfB*pk1PBlyK!5-N0t5&UAV7cs0RjXF5FkK+009C72oNAZfB*pk1PBlyK!5-N
+W0t5&UAVA=s3#91Z6jfCXs__?|920r~
+
+literal 0
+HcmV?d00001
+

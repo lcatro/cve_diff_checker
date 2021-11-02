@@ -1,0 +1,26 @@
+From c62dbd43d6e69ae81530e7c4f8763857f8ff1dda Mon Sep 17 00:00:00 2001
+From: James Elliott <james-d-elliott@users.noreply.github.com>
+Date: Fri, 21 May 2021 22:03:44 +1000
+Subject: [PATCH] fix(handlers): align response status codes for the verify
+ endpoint (#2016)
+
+This aligns all response status codes on the /api/verify endpoint when an error occurs, making it impossible to determine the actual reason for the failure.
+---
+ internal/handlers/handler_verify.go | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/internal/handlers/handler_verify.go b/internal/handlers/handler_verify.go
+index 0b08059a5..331eece1f 100644
+--- a/internal/handlers/handler_verify.go
++++ b/internal/handlers/handler_verify.go
+@@ -428,7 +428,9 @@ func VerifyGet(cfg schema.AuthenticationBackendConfiguration) middlewares.Reques
+ 		targetURL, err := ctx.GetOriginalURL()
+ 
+ 		if err != nil {
+-			ctx.Error(fmt.Errorf("Unable to parse target URL: %s", err), operationFailedMessage)
++			ctx.Logger.Error(fmt.Errorf("Unable to parse target URL: %s", err))
++			ctx.ReplyUnauthorized()
++
+ 			return
+ 		}
+ 

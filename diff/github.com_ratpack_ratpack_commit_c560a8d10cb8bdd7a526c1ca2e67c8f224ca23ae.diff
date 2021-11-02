@@ -1,0 +1,58 @@
+From c560a8d10cb8bdd7a526c1ca2e67c8f224ca23ae Mon Sep 17 00:00:00 2001
+From: Luke Daley <ld@ldaley.com>
+Date: Wed, 9 Oct 2019 09:43:23 +1000
+Subject: [PATCH] Add test for response header validation
+
+---
+ .../http/ResponseHeaderValidationSpec.groovy  | 42 +++++++++++++++++++
+ 1 file changed, 42 insertions(+)
+ create mode 100644 ratpack-core/src/test/groovy/ratpack/http/ResponseHeaderValidationSpec.groovy
+
+diff --git a/ratpack-core/src/test/groovy/ratpack/http/ResponseHeaderValidationSpec.groovy b/ratpack-core/src/test/groovy/ratpack/http/ResponseHeaderValidationSpec.groovy
+new file mode 100644
+index 0000000000..d68aab26a8
+--- /dev/null
++++ b/ratpack-core/src/test/groovy/ratpack/http/ResponseHeaderValidationSpec.groovy
+@@ -0,0 +1,42 @@
++/*
++ * Copyright 2019 the original author or authors.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package ratpack.http
++
++import ratpack.test.internal.RatpackGroovyDslSpec
++
++class ResponseHeaderValidationSpec extends RatpackGroovyDslSpec {
++
++  def "invalid header values yield exception"() {
++    when:
++    handlers {
++      all {
++        try {
++          header("Test", "value\r\nAnotherHeader: another value")
++          render "ok"
++        } catch (e) {
++          render e.toString()
++        }
++      }
++    }
++
++    then:
++    def response = get()
++    response.headers.names == ['content-type', 'content-length'].toSet()
++    response.body.text == "java.lang.IllegalArgumentException: only ' ' and '\\t' are allowed after '\\n': value\r\nAnotherHeader: another value"
++  }
++
++}

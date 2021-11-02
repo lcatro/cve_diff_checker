@@ -1,0 +1,70 @@
+diff --git a/plugins/views_plugin_access_menu.inc b/plugins/views_plugin_access_menu.inc
+index 1d7632474f64b98aa7af9b75f9b100593714f1d1..82c9ceaab594898ce091e4467cd8918bb278edda 100644
+--- a/plugins/views_plugin_access_menu.inc
++++ b/plugins/views_plugin_access_menu.inc
+@@ -19,14 +19,17 @@ class views_plugin_access_menu extends views_plugin_access {
+    * In that case, we need to check access to the router path manually.
+    */
+   function access($account) {
++    // Retrieve the original router path for this view, and check access to it.
++    // Get this based on the display property of this access plugin, not the
++    // view itself. The 'current display' could be set to something else, like
++    // default.
++    $path = $this->display->handler->get_option('path');
++    $item = menu_get_item($path);
++
+     // If we are on the original router path, the menu system has checked access already.
+-    $item = menu_get_item();
+     if ($item['href'] == $_GET['q']) {
+       return TRUE;
+     }
+-    // Retrieve the original router path for this view, and check access to it.
+-    $path = $this->view->display_handler->get_option('path');
+-    $item = menu_get_item($path);
+ 
+     return $item['access'];
+   }
+diff --git a/tests/admin_views.test b/tests/admin_views.test
+index 7ffa63988108bf1b2c8073366a8d65464886fffa..727bded366b39d3f3721bce0d812f2e343f0d985 100644
+--- a/tests/admin_views.test
++++ b/tests/admin_views.test
+@@ -249,3 +249,39 @@ class AdminViewsPageDisplayTestCase extends AdminViewsWebTestCase {
+     return $view;
+   }
+ }
++
++/**
++ * Tests default views.
++ */
++class AdminViewsAccessHandlerTestCase extends AdminViewsWebTestCase {
++
++  public static function getInfo() {
++    return array(
++      'name' => 'Access handler',
++      'description' => 'Tests views_plugin_access_menu handler.',
++      'group' => 'Administration views',
++    );
++  }
++
++  function setUp() {
++    parent::setUp(array('node'));
++  }
++
++  /**
++   * Tests access handler via views/ajax.
++   */
++  function testAjaxAccess() {
++    $params = array(
++      'view_name' => 'admin_views_user',
++      'view_display_id' => 'system_1',
++    );
++    $response_data = $this->drupalGetAJAX('views/ajax', array('query' => $params));
++
++    $this->assertResponse(200);
++    // Check no views settings are returned.
++    $this->assertTrue(empty($response_data[0]['settings']['views']));
++    // The next item in the AJAX data will be the insert command containing the
++    // rendered view.
++    $this->assertTrue(empty($response_data[1]));
++  }
++}

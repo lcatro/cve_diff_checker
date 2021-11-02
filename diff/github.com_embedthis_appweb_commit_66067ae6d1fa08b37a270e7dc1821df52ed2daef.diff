@@ -1,0 +1,68 @@
+From 66067ae6d1fa08b37a270e7dc1821df52ed2daef Mon Sep 17 00:00:00 2001
+From: Michael O'Brien <mob@emobrien.com>
+Date: Tue, 6 Feb 2018 12:36:27 +1100
+Subject: [PATCH] FIX: array ref out of bounds with invalid time spec.
+
+---
+ src/mpr/mprLib.c | 33 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/src/mpr/mprLib.c b/src/mpr/mprLib.c
+index 660837675..26c01349e 100644
+--- a/src/mpr/mprLib.c
++++ b/src/mpr/mprLib.c
+@@ -27583,13 +27583,40 @@ static void validateTime(struct tm *tp, struct tm *defaults)
+         swapDayMonth(tp);
+     }
+ 
++    /*
++        Check for overflow. Underflow validated below.
++     */
++    if (tp->tm_sec > 60) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_min > 60) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_hour > 24) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_mday > 31) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_mon > 11) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_wday > 6) {
++        tp->tm_sec = -1;
++    }
++    if (tp->tm_yday > 366) {
++        tp->tm_sec = -1;
++    }
++
++#if UNUSED
+     if (tp->tm_year != -MAXINT && tp->tm_mon >= 0 && tp->tm_mday >= 0 && tp->tm_hour >= 0) {
+         /*  Everything defined */
+         return;
+     }
++#endif
+ 
+     /*
+-        Use empty time if missing
++        Use empty time if defaults missing
+      */
+     if (defaults == NULL) {
+         memset(&empty, 0, sizeof(empty));
+@@ -27640,8 +27667,12 @@ static void validateTime(struct tm *tp, struct tm *defaults)
+         tp->tm_mday = defaults->tm_mday;
+     }
+     if (tp->tm_yday < 0) {
++        if (tp->tm_mon <= 11) {
+         tp->tm_yday = (leapYear(tp->tm_year + 1900) ?
+             leapMonthStart[tp->tm_mon] : normalMonthStart[tp->tm_mon]) + tp->tm_mday - 1;
++        } else {
++            tp->tm_yday = defaults->tm_yday;
++        }
+     }
+     if (tp->tm_hour < 0) {
+         tp->tm_hour = defaults->tm_hour;

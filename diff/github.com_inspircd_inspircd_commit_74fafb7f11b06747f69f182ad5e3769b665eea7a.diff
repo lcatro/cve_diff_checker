@@ -1,0 +1,31 @@
+From 74fafb7f11b06747f69f182ad5e3769b665eea7a Mon Sep 17 00:00:00 2001
+From: Adam <Adam@anope.org>
+Date: Fri, 2 Sep 2016 22:57:03 -0400
+Subject: [PATCH] m_sasl: don't allow AUTHENTICATE with mechanisms with a space
+
+---
+ src/modules/m_sasl.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/modules/m_sasl.cpp b/src/modules/m_sasl.cpp
+index 9cb5592d1f..16a15357f5 100644
+--- a/src/modules/m_sasl.cpp
++++ b/src/modules/m_sasl.cpp
+@@ -189,6 +189,7 @@ class CommandAuthenticate : public Command
+ 		: Command(Creator, "AUTHENTICATE", 1), authExt(ext), cap(Cap)
+ 	{
+ 		works_before_reg = true;
++		allow_empty_last_param = false;
+ 	}
+ 
+ 	CmdResult Handle (const std::vector<std::string>& parameters, User *user)
+@@ -199,6 +200,9 @@ class CommandAuthenticate : public Command
+ 			if (!cap.ext.get(user))
+ 				return CMD_FAILURE;
+ 
++			if (parameters[0].find(' ') != std::string::npos || parameters[0][0] == ':')
++				return CMD_FAILURE;
++
+ 			SaslAuthenticator *sasl = authExt.get(user);
+ 			if (!sasl)
+ 				authExt.set(user, new SaslAuthenticator(user, parameters[0]));

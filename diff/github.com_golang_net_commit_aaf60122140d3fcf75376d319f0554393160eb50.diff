@@ -1,0 +1,83 @@
+From aaf60122140d3fcf75376d319f0554393160eb50 Mon Sep 17 00:00:00 2001
+From: Kunpei Sakai <namusyaka@gmail.com>
+Date: Sat, 14 Jul 2018 02:18:40 +0900
+Subject: [PATCH] html: remove special procedure for <template> in frameset im
+
+See more details: https://bugs.chromium.org/p/chromium/issues/detail?id=829668
+
+Updates golang/go#23071
+
+Change-Id: Ib9c963269f814c3f21d3784754729df57dcc8f90
+Reviewed-on: https://go-review.googlesource.com/123776
+Run-TryBot: Kunpei Sakai <namusyaka@gmail.com>
+TryBot-Result: Gobot Gobot <gobot@golang.org>
+Reviewed-by: Nigel Tao <nigeltao@golang.org>
+---
+ html/parse.go                     | 13 +------------
+ html/testdata/webkit/template.dat |  8 +-------
+ 2 files changed, 2 insertions(+), 19 deletions(-)
+
+diff --git a/html/parse.go b/html/parse.go
+index d5b0aee1a..1489ff920 100644
+--- a/html/parse.go
++++ b/html/parse.go
+@@ -1071,13 +1071,7 @@ func inBodyIM(p *parser) bool {
+ 				p.acknowledgeSelfClosingTag()
+ 			}
+ 			return true
+-		case a.Frame:
+-			// TODO: remove this divergence from the HTML5 spec.
+-			if p.oe.contains(a.Template) {
+-				p.addElement()
+-				return true
+-			}
+-		case a.Caption, a.Col, a.Colgroup, a.Head, a.Tbody, a.Td, a.Tfoot, a.Th, a.Thead, a.Tr:
++		case a.Caption, a.Col, a.Colgroup, a.Frame, a.Head, a.Tbody, a.Td, a.Tfoot, a.Th, a.Thead, a.Tr:
+ 			// Ignore the token.
+ 		default:
+ 			p.reconstructActiveFormattingElements()
+@@ -1925,11 +1919,6 @@ func inFramesetIM(p *parser) bool {
+ 			p.acknowledgeSelfClosingTag()
+ 		case a.Noframes:
+ 			return inHeadIM(p)
+-		case a.Template:
+-			// TODO: remove this divergence from the HTML5 spec.
+-			//
+-			// See https://bugs.chromium.org/p/chromium/issues/detail?id=829668
+-			return inTemplateIM(p)
+ 		}
+ 	case EndTagToken:
+ 		switch p.tok.DataAtom {
+diff --git a/html/testdata/webkit/template.dat b/html/testdata/webkit/template.dat
+index 2d6c0a733..f130961ce 100644
+--- a/html/testdata/webkit/template.dat
++++ b/html/testdata/webkit/template.dat
+@@ -477,9 +477,7 @@
+ | <html>
+ |   <head>
+ |   <frameset>
+-|     <template>
+-|       content
+-|         <frame>
++|     <frame>
+ 
+ #data
+ <template><frame></frame></frameset><frame></frame></template>
+@@ -489,8 +487,6 @@
+ |   <head>
+ |     <template>
+ |       content
+-|         <frame>
+-|         <frame>
+ |   <body>
+ 
+ #data
+@@ -823,8 +819,6 @@
+ |   <head>
+ |     <template>
+ |       content
+-|         <frame>
+-|         <frame>
+ |   <body>
+ 
+ #data

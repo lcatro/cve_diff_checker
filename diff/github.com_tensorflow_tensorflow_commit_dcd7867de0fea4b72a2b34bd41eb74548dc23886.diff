@@ -1,0 +1,25 @@
+From dcd7867de0fea4b72a2b34bd41eb74548dc23886 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 5 May 2021 08:38:03 -0700
+Subject: [PATCH] Fix heap buffer overflow
+
+PiperOrigin-RevId: 372132844
+Change-Id: Idef9895efaf145f2b1c23d31983601ec980cd5e4
+---
+ tensorflow/core/kernels/maxpooling_op.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/maxpooling_op.cc b/tensorflow/core/kernels/maxpooling_op.cc
+index b60d54533be68..003d2e94b99cd 100644
+--- a/tensorflow/core/kernels/maxpooling_op.cc
++++ b/tensorflow/core/kernels/maxpooling_op.cc
+@@ -1014,6 +1014,9 @@ struct LaunchMaxPoolingGradWithArgmax<CPUDevice, T> {
+         const int input_start = start * input_size_per_batch;
+         const int input_end = limit * input_size_per_batch;
+         for (int64 index = input_start; index < input_end; index++) {
++          if (index >= argmax.NumElements()) {
++            break;
++          }
+           int64 grad_out_index = argmax_flat(index);
+           if (!include_batch_in_index) {
+             const int64 cur_batch = index / input_size_per_batch;

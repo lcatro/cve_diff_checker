@@ -1,0 +1,38 @@
+From 8aa0832bd449c44ec300da4189bd8ed4e036140c Mon Sep 17 00:00:00 2001
+From: Lukas Reschke <lukas@owncloud.com>
+Date: Fri, 1 Jul 2016 15:00:31 +0200
+Subject: [PATCH] Match for /../
+
+---
+ apps/files/js/filelist.js           | 2 +-
+ apps/files/tests/js/filelistSpec.js | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/apps/files/js/filelist.js b/apps/files/js/filelist.js
+index 649661a5f013..c0d72a0f1948 100644
+--- a/apps/files/js/filelist.js
++++ b/apps/files/js/filelist.js
+@@ -1333,7 +1333,7 @@
+ 		 * @param changeUrl true to also update the URL, false otherwise (default)
+ 		 */
+ 		_setCurrentDir: function(targetDir, changeUrl) {
+-			targetDir = targetDir.replace(/\\/g, '/').replace(/\.\.\//g, '');
++			targetDir = targetDir.replace(/\\/g, '/').replace(/\/\.\.\//g, '/');
+ 			var previousDir = this.getCurrentDirectory(),
+ 				baseDir = OC.basename(targetDir);
+ 
+diff --git a/apps/files/tests/js/filelistSpec.js b/apps/files/tests/js/filelistSpec.js
+index bab3d45be4ae..9dbdb889eac7 100644
+--- a/apps/files/tests/js/filelistSpec.js
++++ b/apps/files/tests/js/filelistSpec.js
+@@ -1327,6 +1327,10 @@ describe('OCA.Files.FileList tests', function() {
+ 			fileList.changeDirectory('/another\\subdir/../foo\\../bar\\..\\file/..\\folder/../');
+ 			expect(fileList.getCurrentDirectory()).toEqual('/another/subdir/foo/bar/file/folder/');
+ 		});
++		it('does not convert folders with a ".." in the name', function() {
++			fileList.changeDirectory('/abc../def');
++			expect(fileList.getCurrentDirectory()).toEqual('/abc../def');
++		});
+ 		it('switches to root dir when current directory does not exist', function() {
+ 			fileList.changeDirectory('/unexist');
+ 			deferredList.reject(404);

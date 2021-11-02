@@ -1,0 +1,29 @@
+From 96f364a1ca3009f98980021c4b32be5fdcca33a1 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Mon, 2 Aug 2021 13:27:01 -0700
+Subject: [PATCH] Validate axis input in tf.raw_ops.QuantizeAndDequantizeV4Grad
+
+PiperOrigin-RevId: 388291385
+Change-Id: I3bab68dc61d935afa96c0da021a7b722c6dc8dc8
+---
+ tensorflow/core/kernels/quantize_and_dequantize_op.cc | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantize_and_dequantize_op.cc b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+index 540d900f9f869..d63a49a04be62 100644
+--- a/tensorflow/core/kernels/quantize_and_dequantize_op.cc
++++ b/tensorflow/core/kernels/quantize_and_dequantize_op.cc
+@@ -158,6 +158,13 @@ class QuantizeAndDequantizeV4GradientOp : public OpKernel {
+     Tensor* input_backprop = nullptr;
+     OP_REQUIRES_OK(ctx,
+                    ctx->allocate_output(0, input.shape(), &input_backprop));
++    OP_REQUIRES(
++        ctx, axis_ >= -1,
++        errors::InvalidArgument("Axis must be at least -1. Found ", axis_));
++    OP_REQUIRES(ctx, (axis_ == -1 || axis_ < input.shape().dims()),
++                errors::InvalidArgument(
++                    "Axis should be -1 or 0 or a positive value less than ",
++                    input.shape().dims(), "but given axis value was ", axis_));
+ 
+     OP_REQUIRES(
+         ctx, input.IsSameSize(gradient),

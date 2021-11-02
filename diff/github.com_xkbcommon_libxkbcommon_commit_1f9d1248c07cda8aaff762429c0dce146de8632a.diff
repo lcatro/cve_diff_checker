@@ -1,0 +1,32 @@
+From 1f9d1248c07cda8aaff762429c0dce146de8632a Mon Sep 17 00:00:00 2001
+From: Ran Benita <ran234@gmail.com>
+Date: Sat, 10 Mar 2018 23:10:47 +0200
+Subject: [PATCH] xkbcomp: fix stack overflow when evaluating boolean negation
+
+The expression evaluator would go into an infinite recursion when
+evaluating something like this as a boolean: `!True`. Instead of
+recursing to just `True` and negating, it recursed to `!True` itself
+again.
+
+Bug inherited from xkbcomp.
+
+Caught with the afl fuzzer.
+
+Signed-off-by: Ran Benita <ran234@gmail.com>
+---
+ src/xkbcomp/expr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/xkbcomp/expr.c b/src/xkbcomp/expr.c
+index 3ff3c18e..5d43cbaa 100644
+--- a/src/xkbcomp/expr.c
++++ b/src/xkbcomp/expr.c
+@@ -165,7 +165,7 @@ ExprResolveBoolean(struct xkb_context *ctx, const ExprDef *expr,
+ 
+     case EXPR_INVERT:
+     case EXPR_NOT:
+-        ok = ExprResolveBoolean(ctx, expr, set_rtrn);
++        ok = ExprResolveBoolean(ctx, expr->unary.child, set_rtrn);
+         if (ok)
+             *set_rtrn = !*set_rtrn;
+         return ok;

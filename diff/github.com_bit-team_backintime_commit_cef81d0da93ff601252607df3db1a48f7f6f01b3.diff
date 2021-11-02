@@ -1,0 +1,56 @@
+From cef81d0da93ff601252607df3db1a48f7f6f01b3 Mon Sep 17 00:00:00 2001
+From: Germar Reitze <germar.reitze@gmail.com>
+Date: Tue, 7 Nov 2017 21:32:34 +0100
+Subject: [PATCH] fix critical bug: shell injection in notify-send (fixes #834)
+
+---
+ CHANGES                     |  3 +++
+ qt4/plugins/notifyplugin.py | 11 ++++++-----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/CHANGES b/CHANGES
+index 07f8bc5e..d3df0288 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -1,5 +1,8 @@
+ Back In Time
+ 
++Version 1.1.24
++* fix critical bug: shell injection in notify-send (https://github.com/bit-team/backintime/issues/834)
++
+ Version 1.1.22
+ * fix bug: stat free space for snapshot folder instead of backintime folder (https://github.com/bit-team/backintime/issues/733)
+ * backport bug fix: backintime root crontab doesn't run; missinng line-feed 0x0A on last line (https://github.com/bit-team/backintime/issues/781)
+diff --git a/qt4/plugins/notifyplugin.py b/qt4/plugins/notifyplugin.py
+index 1ab063ec..ae019221 100644
+--- a/qt4/plugins/notifyplugin.py
++++ b/qt4/plugins/notifyplugin.py
+@@ -19,6 +19,7 @@
+ import os
+ import pluginmanager
+ import gettext
++import subprocess
+ 
+ _=gettext.gettext
+ 
+@@ -64,15 +65,15 @@ def on_new_snapshot( self, snapshot_id, snapshot_path ):
+ 
+     def on_message( self, profile_id, profile_name, level, message, timeout ):
+         if 1 == level:
+-            cmd = "notify-send "
++            cmd = ['notify-send']
+             if timeout > 0:
+-                cmd = cmd + " -t %s" % (1000 * timeout)
++                cmd.extend(['-t', str(1000 * timeout)])
+ 
+             title = "Back In Time (%s) : %s" % (self.user, profile_name)
+             message = message.replace("\n", ' ')
+             message = message.replace("\r", '')
+ 
+-            cmd = cmd + " \"%s\" \"%s\"" % (title, message)
+-            print(cmd)
+-            os.system(cmd)
++            cmd.append(title)
++            cmd.append(message)
++            subprocess.Popen(cmd).communicate()
+         return

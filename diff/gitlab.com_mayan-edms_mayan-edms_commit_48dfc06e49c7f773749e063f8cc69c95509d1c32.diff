@@ -1,0 +1,53 @@
+From 48dfc06e49c7f773749e063f8cc69c95509d1c32 Mon Sep 17 00:00:00 2001
+From: Roberto Rosario <roberto.rosario.gonzalez@gmail.com>
+Date: Thu, 16 Aug 2018 19:26:37 -0400
+Subject: [PATCH] Cabinets app: Escape cabinet labels to avoid possible exploit
+ of cross site scripting. Thanks to Lokesh (@lokesh1095) for the report and
+ proposed solutions. Closes GitLab issue #495.
+
+Signed-off-by: Roberto Rosario <roberto.rosario.gonzalez@gmail.com>
+---
+ HISTORY.rst                    | 3 +++
+ mayan/apps/cabinets/widgets.py | 5 +++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/HISTORY.rst b/HISTORY.rst
+index 4d4e14628e..a99b449954 100644
+--- a/HISTORY.rst
++++ b/HISTORY.rst
+@@ -39,6 +39,9 @@
+ - Appearance app: avoid setting window.location directly to avoid exploit
+   of cross site scripting. Thanks to Lokesh (@lokesh1095) for the report
+   and solution. Closes GitLab issue #494.
++- Cabinets app: Escape cabinet labels to avoid possible exploit of
++  cross site scripting. Thanks to Lokesh (@lokesh1095) for the report
++  and proposed solutions. Closes GitLab issue #495.
+ 
+ 3.0.1 (2018-07-08)
+ =================
+diff --git a/mayan/apps/cabinets/widgets.py b/mayan/apps/cabinets/widgets.py
+index d36dbc83dc..d7f20c50d1 100644
+--- a/mayan/apps/cabinets/widgets.py
++++ b/mayan/apps/cabinets/widgets.py
+@@ -1,15 +1,16 @@
+ from __future__ import unicode_literals
+ 
+ from django.apps import apps
+-from django.utils.html import format_html_join
++from django.utils.html import format_html, format_html_join
+ 
+ from .permissions import permission_cabinet_view
+ 
+ 
+ def jstree_data(node, selected_node):
+     result = []
++
+     result.append('{')
+-    result.append('"text": "{}",'.format(node.label))
++    result.append(format_html('"text": "{}",', node.label))
+     result.append(
+         '"state": {{ "opened": true, "selected": {} }},'.format(
+             'true' if node == selected_node else 'false'
+-- 
+GitLab
+

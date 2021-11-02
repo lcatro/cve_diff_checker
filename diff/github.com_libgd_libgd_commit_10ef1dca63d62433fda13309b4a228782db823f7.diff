@@ -1,0 +1,127 @@
+From 10ef1dca63d62433fda13309b4a228782db823f7 Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Tue, 12 Jul 2016 19:23:13 +0200
+Subject: [PATCH] Unsupported TGA bpp/alphabit combinations should error
+ gracefully
+
+Currently, only 24bpp without alphabits and 32bpp with 8 alphabits are
+really supported. All other combinations will be rejected with a warning.
+---
+ src/gd_tga.c             |  16 ++++++----------
+ tests/tga/.gitignore     |   1 +
+ tests/tga/CMakeLists.txt |   1 +
+ tests/tga/Makemodule.am  |   4 +++-
+ tests/tga/bug00247a.c    |  19 +++++++++++++++++++
+ tests/tga/bug00247a.tga  | Bin 0 -> 36 bytes
+ 6 files changed, 30 insertions(+), 11 deletions(-)
+ create mode 100644 tests/tga/bug00247a.c
+ create mode 100644 tests/tga/bug00247a.tga
+
+diff --git a/src/gd_tga.c b/src/gd_tga.c
+index 20fe2d273..b4f8fa629 100644
+--- a/src/gd_tga.c
++++ b/src/gd_tga.c
+@@ -99,7 +99,7 @@ BGD_DECLARE(gdImagePtr) gdImageCreateFromTgaCtx(gdIOCtx* ctx)
+ 			if (tga->bits == TGA_BPP_24) {
+ 				*tpix = gdTrueColor(tga->bitmap[bitmap_caret + 2], tga->bitmap[bitmap_caret + 1], tga->bitmap[bitmap_caret]);
+ 				bitmap_caret += 3;
+-			} else if (tga->bits == TGA_BPP_32 || tga->alphabits) {
++			} else if (tga->bits == TGA_BPP_32 && tga->alphabits) {
+ 				register int a = tga->bitmap[bitmap_caret + 3];
+ 
+ 				*tpix = gdTrueColorAlpha(tga->bitmap[bitmap_caret + 2], tga->bitmap[bitmap_caret + 1], tga->bitmap[bitmap_caret], gdAlphaMax - (a >> 1));
+@@ -159,16 +159,12 @@ int read_header_tga(gdIOCtx *ctx, oTga *tga)
+ 	printf("wxh: %i %i\n", tga->width, tga->height);
+ #endif
+ 
+-	switch(tga->bits) {
+-	case 8:
+-	case 16:
+-	case 24:
+-	case 32:
+-		break;
+-	default:
+-		gd_error("bps %i not supported", tga->bits);
++	if (!((tga->bits == TGA_BPP_24 && tga->alphabits == 0)
++		|| (tga->bits == TGA_BPP_32 && tga->alphabits == 8)))
++	{
++		gd_error_ex(GD_WARNING, "gd-tga: %u bits per pixel with %u alpha bits not supported\n",
++			tga->bits, tga->alphabits);
+ 		return -1;
+-		break;
+ 	}
+ 
+ 	tga->ident = NULL;
+diff --git a/tests/tga/.gitignore b/tests/tga/.gitignore
+index f811a246c..14bf59fe6 100644
+--- a/tests/tga/.gitignore
++++ b/tests/tga/.gitignore
+@@ -1,3 +1,4 @@
+ /bug00084
+ /bug00247
++/bug00247a
+ /tga_null
+diff --git a/tests/tga/CMakeLists.txt b/tests/tga/CMakeLists.txt
+index a2553d1db..52a4223ca 100644
+--- a/tests/tga/CMakeLists.txt
++++ b/tests/tga/CMakeLists.txt
+@@ -2,6 +2,7 @@ LIST(APPEND TESTS_FILES
+ 	tga_null
+ 	bug00084
+ 	bug00247
++	bug00247a
+ )
+ 
+ ADD_GD_TESTS()
+diff --git a/tests/tga/Makemodule.am b/tests/tga/Makemodule.am
+index 93063a33d..0052a2756 100644
+--- a/tests/tga/Makemodule.am
++++ b/tests/tga/Makemodule.am
+@@ -1,9 +1,11 @@
+ libgd_test_programs += \
+ 	tga/bug00084 \
+ 	tga/bug00247 \
++	tag/bug00247a \
+ 	tga/tga_null
+ 
+ EXTRA_DIST += \
+ 	tga/CMakeLists.txt \
+ 	tga/bug00084.tga \
+-	tga/bug00247.tga
++	tga/bug00247.tga \
++	tga/bug00247a.tga
+diff --git a/tests/tga/bug00247a.c b/tests/tga/bug00247a.c
+new file mode 100644
+index 000000000..676efa3a6
+--- /dev/null
++++ b/tests/tga/bug00247a.c
+@@ -0,0 +1,19 @@
++/*
++We test that a 8bpp TGA file will be gracefully rejected by
++gdImageCreateFromTga().
++*/
++
++#include <stdio.h>
++
++#include "gd.h"
++#include "gdtest.h"
++
++int main(int argc, char **argv)
++{
++    gdImagePtr im;
++    FILE *fp = gdTestFileOpen("tga/bug00247a.tga");
++    im = gdImageCreateFromTga(fp);
++    gdTestAssert(im == NULL);
++    fclose(fp);
++    return gdNumFailures();
++}
+diff --git a/tests/tga/bug00247a.tga b/tests/tga/bug00247a.tga
+new file mode 100644
+index 0000000000000000000000000000000000000000..65e55abeae2204d745f1e2a5eb45bb64f8e0bf7c
+GIT binary patch
+literal 36
+mcmWN@u>k-e3<5Bq75M)XKh#V)R3T^?>`yNd!8Sadk+TmJngJ#N
+
+literal 0
+HcmV?d00001
+

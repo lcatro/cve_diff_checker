@@ -1,0 +1,26 @@
+From 90b71c017a7fa9732fe45fd21b245ee051b1f548 Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Mon, 11 Jun 2018 03:28:35 +0200
+Subject: [PATCH] Fix #10293 - Use-after-free in r_anal_bb_free()
+
+---
+ libr/anal/bb.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/libr/anal/bb.c b/libr/anal/bb.c
+index 81c5fab1432..a693c55856d 100644
+--- a/libr/anal/bb.c
++++ b/libr/anal/bb.c
+@@ -62,7 +62,11 @@ R_API void r_anal_bb_free(RAnalBlock *bb) {
+ 		bb->failbb->prev = NULL;
+ 		bb->failbb = NULL;
+ 	}
+-	R_FREE (bb);
++	if (bb->next) {
++		// avoid double free
++		bb->next->prev = NULL;
++	}
++	R_FREE (bb); // double free
+ }
+ 
+ R_API RList *r_anal_bb_list_new() {

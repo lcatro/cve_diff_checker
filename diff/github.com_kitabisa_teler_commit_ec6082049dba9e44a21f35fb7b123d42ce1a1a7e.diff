@@ -1,0 +1,33 @@
+From ec6082049dba9e44a21f35fb7b123d42ce1a1a7e Mon Sep 17 00:00:00 2001
+From: Dwi Siswanto <dwi.siswanto98@gmail.com>
+Date: Mon, 2 Nov 2020 21:09:38 +0700
+Subject: [PATCH] :hammer: Fix segmentation fault of syscall
+
+If teler is run via the docker image, the syscall function cannot allocate and return a nil pointer to address.
+---
+ pkg/errors/abort.go | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/pkg/errors/abort.go b/pkg/errors/abort.go
+index 736ce7b9..97220efd 100644
+--- a/pkg/errors/abort.go
++++ b/pkg/errors/abort.go
+@@ -2,10 +2,17 @@
+ 
+ package errors
+ 
+-import "syscall"
++import (
++	"os"
++	"syscall"
++)
+ 
+ // Abort will terminate & sends SIGTERM to process
+ func Abort(i ...int) {
++	if _, err := os.Stat("/.dockerenv"); err == nil {
++		os.Exit(i[0])
++	}
++
+ 	pgid, err := syscall.Getpgid(syscall.Getpid())
+ 	if err != nil {
+ 		Exit(err.Error())

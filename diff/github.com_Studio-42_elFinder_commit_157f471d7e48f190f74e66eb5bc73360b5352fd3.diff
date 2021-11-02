@@ -1,0 +1,35 @@
+From 157f471d7e48f190f74e66eb5bc73360b5352fd3 Mon Sep 17 00:00:00 2001
+From: nao-pon <hypweb@gmail.com>
+Date: Wed, 28 Mar 2018 09:53:14 +0900
+Subject: [PATCH] [php:security] fix directory traversal vulnerability
+
+Fixed vulnerability that can delete arbitrary files with zipdl command.
+
+Fixed it because there was a possibility that files that can be deleted
+may be deleted by the execution account of the web server.
+
+Reviewed-by: Ravindra Rajaram <ravindra.rajaram@ca.com> and Kevin Kotas <kevin.kotas@ca.com>
+---
+ php/elFinder.class.php | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/php/elFinder.class.php b/php/elFinder.class.php
+index 84b5852ebf..0ed8272fde 100644
+--- a/php/elFinder.class.php
++++ b/php/elFinder.class.php
+@@ -1623,10 +1623,14 @@ protected function zipdl($args) {
+ 				return array('error' => 'File not found', 'header' => $h404, 'raw' => true);
+ 			}
+ 			$file = $targets[1];
++			// checking the validity of the file parameter
++			if (strpos($file, DIRECTORY_SEPARATOR) !== false) {
++				return array('error' => 'File not found', 'header' => $h404, 'raw' => true);
++			}
+ 			$path = $volume->getTempPath().DIRECTORY_SEPARATOR.$file;
+ 			// register auto delete on shutdown
+ 			$GLOBALS['elFinderTempFiles'][$path] = true;
+-			if (!is_readable($path)) {
++			if (!is_writable($path)) {
+ 				return array('error' => 'File not found', 'header' => $h404, 'raw' => true);
+ 			}
+ 			$name = $targets[2];

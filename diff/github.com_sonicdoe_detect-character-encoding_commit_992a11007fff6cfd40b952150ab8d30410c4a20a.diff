@@ -1,0 +1,60 @@
+From 992a11007fff6cfd40b952150ab8d30410c4a20a Mon Sep 17 00:00:00 2001
+From: Jakob Krigovsky <jakob@krigovsky.com>
+Date: Tue, 6 Nov 2018 19:10:49 +0100
+Subject: [PATCH] Return null if no charset matches
+
+Fixes a segmentation fault if no charset matches. According to http://icu-project.org/apiref/icu4c/ucsdet_8h.html#aff2633b5055d472cff4108d94f97cf7d, ucsdet_detect() may return NULL if no charset matches.
+
+Fixes: #15
+Co-authored-by: chenzhip <letme2010@gmail.com>
+---
+ README.md      | 2 ++
+ icuWrapper.cpp | 6 ++++++
+ test/index.js  | 4 ++++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/README.md b/README.md
+index 80ace35..7cf48de 100644
+--- a/README.md
++++ b/README.md
+@@ -27,6 +27,8 @@ console.log(charsetMatch);
+ // }
+ ```
+ 
++detect-character-encoding may return `null` if no charset matches.
++
+ ## Supported operating systems
+ 
+ - macOS High Sierra
+diff --git a/icuWrapper.cpp b/icuWrapper.cpp
+index a228fe0..78282d5 100644
+--- a/icuWrapper.cpp
++++ b/icuWrapper.cpp
+@@ -40,6 +40,12 @@ NAN_METHOD(DetectCharacterEncoding) {
+ 		return;
+ 	}
+ 
++	if(charsetMatch == NULL) {
++		info.GetReturnValue().Set(Nan::Null());
++		ucsdet_close(charsetDetector);
++		return;
++	}
++
+ 	const char *charsetName = ucsdet_getName(charsetMatch, &errorCode);
+ 
+ 	if(U_FAILURE(errorCode)) {
+diff --git a/test/index.js b/test/index.js
+index ea484e6..a955479 100644
+--- a/test/index.js
++++ b/test/index.js
+@@ -18,6 +18,10 @@ it('should return a confidence value', () => {
+ 	assert(typeof detectCharacterEncoding(getFixture('utf-8.txt')).confidence === 'number');
+ });
+ 
++it('should return null if no charset matches', () => {
++	assert.strictEqual(detectCharacterEncoding(Buffer.from([0xAB])), null);
++});
++
+ it('should throw a TypeError if argument is not a buffer', () => {
+ 	assert.throws(() => {
+ 		detectCharacterEncoding('string');

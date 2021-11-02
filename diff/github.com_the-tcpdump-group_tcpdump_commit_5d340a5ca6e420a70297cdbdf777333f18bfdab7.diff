@@ -1,0 +1,244 @@
+From 5d340a5ca6e420a70297cdbdf777333f18bfdab7 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Tue, 15 Aug 2017 00:05:32 +0100
+Subject: [PATCH] CVE-2017-13052/CFM: refine decoding of the Sender ID TLV
+
+In cfm_network_addr_print() add a length argument and use it to validate
+the input buffer.
+
+In cfm_print() add a length check for MAC address chassis ID. Supply
+cfm_network_addr_print() with the length of its buffer and a correct
+pointer to the buffer (it was off-by-one before). Change some error
+handling blocks to skip to the next TLV in the current PDU rather than to
+stop decoding the PDU. Print the management domain and address contents,
+although in hex only so far.
+
+Add some comments to clarify the code flow and to tell exact sections in
+IEEE standard documents. Add new error messages and make some existing
+messages more specific.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-cfm.c                   |  62 +++++++++++++++++++++++++++++-----
+ tests/TESTLIST                |   1 +
+ tests/cfm_sender_id-oobr.out  |   8 +++++
+ tests/cfm_sender_id-oobr.pcap | Bin 0 -> 94 bytes
+ 4 files changed, 62 insertions(+), 9 deletions(-)
+ create mode 100644 tests/cfm_sender_id-oobr.out
+ create mode 100644 tests/cfm_sender_id-oobr.pcap
+
+diff --git a/print-cfm.c b/print-cfm.c
+index 0fe57100d..85aebb131 100644
+--- a/print-cfm.c
++++ b/print-cfm.c
+@@ -217,7 +217,7 @@ static const struct tok cfm_tlv_senderid_chassisid_values[] = {
+ 
+ static int
+ cfm_network_addr_print(netdissect_options *ndo,
+-                       register const u_char *tptr)
++                       register const u_char *tptr, const u_int length)
+ {
+     u_int network_addr_type;
+     u_int hexdump =  FALSE;
+@@ -227,6 +227,11 @@ cfm_network_addr_print(netdissect_options *ndo,
+      * 802.1ab specifies that this field width
+      * is only once octet
+      */
++    if (length < 1) {
++        ND_PRINT((ndo, "\n\t  Network Address Type (invalid, no data"));
++        return hexdump;
++    }
++    /* The calling function must make any due ND_TCHECK calls. */
+     network_addr_type = *tptr;
+     ND_PRINT((ndo, "\n\t  Network Address Type %s (%u)",
+            tok2str(af_values, "Unknown", network_addr_type),
+@@ -237,10 +242,20 @@ cfm_network_addr_print(netdissect_options *ndo,
+      */
+     switch(network_addr_type) {
+     case AFNUM_INET:
++        if (length != 1 + 4) {
++            ND_PRINT((ndo, "(invalid IPv4 address length %u)", length - 1));
++            hexdump = TRUE;
++            break;
++        }
+         ND_PRINT((ndo, ", %s", ipaddr_string(ndo, tptr + 1)));
+         break;
+ 
+     case AFNUM_INET6:
++        if (length != 1 + 16) {
++            ND_PRINT((ndo, "(invalid IPv6 address length %u)", length - 1));
++            hexdump = TRUE;
++            break;
++        }
+         ND_PRINT((ndo, ", %s", ip6addr_string(ndo, tptr + 1)));
+         break;
+ 
+@@ -584,11 +599,12 @@ cfm_print(netdissect_options *ndo,
+ 
+             if (cfm_tlv_len < 1) {
+                 ND_PRINT((ndo, " (too short, must be >= 1)"));
+-                return;
++                goto next_tlv;
+             }
+ 
+             /*
+              * Get the Chassis ID length and check it.
++             * IEEE 802.1Q-2014 Section 21.5.3.1
+              */
+             chassis_id_length = *tptr;
+             tptr++;
+@@ -596,9 +612,14 @@ cfm_print(netdissect_options *ndo,
+             cfm_tlv_len--;
+ 
+             if (chassis_id_length) {
++                /*
++                 * IEEE 802.1Q-2014 Section 21.5.3.2: Chassis ID Subtype, references
++                 * IEEE 802.1AB-2005 Section 9.5.2.2, subsequently
++                 * IEEE 802.1AB-2016 Section 8.5.2.2: chassis ID subtype
++                 */
+                 if (cfm_tlv_len < 1) {
+                     ND_PRINT((ndo, "\n\t  (TLV too short)"));
+-                    return;
++                    goto next_tlv;
+                 }
+                 chassis_id_type = *tptr;
+                 cfm_tlv_len--;
+@@ -611,16 +632,22 @@ cfm_print(netdissect_options *ndo,
+ 
+                 if (cfm_tlv_len < chassis_id_length) {
+                     ND_PRINT((ndo, "\n\t  (TLV too short)"));
+-                    return;
++                    goto next_tlv;
+                 }
+ 
++                /* IEEE 802.1Q-2014 Section 21.5.3.3: Chassis ID */
+                 switch (chassis_id_type) {
+                 case CFM_CHASSIS_ID_MAC_ADDRESS:
++                    if (chassis_id_length != ETHER_ADDR_LEN) {
++                        ND_PRINT((ndo, " (invalid MAC address length)"));
++                        hexdump = TRUE;
++                        break;
++                    }
+                     ND_PRINT((ndo, "\n\t  MAC %s", etheraddr_string(ndo, tptr + 1)));
+                     break;
+ 
+                 case CFM_CHASSIS_ID_NETWORK_ADDRESS:
+-                    hexdump |= cfm_network_addr_print(ndo, tptr);
++                    hexdump |= cfm_network_addr_print(ndo, tptr + 1, chassis_id_length);
+                     break;
+ 
+                 case CFM_CHASSIS_ID_INTERFACE_NAME: /* fall through */
+@@ -643,38 +670,53 @@ cfm_print(netdissect_options *ndo,
+ 
+             /*
+              * Check if there is a Management Address.
++             * IEEE 802.1Q-2014 Section 21.5.3.4: Management Address Domain Length
++             * This and all subsequent fields are not present if the TLV length
++             * allows only the above fields.
+              */
+             if (cfm_tlv_len == 0) {
+                 /* No, there isn't; we're done. */
+-                return;
++                break;
+             }
+ 
++            /* Here mgmt_addr_length stands for the management domain length. */
+             mgmt_addr_length = *tptr;
+             tptr++;
+             tlen--;
+             cfm_tlv_len--;
++            ND_PRINT((ndo, "\n\t  Management Address Domain Length %u", mgmt_addr_length));
+             if (mgmt_addr_length) {
++                /* IEEE 802.1Q-2014 Section 21.5.3.5: Management Address Domain */
+                 if (cfm_tlv_len < mgmt_addr_length) {
+                     ND_PRINT((ndo, "\n\t  (TLV too short)"));
+-                    return;
++                    goto next_tlv;
+                 }
+                 cfm_tlv_len -= mgmt_addr_length;
+                 /*
+                  * XXX - this is an OID; print it as such.
+                  */
++                hex_print(ndo, "\n\t  Management Address Domain: ", tptr, mgmt_addr_length);
+                 tptr += mgmt_addr_length;
+                 tlen -= mgmt_addr_length;
+ 
++                /*
++                 * IEEE 802.1Q-2014 Section 21.5.3.6: Management Address Length
++                 * This field is present if Management Address Domain Length is not 0.
++                 */
+                 if (cfm_tlv_len < 1) {
+-                    ND_PRINT((ndo, "\n\t  (TLV too short)"));
+-                    return;
++                    ND_PRINT((ndo, " (Management Address Length is missing)"));
++                    hexdump = TRUE;
++                    break;
+                 }
+ 
++                /* Here mgmt_addr_length stands for the management address length. */
+                 mgmt_addr_length = *tptr;
+                 tptr++;
+                 tlen--;
+                 cfm_tlv_len--;
++                ND_PRINT((ndo, "\n\t  Management Address Length %u", mgmt_addr_length));
+                 if (mgmt_addr_length) {
++                    /* IEEE 802.1Q-2014 Section 21.5.3.7: Management Address */
+                     if (cfm_tlv_len < mgmt_addr_length) {
+                         ND_PRINT((ndo, "\n\t  (TLV too short)"));
+                         return;
+@@ -683,6 +725,7 @@ cfm_print(netdissect_options *ndo,
+                     /*
+                      * XXX - this is a TransportDomain; print it as such.
+                      */
++                    hex_print(ndo, "\n\t  Management Address: ", tptr, mgmt_addr_length);
+                     tptr += mgmt_addr_length;
+                     tlen -= mgmt_addr_length;
+                 }
+@@ -706,6 +749,7 @@ cfm_print(netdissect_options *ndo,
+         if (hexdump || ndo->ndo_vflag > 1)
+             print_unknown_data(ndo, tlv_ptr, "\n\t  ", cfm_tlv_len);
+ 
++next_tlv:
+         tptr+=cfm_tlv_len;
+         tlen-=cfm_tlv_len;
+     }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index d770f5ccf..874876924 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -573,6 +573,7 @@ rsvp_uni-oobr-3	rsvp_uni-oobr-3.pcap	rsvp_uni-oobr-3.out	-v -c3
+ rpki-rtr-oob		rpki-rtr-oob.pcap	rpki-rtr-oob.out	-v -c1
+ lldp_8023_mtu-oobr	lldp_8023_mtu-oobr.pcap	lldp_8023_mtu-oobr.out	-v -c1
+ bgp_vpn_rt-oobr	bgp_vpn_rt-oobr.pcap	bgp_vpn_rt-oobr.out	-v -c1
++cfm_sender_id-oobr	cfm_sender_id-oobr.pcap	cfm_sender_id-oobr.out	-v -c1
+ 
+ # bad packets from Katie Holly
+ mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
+diff --git a/tests/cfm_sender_id-oobr.out b/tests/cfm_sender_id-oobr.out
+new file mode 100644
+index 000000000..4d294af90
+--- /dev/null
++++ b/tests/cfm_sender_id-oobr.out
+@@ -0,0 +1,8 @@
++CFMv0 unknown (255), MD Level 0, length 65556
++	First TLV offset 0
++	  0x0000:  ff00 0001 0004 0104 9a00 000c fb
++	Unknown TLV (0xff), length 0
++	Sender ID TLV (0x01), length 4
++	  Chassis-ID Type MAC address (4), Chassis-ID length 1 (invalid MAC address length)
++	  Management Address Domain Length 0
++	End TLV (0x00)
+diff --git a/tests/cfm_sender_id-oobr.pcap b/tests/cfm_sender_id-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..30d9a1feac8fa18dc5e37dd292482415c2a849f9
+GIT binary patch
+literal 94
+zcmca|c+)~A1{Q|@zZn=AfIuFIK@8q)5y8w10xU{Ewh~B$=eOsyx&sFfESNoa^;w4h
+l3?RhFz{1Ef3nItC;PO*UL*C*3w|}e*GQV#BS72yZ3jmAw97+HH
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,167 @@
+From e4d7a885bca8251517ada85545656bfe7a2e6834 Mon Sep 17 00:00:00 2001
+From: Sourabh Banerjee <sbanerje@codeaurora.org>
+Date: Wed, 20 Dec 2017 00:30:29 +0530
+Subject: inittab: start qmmf user space as non root
+
+qmmf-server, ipc-webserver and qmmf-webserver started as non-root process
+
+Change-Id: Ic7785b2bbd122c71f9c1c38f7c318b87b051336d
+---
+ .../files/apq8053/find_partitions.sh               |  7 +++++-
+ .../files/apq8053/firmware-links.sh                |  4 ++--
+ recipes-core/busybox/files/apq8053/mdev.conf       | 11 +++++----
+ .../sysvinit-inittab-2.88dsf/apq8053/inittab       | 10 ++++----
+ .../images/apq8053/apq8053-fsconfig.conf           | 27 ++++++++++++++++++++++
+ recipes-products/images/machine-image.bb           |  2 +-
+ 6 files changed, 47 insertions(+), 14 deletions(-)
+
+diff --git a/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh b/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
+index 92ca56f..2301c13 100755
+--- a/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
++++ b/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
+@@ -37,11 +37,16 @@ FindAndMountEXT4 () {
+    mkdir -p $dir
+    mount -t ext4 $mmc_block_device $dir -o $flags
+    /sbin/restorecon -R $2
++
++   if [ $1 == "dsp" ]; then
++      chown -R system:system $2
++      mount -o ro,remount /dsp
++   fi
+ }
+ 
+ 
+ FindAndMountEXT4 userdata /data relatime,data=ordered,noauto_da_alloc,discard,nodev,nosuid
+-FindAndMountEXT4 dsp /dsp relatime,data=ordered,noauto_da_alloc,discard,ro,noexec,nodev,nosuid
++FindAndMountEXT4 dsp /dsp relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev,nosuid
+ FindAndMountEXT4 persist /persist relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev,nosuid
+ FindAndMountEXT4 cache  /cache relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev,nosuid
+ 
+diff --git a/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh b/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
+index 0cd78fe..56f6c09 100755
+--- a/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
++++ b/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
+@@ -35,9 +35,9 @@ export PATH
+ 
+ 
+ if [ -f /etc/selinux/config ];then
+-   mount -t vfat /dev/mmcblk0p1 /firmware -o context=system_u:object_r:firmware_t:s0,noexec,nodev,ro
++   mount -t vfat /dev/mmcblk0p1 /firmware -o context=system_u:object_r:firmware_t:s0,noexec,nodev,ro,gid=1000
+ else
+-   mount -t vfat /dev/mmcblk0p1 /firmware -o noexec,nodev,ro
++   mount -t vfat /dev/mmcblk0p1 /firmware -o noexec,nodev,ro,gid=1000
+ fi
+ 
+ 
+diff --git a/recipes-core/busybox/files/apq8053/mdev.conf b/recipes-core/busybox/files/apq8053/mdev.conf
+index 9f30564..02591e4 100644
+--- a/recipes-core/busybox/files/apq8053/mdev.conf
++++ b/recipes-core/busybox/files/apq8053/mdev.conf
+@@ -5,10 +5,10 @@ media1 camera:system 0660
+ video[0-99]* camera:system 0660
+ v4l-subdev[0-99]* camera:system 0660
+ event-log-tags logd:logd 0644
+-logd logd:logd 0666 =socket/
+-logdr logd:logd 0666 =socket/
+-logdw logd:logd 0222 =socket/
+-fb[0-99]* root:graphics 0660 =graphics/
++socket/logd logd:logd 0666
++socket/logdr logd:logd 0666
++socket/logdw logd:logd 0222
++fb[0-99]* graphics:system 0660 =graphics/
+ diag system:radio 0660
+ cpu_dma_latency 0:0 0660
+ fb0:0 44 0660
+@@ -51,4 +51,7 @@ tun[0-9]* 0:0 0660 =net/
+ mmcblk[0-9]*     0:6     660
+ mmcblk[0-9]*p[0-9]* 0:6     660 */etc/mdev/automountsdcard.sh ${MDEV}
+ [hs]d[a-z][0-9]* 0:0 660 */etc/mdev/automountsdcard.sh ${MDEV}
++
++binder 1000:1000 0666
++
+ .* 1000:1000 0660
+diff --git a/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab b/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
+index a8c5475..a8ed56a 100644
+--- a/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
++++ b/recipes-core/sysvinit/sysvinit-inittab-2.88dsf/apq8053/inittab
+@@ -22,21 +22,18 @@ logd:2345:respawn:/sbin/logd
+ 
+ node:2345:wait:mknod -m 660 /dev/media0 c 251 0
+ chug:2345:wait:chown camera:system /dev/media0
++sys1:2345:wait:chmod 0222 /sys/kernel/debug/tracing/trace_marker
+ 
+ qcam:2345:respawn:start-stop-daemon -c camera -S -b -a /system/bin/mm-qcamera-daemon
+ srvm:2345:respawn:start-stop-daemon -c system -S -b -a /usr/bin/servicemanager
+-qmfs:2345:respawn:/usr/bin/qmmf-server
+-qmfw:2345:respawn:/usr/bin/qmmf-webserver
+-ipcw:2345:respawn:/usr/bin/ipc-webserver
++qmfs:2345:respawn:start-stop-daemon -c camera:system -S -b -a /usr/bin/qmmf-server
++qmfw:2345:respawn:start-stop-daemon -c qmmfwebsvr:system -S -b -a /usr/bin/qmmf-webserver
+ 
+ #Set the storage daemons to respawn
+ rmlk:2345:wait:chown -R nobody /sys/power/wake_lock /sys/power/wake_unlock
+ rmts:2345:respawn:start-stop-daemon -c nobody -S -b -a /sbin/rmt_storage
+ 
+ log1:2345:wait:echo 600 > /proc/sys/net/unix/max_dgram_qlen
+-log2:2345:wait:chmod 0666 /dev/socket/logd
+-log3:2345:wait:chmod 0666 /dev/socket/logdr
+-log4:2345:wait:chmod 0222 /dev/socket/logdw
+ 
+ # /etc/init.d executes the S and K scripts upon change
+ # of runlevel.
+@@ -62,3 +59,4 @@ z6:6:respawn:/sbin/sulogin
+ 
+ m1:5:respawn:start-stop-daemon -c diag -S -b -a /usr/bin/diagrebootapp
+ 
++ipcw:2345:respawn:start-stop-daemon -c qmmfwebsvr:system -S -b -a /usr/bin/ipc-webserver
+diff --git a/recipes-products/images/apq8053/apq8053-fsconfig.conf b/recipes-products/images/apq8053/apq8053-fsconfig.conf
+index 421bdbb..a9e33de 100644
+--- a/recipes-products/images/apq8053/apq8053-fsconfig.conf
++++ b/recipes-products/images/apq8053/apq8053-fsconfig.conf
+@@ -6,3 +6,30 @@ usr/sbin/dhcpcd 1000 0 0744 capabilities=0x3c00
+ usr/bin/ptt_socket_app 1000 0 0744 capabilities=0x1000
+ build.prop 5002 5002 644
+ etc/build.prop 5002 5002 644
++usr/bin/qmmf-webserver 5001 5001 0744 capabilities=0x3C02
++usr/bin/ipc-webserver 5001 5001 0744 capabilities=0x3C02
++data 0 1000 0775
++etc/passwd 0 0 0644
++system 1000 1000 775
++system/etc 1000 1000 775
++system/etc/camera 1006 1000 775
++system/etc/mm-mux 1000 1000 775
++system/etc/qmmf 5000 1000 775
++system/etc/camera/ar1335_chromatix.xml 1006 1000 444
++system/etc/camera/camera_config.xml 1006 1000 444
++system/etc/camera/imx230_chromatix.xml 1006 1000 444
++system/etc/camera/imx230_qc2002_chromatix.xml 1006 1000 444
++system/etc/camera/imx230_qc2002_with_gyro_chromatix.xml 1006 1000 444
++system/etc/camera/imx274_chromatix.xml 1006 1000 444
++system/etc/camera/imx377_chromatix.xml 1006 1000 444
++system/etc/camera/imx378_chromatix.xml 1006 1000 444
++system/etc/camera/imx477_chromatix.xml 1006 1000 444
++system/etc/camera/imx477_raw10_chromatix.xml 1006 1000 444
++system/etc/camera/imx477_raw12_chromatix.xml 1006 1000 444
++system/etc/camera/ov7251_chromatix.xml 1006 1000 444
++system/etc/camera/shdr-1x1.bin 1006 1000 444
++system/etc/mm-mux/ConfigFile.xml 1000 1000 444
++system/etc/qmmf/lens_ca_gpblack_GPversion_large.json 5000 1000 444
++system/etc/qmmf/qmmf_polaris_calib.bin 5000 1000 444
++system/etc/qmmf/yuv_cac_calib_nv12.json 5000 1000 444
++system/etc/qmmf/yuv_cac_calib_nv21.json 5000 1000 444
+diff --git a/recipes-products/images/machine-image.bb b/recipes-products/images/machine-image.bb
+index 348f999..f5f7968 100644
+--- a/recipes-products/images/machine-image.bb
++++ b/recipes-products/images/machine-image.bb
+@@ -11,7 +11,7 @@ inherit core-image
+ MULTILIBRE_ALLOW_REP =. "/usr/include/python2.7/*|${base_bindir}|${base_sbindir}|${bindir}|${sbindir}|${libexecdir}|${sysconfdir}|${nonarch_base_libdir}/udev|/lib/modules/[^/]*/modules.*|"
+ 
+ do_fsconfig() {
+-chmod go-r ${IMAGE_ROOTFS}/etc/passwd
++   mkdir -p ${IMAGE_ROOTFS}/data/
+ }
+ 
+ ROOTFS_POSTPROCESS_COMMAND += "do_fsconfig; "
+-- 
+cgit v1.1
+

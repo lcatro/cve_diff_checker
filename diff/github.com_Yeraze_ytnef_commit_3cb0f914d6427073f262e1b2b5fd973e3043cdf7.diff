@@ -1,0 +1,50 @@
+From 3cb0f914d6427073f262e1b2b5fd973e3043cdf7 Mon Sep 17 00:00:00 2001
+From: Randall Hand <randall.hand@gmail.com>
+Date: Fri, 24 Feb 2017 16:08:02 -0500
+Subject: [PATCH] BugFix - Potential OOB with Fields of Size 0
+
+Thanks to @hannob for contributing a malformed TNEF stream with
+a Version field of size 0.  Now such files will return an error
+indicating invalid data.
+---
+ lib/ytnef.c                              |   4 ++++
+ test-data/test.sh                        |   2 ++
+ test-data/ytnef-oob-TNEFVersion-SwapWord | Bin 0 -> 17 bytes
+ 3 files changed, 6 insertions(+)
+ create mode 100644 test-data/ytnef-oob-TNEFVersion-SwapWord
+
+diff --git a/lib/ytnef.c b/lib/ytnef.c
+index afb2efb..eea43b7 100644
+--- a/lib/ytnef.c
++++ b/lib/ytnef.c
+@@ -1147,6 +1147,10 @@ int TNEFParse(TNEFStruct *TNEF) {
+   while (TNEFGetHeader(TNEF, &type, &size) == 0) {
+     DEBUG2(TNEF->Debug, 2, "Header says type=0x%X, size=%u", type, size);
+     DEBUG2(TNEF->Debug, 2, "Header says type=%u, size=%u", type, size);
++    if(size == 0) {
++      printf("ERROR: Field with size of 0\n");
++      return YTNEF_ERROR_READING_DATA;
++    }
+     data = calloc(size, sizeof(BYTE));
+     ALLOCCHECK(data);
+     if (TNEFRawRead(TNEF, data, size, &header_checksum) < 0) {
+diff --git a/test-data/test.sh b/test-data/test.sh
+index 7e2e541..81037e4 100755
+--- a/test-data/test.sh
++++ b/test-data/test.sh
+@@ -21,3 +21,5 @@ diff results data
+ ../ytnefprint/ytnefprint ./winmail.dat  | grep -A 1 PR_RTF_SYNC_BODY_CRC     | grep 872404792
+ ../ytnefprint/ytnefprint ./winmail.dat  | grep -A 1 PR_RTF_SYNC_BODY_COUNT   | grep 90
+ ../ytnefprint/ytnefprint ./winmail.dat  | grep -A 18 PR_RTF_COMPRESSED       | grep '\pard Casdasdfasdfasd\\par'
++
++../ytnefprint/ytnefprint ./ytnef-oob-TNEFVersion-SwapWord | grep 'ERROR: Field with size of 0'
+diff --git a/test-data/ytnef-oob-TNEFVersion-SwapWord b/test-data/ytnef-oob-TNEFVersion-SwapWord
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ee03bc0aa8370537d57608b1819d099d9f9d566
+GIT binary patch
+literal 17
+Tcmb=JZ>MBnV8Awkg8>2nBf|ow
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,53 @@
+From 076468a9225e4630a463c0bbceb8e5b805fe380c Mon Sep 17 00:00:00 2001
+From: Roberto Rosario <roberto.rosario.gonzalez@gmail.com>
+Date: Fri, 17 Aug 2018 04:12:00 -0400
+Subject: [PATCH] Add explicit casting of escaped tag labels to prevent exploit
+ of cross site scripting. Thanks to Lokesh (@lokesh1095) for the report and
+ proposed solutions. Closes GitLab issue #496.
+
+Signed-off-by: Roberto Rosario <roberto.rosario.gonzalez@gmail.com>
+---
+ HISTORY.rst                | 6 ++++++
+ mayan/apps/tags/widgets.py | 5 +++--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/HISTORY.rst b/HISTORY.rst
+index ca7371198c..007d11dd82 100644
+--- a/HISTORY.rst
++++ b/HISTORY.rst
+@@ -1,3 +1,9 @@
++3.0.3 (2018-08-17)
++==================
++- Add explicit casting of escaped tag labels to prevent exploit
++  of cross site scripting. Thanks to Lokesh (@lokesh1095) for
++  the report and proposed solutions. Closes GitLab issue #496.
++
+ 3.0.2 (2018-08-16)
+ ==================
+ - Docker install script: Default to verbose.
+diff --git a/mayan/apps/tags/widgets.py b/mayan/apps/tags/widgets.py
+index 449069576c..d532d0e8c1 100644
+--- a/mayan/apps/tags/widgets.py
++++ b/mayan/apps/tags/widgets.py
+@@ -3,6 +3,7 @@ from __future__ import absolute_import, unicode_literals
+ from django import forms
+ from django.apps import apps
+ from django.template.loader import render_to_string
++from django.utils.html import conditional_escape
+ from django.utils.safestring import mark_safe
+ 
+ from .permissions import permission_tag_view
+@@ -17,8 +18,8 @@ class TagFormWidget(forms.SelectMultiple):
+ 
+     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+         result = super(TagFormWidget, self).create_option(
+-            name=name, value=value, label=label, selected=selected,
+-            index=index, subindex=subindex, attrs=attrs
++            name=name, value=value, label='{}'.format(conditional_escape(label)),
++            selected=selected, index=index, subindex=subindex, attrs=attrs
+         )
+ 
+         result['attrs']['data-color'] = self.queryset.get(pk=value).color
+-- 
+GitLab
+

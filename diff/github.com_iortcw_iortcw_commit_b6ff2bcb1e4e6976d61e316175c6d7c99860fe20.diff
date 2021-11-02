@@ -1,0 +1,141 @@
+From b6ff2bcb1e4e6976d61e316175c6d7c99860fe20 Mon Sep 17 00:00:00 2001
+From: MAN-AT-ARMS <M4N4T4RMS@gmail.com>
+Date: Mon, 13 Mar 2017 19:37:39 -0400
+Subject: [PATCH] All: Don't load .pk3s as .dlls, and don't load user config
+ files from .pk3s
+
+---
+ MP/code/client/cl_main.c | 4 ++--
+ MP/code/qcommon/files.c  | 6 ++++++
+ MP/code/sys/sys_main.c   | 7 +++++++
+ SP/code/client/cl_main.c | 4 ++--
+ SP/code/qcommon/files.c  | 6 ++++++
+ SP/code/sys/sys_main.c   | 7 +++++++
+ 6 files changed, 30 insertions(+), 4 deletions(-)
+
+diff --git a/MP/code/client/cl_main.c b/MP/code/client/cl_main.c
+index f23e717da..92675c53d 100644
+--- a/MP/code/client/cl_main.c
++++ b/MP/code/client/cl_main.c
+@@ -3674,7 +3674,7 @@ void CL_InitRef( void ) {
+ 	Com_Printf( "----- Initializing Renderer ----\n" );
+ 
+ #ifdef USE_RENDERER_DLOPEN
+-	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH);
++	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_PROTECTED);
+ 
+ 	Com_sprintf(dllName, sizeof(dllName), "renderer_mp_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
+ 
+@@ -4014,7 +4014,7 @@ void CL_Init( void ) {
+ 
+ 	cl_allowDownload = Cvar_Get( "cl_allowDownload", "1", CVAR_ARCHIVE );
+ #ifdef USE_CURL_DLOPEN
+-	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE);
++	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE | CVAR_PROTECTED);
+ #endif
+ 
+ 	// init autoswitch so the ui will have it correctly even
+diff --git a/MP/code/qcommon/files.c b/MP/code/qcommon/files.c
+index 3980f1c09..c262e6b62 100644
+--- a/MP/code/qcommon/files.c
++++ b/MP/code/qcommon/files.c
+@@ -1424,12 +1424,18 @@ long FS_FOpenFileRead(const char *filename, fileHandle_t *file, qboolean uniqueF
+ {
+ 	searchpath_t *search;
+ 	long len;
++	qboolean isLocalConfig;
+ 
+ 	if(!fs_searchpaths)
+ 		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+ 
++	isLocalConfig = !strcmp(filename, "autoexec.cfg") || !strcmp(filename, Q3CONFIG_CFG);
+ 	for(search = fs_searchpaths; search; search = search->next)
+ 	{
++		// autoexec.cfg and wolfconfig_mp.cfg can only be loaded outside of pk3 files.
++		if (isLocalConfig && search->pack)
++			continue;
++
+ 	        len = FS_FOpenFileReadDir(filename, search, file, uniqueFILE, qfalse);
+ 	        
+ 	        if(file == NULL)
+diff --git a/MP/code/sys/sys_main.c b/MP/code/sys/sys_main.c
+index b4181da3b..f3dc2e919 100644
+--- a/MP/code/sys/sys_main.c
++++ b/MP/code/sys/sys_main.c
+@@ -499,6 +499,13 @@ from executable path, then fs_basepath.
+ void *Sys_LoadDll(const char *name, qboolean useSystemLib)
+ {
+ 	void *dllhandle;
++
++	// Don't load any DLLs that end with the pk3 extension
++	if (COM_CompareExtension(name, ".pk3"))
++	{
++		Com_Printf("Rejecting DLL named \"%s\"", name);
++		return NULL;
++	}
+ 	
+ 	if(useSystemLib)
+ 		Com_Printf("Trying to load \"%s\"...\n", name);
+diff --git a/SP/code/client/cl_main.c b/SP/code/client/cl_main.c
+index 6a9a2c469..18c16aa97 100644
+--- a/SP/code/client/cl_main.c
++++ b/SP/code/client/cl_main.c
+@@ -3348,7 +3348,7 @@ void CL_InitRef( void ) {
+ 	Com_Printf( "----- Initializing Renderer ----\n" );
+ 
+ #ifdef USE_RENDERER_DLOPEN
+-	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH);
++	cl_renderer = Cvar_Get("cl_renderer", "opengl1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_PROTECTED);
+ 
+ 	Com_sprintf(dllName, sizeof(dllName), "renderer_sp_%s_" ARCH_STRING DLL_EXT, cl_renderer->string);
+ 
+@@ -3690,7 +3690,7 @@ void CL_Init( void ) {
+ 
+ 	cl_allowDownload = Cvar_Get( "cl_allowDownload", "0", CVAR_ARCHIVE );
+ #ifdef USE_CURL_DLOPEN
+-	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE);
++	cl_cURLLib = Cvar_Get("cl_cURLLib", DEFAULT_CURL_LIB, CVAR_ARCHIVE | CVAR_PROTECTED);
+ #endif
+ 
+ 	// init autoswitch so the ui will have it correctly even
+diff --git a/SP/code/qcommon/files.c b/SP/code/qcommon/files.c
+index c63ee2e59..15910bd5e 100644
+--- a/SP/code/qcommon/files.c
++++ b/SP/code/qcommon/files.c
+@@ -1591,12 +1591,18 @@ long FS_FOpenFileRead(const char *filename, fileHandle_t *file, qboolean uniqueF
+ {
+ 	searchpath_t *search;
+ 	long len;
++	qboolean isLocalConfig;
+ 
+ 	if(!fs_searchpaths)
+ 		Com_Error(ERR_FATAL, "Filesystem call made without initialization");
+ 
++	isLocalConfig = !strcmp(filename, "autoexec.cfg") || !strcmp(filename, Q3CONFIG_CFG);
+ 	for(search = fs_searchpaths; search; search = search->next)
+ 	{
++		// autoexec.cfg and wolfconfig.cfg can only be loaded outside of pk3 files.
++		if (isLocalConfig && search->pack)
++			continue;
++
+ 		len = FS_FOpenFileReadDir(filename, search, file, uniqueFILE, qfalse);
+ 
+ 		if(file == NULL)
+diff --git a/SP/code/sys/sys_main.c b/SP/code/sys/sys_main.c
+index d24f40274..e591d9890 100644
+--- a/SP/code/sys/sys_main.c
++++ b/SP/code/sys/sys_main.c
+@@ -499,6 +499,13 @@ from executable path, then fs_basepath.
+ void *Sys_LoadDll(const char *name, qboolean useSystemLib)
+ {
+ 	void *dllhandle;
++
++	// Don't load any DLLs that end with the pk3 extension
++	if (COM_CompareExtension(name, ".pk3"))
++	{
++		Com_Printf("Rejecting DLL named \"%s\"", name);
++		return NULL;
++	}
+ 	
+ 	if(useSystemLib)
+ 		Com_Printf("Trying to load \"%s\"...\n", name);

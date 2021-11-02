@@ -1,0 +1,24 @@
+From 7ab66cca5bbdf6cb2d69339ef4f513d95e532dbf Mon Sep 17 00:00:00 2001
+From: Giovanni <wargio@libero.it>
+Date: Mon, 27 Mar 2017 12:55:16 +0200
+Subject: [PATCH] Fix #7152 - Null deref in cms
+
+---
+ libr/util/r_pkcs7.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/libr/util/r_pkcs7.c b/libr/util/r_pkcs7.c
+index 765fe6f0e2a..467f58fa729 100644
+--- a/libr/util/r_pkcs7.c
++++ b/libr/util/r_pkcs7.c
+@@ -284,7 +284,9 @@ RCMS *r_pkcs7_parse_cms (const ut8 *buffer, ut32 length) {
+ 		return NULL;
+ 	}
+ 	object = r_asn1_create_object (buffer, length);
+-	if (!object || object->list.length != 2 || !object->list.objects[0] || object->list.objects[1]->list.length != 1) {
++	if (!object || object->list.length != 2 || !object->list.objects ||
++		!object->list.objects[0] || !object->list.objects[1] ||
++		object->list.objects[1]->list.length != 1) {
+ 		r_asn1_free_object (object);
+ 		free (container);
+ 		return NULL;

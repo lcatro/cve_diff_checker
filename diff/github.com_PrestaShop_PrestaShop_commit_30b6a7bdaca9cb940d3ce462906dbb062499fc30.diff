@@ -1,0 +1,934 @@
+From 3ef3b64d27b7d248bbd2f92289f11369b3dbbafa Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 26 May 2020 16:09:10 +0200
+Subject: [PATCH 1/8] Improper authentication
+
+---
+ classes/Cookie.php                         | 92 +++++++++++++++++++++-
+ classes/Customer.php                       |  8 +-
+ classes/CustomerSession.php                | 46 +++++++++++
+ classes/Employee.php                       | 13 ++-
+ classes/EmployeeSession.php                | 46 +++++++++++
+ classes/form/CustomerLoginForm.php         |  1 +
+ controllers/admin/AdminLoginController.php |  1 +
+ install-dev/data/db_structure.sql          | 14 ++++
+ src/Core/Session/SessionInterface.php      | 34 ++++++++
+ 9 files changed, 251 insertions(+), 4 deletions(-)
+ create mode 100644 classes/CustomerSession.php
+ create mode 100644 classes/EmployeeSession.php
+ create mode 100644 src/Core/Session/SessionInterface.php
+
+diff --git a/classes/Cookie.php b/classes/Cookie.php
+index adb2fe383296..8914741879e3 100644
+--- a/classes/Cookie.php
++++ b/classes/Cookie.php
+@@ -24,6 +24,8 @@
+  * International Registered Trademark & Property of PrestaShop SA
+  */
+ use Defuse\Crypto\Key;
++use PrestaShop\PrestaShop\Core\Exception\CoreException;
++use PrestaShop\PrestaShop\Core\Session\SessionInterface;
+ 
+ class CookieCore
+ {
+@@ -246,7 +248,8 @@ public function isLoggedBack()
+      */
+     public function logout()
+     {
+-        $this->_content = array();
++        $this->deleteSession();
++        $this->_content = [];
+         $this->encryptAndSetCookie();
+         unset($_COOKIE[$this->_name]);
+         $this->_modified = true;
+@@ -453,4 +456,91 @@ public function exists()
+     {
+         return isset($_COOKIE[$this->_name]);
+     }
++
++    /**
++     * Register a new session
++     *
++     * @param SessionInterface $session
++     */
++    public function registerSession(SessionInterface $session)
++    {
++        if (isset($this->id_employee)) {
++            $session->id_employee = $this->id_employee;
++        } elseif (isset($this->id_customer)) {
++            $session->id_customer = $this->id_customer;
++        } else {
++            throw new CoreException('Invalid user id');
++        }
++
++        $session->token = sha1(time() . uniqid());
++        $session->add();
++
++        $this->session_id = $session->id;
++        $this->session_token = $session->token;
++    }
++
++    /**
++     * Delete session
++     *
++     * @return bool
++     */
++    public function deleteSession(): bool
++    {
++        if (!isset($this->session_id)) {
++            return false;
++        }
++
++        $session = $this->getSession($this->session_id);
++        if ($session !== null) {
++            $session->delete();
++
++            return true;
++        }
++
++        return false;
++    }
++
++    /**
++     * Check if this session is still alived
++     *
++     * @return bool
++     */
++    public function isSessionAlived(): bool
++    {
++        if (!isset($this->session_id, $this->session_token)) {
++            return false;
++        }
++
++        $session = $this->getSession($this->session_id);
++
++        return
++            $session !== null
++            && $session->token === $this->session_token
++            && (
++                (isset($session->id_employee) && $this->id_employee === $session->id_employee)
++                || (isset($session->id_customer) && $this->id_customer === $session->id_customer)
++            )
++        ;
++    }
++
++    /**
++     * Retrieve session based on a session id and the employee or
++     * customer id
++     *
++     * @return SessionInterface|null
++     */
++    public function getSession(int $sessionId): ?SessionInterface
++    {
++        if (isset($this->id_employee)) {
++            $session = new EmployeeSession($sessionId);
++        } elseif (isset($this->id_customer)) {
++            $session = new CustomerSession($sessionId);
++        }
++
++        if (!empty($session->id)) {
++            return $session;
++        }
++
++        return null;
++    }
+ }
+diff --git a/classes/Customer.php b/classes/Customer.php
+index d0b7a3f40b3d..0fe61af8139e 100644
+--- a/classes/Customer.php
++++ b/classes/Customer.php
+@@ -1187,7 +1187,13 @@ public function isLogged($withGuest = false)
+         }
+ 
+         /* Customer is valid only if it can be load and if object password is the same as database one */
+-        return $this->logged == 1 && $this->id && Validate::isUnsignedId($this->id) && Customer::checkPassword($this->id, $this->passwd);
++        return
++            $this->logged == 1
++            && $this->id
++            && Validate::isUnsignedId($this->id)
++            && Customer::checkPassword($this->id, $this->passwd)
++            && Context::getContext()->cookie->isSessionAlived()
++        ;
+     }
+ 
+     /**
+diff --git a/classes/CustomerSession.php b/classes/CustomerSession.php
+new file mode 100644
+index 000000000000..16adc6df3e07
+--- /dev/null
++++ b/classes/CustomerSession.php
+@@ -0,0 +1,46 @@
++<?php
++/**
++ * 2007-2020 PrestaShop SA and Contributors
++ *
++ * NOTICE OF LICENSE
++ *
++ * This source file is subject to the Open Software License (OSL 3.0)
++ * that is bundled with this package in the file LICENSE.txt.
++ * It is also available through the world-wide-web at this URL:
++ * https://opensource.org/licenses/OSL-3.0
++ * If you did not receive a copy of the license and are unable to
++ * obtain it through the world-wide-web, please send an email
++ * to license@prestashop.com so we can send you a copy immediately.
++ *
++ * DISCLAIMER
++ *
++ * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++ * versions in the future. If you wish to customize PrestaShop for your
++ * needs please refer to https://www.prestashop.com for more information.
++ *
++ * @author    PrestaShop SA <contact@prestashop.com>
++ * @copyright 2007-2020 PrestaShop SA and Contributors
++ * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++ * International Registered Trademark & Property of PrestaShop SA
++ */
++use PrestaShop\PrestaShop\Core\Session\SessionInterface;
++
++class CustomerSessionCore extends ObjectModel implements SessionInterface
++{
++    public $id;
++
++    /** @var string Name */
++    public $id_customer;
++
++    /**
++     * @see ObjectModel::$definition
++     */
++    public static $definition = [
++        'table' => 'customer_session',
++        'primary' => 'id_customer_session',
++        'fields' => [
++            'id_customer' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedId', 'required' => true],
++            'token' => ['type' => self::TYPE_STRING, 'validate' => 'isSha1', 'size' => 40, 'copy_post' => false],
++        ],
++    ];
++}
+diff --git a/classes/Employee.php b/classes/Employee.php
+index 71fcf965b06f..1b5de925c20f 100644
+--- a/classes/Employee.php
++++ b/classes/Employee.php
+@@ -480,8 +480,16 @@ public function isLoggedBack()
+         if (!Cache::isStored('isLoggedBack' . $this->id)) {
+             /* Employee is valid only if it can be load and if cookie password is the same as database one */
+             $result = (
+-                $this->id && Validate::isUnsignedId($this->id) && Context::getContext()->cookie && Employee::checkPassword($this->id, Context::getContext()->cookie->passwd)
+-                    && (!isset(Context::getContext()->cookie->remote_addr) || Context::getContext()->cookie->remote_addr == ip2long(Tools::getRemoteAddr()) || !Configuration::get('PS_COOKIE_CHECKIP'))
++                $this->id
++                && Validate::isUnsignedId($this->id)
++                && Context::getContext()->cookie
++                && Context::getContext()->cookie->isSessionAlived()
++                && Employee::checkPassword($this->id, Context::getContext()->cookie->passwd)
++                && (
++                    !isset(Context::getContext()->cookie->remote_addr)
++                    || Context::getContext()->cookie->remote_addr == ip2long(Tools::getRemoteAddr())
++                    || !Configuration::get('PS_COOKIE_CHECKIP')
++                )
+             );
+             Cache::store('isLoggedBack' . $this->id, $result);
+ 
+@@ -500,6 +508,7 @@ public function logout()
+             Context::getContext()->cookie->logout();
+             Context::getContext()->cookie->write();
+         }
++
+         $this->id = null;
+     }
+ 
+diff --git a/classes/EmployeeSession.php b/classes/EmployeeSession.php
+new file mode 100644
+index 000000000000..3be11f627c24
+--- /dev/null
++++ b/classes/EmployeeSession.php
+@@ -0,0 +1,46 @@
++<?php
++/**
++ * 2007-2020 PrestaShop SA and Contributors
++ *
++ * NOTICE OF LICENSE
++ *
++ * This source file is subject to the Open Software License (OSL 3.0)
++ * that is bundled with this package in the file LICENSE.txt.
++ * It is also available through the world-wide-web at this URL:
++ * https://opensource.org/licenses/OSL-3.0
++ * If you did not receive a copy of the license and are unable to
++ * obtain it through the world-wide-web, please send an email
++ * to license@prestashop.com so we can send you a copy immediately.
++ *
++ * DISCLAIMER
++ *
++ * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++ * versions in the future. If you wish to customize PrestaShop for your
++ * needs please refer to https://www.prestashop.com for more information.
++ *
++ * @author    PrestaShop SA <contact@prestashop.com>
++ * @copyright 2007-2020 PrestaShop SA and Contributors
++ * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++ * International Registered Trademark & Property of PrestaShop SA
++ */
++use PrestaShop\PrestaShop\Core\Session\SessionInterface;
++
++class EmployeeSessionCore extends ObjectModel implements SessionInterface
++{
++    public $id;
++
++    /** @var string Name */
++    public $id_employee;
++
++    /**
++     * @see ObjectModel::$definition
++     */
++    public static $definition = [
++        'table' => 'employee_session',
++        'primary' => 'id_employee_session',
++        'fields' => [
++            'id_employee' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedId', 'required' => true],
++            'token' => ['type' => self::TYPE_STRING, 'validate' => 'isSha1', 'size' => 40, 'copy_post' => false],
++        ],
++    ];
++}
+diff --git a/classes/form/CustomerLoginForm.php b/classes/form/CustomerLoginForm.php
+index a5e26ecaf32a..2e4368d0bd7a 100644
+--- a/classes/form/CustomerLoginForm.php
++++ b/classes/form/CustomerLoginForm.php
+@@ -71,6 +71,7 @@ public function submit()
+                 $this->errors[''][] = $this->translator->trans('Authentication failed.', [], 'Shop.Notifications.Error');
+             } else {
+                 $this->context->updateCustomer($customer);
++                $this->context->cookie->registerSession(new CustomerSession());
+ 
+                 Hook::exec('actionAuthentication', ['customer' => $this->context->customer]);
+ 
+diff --git a/controllers/admin/AdminLoginController.php b/controllers/admin/AdminLoginController.php
+index 865c03663839..13f987125049 100644
+--- a/controllers/admin/AdminLoginController.php
++++ b/controllers/admin/AdminLoginController.php
+@@ -213,6 +213,7 @@ public function processLogin()
+                 $cookie->profile = $this->context->employee->id_profile;
+                 $cookie->passwd = $this->context->employee->passwd;
+                 $cookie->remote_addr = $this->context->employee->remote_addr;
++                $cookie->registerSession(new EmployeeSession());
+ 
+                 if (!Tools::getValue('stay_logged_in')) {
+                     $cookie->last_activity = time();
+diff --git a/install-dev/data/db_structure.sql b/install-dev/data/db_structure.sql
+index 93ca9c6326d8..0e4d044d6120 100644
+--- a/install-dev/data/db_structure.sql
++++ b/install-dev/data/db_structure.sql
+@@ -2829,3 +2829,17 @@ CREATE TABLE IF NOT EXISTS `PREFIX_cms_role_lang` (
+     `id_cms_role`, `id_lang`, id_shop
+   )
+ ) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8;
++
++CREATE TABLE `PREFIX_employee_session` (
++  `id_employee_session` int(11) unsigned NOT NULL auto_increment,
++  `id_employee` int(10) unsigned DEFAULT NULL,
++  `token` varchar(40) DEFAULT NULL,
++  PRIMARY KEY `id_employee_session` (`id_employee_session`)
++) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8 COLLATION;
++
++CREATE TABLE `PREFIX_customer_session` (
++  `id_customer_session` int(11) unsigned NOT NULL auto_increment,
++  `id_customer` int(10) unsigned DEFAULT NULL,
++  `token` varchar(40) DEFAULT NULL,
++  PRIMARY KEY `id_customer_session` (`id_customer_session`)
++) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8 COLLATION;
+diff --git a/src/Core/Session/SessionInterface.php b/src/Core/Session/SessionInterface.php
+new file mode 100644
+index 000000000000..cf06bd4452f8
+--- /dev/null
++++ b/src/Core/Session/SessionInterface.php
+@@ -0,0 +1,34 @@
++<?php
++/**
++ * 2007-2020 PrestaShop SA and Contributors
++ *
++ * NOTICE OF LICENSE
++ *
++ * This source file is subject to the Open Software License (OSL 3.0)
++ * that is bundled with this package in the file LICENSE.txt.
++ * It is also available through the world-wide-web at this URL:
++ * https://opensource.org/licenses/OSL-3.0
++ * If you did not receive a copy of the license and are unable to
++ * obtain it through the world-wide-web, please send an email
++ * to license@prestashop.com so we can send you a copy immediately.
++ *
++ * DISCLAIMER
++ *
++ * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++ * versions in the future. If you wish to customize PrestaShop for your
++ * needs please refer to https://www.prestashop.com for more information.
++ *
++ * @author    PrestaShop SA <contact@prestashop.com>
++ * @copyright 2007-2020 PrestaShop SA and Contributors
++ * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++ * International Registered Trademark & Property of PrestaShop SA
++ */
++
++namespace PrestaShop\PrestaShop\Core\Session;
++
++/**
++ * SessionInterface is used to store/access to the session token used by customers and employees
++ */
++interface SessionInterface
++{
++}
+
+From 0ae0ac8a83a93133f632e767d22dd2f12edf1cde Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 3 Jun 2020 16:05:36 +0200
+Subject: [PATCH 2/8] Upgrade script
+
+---
+ install-dev/upgrade/sql/1.7.6.6.sql | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+ create mode 100644 install-dev/upgrade/sql/1.7.6.6.sql
+
+diff --git a/install-dev/upgrade/sql/1.7.6.6.sql b/install-dev/upgrade/sql/1.7.6.6.sql
+new file mode 100644
+index 000000000000..a8c1fd1e49cd
+--- /dev/null
++++ b/install-dev/upgrade/sql/1.7.6.6.sql
+@@ -0,0 +1,16 @@
++SET SESSION sql_mode='';
++SET NAMES 'utf8';
++
++CREATE TABLE `PREFIX_employee_session` (
++  `id_employee_session` int(11) unsigned NOT NULL auto_increment,
++  `id_employee` int(10) unsigned DEFAULT NULL,
++  `token` varchar(40) DEFAULT NULL,
++  PRIMARY KEY `id_employee_session` (`id_employee_session`)
++) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8 COLLATION;
++
++CREATE TABLE `PREFIX_customer_session` (
++  `id_customer_session` int(11) unsigned NOT NULL auto_increment,
++  `id_customer` int(10) unsigned DEFAULT NULL,
++  `token` varchar(40) DEFAULT NULL,
++  PRIMARY KEY `id_customer_session` (`id_customer_session`)
++) ENGINE=ENGINE_TYPE DEFAULT CHARSET=utf8 COLLATION;
+
+From bacb425ae87d553d710f256e0534bb344d096059 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 3 Jun 2020 18:07:52 +0200
+Subject: [PATCH 3/8] Apply @jolelievre feedbacks
+
+---
+ classes/Cookie.php                    | 22 ++++++-------
+ classes/Customer.php                  |  2 +-
+ classes/CustomerSession.php           | 45 ++++++++++++++++++++++++++-
+ classes/Employee.php                  |  2 +-
+ classes/EmployeeSession.php           | 45 ++++++++++++++++++++++++++-
+ src/Core/Session/SessionInterface.php | 38 ++++++++++++++++++++++
+ 6 files changed, 139 insertions(+), 15 deletions(-)
+
+diff --git a/classes/Cookie.php b/classes/Cookie.php
+index 8914741879e3..b7bd74b1fec7 100644
+--- a/classes/Cookie.php
++++ b/classes/Cookie.php
+@@ -465,18 +465,18 @@ public function exists()
+     public function registerSession(SessionInterface $session)
+     {
+         if (isset($this->id_employee)) {
+-            $session->id_employee = $this->id_employee;
++            $session->setUserId($this->id_employee);
+         } elseif (isset($this->id_customer)) {
+-            $session->id_customer = $this->id_customer;
++            $session->setUserId($this->id_customer);
+         } else {
+             throw new CoreException('Invalid user id');
+         }
+ 
+-        $session->token = sha1(time() . uniqid());
++        $session->setToken(sha1(time() . uniqid()));
+         $session->add();
+ 
+-        $this->session_id = $session->id;
+-        $this->session_token = $session->token;
++        $this->session_id = $session->getId();
++        $this->session_token = $session->getToken();
+     }
+ 
+     /**
+@@ -484,7 +484,7 @@ public function registerSession(SessionInterface $session)
+      *
+      * @return bool
+      */
+-    public function deleteSession(): bool
++    public function deleteSession()
+     {
+         if (!isset($this->session_id)) {
+             return false;
+@@ -505,7 +505,7 @@ public function deleteSession(): bool
+      *
+      * @return bool
+      */
+-    public function isSessionAlived(): bool
++    public function isSessionAlive()
+     {
+         if (!isset($this->session_id, $this->session_token)) {
+             return false;
+@@ -515,10 +515,10 @@ public function isSessionAlived(): bool
+ 
+         return
+             $session !== null
+-            && $session->token === $this->session_token
++            && $session->getToken() === $this->session_token
+             && (
+-                (isset($session->id_employee) && $this->id_employee === $session->id_employee)
+-                || (isset($session->id_customer) && $this->id_customer === $session->id_customer)
++                $this->id_employee === $session->getUserId()
++                || $this->id_customer === $session->getUserId()
+             )
+         ;
+     }
+@@ -529,7 +529,7 @@ public function isSessionAlived(): bool
+      *
+      * @return SessionInterface|null
+      */
+-    public function getSession(int $sessionId): ?SessionInterface
++    public function getSession($sessionId)
+     {
+         if (isset($this->id_employee)) {
+             $session = new EmployeeSession($sessionId);
+diff --git a/classes/Customer.php b/classes/Customer.php
+index 0fe61af8139e..64cca94b8c5d 100644
+--- a/classes/Customer.php
++++ b/classes/Customer.php
+@@ -1192,7 +1192,7 @@ public function isLogged($withGuest = false)
+             && $this->id
+             && Validate::isUnsignedId($this->id)
+             && Customer::checkPassword($this->id, $this->passwd)
+-            && Context::getContext()->cookie->isSessionAlived()
++            && Context::getContext()->cookie->isSessionAlive()
+         ;
+     }
+ 
+diff --git a/classes/CustomerSession.php b/classes/CustomerSession.php
+index 16adc6df3e07..e7aa2a05e2ea 100644
+--- a/classes/CustomerSession.php
++++ b/classes/CustomerSession.php
+@@ -29,9 +29,12 @@ class CustomerSessionCore extends ObjectModel implements SessionInterface
+ {
+     public $id;
+ 
+-    /** @var string Name */
++    /** @var Id Customer */
+     public $id_customer;
+ 
++    /** @var string Token */
++    public $token;
++
+     /**
+      * @see ObjectModel::$definition
+      */
+@@ -43,4 +46,44 @@ class CustomerSessionCore extends ObjectModel implements SessionInterface
+             'token' => ['type' => self::TYPE_STRING, 'validate' => 'isSha1', 'size' => 40, 'copy_post' => false],
+         ],
+     ];
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getId()
++    {
++        return $this->id;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function setUserId($idCustomer)
++    {
++        $this->id_customer = (int) $idCustomer;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getUserId()
++    {
++        return $this->id_customer;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function setToken($token)
++    {
++        $this->token = (string) $token;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getToken()
++    {
++        return $this->token;
++    }
+ }
+diff --git a/classes/Employee.php b/classes/Employee.php
+index 1b5de925c20f..fe8aaa0c728d 100644
+--- a/classes/Employee.php
++++ b/classes/Employee.php
+@@ -483,7 +483,7 @@ public function isLoggedBack()
+                 $this->id
+                 && Validate::isUnsignedId($this->id)
+                 && Context::getContext()->cookie
+-                && Context::getContext()->cookie->isSessionAlived()
++                && Context::getContext()->cookie->isSessionAlive()
+                 && Employee::checkPassword($this->id, Context::getContext()->cookie->passwd)
+                 && (
+                     !isset(Context::getContext()->cookie->remote_addr)
+diff --git a/classes/EmployeeSession.php b/classes/EmployeeSession.php
+index 3be11f627c24..4b5f3e4651f1 100644
+--- a/classes/EmployeeSession.php
++++ b/classes/EmployeeSession.php
+@@ -29,9 +29,12 @@ class EmployeeSessionCore extends ObjectModel implements SessionInterface
+ {
+     public $id;
+ 
+-    /** @var string Name */
++    /** @var int Id Employee */
+     public $id_employee;
+ 
++    /** @var string Token */
++    public $token;
++
+     /**
+      * @see ObjectModel::$definition
+      */
+@@ -43,4 +46,44 @@ class EmployeeSessionCore extends ObjectModel implements SessionInterface
+             'token' => ['type' => self::TYPE_STRING, 'validate' => 'isSha1', 'size' => 40, 'copy_post' => false],
+         ],
+     ];
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getId()
++    {
++        return $this->id;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function setUserId($idEmployee)
++    {
++        $this->id_employee = (int) $idEmployee;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getUserId()
++    {
++        return $this->id_employee;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function setToken($token)
++    {
++        $this->token = (string) $token;
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    public function getToken()
++    {
++        return $this->token;
++    }
+ }
+diff --git a/src/Core/Session/SessionInterface.php b/src/Core/Session/SessionInterface.php
+index cf06bd4452f8..dc9f532ba682 100644
+--- a/src/Core/Session/SessionInterface.php
++++ b/src/Core/Session/SessionInterface.php
+@@ -31,4 +31,42 @@
+  */
+ interface SessionInterface
+ {
++    /**
++     * Returns session id
++     *
++     * @return int
++     */
++    public function getId(): int;
++
++    /**
++     * Set session user id
++     *
++     * @param int $id
++
++     * @return void
++     */
++    public function setUserId(int $id): void;
++
++    /**
++     * Returns session user id
++     *
++     * @return int
++     */
++    public function getUserId(): int;
++
++    /**
++     * Set session token
++     *
++     * @param string $string
++     *
++     * @return void
++     */
++    public function setToken(string $string): void;
++
++    /**
++     * Returns session token
++     *
++     * @return string
++     */
++    public function getToken(): string;
+ }
+
+From 7d46d52aebfd0ef53ca3ef1a8a98a0a053552433 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Thu, 25 Jun 2020 11:29:33 +0200
+Subject: [PATCH 4/8] Improve interface
+
+---
+ classes/Cookie.php                    |  8 ++++----
+ classes/CustomerSession.php           |  2 +-
+ classes/EmployeeSession.php           |  2 +-
+ src/Core/Session/SessionInterface.php | 10 ++++++++++
+ 4 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/classes/Cookie.php b/classes/Cookie.php
+index b7bd74b1fec7..8aca51444551 100644
+--- a/classes/Cookie.php
++++ b/classes/Cookie.php
+@@ -465,9 +465,9 @@ public function exists()
+     public function registerSession(SessionInterface $session)
+     {
+         if (isset($this->id_employee)) {
+-            $session->setUserId($this->id_employee);
++            $session->setUserId((int) $this->id_employee);
+         } elseif (isset($this->id_customer)) {
+-            $session->setUserId($this->id_customer);
++            $session->setUserId((int) $this->id_customer);
+         } else {
+             throw new CoreException('Invalid user id');
+         }
+@@ -517,8 +517,8 @@ public function isSessionAlive()
+             $session !== null
+             && $session->getToken() === $this->session_token
+             && (
+-                $this->id_employee === $session->getUserId()
+-                || $this->id_customer === $session->getUserId()
++                (int) $this->id_employee === $session->getUserId()
++                || (int) $this->id_customer === $session->getUserId()
+             )
+         ;
+     }
+diff --git a/classes/CustomerSession.php b/classes/CustomerSession.php
+index e7aa2a05e2ea..bf98dfb6a1f6 100644
+--- a/classes/CustomerSession.php
++++ b/classes/CustomerSession.php
+@@ -68,7 +68,7 @@ public function setUserId($idCustomer)
+      */
+     public function getUserId()
+     {
+-        return $this->id_customer;
++        return (int) $this->id_customer;
+     }
+ 
+     /**
+diff --git a/classes/EmployeeSession.php b/classes/EmployeeSession.php
+index 4b5f3e4651f1..8f7a5a9b3e31 100644
+--- a/classes/EmployeeSession.php
++++ b/classes/EmployeeSession.php
+@@ -68,7 +68,7 @@ public function setUserId($idEmployee)
+      */
+     public function getUserId()
+     {
+-        return $this->id_employee;
++        return (int) $this->id_employee;
+     }
+ 
+     /**
+diff --git a/src/Core/Session/SessionInterface.php b/src/Core/Session/SessionInterface.php
+index dc9f532ba682..439e30924e8d 100644
+--- a/src/Core/Session/SessionInterface.php
++++ b/src/Core/Session/SessionInterface.php
+@@ -69,4 +69,14 @@ public function setToken(string $string): void;
+      * @return string
+      */
+     public function getToken(): string;
++
++    /**
++     * Adds current object to the database.
++     */
++    public function add();
++
++    /**
++     * Deletes current object from database.
++     */
++    public function delete();
+ }
+
+From 12520ff978c540d69da3994ebf96efc852ce1b89 Mon Sep 17 00:00:00 2001
+From: GoT <PierreRambaud@users.noreply.github.com>
+Date: Fri, 5 Jun 2020 15:41:06 +0200
+Subject: [PATCH 5/8] Update classes/Cookie.php
+
+Co-authored-by: Jonathan Lelievre <jo.lelievre@gmail.com>
+---
+ classes/Cookie.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/classes/Cookie.php b/classes/Cookie.php
+index 8aca51444551..f1a9c77f54da 100644
+--- a/classes/Cookie.php
++++ b/classes/Cookie.php
+@@ -537,7 +537,7 @@ public function getSession($sessionId)
+             $session = new CustomerSession($sessionId);
+         }
+ 
+-        if (!empty($session->id)) {
++        if (!empty($session->getId())) {
+             return $session;
+         }
+ 
+
+From c806a17fa7fcc3a8205211f929751e6dc6115cec Mon Sep 17 00:00:00 2001
+From: GoT <PierreRambaud@users.noreply.github.com>
+Date: Tue, 9 Jun 2020 11:00:27 +0200
+Subject: [PATCH 6/8] Update classes/Cookie.php
+
+Co-authored-by: Mathieu Ferment <mathieu.ferment@prestashop.com>
+---
+ classes/Cookie.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/classes/Cookie.php b/classes/Cookie.php
+index f1a9c77f54da..87545e63ab6e 100644
+--- a/classes/Cookie.php
++++ b/classes/Cookie.php
+@@ -501,7 +501,7 @@ public function deleteSession()
+     }
+ 
+     /**
+-     * Check if this session is still alived
++     * Check if this session is still alive
+      *
+      * @return bool
+      */
+
+From 170752243047656a586125d620e6ae9901570847 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Thu, 25 Jun 2020 11:31:41 +0200
+Subject: [PATCH 7/8] Remove signature void and string
+
+---
+ src/Core/Session/SessionInterface.php | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/Core/Session/SessionInterface.php b/src/Core/Session/SessionInterface.php
+index 439e30924e8d..060f76cb15f8 100644
+--- a/src/Core/Session/SessionInterface.php
++++ b/src/Core/Session/SessionInterface.php
+@@ -36,7 +36,7 @@ interface SessionInterface
+      *
+      * @return int
+      */
+-    public function getId(): int;
++    public function getId();
+ 
+     /**
+      * Set session user id
+@@ -45,14 +45,14 @@ public function getId(): int;
+ 
+      * @return void
+      */
+-    public function setUserId(int $id): void;
++    public function setUserId($id);
+ 
+     /**
+      * Returns session user id
+      *
+      * @return int
+      */
+-    public function getUserId(): int;
++    public function getUserId();
+ 
+     /**
+      * Set session token
+@@ -61,14 +61,14 @@ public function getUserId(): int;
+      *
+      * @return void
+      */
+-    public function setToken(string $string): void;
++    public function setToken($string);
+ 
+     /**
+      * Returns session token
+      *
+      * @return string
+      */
+-    public function getToken(): string;
++    public function getToken();
+ 
+     /**
+      * Adds current object to the database.
+
+From 31b896dacf71503a16031b72222d23699c6fad74 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Thu, 25 Jun 2020 13:59:27 +0200
+Subject: [PATCH 8/8] Create new session on updateCustomer call
+
+---
+ classes/Context.php                | 2 ++
+ classes/form/CustomerLoginForm.php | 1 -
+ classes/form/CustomerPersister.php | 4 ++--
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/classes/Context.php b/classes/Context.php
+index 8ce001d4471f..a4c66f570a1a 100644
+--- a/classes/Context.php
++++ b/classes/Context.php
+@@ -359,6 +359,8 @@ public function updateCustomer(Customer $customer)
+         $this->cookie->id_cart = (int) $this->cart->id;
+         $this->cookie->write();
+         $this->cart->autosetProductAddress();
++
++        $this->cookie->registerSession(new CustomerSession());
+     }
+ 
+     /**
+diff --git a/classes/form/CustomerLoginForm.php b/classes/form/CustomerLoginForm.php
+index 2e4368d0bd7a..a5e26ecaf32a 100644
+--- a/classes/form/CustomerLoginForm.php
++++ b/classes/form/CustomerLoginForm.php
+@@ -71,7 +71,6 @@ public function submit()
+                 $this->errors[''][] = $this->translator->trans('Authentication failed.', [], 'Shop.Notifications.Error');
+             } else {
+                 $this->context->updateCustomer($customer);
+-                $this->context->cookie->registerSession(new CustomerSession());
+ 
+                 Hook::exec('actionAuthentication', ['customer' => $this->context->customer]);
+ 
+diff --git a/classes/form/CustomerPersister.php b/classes/form/CustomerPersister.php
+index ba4a1328745b..2b7815c429dc 100644
+--- a/classes/form/CustomerPersister.php
++++ b/classes/form/CustomerPersister.php
+@@ -55,9 +55,9 @@ public function save(Customer $customer, $clearTextPassword, $newPassword = '',
+     {
+         if ($customer->id) {
+             return $this->update($customer, $clearTextPassword, $newPassword, $passwordRequired);
+-        } else {
+-            return $this->create($customer, $clearTextPassword);
+         }
++
++        return $this->create($customer, $clearTextPassword);
+     }
+ 
+     private function update(Customer $customer, $clearTextPassword, $newPassword, $passwordRequired = true)

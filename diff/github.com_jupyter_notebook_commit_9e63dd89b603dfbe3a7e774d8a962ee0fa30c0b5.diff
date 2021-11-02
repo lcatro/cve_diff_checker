@@ -1,0 +1,155 @@
+From 6ec427b5234bfc6c97065f130f762aee8ee67df4 Mon Sep 17 00:00:00 2001
+From: Min RK <benjaminrk@gmail.com>
+Date: Mon, 20 Jul 2015 12:10:10 -0700
+Subject: [PATCH 1/4] set mime-type on /files/
+
+---
+ notebook/files/handlers.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/notebook/files/handlers.py b/notebook/files/handlers.py
+index def3ec6674..9d2726165b 100644
+--- a/notebook/files/handlers.py
++++ b/notebook/files/handlers.py
+@@ -40,6 +40,11 @@ def get(self, path):
+             cur_mime = mimetypes.guess_type(name)[0]
+             if cur_mime is not None:
+                 self.set_header('Content-Type', cur_mime)
++            else:
++                if model['format'] == 'base64':
++                    self.set_header('Content-Type', 'application/octet-stream')
++                else:
++                    self.set_header('Content-Type', 'text/plain')
+         
+         if model['format'] == 'base64':
+             b64_bytes = model['content'].encode('ascii')
+
+From f64aa490e3574ee2c2b504d0e0b39641c709a34f Mon Sep 17 00:00:00 2001
+From: Min RK <benjaminrk@gmail.com>
+Date: Mon, 20 Jul 2015 12:10:25 -0700
+Subject: [PATCH 2/4] set model mimetype, even when content=False
+
+---
+ notebook/services/contents/filemanager.py | 12 +++++++-----
+ notebook/services/contents/handlers.py    |  3 ---
+ 2 files changed, 7 insertions(+), 8 deletions(-)
+
+diff --git a/notebook/services/contents/filemanager.py b/notebook/services/contents/filemanager.py
+index ff8ac7d967..637ff52afc 100644
+--- a/notebook/services/contents/filemanager.py
++++ b/notebook/services/contents/filemanager.py
+@@ -278,18 +278,20 @@ def _file_model(self, path, content=True, format=None):
+         model['type'] = 'file'
+ 
+         os_path = self._get_os_path(path)
++        model['mimetype'] = mimetypes.guess_type(os_path)[0]
+ 
+         if content:
+             content, format = self._read_file(os_path, format)
+-            default_mime = {
+-                'text': 'text/plain',
+-                'base64': 'application/octet-stream'
+-            }[format]
++            if model['mimetype'] is None:
++                default_mime = {
++                    'text': 'text/plain',
++                    'base64': 'application/octet-stream'
++                }[format]
++                model['mimetype'] = default_mime
+ 
+             model.update(
+                 content=content,
+                 format=format,
+-                mimetype=mimetypes.guess_type(os_path)[0] or default_mime,
+             )
+ 
+         return model
+diff --git a/notebook/services/contents/handlers.py b/notebook/services/contents/handlers.py
+index 2a0a4cca54..521aae5fd0 100644
+--- a/notebook/services/contents/handlers.py
++++ b/notebook/services/contents/handlers.py
+@@ -55,9 +55,6 @@ def validate_model(model, expect_content):
+         )
+ 
+     maybe_none_keys = ['content', 'format']
+-    if model['type'] == 'file':
+-        # mimetype should be populated only for file models
+-        maybe_none_keys.append('mimetype')
+     if expect_content:
+         errors = [key for key in maybe_none_keys if model[key] is None]
+         if errors:
+
+From 4f0b3b8c10811d460efc67cf61e9f4df83d2a0a7 Mon Sep 17 00:00:00 2001
+From: Min RK <benjaminrk@gmail.com>
+Date: Mon, 20 Jul 2015 12:11:04 -0700
+Subject: [PATCH 3/4] only redirect to editor for text documents
+
+treat unidentified mime-types as text
+---
+ notebook/static/tree/js/notebooklist.js | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/notebook/static/tree/js/notebooklist.js b/notebook/static/tree/js/notebooklist.js
+index 6308d7ff6f..0b71f42657 100644
+--- a/notebook/static/tree/js/notebooklist.js
++++ b/notebook/static/tree/js/notebooklist.js
+@@ -536,6 +536,13 @@ define([
+             icon = 'running_' + icon;
+         }
+         var uri_prefix = NotebookList.uri_prefixes[model.type];
++        if (model.type === 'file' &&
++            model.mimetype && model.mimetype.substr(0,5) !== 'text/'
++        ) {
++            // send text/unidentified files to editor, others go to raw viewer
++            uri_prefix = 'files';
++        }
++        
+         item.find(".item_icon").addClass(icon).addClass('icon-fixed-width');
+         var link = item.find("a.item_link")
+             .attr('href',
+
+From 23162fd2895ad7445fdbe095b8fc8633d95ec6e6 Mon Sep 17 00:00:00 2001
+From: Min RK <benjaminrk@gmail.com>
+Date: Mon, 20 Jul 2015 12:11:23 -0700
+Subject: [PATCH 4/4] Don't redirect from /edit/ to /files/
+
+show failure to decode, instead
+---
+ notebook/static/edit/js/editor.js | 15 +++------------
+ 1 file changed, 3 insertions(+), 12 deletions(-)
+
+diff --git a/notebook/static/edit/js/editor.js b/notebook/static/edit/js/editor.js
+index ddbc2ded22..421fa57819 100644
+--- a/notebook/static/edit/js/editor.js
++++ b/notebook/static/edit/js/editor.js
+@@ -90,19 +90,10 @@ function($,
+             }).catch(
+             function(error) {
+                 that.events.trigger("file_load_failed.Editor", error);
+-                if (((error.xhr||{}).responseJSON||{}).reason === 'bad format') {
+-                    window.location = utils.url_path_join(
+-                        that.base_url,
+-                        'files',
+-                        that.file_path
+-                    );
+-                } else {
+-                    console.warn('Error while loading: the error was:')
+-                    console.warn(error)
+-                }
++                console.warn('Error loading: ', error);
+                 cm.setValue("Error! " + error.message +
+                                 "\nSaving disabled.\nSee Console for more details.");
+-                cm.setOption('readOnly','nocursor')
++                cm.setOption('readOnly','nocursor');
+                 that.save_enabled = false;
+             }
+         );
+@@ -186,7 +177,7 @@ function($,
+     Editor.prototype._clean_state = function(){
+         var clean = this.codemirror.isClean(this.generation);
+         if (clean === this.clean){
+-            return
++            return;
+         } else {
+             this.clean = clean;
+         }

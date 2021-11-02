@@ -1,0 +1,39 @@
+From 1fe8fbc032ccda1db9af66d93016b49c16c1f22d Mon Sep 17 00:00:00 2001
+From: Viet Hoa Dinh <dvh@fb.com>
+Date: Sun, 7 May 2017 15:58:41 -0700
+Subject: [PATCH] Fixed crash #274
+
+---
+ src/low-level/imf/mailimf.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/low-level/imf/mailimf.c b/src/low-level/imf/mailimf.c
+index 4554f1ce..b557070d 100644
+--- a/src/low-level/imf/mailimf.c
++++ b/src/low-level/imf/mailimf.c
+@@ -3083,6 +3083,7 @@ static int mailimf_group_parse(const char * message, size_t length,
+   struct mailimf_group * group;
+   int r;
+   int res;
++  clist * list;
+ 
+   cur_token = * indx;
+ 
+@@ -3110,6 +3111,17 @@ static int mailimf_group_parse(const char * message, size_t length,
+       res = r;
+       goto free_display_name;
+     }
++    list = clist_new();
++    if (list == NULL) {
++      res = MAILIMF_ERROR_MEMORY;
++      goto free_display_name;
++    }
++    mailbox_list = mailimf_mailbox_list_new(list);
++    if (mailbox_list == NULL) {
++      res = MAILIMF_ERROR_MEMORY;
++      clist_free(list);
++      goto free_display_name;
++    }
+     break;
+   default:
+     res = r;

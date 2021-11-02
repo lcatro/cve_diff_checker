@@ -1,0 +1,41 @@
+From d9204be9f49520cdaaeb2541d1dc5187b23f31d9 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Fri, 9 Jul 2021 18:27:22 -0700
+Subject: [PATCH] Disallow division by zero FPE in
+ tf.raw_ops.SparseDenseCwiseDiv
+
+PiperOrigin-RevId: 383959809
+Change-Id: Ibe88458bdf66a686c93e354b8255dec94285c560
+---
+ .../core/kernels/sparse_dense_binary_op_shared.cc     | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/sparse_dense_binary_op_shared.cc b/tensorflow/core/kernels/sparse_dense_binary_op_shared.cc
+index dac4a3d3e6bfc..dda05dbc3b8cb 100644
+--- a/tensorflow/core/kernels/sparse_dense_binary_op_shared.cc
++++ b/tensorflow/core/kernels/sparse_dense_binary_op_shared.cc
+@@ -114,7 +114,10 @@ class SparseDenseBinaryOpShared : public OpKernel {
+     OP_REQUIRES_OK(
+         ctx, ctx->allocate_temp(DataTypeToEnum<T>::value, TensorShape({nnz}),
+                                 &dense_gathered));
+-
++    bool op_is_div = false;
++    if (absl::StrContains(ctx->op_kernel().type_string_view(), "Div")) {
++      op_is_div = true;
++    }
+     // Pulls relevant entries from the dense side, with reshape and broadcasting
+     // *of the dense side* taken into account.  Use a TensorRef to avoid blowing
+     // up memory.
+@@ -143,6 +146,12 @@ class SparseDenseBinaryOpShared : public OpKernel {
+           errors::InvalidArgument("Provided indices are out-of-bounds w.r.t. " \
+                                   "dense side with broadcasted shape"));       \
+       dense_gathered_flat(i) = rhs_ref.coeff(idx);                             \
++      if (op_is_div) {                                                         \
++        OP_REQUIRES(ctx, dense_gathered_flat(i) != 0,                          \
++                    errors::InvalidArgument(                                   \
++                        "SparseDenseCwiseDiv cannot divide by zero,"           \
++                        "but input dense tensor contains zero "));             \
++      }                                                                        \
+     }                                                                          \
+     break;                                                                     \
+   }

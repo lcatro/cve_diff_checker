@@ -1,0 +1,61 @@
+From 780ae4f3c99b579cb2ea9845121caebb6192f725 Mon Sep 17 00:00:00 2001
+From: Nick Meves <nick.meves@greenhouse.io>
+Date: Mon, 1 Feb 2021 10:04:33 -0800
+Subject: [PATCH] Merge pull request from GHSA-4mf2-f3wh-gvf2
+
+---
+ oauthproxy.go      | 16 +++++++++-------
+ oauthproxy_test.go |  5 +++++
+ 2 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/oauthproxy.go b/oauthproxy.go
+index 36c58c46d..0cfa1f93c 100644
+--- a/oauthproxy.go
++++ b/oauthproxy.go
+@@ -437,21 +437,23 @@ func (p *OAuthProxy) IsValidRedirect(redirect string) bool {
+ 		}
+ 		redirectHostname := redirectURL.Hostname()
+ 
+-		for _, domain := range p.whitelistDomains {
+-			domainHostname, domainPort := splitHostPort(strings.TrimLeft(domain, "."))
+-			if domainHostname == "" {
++		for _, allowedDomain := range p.whitelistDomains {
++			allowedHost, allowedPort := splitHostPort(allowedDomain)
++			if allowedHost == "" {
+ 				continue
+ 			}
+ 
+-			if (redirectHostname == domainHostname) || (strings.HasPrefix(domain, ".") && strings.HasSuffix(redirectHostname, domainHostname)) {
++			if redirectHostname == strings.TrimPrefix(allowedHost, ".") ||
++				(strings.HasPrefix(allowedHost, ".") &&
++					strings.HasSuffix(redirectHostname, allowedHost)) {
+ 				// the domain names match, now validate the ports
+ 				// if the whitelisted domain's port is '*', allow all ports
+ 				// if the whitelisted domain contains a specific port, only allow that port
+ 				// if the whitelisted domain doesn't contain a port at all, only allow empty redirect ports ie http and https
+ 				redirectPort := redirectURL.Port()
+-				if (domainPort == "*") ||
+-					(domainPort == redirectPort) ||
+-					(domainPort == "" && redirectPort == "") {
++				if allowedPort == "*" ||
++					allowedPort == redirectPort ||
++					(allowedPort == "" && redirectPort == "") {
+ 					return true
+ 				}
+ 			}
+diff --git a/oauthproxy_test.go b/oauthproxy_test.go
+index 41ac81bb6..06b77ca85 100644
+--- a/oauthproxy_test.go
++++ b/oauthproxy_test.go
+@@ -298,6 +298,11 @@ func TestIsValidRedirect(t *testing.T) {
+ 			Redirect:       "/\t/\t\\evil.com",
+ 			ExpectedResult: false,
+ 		},
++		{
++			Desc:           "openRedirectPartialSubdomain",
++			Redirect:       "http://evilbar.foo",
++			ExpectedResult: false,
++		},
+ 	}
+ 
+ 	for _, tc := range testCases {

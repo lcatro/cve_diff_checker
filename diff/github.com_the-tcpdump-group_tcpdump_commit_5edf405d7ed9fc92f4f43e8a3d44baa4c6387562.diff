@@ -1,0 +1,102 @@
+From 5edf405d7ed9fc92f4f43e8a3d44baa4c6387562 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Mon, 6 Mar 2017 09:42:49 -0800
+Subject: [PATCH] CVE-2017-13008/IEEE 802.11: Fix TIM bitmap copy to copy from
+ p + offset.
+
+offset has already been advanced to point to the bitmap; we shouldn't
+add the amount to advance again.
+
+This fixes a buffer over-read discovered by Brian 'geeknik' Carpenter.
+
+Add a test using the capture file supplied by the reporter(s).
+
+While we're at it, remove some redundant tests - we've already checked,
+before the case statement, whether we have captured the entire
+information element and whether the entire information element is
+present in the on-the-wire packet; in the cases for particular IEs, we
+only need to make sure we don't go past the end of the IE.
+---
+ print-802_11.c                   |  14 +-------------
+ tests/TESTLIST                   |   1 +
+ tests/ieee802.11_rates_oobr.out  |   1 +
+ tests/ieee802.11_rates_oobr.pcap | Bin 0 -> 126 bytes
+ 4 files changed, 3 insertions(+), 13 deletions(-)
+ create mode 100644 tests/ieee802.11_rates_oobr.out
+ create mode 100644 tests/ieee802.11_rates_oobr.pcap
+
+diff --git a/print-802_11.c b/print-802_11.c
+index 17c1f70cb..d8bf039de 100644
+--- a/print-802_11.c
++++ b/print-802_11.c
+@@ -1039,10 +1039,6 @@ parse_elements(netdissect_options *ndo,
+ 			if (ssid.length != 0) {
+ 				if (ssid.length > sizeof(ssid.ssid) - 1)
+ 					return 0;
+-				if (!ND_TTEST2(*(p + offset), ssid.length))
+-					return 0;
+-				if (length < ssid.length)
+-					return 0;
+ 				memcpy(&ssid.ssid, p + offset, ssid.length);
+ 				offset += ssid.length;
+ 				length -= ssid.length;
+@@ -1068,10 +1064,6 @@ parse_elements(netdissect_options *ndo,
+ 				if (challenge.length >
+ 				    sizeof(challenge.text) - 1)
+ 					return 0;
+-				if (!ND_TTEST2(*(p + offset), challenge.length))
+-					return 0;
+-				if (length < challenge.length)
+-					return 0;
+ 				memcpy(&challenge.text, p + offset,
+ 				    challenge.length);
+ 				offset += challenge.length;
+@@ -1097,10 +1089,6 @@ parse_elements(netdissect_options *ndo,
+ 			if (rates.length != 0) {
+ 				if (rates.length > sizeof rates.rate)
+ 					return 0;
+-				if (!ND_TTEST2(*(p + offset), rates.length))
+-					return 0;
+-				if (length < rates.length)
+-					return 0;
+ 				memcpy(&rates.rate, p + offset, rates.length);
+ 				offset += rates.length;
+ 				length -= rates.length;
+@@ -1189,7 +1177,7 @@ parse_elements(netdissect_options *ndo,
+ 			offset += 3;
+ 			length -= 3;
+ 
+-			memcpy(tim.bitmap, p + offset + 3, tim.length - 3);
++			memcpy(tim.bitmap, p + offset, tim.length - 3);
+ 			offset += tim.length - 3;
+ 			length -= tim.length - 3;
+ 			/*
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5f18a0574..17ee6fb73 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -438,6 +438,7 @@ ipv6-rthdr-oobr		ipv6-rthdr-oobr.pcap		ipv6-rthdr-oobr.out
+ ieee802.11_tim_ie_oobr	ieee802.11_tim_ie_oobr.pcap	ieee802.11_tim_ie_oobr.out
+ decnet-shorthdr-oobr	decnet-shorthdr-oobr.pcap	decnet-shorthdr-oobr.out
+ isakmp-3948-oobr-2	isakmp-3948-oobr-2.pcap		isakmp-3948-oobr-2.out
++ieee802.11_rates_oobr	ieee802.11_rates_oobr.pcap	ieee802.11_rates_oobr.out
+ 
+ # bad packets from Kamil Frankowicz
+ snmp-heapoverflow-1	snmp-heapoverflow-1.pcap	snmp-heapoverflow-1.out
+diff --git a/tests/ieee802.11_rates_oobr.out b/tests/ieee802.11_rates_oobr.out
+new file mode 100644
+index 000000000..222eed335
+--- /dev/null
++++ b/tests/ieee802.11_rates_oobr.out
+@@ -0,0 +1 @@
++fhset 48 fhpat 48 48dBm signal 48dB signal 48dB noise [|802.11]Beacon IBSS, PRIVACY[|802.11]
+diff --git a/tests/ieee802.11_rates_oobr.pcap b/tests/ieee802.11_rates_oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb2819a8c04c245c86fc53e40c77f5de92129dab
+GIT binary patch
+literal 126
+ycmca|c+)~A1{MYbC~#+BV5nz+a}C0P{4lVb1VRv|7)UoFv2ijP4Om&QN&)~eXcxu+
+
+literal 0
+HcmV?d00001
+

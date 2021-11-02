@@ -1,0 +1,144 @@
+From c547433cdf2e79191b15c6932c57f1472bfb5ff4 Mon Sep 17 00:00:00 2001
+From: Kevin McCarthy <kevin@8t8.us>
+Date: Tue, 16 Jun 2020 13:49:20 -0700
+Subject: [PATCH] Fix STARTTLS response injection attack.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Thanks again to Damian Poddebniak and Fabian Ising from the MÃ¼nster
+University of Applied Sciences for reporting this issue.  Their
+summary in ticket 248 states the issue clearly:
+
+  We found another STARTTLS-related issue in Mutt. Unfortunately, it
+  affects SMTP, POP3 and IMAP.
+
+  When the server responds with its "let's do TLS now message", e.g. A
+  OK begin TLS\r\n in IMAP or +OK begin TLS\r\n in POP3, Mutt will
+  also read any data after the \r\n and save it into some internal
+  buffer for later processing. This is problematic, because a MITM
+  attacker can inject arbitrary responses.
+
+  There is a nice blogpost by Wietse Venema about a "command
+  injection" in postfix (http://www.postfix.org/CVE-2011-0411.html).
+  What we have here is the problem in reverse, i.e. not a command
+  injection, but a "response injection."
+
+This commit fixes the issue by clearing the CONNECTION input buffer in
+mutt_ssl_starttls().
+
+To make backporting this fix easier, the new functions only clear the
+top-level CONNECTION buffer; they don't handle nested buffering in
+mutt_zstrm.c or mutt_sasl.c.  However both of those wrap the
+connection *after* STARTTLS, so this is currently okay.  mutt_tunnel.c
+occurs before connecting, but it does not perform any nesting.
+---
+ mutt_socket.c     | 30 ++++++++++++++++++++++++++++++
+ mutt_socket.h     |  2 ++
+ mutt_ssl.c        | 12 ++++++++++++
+ mutt_ssl_gnutls.c | 12 ++++++++++++
+ 4 files changed, 56 insertions(+)
+
+diff --git a/mutt_socket.c b/mutt_socket.c
+index 83d8ddf7..5a2800b8 100644
+--- a/mutt_socket.c
++++ b/mutt_socket.c
+@@ -129,6 +129,36 @@ int mutt_socket_write_d (CONNECTION *conn, const char *buf, int len, int dbg)
+   return sent;
+ }
+ 
++/* Checks if the CONNECTION input buffer has unread data.
++ *
++ * NOTE: for general use, the function needs to expand to poll nested
++ * connections.  It currently does not to make backporting a security
++ * fix easier.
++ *
++ * STARTTLS occurs before SASL and COMPRESS=DEFLATE processing, and
++ * mutt_tunnel() does not wrap the connection.  So this and the next
++ * function are safe for current usage in mutt_ssl_starttls().
++ */
++int mutt_socket_has_buffered_input (CONNECTION *conn)
++{
++  return conn->bufpos < conn->available;
++}
++
++/* Clears buffered input from a connection.
++ *
++ * NOTE: for general use, the function needs to expand to call nested
++ * connections.  It currently does not to make backporting a security
++ * fix easier.
++ *
++ * STARTTLS occurs before SASL and COMPRESS=DEFLATE processing, and
++ * mutt_tunnel() does not wrap the connection.  So this and the previous
++ * function are safe for current usage in mutt_ssl_starttls().
++ */
++void mutt_socket_clear_buffered_input (CONNECTION *conn)
++{
++  conn->bufpos = conn->available = 0;
++}
++
+ /* poll whether reads would block.
+  *   Returns: >0 if there is data to read,
+  *            0 if a read would block,
+diff --git a/mutt_socket.h b/mutt_socket.h
+index 68f158e0..b0b27ee8 100644
+--- a/mutt_socket.h
++++ b/mutt_socket.h
+@@ -53,6 +53,8 @@ typedef struct _connection
+ 
+ int mutt_socket_open (CONNECTION* conn);
+ int mutt_socket_close (CONNECTION* conn);
++int mutt_socket_has_buffered_input (CONNECTION *conn);
++void mutt_socket_clear_buffered_input (CONNECTION *conn);
+ int mutt_socket_poll (CONNECTION* conn, time_t wait_secs);
+ int mutt_socket_readchar (CONNECTION *conn, char *c);
+ #define mutt_socket_readln(A,B,C) mutt_socket_readln_d(A,B,C,MUTT_SOCK_LOG_CMD)
+diff --git a/mutt_ssl.c b/mutt_ssl.c
+index 6978e4e4..9c0e52b5 100644
+--- a/mutt_ssl.c
++++ b/mutt_ssl.c
+@@ -199,6 +199,18 @@ int mutt_ssl_starttls (CONNECTION* conn)
+   int maxbits;
+   long ssl_options = 0;
+ 
++  if (mutt_socket_has_buffered_input (conn))
++  {
++    /* L10N:
++       The server is not supposed to send data immediately after
++       confirming STARTTLS.  This warns the user that something
++       weird is going on.
++    */
++    mutt_error _("Warning: clearing unexpected buffered data before STARTTLS");
++    mutt_sleep (0);
++    mutt_socket_clear_buffered_input (conn);
++  }
++
+   if (ssl_init())
+     goto bail;
+ 
+diff --git a/mutt_ssl_gnutls.c b/mutt_ssl_gnutls.c
+index 693311f9..3eb276d5 100644
+--- a/mutt_ssl_gnutls.c
++++ b/mutt_ssl_gnutls.c
+@@ -218,6 +218,18 @@ static int tls_socket_open (CONNECTION* conn)
+ 
+ int mutt_ssl_starttls (CONNECTION* conn)
+ {
++  if (mutt_socket_has_buffered_input (conn))
++  {
++    /* L10N:
++       The server is not supposed to send data immediately after
++       confirming STARTTLS.  This warns the user that something
++       weird is going on.
++    */
++    mutt_error _("Warning: clearing unexpected buffered data before STARTTLS");
++    mutt_sleep (0);
++    mutt_socket_clear_buffered_input (conn);
++  }
++
+   if (tls_init() < 0)
+     return -1;
+ 
+-- 
+GitLab
+

@@ -1,0 +1,38 @@
+From 30663fd26c0307e414622c7a8607fbc04f92ec14 Mon Sep 17 00:00:00 2001
+From: Pranith Kumar <bobby.prani@gmail.com>
+Date: Thu, 23 Mar 2017 13:58:51 -0400
+Subject: [PATCH] tcg/i386: Check the size of instruction being translated
+
+This fixes the bug: 'user-to-root privesc inside VM via bad translation
+caching' reported by Jann Horn here:
+https://bugs.chromium.org/p/project-zero/issues/detail?id=1122
+
+Reviewed-by: Richard Henderson <rth@twiddle.net>
+CC: Peter Maydell <peter.maydell@linaro.org>
+CC: Paolo Bonzini <pbonzini@redhat.com>
+Reported-by: Jann Horn <jannh@google.com>
+Signed-off-by: Pranith Kumar <bobby.prani@gmail.com>
+Message-Id: <20170323175851.14342-1-bobby.prani@gmail.com>
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+---
+ target/i386/translate.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/target/i386/translate.c b/target/i386/translate.c
+index 72c1b03a2a69..1d1372fb4360 100644
+--- a/target/i386/translate.c
++++ b/target/i386/translate.c
+@@ -4418,6 +4418,13 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
+     s->vex_l = 0;
+     s->vex_v = 0;
+  next_byte:
++    /* x86 has an upper limit of 15 bytes for an instruction. Since we
++     * do not want to decode and generate IR for an illegal
++     * instruction, the following check limits the instruction size to
++     * 25 bytes: 14 prefix + 1 opc + 6 (modrm+sib+ofs) + 4 imm */
++    if (s->pc - pc_start > 14) {
++        goto illegal_op;
++    }
+     b = cpu_ldub_code(env, s->pc);
+     s->pc++;
+     /* Collect prefixes.  */

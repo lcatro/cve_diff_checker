@@ -1,0 +1,55 @@
+From 3e07ea52885f88d3fbec444dfd592f27bfb65647 Mon Sep 17 00:00:00 2001
+From: jvoisin <julien.voisin@dustri.org>
+Date: Mon, 1 Apr 2019 11:33:35 +0200
+Subject: [PATCH] Use a random key to "encrypt" the remember-me cookie's value
+
+Since Spring's default remember-me technique is
+terrible security-wise (`user:timstamp:md5(use:timestamp:password:key)`),
+we should at least use a random key, instead of a fixed one,
+otherwise, and attacker able to capture the cookies
+might be able to trivially bruteforce offline
+the password of the associated user.
+---
+ .../player/security/GlobalSecurityConfig.java      | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/airsonic-main/src/main/java/org/airsonic/player/security/GlobalSecurityConfig.java b/airsonic-main/src/main/java/org/airsonic/player/security/GlobalSecurityConfig.java
+index 7ea775791..0fc537688 100644
+--- a/airsonic-main/src/main/java/org/airsonic/player/security/GlobalSecurityConfig.java
++++ b/airsonic-main/src/main/java/org/airsonic/player/security/GlobalSecurityConfig.java
+@@ -22,6 +22,8 @@
+ import org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter;
+ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+ 
++import java.security.SecureRandom;
++
+ @Configuration
+ @Order(SecurityProperties.ACCESS_OVERRIDE_ORDER)
+ @EnableGlobalMethodSecurity(securedEnabled = true, prePostEnabled = true)
+@@ -31,6 +33,14 @@
+ 
+     static final String FAILURE_URL = "/login?error=1";
+ 
++    private static final String key;
++
++    static {
++      byte[] array = new byte[32];
++      new SecureRandom().nextBytes(array);
++      key = new String(array);
++    }
++
+     @Autowired
+     private SecurityService securityService;
+ 
+@@ -162,8 +172,8 @@ protected void configure(HttpSecurity http) throws Exception {
+                     // see http://docs.spring.io/spring-security/site/docs/3.2.4.RELEASE/reference/htmlsingle/#csrf-logout
+                     .and().logout().logoutRequestMatcher(new AntPathRequestMatcher("/logout", "GET")).logoutSuccessUrl(
+                     "/login?logout")
+-                    .and().rememberMe().key("airsonic");
++                    .and().rememberMe().key(key);
+         }
+ 
+     }
+-}
+\ No newline at end of file
++}

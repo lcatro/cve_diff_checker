@@ -1,0 +1,89 @@
+From 0554324ec6bbc2071f5d1f8ad211a1643e29eb1f Mon Sep 17 00:00:00 2001
+From: Benjamin Tissoires <benjamin.tissoires@gmail.com>
+Date: Tue, 4 Apr 2017 19:13:38 +0200
+Subject: Use getentropy() if arc4random_buf() is not available
+
+This allows to fix CVE-2017-2625 on Linux platforms without pulling in
+libbsd.
+The libc getentropy() is available since glibc 2.25 but also on OpenBSD.
+For Linux, we need at least a v3.17 kernel. If the recommended
+arc4random_buf() function is not available, emulate it by first trying
+to use getentropy() on a supported glibc and kernel. If the call fails,
+fall back to the current (vulnerable) code.
+
+Signed-off-by: Benjamin Tissoires <benjamin.tissoires@gmail.com>
+Reviewed-by: Mark Kettenis <kettenis@openbsd.org>
+Reviewed-by: Alan Coopersmith <alan.coopersmith@oracle.com>
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ Key.c        | 31 ++++++++++++++++++++++++++-----
+ configure.ac |  2 +-
+ 2 files changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/Key.c b/Key.c
+index a09b316..70607d0 100644
+--- a/Key.c
++++ b/Key.c
+@@ -62,10 +62,11 @@ getbits (long data, unsigned char *dst)
+ #define getpid(x) _getpid(x)
+ #endif
+ 
+-void
+-XdmcpGenerateKey (XdmAuthKeyPtr key)
+-{
+ #ifndef HAVE_ARC4RANDOM_BUF
++
++static void
++emulate_getrandom_buf (char *auth, int len)
++{
+     long    lowbits, highbits;
+ 
+     srandom ((int)getpid() ^ time((Time_t *)0));
+@@ -73,9 +74,29 @@ XdmcpGenerateKey (XdmAuthKeyPtr key)
+     highbits = random ();
+     getbits (lowbits, key->data);
+     getbits (highbits, key->data + 4);
+-#else
++}
++
++static void
++arc4random_buf (void *auth, int len)
++{
++    int	    ret;
++
++#if HAVE_GETENTROPY
++    /* weak emulation of arc4random through the getentropy libc call */
++    ret = getentropy (auth, len);
++    if (ret == 0)
++	return;
++#endif /* HAVE_GETENTROPY */
++
++    emulate_getrandom_buf (auth, len);
++}
++
++#endif /* !defined(HAVE_ARC4RANDOM_BUF) */
++
++void
++XdmcpGenerateKey (XdmAuthKeyPtr key)
++{
+     arc4random_buf(key->data, 8);
+-#endif
+ }
+ 
+ int
+diff --git a/configure.ac b/configure.ac
+index 2288502..d2b045d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -65,7 +65,7 @@ esac
+ 
+ # Checks for library functions.
+ AC_CHECK_LIB([bsd], [arc4random_buf])
+-AC_CHECK_FUNCS([srand48 lrand48 arc4random_buf])
++AC_CHECK_FUNCS([srand48 lrand48 arc4random_buf getentropy])
+ 
+ # Obtain compiler/linker options for depedencies
+ PKG_CHECK_MODULES(XDMCP, xproto)
+-- 
+cgit v1.2.1
+

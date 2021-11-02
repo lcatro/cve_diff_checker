@@ -1,0 +1,33 @@
+From c3ba5b78261e07a883ad8fac28c214486c854e12 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Wed, 19 Jun 2019 15:24:25 -0500
+Subject: [PATCH] xss: Install Form
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This addresses an issue reported by Aishwarya Iyer where inserting `<img src
+=x onerror = prompt(1)` into any text field on the install form will execute
+in the browser after the system is installed and you log in. This is due to
+us not sanitizing the content before it’s saved in the database. This adds
+`Format::htmlchars()` to the installer to ensure the text field data is
+sanitized properly.
+---
+ setup/inc/class.installer.php | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/setup/inc/class.installer.php b/setup/inc/class.installer.php
+index 1a19832554..8d10bd4f98 100644
+--- a/setup/inc/class.installer.php
++++ b/setup/inc/class.installer.php
+@@ -188,8 +188,8 @@ function install($vars) {
+             'dept_id' => $dept_id,
+             'role_id' => $role_id,
+             'email' => $vars['admin_email'],
+-            'firstname' => $vars['fname'],
+-            'lastname' => $vars['lname'],
++            'firstname' => Format::htmlchars($vars['fname']),
++            'lastname' => Format::htmlchars($vars['lname']),
+             'username' => $vars['username'],
+         ));
+         $staff->updatePerms(array(

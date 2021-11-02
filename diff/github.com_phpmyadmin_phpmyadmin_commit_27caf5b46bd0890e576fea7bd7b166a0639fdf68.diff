@@ -1,0 +1,156 @@
+From 27caf5b46bd0890e576fea7bd7b166a0639fdf68 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Thu, 16 Jun 2016 09:35:56 +0200
+Subject: [PATCH] Improve detection of script name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In case PHP_SELF was not set by server, we used REQUEST_URI, which might
+embed PATH_INFO as well. However we really need to know the path without
+it, so let's strip it as well.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ libraries/Config.php                          |  6 +-
+ libraries/core.lib.php                        | 13 ++-
+ .../core/PMA_cleanupPathInfo_test.php         | 84 +++++++++++++++++++
+ 3 files changed, 94 insertions(+), 9 deletions(-)
+ create mode 100644 test/libraries/core/PMA_cleanupPathInfo_test.php
+
+diff --git a/libraries/Config.php b/libraries/Config.php
+index 95f74ad3014..f75963dfddf 100644
+--- a/libraries/Config.php
++++ b/libraries/Config.php
+@@ -1393,11 +1393,7 @@ public function getCookiePath()
+             return $cookie_path;
+         }
+ 
+-        if (isset($GLOBALS['PMA_PHP_SELF'])) {
+-            $parsed_url = parse_url($GLOBALS['PMA_PHP_SELF']);
+-        } else {
+-            $parsed_url = parse_url(PMA_getenv('REQUEST_URI'));
+-        }
++        $parsed_url = parse_url($GLOBALS['PMA_PHP_SELF']);
+ 
+         $parts = explode(
+             '/',
+diff --git a/libraries/core.lib.php b/libraries/core.lib.php
+index 1ee6cef23a8..037227d7979 100644
+--- a/libraries/core.lib.php
++++ b/libraries/core.lib.php
+@@ -940,15 +940,20 @@ function PMA_setGlobalDbOrTable($param)
+  */
+ function PMA_cleanupPathInfo()
+ {
+-    global $PMA_PHP_SELF, $_PATH_INFO;
++    global $PMA_PHP_SELF;
+ 
+     $PMA_PHP_SELF = PMA_getenv('PHP_SELF');
++    if (empty($PMA_PHP_SELF)) {
++        $PMA_PHP_SELF = urldecode(PMA_getenv('REQUEST_URI'));
++    }
+     $_PATH_INFO = PMA_getenv('PATH_INFO');
+     if (! empty($_PATH_INFO) && ! empty($PMA_PHP_SELF)) {
+         $path_info_pos = mb_strrpos($PMA_PHP_SELF, $_PATH_INFO);
+-        $pathLength = $path_info_pos + mb_strlen($_PATH_INFO);
+-        if ($pathLength === mb_strlen($PMA_PHP_SELF)) {
+-            $PMA_PHP_SELF = mb_substr($PMA_PHP_SELF, 0, $path_info_pos);
++        if ($path_info_pos !== false) {
++            $path_info_part = mb_substr($PMA_PHP_SELF, $path_info_pos, mb_strlen($_PATH_INFO));
++            if ($path_info_part == $_PATH_INFO) {
++                $PMA_PHP_SELF = mb_substr($PMA_PHP_SELF, 0, $path_info_pos);
++            }
+         }
+     }
+     $PMA_PHP_SELF = htmlspecialchars($PMA_PHP_SELF);
+diff --git a/test/libraries/core/PMA_cleanupPathInfo_test.php b/test/libraries/core/PMA_cleanupPathInfo_test.php
+new file mode 100644
+index 00000000000..7ca9f3f971e
+--- /dev/null
++++ b/test/libraries/core/PMA_cleanupPathInfo_test.php
+@@ -0,0 +1,84 @@
++<?php
++/* vim: set expandtab sw=4 ts=4 sts=4: */
++/**
++ *
++ * PMA_fatalError() displays the given error message on phpMyAdmin error page in
++ * foreign language
++ * and ends script execution and closes session
++ *
++ * @package PhpMyAdmin-test
++ */
++
++
++
++
++/**
++ *
++ * PMA_fatalError() displays the given error message on phpMyAdmin error page in
++ * foreign language
++ * and ends script execution and closes session
++ *
++ * @package PhpMyAdmin-test
++ */
++class PMA_CleanupPathInfo_Test extends PHPUnit_Framework_TestCase
++{
++    /**
++     * Test for PMA_cleanupPathInfo
++     *
++     * @param string $php_self  The PHP_SELF value
++     * @param string $request   The REQUEST_URI value
++     * @param string $path_info The PATH_INFO value
++     * @param string $expected  Expected result
++     *
++     * @return void
++     *
++     * @dataProvider pathsProvider
++     */
++    public function testPahtInfo($php_self, $request, $path_info, $expected)
++    {
++        $_SERVER['PHP_SELF'] = $php_self;
++        $_SERVER['REQUEST_URI'] = $request;
++        $_SERVER['PATH_INFO'] = $path_info;
++        PMA_cleanupPathInfo();
++        $this->assertEquals(
++            $expected,
++            $GLOBALS['PMA_PHP_SELF']
++        );
++    }
++
++    /**
++     * Data provider for PMA_cleanupPathInfo tests
++     *
++     * @return array
++     */
++    public function pathsProvider()
++    {
++        return array(
++            array(
++                '/phpmyadmin/index.php/; cookieinj=value/',
++                '/phpmyadmin/index.php/;%20cookieinj=value///',
++                '/; cookieinj=value/',
++                '/phpmyadmin/index.php'
++            ),
++            array(
++                '',
++                '/phpmyadmin/index.php/;%20cookieinj=value///',
++                '/; cookieinj=value/',
++                '/phpmyadmin/index.php'
++            ),
++            array(
++                '/phpmyadmin/index.php',
++                '/phpmyadmin/index.php',
++                '',
++                '/phpmyadmin/index.php'
++            ),
++            array(
++                '',
++                '/phpmyadmin/index.php',
++                '',
++                '/phpmyadmin/index.php'
++            ),
++        );
++    }
++}
++

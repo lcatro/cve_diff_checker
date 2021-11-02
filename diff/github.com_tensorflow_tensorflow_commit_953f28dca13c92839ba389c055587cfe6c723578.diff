@@ -1,0 +1,82 @@
+From 953f28dca13c92839ba389c055587cfe6c723578 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Apr 2021 17:46:38 -0700
+Subject: [PATCH] Prevent a null pointer exception in TFLite
+
+PiperOrigin-RevId: 370800206
+Change-Id: Idd437ebce4ff224120d8eefc1c14c062173b71d6
+---
+ tensorflow/lite/kernels/maximum_minimum.cc | 60 +++++++++++-----------
+ 1 file changed, 31 insertions(+), 29 deletions(-)
+
+diff --git a/tensorflow/lite/kernels/maximum_minimum.cc b/tensorflow/lite/kernels/maximum_minimum.cc
+index 777e51442f120..176e020a5a8e5 100644
+--- a/tensorflow/lite/kernels/maximum_minimum.cc
++++ b/tensorflow/lite/kernels/maximum_minimum.cc
+@@ -157,35 +157,37 @@ template <KernelType kernel_type, typename OpType>
+ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+   OpContext op_context(context, node);
+ 
+-    switch (op_context.output->type) {
+-      case kTfLiteFloat32:
+-        TFLiteOperation<kernel_type, float, OpType>(context, node, op_context);
+-        break;
+-      case kTfLiteUInt8:
+-        TFLiteOperation<kernel_type, uint8_t, OpType>(context, node,
+-                                                      op_context);
+-        break;
+-      case kTfLiteInt8:
+-        TFLiteOperation<kernel_type, int8_t, OpType>(context, node, op_context);
+-        break;
+-      case kTfLiteInt32:
+-        TFLiteOperation<kernel_type, int32_t, OpType>(context, node,
+-                                                      op_context);
+-        break;
+-      case kTfLiteInt64:
+-        TFLiteOperation<kernel_type, int64_t, OpType>(context, node,
+-                                                      op_context);
+-        break;
+-      case kTfLiteInt16:
+-        TFLiteOperation<kernel_type, int16_t, OpType>(context, node,
+-                                                      op_context);
+-        break;
+-      default:
+-        context->ReportError(context,
+-                             "Type %d is currently not supported by Maximum.",
+-                             op_context.output->type);
+-        return kTfLiteError;
+-    }
++  // If inputs have no element, shortcircuit.
++  if (NumElements(op_context.input1) == 0 ||
++      NumElements(op_context.input2) == 0) {
++    return kTfLiteOk;
++  }
++
++  switch (op_context.output->type) {
++    case kTfLiteFloat32:
++      TFLiteOperation<kernel_type, float, OpType>(context, node, op_context);
++      break;
++    case kTfLiteUInt8:
++      TFLiteOperation<kernel_type, uint8_t, OpType>(context, node, op_context);
++      break;
++    case kTfLiteInt8:
++      TFLiteOperation<kernel_type, int8_t, OpType>(context, node, op_context);
++      break;
++    case kTfLiteInt32:
++      TFLiteOperation<kernel_type, int32_t, OpType>(context, node, op_context);
++      break;
++    case kTfLiteInt64:
++      TFLiteOperation<kernel_type, int64_t, OpType>(context, node, op_context);
++      break;
++    case kTfLiteInt16:
++      TFLiteOperation<kernel_type, int16_t, OpType>(context, node, op_context);
++      break;
++    default:
++      context->ReportError(context,
++                           "Type %d is currently not supported by Maximum.",
++                           op_context.output->type);
++      return kTfLiteError;
++  }
+   return kTfLiteOk;
+ }
+ 

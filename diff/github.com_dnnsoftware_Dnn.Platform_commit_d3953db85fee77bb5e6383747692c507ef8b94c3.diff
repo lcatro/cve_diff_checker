@@ -1,0 +1,268 @@
+From d3953db85fee77bb5e6383747692c507ef8b94c3 Mon Sep 17 00:00:00 2001
+From: George Alatrash <george.alatrash@dnnsoftware.com>
+Date: Thu, 4 Jan 2018 17:08:02 -0800
+Subject: [PATCH] DNN-10601: preventing handling external URLs in image
+ handler.
+
+---
+ .../GeneratedImage/DnnImageHandler.cs         | 23 +++++-
+ .../FilterTransform/ImageResizeTransform.cs   |  5 +-
+ .../GeneratedImage/ImageHandlerInternal.cs    |  2 +-
+ .../DNN.Integration.Test.Framework.csproj     |  1 +
+ .../Helpers/PortalAliasHelper.cs              | 40 ++++++++++
+ .../DotNetNuke.Tests.Integration.csproj       |  1 +
+ .../Tests/Library/ImageHandlerTests.cs        | 76 +++++++++++++++++++
+ .../Tests/Security/AuthCookieTests.cs         |  8 +-
+ 8 files changed, 149 insertions(+), 7 deletions(-)
+ create mode 100644 DNN Platform/Tests/DNN.Integration.Test.Framework/Helpers/PortalAliasHelper.cs
+ create mode 100644 DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Library/ImageHandlerTests.cs
+
+diff --git a/DNN Platform/Library/Services/GeneratedImage/DnnImageHandler.cs b/DNN Platform/Library/Services/GeneratedImage/DnnImageHandler.cs
+index d8562ac1cca..8ed6be13c47 100644
+--- a/DNN Platform/Library/Services/GeneratedImage/DnnImageHandler.cs	
++++ b/DNN Platform/Library/Services/GeneratedImage/DnnImageHandler.cs	
+@@ -1,4 +1,5 @@
+ ﻿using System;
++using System.Collections.Generic;
+ using System.Collections.Specialized;
+ using System.Configuration;
+ using System.Drawing;
+@@ -233,11 +234,14 @@ public override ImageInfo GenerateImage(NameValueCollection parameters)
+                         }
+                         else if (!string.IsNullOrEmpty(parameters["Url"]))
+                         {
+-                            if (!parameters["Url"].StartsWith("http"))
++                            var url = parameters["Url"];
++                            // allow only site resources when using the url parameter
++                            if (!url.StartsWith("http") || !UriBelongsToSite(new Uri(url)))
+                             {
+                                 return GetEmptyImageInfo();
+                             }
+-                            imgUrl = parameters["Url"];
++
++                            imgUrl = url;
+                         }
+ 
+                         if (string.IsNullOrEmpty(parameters["format"]))
+@@ -555,5 +559,20 @@ private static ImageFormat GetImageFormat(string extension)
+                     return ImageFormat.Png;
+             }
+         }
++
++        // checks whether the uri belongs to any of the site-wide aliases
++        private static bool UriBelongsToSite(Uri uri)
++        {
++            IEnumerable<string> hostAliases =
++                from PortalAliasInfo alias in PortalAliasController.Instance.GetPortalAliases().Values
++                 select alias.HTTPAlias.ToLowerInvariant();
++
++            // if URI, for example, = "http(s)://myDomain:80/DNNDev/myPage?var=name" , then the two strings will be
++            // uriNoScheme1 = "mydomain/dnndev/mypage"  -- lower case
++            // uriNoScheme2 = "mydomain:80/dnndev/mypage"  -- lower case
++            var uriNoScheme1 = (uri.DnsSafeHost + uri.LocalPath).ToLowerInvariant();
++            var uriNoScheme2 = (uri.Authority + uri.LocalPath).ToLowerInvariant();
++            return hostAliases.Any(alias => uriNoScheme1.StartsWith(alias) || uriNoScheme2.StartsWith(alias));
++        }
+     }
+ }
+\ No newline at end of file
+diff --git a/DNN Platform/Library/Services/GeneratedImage/FilterTransform/ImageResizeTransform.cs b/DNN Platform/Library/Services/GeneratedImage/FilterTransform/ImageResizeTransform.cs
+index ad8a3b67e84..786b072c54b 100644
+--- a/DNN Platform/Library/Services/GeneratedImage/FilterTransform/ImageResizeTransform.cs	
++++ b/DNN Platform/Library/Services/GeneratedImage/FilterTransform/ImageResizeTransform.cs	
+@@ -113,7 +113,10 @@ public int Border
+         /// <param name="image">Input image</param>
+         /// <returns>Image result after image transformation</returns>
+         public override Image ProcessImage(Image image)
+-		{
++        {
++            if (image == null)
++                return null;    
++
+             if (MaxWidth > 0)
+             {
+                 Width = image.Width > MaxWidth ? MaxWidth : image.Width;
+diff --git a/DNN Platform/Library/Services/GeneratedImage/ImageHandlerInternal.cs b/DNN Platform/Library/Services/GeneratedImage/ImageHandlerInternal.cs
+index a5a0f2ae24f..94528aae71b 100644
+--- a/DNN Platform/Library/Services/GeneratedImage/ImageHandlerInternal.cs	
++++ b/DNN Platform/Library/Services/GeneratedImage/ImageHandlerInternal.cs	
+@@ -426,7 +426,7 @@ private void RenderImage(Image image, Stream outStream)
+                         Param = { [0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, ImageCompression) }
+                     };
+                     var ici = GetEncoderInfo(GetImageMimeType(ContentType));
+-                    image.Save(outStream, ici, eps);
++                    image?.Save(outStream, ici, eps);
+                 }
+             }
+             finally
+diff --git a/DNN Platform/Tests/DNN.Integration.Test.Framework/DNN.Integration.Test.Framework.csproj b/DNN Platform/Tests/DNN.Integration.Test.Framework/DNN.Integration.Test.Framework.csproj
+index 2499a53400c..b159844446c 100644
+--- a/DNN Platform/Tests/DNN.Integration.Test.Framework/DNN.Integration.Test.Framework.csproj	
++++ b/DNN Platform/Tests/DNN.Integration.Test.Framework/DNN.Integration.Test.Framework.csproj	
+@@ -81,6 +81,7 @@
+     <Compile Include="Helpers\FolderHelper.cs" />
+     <Compile Include="Helpers\HostSettingsHelper.cs" />
+     <Compile Include="Helpers\MockComponentHelper.cs" />
++    <Compile Include="Helpers\PortalAliasHelper.cs" />
+     <Compile Include="Helpers\PortalInfoHelper.cs" />
+     <Compile Include="Helpers\PortalSettingsHelper.cs" />
+     <Compile Include="Helpers\StoredProcedureStatsHelper.cs" />
+diff --git a/DNN Platform/Tests/DNN.Integration.Test.Framework/Helpers/PortalAliasHelper.cs b/DNN Platform/Tests/DNN.Integration.Test.Framework/Helpers/PortalAliasHelper.cs
+new file mode 100644
+index 00000000000..615da9c1b25
+--- /dev/null
++++ b/DNN Platform/Tests/DNN.Integration.Test.Framework/Helpers/PortalAliasHelper.cs	
+@@ -0,0 +1,40 @@
++﻿// DotNetNuke® - http://www.dnnsoftware.com
++// Copyright (c) 2002-2018, DNN Corp.
++// All Rights Reserved
++
++using System.Collections.Generic;
++using System.Linq;
++using DotNetNuke.Entities.Portals;
++
++namespace DNN.Integration.Test.Framework.Helpers
++{
++    public class PortalAliasHelper
++    {
++        public static PortalAliasInfo GetPrimaryPortalAlias(int portalId = 0)
++        {
++            return DatabaseHelper.ExecuteStoredProcedure<PortalAliasInfo>("GetPortalAliases").First(p => p.PortalID == portalId && p.IsPrimary);
++        }
++
++        public static IEnumerable<PortalAliasInfo> GetPortalAliaes(int portalId = 0)
++        {
++            return DatabaseHelper.ExecuteStoredProcedure<PortalAliasInfo>("GetPortalAliases").Where(p => p.PortalID == portalId);
++        }
++
++        public static IEnumerable<PortalAliasInfo> GetAllPortalAliaes()
++        {
++            return DatabaseHelper.ExecuteStoredProcedure<PortalAliasInfo>("GetPortalAliases");
++        }
++
++        public static void AddPortalAlias(PortalAliasInfo portal)
++        {
++            DatabaseHelper.ExecuteStoredProcedure("AddPortalAlias",
++                portal.PortalID,
++                portal.HTTPAlias,
++                portal.CultureCode,
++                portal.Skin,
++                portal.BrowserType,
++                portal.IsPrimary,
++                -1);
++        }
++    }
++}
+diff --git a/DNN Platform/Tests/DotNetNuke.Tests.Integration/DotNetNuke.Tests.Integration.csproj b/DNN Platform/Tests/DotNetNuke.Tests.Integration/DotNetNuke.Tests.Integration.csproj
+index b47625bbb59..7e7274f3894 100644
+--- a/DNN Platform/Tests/DotNetNuke.Tests.Integration/DotNetNuke.Tests.Integration.csproj	
++++ b/DNN Platform/Tests/DotNetNuke.Tests.Integration/DotNetNuke.Tests.Integration.csproj	
+@@ -98,6 +98,7 @@
+     <Compile Include="PersonaBar\Content\Pages\AddPageTests.cs" />
+     <Compile Include="PersonaBar\Content\Pages\PageUrlsTests.cs" />
+     <Compile Include="PersonaBar\Manage\Users\UsersFiltersTests.cs" />
++    <Compile Include="Tests\Library\ImageHandlerTests.cs" />
+     <Compile Include="Tests\Portals\PortalInfoTests.cs" />
+     <Compile Include="Tests\Portals\PortalSettingsTests.cs" />
+     <Compile Include="Properties\AssemblyInfo.cs" />
+diff --git a/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Library/ImageHandlerTests.cs b/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Library/ImageHandlerTests.cs
+new file mode 100644
+index 00000000000..32bc2811ad1
+--- /dev/null
++++ b/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Library/ImageHandlerTests.cs	
+@@ -0,0 +1,76 @@
++﻿// DotNetNuke® - http://www.dnnsoftware.com
++// Copyright (c) 2002-2018, DNN Corp.
++// All Rights Reserved
++
++using System.Linq;
++using DNN.Integration.Test.Framework;
++using DNN.Integration.Test.Framework.Helpers;
++using DotNetNuke.Entities.Portals;
++using NUnit.Framework;
++
++namespace DotNetNuke.Tests.Integration.Tests.Library
++{
++    [TestFixture]
++    public class ImageHandlerTests : IntegrationTestBase
++    {
++        // we assume this GIF image exists in all DNN sites and it shouldn't be PNG
++        private const string HandlerPath = "/DnnImageHandler.ashx?mode=file&w=1&url={0}/images/1x1.GIF";
++
++        [Test]
++        public void Using_Image_Handler_For_Foreign_Site_ShouldFail()
++        {
++            var session = WebApiTestHelper.GetAnnonymousConnector();
++            var relativeUrl = string.Format(HandlerPath, "https://google.com");
++
++            var response = session.GetContent(relativeUrl).Content.ReadAsStringAsync().Result;
++            Assert.IsTrue(response.StartsWith("�PNG\r\n"), $"Content = {response}");
++        }
++
++        [Test]
++        public void Using_Image_Handler_For_Main_Alias_ShouldPass()
++        {
++            var session = WebApiTestHelper.GetAnnonymousConnector();
++            var relativeUrl = string.Format(HandlerPath, AppConfigHelper.SiteUrl);
++
++            var response = session.GetContent(relativeUrl).Content.ReadAsStringAsync().Result;
++            Assert.IsTrue(response.StartsWith("GIF89a"), $"Content = {response}");
++        }
++
++        [Test]
++        public void Using_Image_Handler_From_All_Alias_ShouldPass()
++        {
++            PortalAliasInfo pai;
++            var aliases = PortalAliasHelper.GetPortalAliaes().ToList();
++            if (aliases.Count == 1)
++            {
++                var primary = aliases.First();
++                pai = new PortalAliasInfo
++                {
++                    PortalID = primary.PortalID,
++                    HTTPAlias = "my-" + primary.HTTPAlias,
++                    CultureCode = primary.CultureCode,
++                    Skin = primary.Skin,
++                    BrowserType = primary.BrowserType,
++                    IsPrimary = false,
++
++                };
++            }
++            else
++            {
++                pai = aliases.First(a => a.PortalAliasID > 1);
++            }
++
++            var session = WebApiTestHelper.GetAnnonymousConnector();
++            aliases = PortalAliasHelper.GetPortalAliaes().ToList();
++            foreach (var alias in aliases)
++            {
++                var relativeUrl = string.Format(HandlerPath, AppConfigHelper.SiteUrl);
++                var absoluteUrl = $"http://{alias.HTTPAlias}{relativeUrl}";
++                LogText("Getting image from " + absoluteUrl);
++
++                var response = session.GetContent(absoluteUrl).Content.ReadAsStringAsync().Result;
++                Assert.IsTrue(response.StartsWith("GIF89a"), $"Url: {absoluteUrl} / Content = {response}");
++            }
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Security/AuthCookieTests.cs b/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Security/AuthCookieTests.cs
+index 720d39116ef..223159ece97 100644
+--- a/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Security/AuthCookieTests.cs	
++++ b/DNN Platform/Tests/DotNetNuke.Tests.Integration/Tests/Security/AuthCookieTests.cs	
+@@ -1,8 +1,10 @@
+-﻿using System;
++﻿// DotNetNuke® - http://www.dnnsoftware.com
++// Copyright (c) 2002-2018, DNN Corp.
++// All Rights Reserved
++
++using System;
+ using System.Net;
+ using System.Net.Http;
+-using System.Net.Http.Headers;
+-using System.Threading;
+ using DNN.Integration.Test.Framework;
+ using DNN.Integration.Test.Framework.Helpers;
+ using NUnit.Framework;

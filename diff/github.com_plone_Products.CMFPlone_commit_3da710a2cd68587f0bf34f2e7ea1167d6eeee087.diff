@@ -1,0 +1,90 @@
+From 1845b0a92312291811b68907bf2aa0fb448c4016 Mon Sep 17 00:00:00 2001
+From: vangheem <vangheem@gmail.com>
+Date: Thu, 10 Sep 2015 11:32:44 -0500
+Subject: [PATCH 1/2] Apply isURLInPortal fix from
+ https://pypi.python.org/pypi/Products.PloneHotfix20150910
+
+---
+ CHANGES.rst                            | 3 +++
+ Products/CMFPlone/URLTool.py           | 3 +++
+ Products/CMFPlone/tests/testURLTool.py | 9 +++++++++
+ 3 files changed, 15 insertions(+)
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b6de9e2935..aee860ea97 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,9 @@ Changelog
+ 5.0rc2 (unreleased)
+ -------------------
+ 
++- Apply isURLInPortal fix from https://pypi.python.org/pypi/Products.PloneHotfix20150910
++  [vangheem]
++
+ - Do not bother additional CRSF protection for addMember since all public
+   users get same CSRF token and the method should be unpublished.
+   See https://pypi.python.org/pypi/Products.PloneHotfix20150910
+diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py
+index 9cb669581e..bb0b9e8c0e 100644
+--- a/Products/CMFPlone/URLTool.py
++++ b/Products/CMFPlone/URLTool.py
+@@ -30,6 +30,9 @@ def isURLInPortal(self, url, context=None):
+         """
+         # sanitize url
+         url = re.sub('^[\x00-\x20]+', '', url).strip()
++        if ('<script' in url or '%3Cscript' in url or 'javascript:' in url or
++                'javascript%3A' in url):
++            return False
+ 
+         p_url = self()
+ 
+diff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py
+index 1fa0b144ac..e08cc68f74 100644
+--- a/Products/CMFPlone/tests/testURLTool.py
++++ b/Products/CMFPlone/tests/testURLTool.py
+@@ -96,3 +96,12 @@ def test_isURLInPortalExternal(self):
+         self.assertFalse(iURLiP('http://external4/other'))
+         self.assertFalse(iURLiP('http://external5'))
+         self.assertFalse(iURLiP('http://external11'))
++
++    def test_script_tag_url_not_in_portal(self):
++        self.assertFalse(self.portal.portal_url.isURLInPortal('<script>alert("hi");</script>'))
++        self.assertFalse(
++            self.portal.portal_url.isURLInPortal('%3Cscript%3Ealert(%22hi%22)%3B%3C%2Fscript%3E'))
++
++    def test_inline_url_not_in_portal(self):
++        self.assertFalse(self.portal.portal_url.isURLInPortal('javascript%3Aalert(3)'))
++        self.assertFalse(self.portal.portal_url.isURLInPortal('javascript:alert(3)'))
+
+From 02de70bafb60c4810787e36f5f5850edabe1e26e Mon Sep 17 00:00:00 2001
+From: vangheem <vangheem@gmail.com>
+Date: Thu, 10 Sep 2015 12:56:57 -0500
+Subject: [PATCH 2/2] fix tests
+
+---
+ Products/CMFPlone/tests/testURLTool.py | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py
+index e08cc68f74..d9ec743679 100644
+--- a/Products/CMFPlone/tests/testURLTool.py
++++ b/Products/CMFPlone/tests/testURLTool.py
+@@ -98,10 +98,14 @@ def test_isURLInPortalExternal(self):
+         self.assertFalse(iURLiP('http://external11'))
+ 
+     def test_script_tag_url_not_in_portal(self):
+-        self.assertFalse(self.portal.portal_url.isURLInPortal('<script>alert("hi");</script>'))
++        url_tool = self._makeOne()
++        iURLiP = url_tool.isURLInPortal
++        self.assertFalse(iURLiP('<script>alert("hi");</script>'))
+         self.assertFalse(
+-            self.portal.portal_url.isURLInPortal('%3Cscript%3Ealert(%22hi%22)%3B%3C%2Fscript%3E'))
++            iURLiP('%3Cscript%3Ealert(%22hi%22)%3B%3C%2Fscript%3E'))
+ 
+     def test_inline_url_not_in_portal(self):
+-        self.assertFalse(self.portal.portal_url.isURLInPortal('javascript%3Aalert(3)'))
+-        self.assertFalse(self.portal.portal_url.isURLInPortal('javascript:alert(3)'))
++        url_tool = self._makeOne()
++        iURLiP = url_tool.isURLInPortal
++        self.assertFalse(iURLiP('javascript%3Aalert(3)'))
++        self.assertFalse(iURLiP('javascript:alert(3)'))

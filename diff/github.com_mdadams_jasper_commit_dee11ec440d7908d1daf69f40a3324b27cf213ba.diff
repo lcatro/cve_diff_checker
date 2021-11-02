@@ -1,0 +1,98 @@
+From dee11ec440d7908d1daf69f40a3324b27cf213ba Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Mon, 24 Oct 2016 07:26:40 -0700
+Subject: [PATCH] The component domains must be the same for the ICT/RCT in the
+ JPC codec. This was previously enforced with an assertion. Now, it is handled
+ in a more graceful manner.
+
+---
+ src/libjasper/base/jas_image.c           | 19 +++++++++++++++++++
+ src/libjasper/include/jasper/jas_image.h |  4 ++++
+ src/libjasper/jpc/jpc_dec.c              |  8 ++++++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/src/libjasper/base/jas_image.c b/src/libjasper/base/jas_image.c
+index 16e7b193..b40ba0cc 100644
+--- a/src/libjasper/base/jas_image.c
++++ b/src/libjasper/base/jas_image.c
+@@ -77,6 +77,7 @@
+ #include <assert.h>
+ #include <ctype.h>
+ #include <inttypes.h>
++#include <stdbool.h>
+ 
+ #include "jasper/jas_math.h"
+ #include "jasper/jas_image.h"
+@@ -655,6 +656,24 @@ int jas_image_fmtfromname(char *name)
+ * Miscellaneous operations.
+ \******************************************************************************/
+ 
++bool jas_image_cmpt_domains_same(jas_image_t *image)
++{
++	int cmptno;
++	jas_image_cmpt_t *cmpt;
++	jas_image_cmpt_t *cmpt0;
++
++	cmpt0 = image->cmpts_[0];
++	for (cmptno = 1; cmptno < image->numcmpts_; ++cmptno) {
++		cmpt = image->cmpts_[cmptno];
++		if (cmpt->tlx_ != cmpt0->tlx_ || cmpt->tly_ != cmpt0->tly_ ||
++		  cmpt->hstep_ != cmpt0->hstep_ || cmpt->vstep_ != cmpt0->vstep_ ||
++		  cmpt->width_ != cmpt0->width_ || cmpt->height_ != cmpt0->height_) {
++			return 0;
++		}
++	}
++	return 1;
++}
++
+ uint_fast32_t jas_image_rawsize(jas_image_t *image)
+ {
+ 	uint_fast32_t rawsize;
+diff --git a/src/libjasper/include/jasper/jas_image.h b/src/libjasper/include/jasper/jas_image.h
+index 3ccb7499..163477e4 100644
+--- a/src/libjasper/include/jasper/jas_image.h
++++ b/src/libjasper/include/jasper/jas_image.h
+@@ -79,6 +79,7 @@
+ #include <jasper/jas_seq.h>
+ #include <jasper/jas_cm.h>
+ #include <stdio.h>
++#include <stdbool.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -399,6 +400,9 @@ void jas_image_destroy(jas_image_t *image);
+ 	((image)->cmpts_[cmptno]->tly_ + (image)->cmpts_[cmptno]->height_ * \
+ 	  (image)->cmpts_[cmptno]->vstep_)
+ 
++// Test if all components are specified at the same positions in space. */
++bool jas_image_cmpt_domains_same(jas_image_t *image);
++
+ /* Get the raw size of an image (i.e., the nominal size of the image without
+   any compression. */
+ uint_fast32_t jas_image_rawsize(jas_image_t *image);
+diff --git a/src/libjasper/jpc/jpc_dec.c b/src/libjasper/jpc/jpc_dec.c
+index 4f24660d..95ac7c6d 100644
+--- a/src/libjasper/jpc/jpc_dec.c
++++ b/src/libjasper/jpc/jpc_dec.c
+@@ -1091,6 +1091,10 @@ static int jpc_dec_tiledecode(jpc_dec_t *dec, jpc_dec_tile_t *tile)
+ 			jas_eprintf("RCT requires at least three components\n");
+ 			return -1;
+ 		}
++		if (!jas_image_cmpt_domains_same(dec->image)) {
++			jas_eprintf("RCT requires all components have the same domain\n");
++			return -1;
++		}
+ 		jpc_irct(tile->tcomps[0].data, tile->tcomps[1].data,
+ 		  tile->tcomps[2].data);
+ 		break;
+@@ -1099,6 +1103,10 @@ static int jpc_dec_tiledecode(jpc_dec_t *dec, jpc_dec_tile_t *tile)
+ 			jas_eprintf("ICT requires at least three components\n");
+ 			return -1;
+ 		}
++		if (!jas_image_cmpt_domains_same(dec->image)) {
++			jas_eprintf("RCT requires all components have the same domain\n");
++			return -1;
++		}
+ 		jpc_iict(tile->tcomps[0].data, tile->tcomps[1].data,
+ 		  tile->tcomps[2].data);
+ 		break;

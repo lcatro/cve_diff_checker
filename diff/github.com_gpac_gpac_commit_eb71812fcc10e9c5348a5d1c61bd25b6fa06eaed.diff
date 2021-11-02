@@ -1,0 +1,34 @@
+From eb71812fcc10e9c5348a5d1c61bd25b6fa06eaed Mon Sep 17 00:00:00 2001
+From: jeanlf <jeanlf@gpac.io>
+Date: Fri, 30 Apr 2021 10:37:24 +0200
+Subject: [PATCH] fixed #1765
+
+---
+ applications/mp4box/filedump.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/applications/mp4box/filedump.c b/applications/mp4box/filedump.c
+index 77cf6fc7b..050121d52 100644
+--- a/applications/mp4box/filedump.c
++++ b/applications/mp4box/filedump.c
+@@ -1895,12 +1895,18 @@ void print_udta(GF_ISOFile *file, u32 track_number, Bool has_itags)
+ 			u32 udta_size;
+ 			gf_isom_get_user_data(file, track_number, type, uuid, j+1, &udta, &udta_size);
+ 			if (!udta) continue;
+-			if (gf_utf8_is_legal(udta, udta_size)) {
++			if (udta_size && gf_utf8_is_legal(udta, udta_size)) {
++				u32 idx;
+ 				if (first) {
+ 					fprintf(stderr, "\n");
+ 					first = GF_FALSE;
+ 				}
+-				fprintf(stderr, "\t%s\n", (char *) udta);
++				fprintf(stderr, "\t");
++				for (idx=0; idx<udta_size; idx++) {
++					if (!udta[idx]) break;
++					fprintf(stderr, "%c", udta[idx]);
++				}
++				fprintf(stderr, "\n");
+ 			}
+ 			gf_free(udta);
+ 		}

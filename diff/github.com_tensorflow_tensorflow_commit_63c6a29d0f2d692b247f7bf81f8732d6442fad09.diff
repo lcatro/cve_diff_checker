@@ -1,0 +1,41 @@
+From 63c6a29d0f2d692b247f7bf81f8732d6442fad09 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 5 May 2021 18:07:02 -0700
+Subject: [PATCH] Add missing validation, prevent heap OOB
+
+PiperOrigin-RevId: 372246723
+Change-Id: I1a454a643810e77d7d14821b342098c56a09fbbf
+---
+ tensorflow/core/kernels/pooling_ops_3d.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/tensorflow/core/kernels/pooling_ops_3d.cc b/tensorflow/core/kernels/pooling_ops_3d.cc
+index 7d133b66a1ebd..9da2d62b0a21d 100644
+--- a/tensorflow/core/kernels/pooling_ops_3d.cc
++++ b/tensorflow/core/kernels/pooling_ops_3d.cc
+@@ -693,6 +693,7 @@ class MaxPooling3dGradGradOp : public OpKernel {
+ 
+     Pool3dParameters params{context,  ksize_,       stride_,
+                             padding_, data_format_, tensor_in.shape()};
++    if (!context->status().ok()) return;  // params is invalid
+ 
+     Tensor* output = nullptr;
+     OP_REQUIRES_OK(context, context->forward_input_or_allocate_output(
+@@ -710,6 +711,17 @@ class MaxPooling3dGradGradOp : public OpKernel {
+         context, out_grad_backprop.NumElements() > 0,
+         errors::InvalidArgument("received empty tensor out_grad_backprop: ",
+                                 out_grad_backprop.DebugString()));
++    OP_REQUIRES(context,
++                tensor_in.NumElements() == out_grad_backprop.NumElements(),
++                errors::InvalidArgument("tensor_in and out_grad_backprop must "
++                                        "have same number of elements, got <",
++                                        tensor_in.DebugString(), "> and <",
++                                        out_grad_backprop.DebugString(), ">"));
++    OP_REQUIRES(
++        context, tensor_out.NumElements() == output->NumElements(),
++        errors::InvalidArgument(
++            "tensor_out and output must have same number of elements, got <",
++            tensor_out.DebugString(), "> and <", output->DebugString(), ">"));
+ 
+     LaunchMaxPooling3dGradGradOp<Device, T>::launch(
+         context, params, tensor_in, tensor_out, out_grad_backprop, output);

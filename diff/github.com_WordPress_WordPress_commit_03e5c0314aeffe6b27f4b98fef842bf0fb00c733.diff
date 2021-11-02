@@ -1,0 +1,60 @@
+From 03e5c0314aeffe6b27f4b98fef842bf0fb00c733 Mon Sep 17 00:00:00 2001
+From: Aaron Campbell <aaron@xavisys.com>
+Date: Wed, 11 Jan 2017 01:32:41 +0000
+Subject: [PATCH] Add nonce for widget accessibility mode.
+
+Props vortfu.
+
+See #23328.
+
+
+Built from https://develop.svn.wordpress.org/trunk@39760
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@39698 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-admin/includes/class-wp-screen.php | 3 ++-
+ wp-admin/widgets.php                  | 2 ++
+ wp-includes/version.php               | 2 +-
+ 3 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/wp-admin/includes/class-wp-screen.php b/wp-admin/includes/class-wp-screen.php
+index 79d6c1e0ef61..72b5569082eb 100644
+--- a/wp-admin/includes/class-wp-screen.php
++++ b/wp-admin/includes/class-wp-screen.php
+@@ -915,7 +915,8 @@ public function show_screen_options() {
+ 
+ 		switch ( $this->base ) {
+ 			case 'widgets':
+-				$this->_screen_settings = '<p><a id="access-on" href="widgets.php?widgets-access=on">' . __('Enable accessibility mode') . '</a><a id="access-off" href="widgets.php?widgets-access=off">' . __('Disable accessibility mode') . "</a></p>\n";
++				$nonce = wp_create_nonce( 'widgets-access' );
++				$this->_screen_settings = '<p><a id="access-on" href="widgets.php?widgets-access=on&_wpnonce=' . urlencode( $nonce ) . '">' . __('Enable accessibility mode') . '</a><a id="access-off" href="widgets.php?widgets-access=off&_wpnonce=' . urlencode( $nonce ) . '">' . __('Disable accessibility mode') . "</a></p>\n";
+ 				break;
+ 			case 'post' :
+ 				$expand = '<fieldset class="editor-expand hidden"><legend>' . __( 'Additional settings' ) . '</legend><label for="editor-expand-toggle">';
+diff --git a/wp-admin/widgets.php b/wp-admin/widgets.php
+index 4a34b58c8b1e..8793cab2d56e 100644
+--- a/wp-admin/widgets.php
++++ b/wp-admin/widgets.php
+@@ -22,6 +22,8 @@
+ 
+ $widgets_access = get_user_setting( 'widgets_access' );
+ if ( isset($_GET['widgets-access']) ) {
++	check_admin_referer( 'widgets-access' );
++
+ 	$widgets_access = 'on' == $_GET['widgets-access'] ? 'on' : 'off';
+ 	set_user_setting( 'widgets_access', $widgets_access );
+ }
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index 588b7fb7eda0..25e7cf5e328a 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.8-alpha-39759';
++$wp_version = '4.8-alpha-39760';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

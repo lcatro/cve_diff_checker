@@ -1,0 +1,54 @@
+From f5b0db240b4e3abf18e97f6fd99096b4f9e94dc5 Mon Sep 17 00:00:00 2001
+From: Alexander Matyushentsev <Alexander_Matyushentsev@intuit.com>
+Date: Wed, 3 Feb 2021 16:24:36 -0800
+Subject: [PATCH] fix: tokens keep working after account is deactivated (#5402)
+
+Signed-off-by: Alexander Matyushentsev <AMatyushentsev@gmail.com>
+---
+ util/session/sessionmanager.go      |  4 ++++
+ util/session/sessionmanager_test.go | 17 +++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/util/session/sessionmanager.go b/util/session/sessionmanager.go
+index 2bd99f9fd4a..a1e3df39337 100644
+--- a/util/session/sessionmanager.go
++++ b/util/session/sessionmanager.go
+@@ -283,6 +283,10 @@ func (mgr *SessionManager) Parse(tokenString string) (jwt.Claims, error) {
+ 		return nil, err
+ 	}
+ 
++	if !account.Enabled {
++		return nil, fmt.Errorf("account %s is disabled", subject)
++	}
++
+ 	if id := jwtutil.StringField(claims, "jti"); id != "" && account.TokenIndex(id) == -1 {
+ 		return nil, fmt.Errorf("account %s does not have token with id %s", subject, id)
+ 	}
+diff --git a/util/session/sessionmanager_test.go b/util/session/sessionmanager_test.go
+index 22be5175117..40783ed77e7 100644
+--- a/util/session/sessionmanager_test.go
++++ b/util/session/sessionmanager_test.go
+@@ -92,6 +92,23 @@ func TestSessionManager_AdminToken(t *testing.T) {
+ 	}
+ }
+ 
++func TestSessionManager_AdminToken_Deactivated(t *testing.T) {
++	const (
++		defaultSubject = "admin"
++	)
++	settingsMgr := settings.NewSettingsManager(context.Background(), getKubeClient("pass", false), "argocd")
++	mgr := newSessionManager(settingsMgr, getProjLister(), NewInMemoryUserStateStorage())
++
++	token, err := mgr.Create(defaultSubject, 0, "")
++	if err != nil {
++		t.Errorf("Could not create token: %v", err)
++	}
++
++	_, err = mgr.Parse(token)
++	require.Error(t, err)
++	assert.Contains(t, err.Error(), "account admin is disabled")
++}
++
+ func TestSessionManager_ProjectToken(t *testing.T) {
+ 	settingsMgr := settings.NewSettingsManager(context.Background(), getKubeClient("pass", true), "argocd")
+ 

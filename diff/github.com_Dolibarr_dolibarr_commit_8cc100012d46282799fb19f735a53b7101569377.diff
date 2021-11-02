@@ -1,0 +1,43 @@
+From 8cc100012d46282799fb19f735a53b7101569377 Mon Sep 17 00:00:00 2001
+From: Laurent Destailleur <eldy@destailleur.fr>
+Date: Sun, 9 May 2021 12:50:46 +0200
+Subject: [PATCH] Fix vulnerabiity: External users can set a public note
+
+---
+ htdocs/core/actions_setnotes.inc.php | 24 +++++++++++++-----------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/htdocs/core/actions_setnotes.inc.php b/htdocs/core/actions_setnotes.inc.php
+index f2426f6523f0..91e7f4a8aca2 100644
+--- a/htdocs/core/actions_setnotes.inc.php
++++ b/htdocs/core/actions_setnotes.inc.php
+@@ -67,16 +67,18 @@
+ 			}
+ 		}
+ 	}
+-} elseif ($action == 'setnote_private' && !empty($permissionnote) && !GETPOST('cancel', 'alpha')) {
+-	// Set public note
+-	if (empty($action) || !is_object($object) || empty($id)) {
+-		dol_print_error('', 'Include of actions_setnotes.inc.php was done but required variable was not set before');
+-	}
+-	if (empty($object->id)) {
+-		$object->fetch($id); // Fetch may not be already done
+-	}
+-	$result = $object->update_note(dol_html_entity_decode(GETPOST('note_private', 'restricthtml'), ENT_QUOTES | ENT_HTML5), '_private');
+-	if ($result < 0) {
+-		setEventMessages($object->error, $object->errors, 'errors');
++} elseif ($action == 'setnote_private' && !empty($permissionnote) && !GETPOST('cancel', 'alpha')) {	// Set public note
++	if (empty($user->socid)) {
++		// Private notes (always hidden to external users)
++		if (empty($action) || !is_object($object) || empty($id)) {
++			dol_print_error('', 'Include of actions_setnotes.inc.php was done but required variable was not set before');
++		}
++		if (empty($object->id)) {
++			$object->fetch($id); // Fetch may not be already done
++		}
++		$result = $object->update_note(dol_html_entity_decode(GETPOST('note_private', 'restricthtml'), ENT_QUOTES | ENT_HTML5), '_private');
++		if ($result < 0) {
++			setEventMessages($object->error, $object->errors, 'errors');
++		}
+ 	}
+ }

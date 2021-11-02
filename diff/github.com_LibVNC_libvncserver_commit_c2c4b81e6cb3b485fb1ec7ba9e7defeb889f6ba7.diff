@@ -1,0 +1,30 @@
+From c2c4b81e6cb3b485fb1ec7ba9e7defeb889f6ba7 Mon Sep 17 00:00:00 2001
+From: Christian Beier <dontmind@freeshell.org>
+Date: Sun, 6 Jan 2019 14:20:37 +0100
+Subject: [PATCH] LibVNCClient: fail on server-sent desktop name lengths longer
+ than 1MB
+
+re #273
+---
+ libvncclient/rfbproto.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/libvncclient/rfbproto.c b/libvncclient/rfbproto.c
+index e56e778f6..6af21a54f 100644
+--- a/libvncclient/rfbproto.c
++++ b/libvncclient/rfbproto.c
+@@ -1224,8 +1224,12 @@ InitialiseRFBConnection(rfbClient* client)
+   client->si.format.blueMax = rfbClientSwap16IfLE(client->si.format.blueMax);
+   client->si.nameLength = rfbClientSwap32IfLE(client->si.nameLength);
+ 
+-  /* To guard against integer wrap-around, si.nameLength is cast to 64 bit */
+-  client->desktopName = malloc((uint64_t)client->si.nameLength + 1);
++  if (client->si.nameLength > 1<<20) {
++      rfbClientErr("Too big desktop name length sent by server: %u B > 1 MB\n", (unsigned int)client->si.nameLength);
++      return FALSE;
++  }
++
++  client->desktopName = malloc(client->si.nameLength + 1);
+   if (!client->desktopName) {
+     rfbClientLog("Error allocating memory for desktop name, %lu bytes\n",
+             (unsigned long)client->si.nameLength);

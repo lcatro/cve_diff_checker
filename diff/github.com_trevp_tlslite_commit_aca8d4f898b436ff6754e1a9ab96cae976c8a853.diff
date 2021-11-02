@@ -1,0 +1,26 @@
+From aca8d4f898b436ff6754e1a9ab96cae976c8a853 Mon Sep 17 00:00:00 2001
+From: Trevor Perrin <unsafe@trevp.net>
+Date: Wed, 5 Aug 2015 16:21:38 -0700
+Subject: [PATCH] Fix IndexError on junk message.
+
+---
+ tlslite/tlsrecordlayer.py | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tlslite/tlsrecordlayer.py b/tlslite/tlsrecordlayer.py
+index b9ade02f..06e5597d 100644
+--- a/tlslite/tlsrecordlayer.py
++++ b/tlslite/tlsrecordlayer.py
+@@ -970,6 +970,12 @@ def _decryptRecord(self, recordType, b):
+                 if self.version >= (3,2): #For TLS 1.1, remove explicit IV
+                     b = b[self._readState.encContext.block_size : ]
+ 
++                if len(b) == 0:
++                    for result in self._sendError(\
++                            AlertDescription.decryption_failed,
++                            "No data left after decryption and IV removal"):
++                        yield result
++
+                 #Check padding
+                 paddingGood = True
+                 paddingLength = b[-1]

@@ -1,0 +1,86 @@
+From c9a903e5902834e95bbd4ab0e9fa53ba0189f351 Mon Sep 17 00:00:00 2001
+From: Stepan Palamarchuk <stepan@fb.com>
+Date: Tue, 28 Jan 2020 08:30:50 -0800
+Subject: [PATCH] Better handling of truncated data when reading strings
+
+Summary:
+Currently we read string size and blindly pre-allocate it. This allows malicious attacker to send a few bytes message and cause server to allocate huge amount of memory (>1GB).
+
+This diff changes the logic to check if we have enough data in the buffer before allocating the string.
+
+This is a second part of a fix for CVE-2019-3553.
+
+Reviewed By: vitaut
+
+Differential Revision: D14393393
+
+fbshipit-source-id: e2046d2f5b087d3abc9a9d2c6c107cf088673057
+---
+ thrift/lib/cpp2/protocol/BinaryProtocol-inl.h  |  3 +++
+ thrift/lib/cpp2/protocol/CompactProtocol-inl.h |  3 +++
+ thrift/test/ProtocolTruncatedData.thrift       |  1 +
+ thrift/test/ProtocolTruncatedDataTest.cpp      | 16 ++++++++++++++++
+ 4 files changed, 23 insertions(+)
+
+diff --git a/thrift/lib/cpp2/protocol/BinaryProtocol-inl.h b/thrift/lib/cpp2/protocol/BinaryProtocol-inl.h
+index 19bf7804384..21eb7937202 100644
+--- a/thrift/lib/cpp2/protocol/BinaryProtocol-inl.h
++++ b/thrift/lib/cpp2/protocol/BinaryProtocol-inl.h
+@@ -553,6 +553,9 @@ void BinaryProtocolReader::readStringBody(StrType& str, int32_t size) {
+   }
+ 
+   if (static_cast<int32_t>(in_.length()) < size) {
++    if (!in_.canAdvance(size)) {
++      protocol::TProtocolException::throwTruncatedData();
++    }
+     str.reserve(size); // only reserve for multi iter case below
+   }
+   str.clear();
+diff --git a/thrift/lib/cpp2/protocol/CompactProtocol-inl.h b/thrift/lib/cpp2/protocol/CompactProtocol-inl.h
+index 0ff536d9486..c6782abf6ac 100644
+--- a/thrift/lib/cpp2/protocol/CompactProtocol-inl.h
++++ b/thrift/lib/cpp2/protocol/CompactProtocol-inl.h
+@@ -672,6 +672,9 @@ void CompactProtocolReader::readStringSize(int32_t& size) {
+ template <typename StrType>
+ void CompactProtocolReader::readStringBody(StrType& str, int32_t size) {
+   if (static_cast<int32_t>(in_.length()) < size) {
++    if (!in_.canAdvance(size)) {
++      protocol::TProtocolException::throwTruncatedData();
++    }
+     str.reserve(size); // only reserve for multi iter case below
+   }
+   str.clear();
+diff --git a/thrift/test/ProtocolTruncatedData.thrift b/thrift/test/ProtocolTruncatedData.thrift
+index bd1f6a27226..69a14ce663e 100644
+--- a/thrift/test/ProtocolTruncatedData.thrift
++++ b/thrift/test/ProtocolTruncatedData.thrift
+@@ -20,4 +20,5 @@ struct TestStruct {
+   1: optional list<i64> i64_list,
+   2: optional set<i32> i32_set,
+   3: optional map<i32,i16> i32_i16_map,
++  4: optional string a_string,
+ }
+diff --git a/thrift/test/ProtocolTruncatedDataTest.cpp b/thrift/test/ProtocolTruncatedDataTest.cpp
+index 890355729cb..59f86eccf5f 100644
+--- a/thrift/test/ProtocolTruncatedDataTest.cpp
++++ b/thrift/test/ProtocolTruncatedDataTest.cpp
+@@ -77,3 +77,19 @@ TEST(ProtocolTruncatedDataTest, TruncatedMap) {
+   testPartialDataHandling<CompactSerializer>(
+       s, 3 /* headers */ + 30 * 2 /* 2b / kv pair */);
+ }
++
++TEST(ProtocolTruncatedDataTest, TuncatedString_Compact) {
++  TestStruct s;
++  s.a_string_ref() = "foobarbazstring";
++
++  testPartialDataHandling<CompactSerializer>(
++      s, 2 /* field & length header */ + s.a_string_ref()->size());
++}
++
++TEST(ProtocolTruncatedDataTest, TuncatedString_Binary) {
++  TestStruct s;
++  s.a_string_ref() = "foobarbazstring";
++
++  testPartialDataHandling<BinarySerializer>(
++      s, 7 /* field & length header */ + s.a_string_ref()->size());
++}

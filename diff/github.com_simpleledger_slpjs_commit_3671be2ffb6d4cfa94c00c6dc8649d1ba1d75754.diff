@@ -1,0 +1,47 @@
+From 3671be2ffb6d4cfa94c00c6dc8649d1ba1d75754 Mon Sep 17 00:00:00 2001
+From: James Cramer <jcramer@simpleledger.io>
+Date: Wed, 29 Apr 2020 12:48:21 -0400
+Subject: [PATCH] fix false negative case for MINT transactions
+
+See the newly added unit test case for this issue.
+Currently there are 151 unit tests.
+---
+ lib/localvalidator.ts | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/lib/localvalidator.ts b/lib/localvalidator.ts
+index 39514c8..aa9d135 100644
+--- a/lib/localvalidator.ts
++++ b/lib/localvalidator.ts
+@@ -282,10 +282,10 @@ export class LocalValidator implements SlpValidator {
+                     }
+                 } catch (_) {}
+             }
+-            if (this.cachedValidations[txid].parents.length !== 1) {
++            if (this.cachedValidations[txid].parents.length < 1) {
+                 this.cachedValidations[txid].validity = false;
+                 this.cachedValidations[txid].waiting = false;
+-                this.cachedValidations[txid].invalidReason = "MINT transaction must have 1 valid baton parent.";
++                this.cachedValidations[txid].invalidReason = "MINT transaction must have at least 1 candidate baton parent input.";
+                 return this.cachedValidations[txid].validity!;
+             }
+         }
+@@ -342,10 +342,14 @@ export class LocalValidator implements SlpValidator {
+         // Set validity validation-cache for parents, and handle MINT condition with no valid input
+         // we don't need to check proper token id since we only added parents with same ID in above steps.
+         const parentTxids = [...new Set(this.cachedValidations[txid].parents.map(p => p.txid))];
+-        for (let i = 0; i < parentTxids.length; i++) {
+-            const valid = await this.isValidSlpTxid(parentTxids[i]);
+-            this.cachedValidations[txid].parents.filter(p => p.txid === parentTxids[i]).map(p => p.valid = valid);
+-            if (this.cachedValidations[txid].details!.transactionType === SlpTransactionType.MINT && !valid) {
++        for (const id of parentTxids) {
++            const valid = await this.isValidSlpTxid(id);
++            this.cachedValidations[txid].parents.filter(p => p.txid === id).map(p => p.valid = valid);
++        }
++
++        // Check MINT for exactly 1 valid MINT baton
++        if (this.cachedValidations[txid].details!.transactionType === SlpTransactionType.MINT) {
++            if (this.cachedValidations[txid].parents.filter(p => p.valid && p.inputQty === null).length !== 1) {
+                 this.cachedValidations[txid].validity = false;
+                 this.cachedValidations[txid].waiting = false;
+                 this.cachedValidations[txid].invalidReason = "MINT transaction with invalid baton parent.";

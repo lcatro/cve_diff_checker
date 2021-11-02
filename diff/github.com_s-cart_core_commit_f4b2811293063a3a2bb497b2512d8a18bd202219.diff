@@ -1,0 +1,78 @@
+From f4b2811293063a3a2bb497b2512d8a18bd202219 Mon Sep 17 00:00:00 2001
+From: Lanh Le <lanhktc@gmail.com>
+Date: Tue, 1 Dec 2020 22:37:23 +0700
+Subject: [PATCH] Escape data for front-end
+
+---
+ src/Front/Controllers/ShopCartController.php    | 9 ++++++++-
+ src/Front/Controllers/ShopContentController.php | 3 +++
+ src/Front/Models/ShopOrder.php                  | 6 +++++-
+ 3 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/src/Front/Controllers/ShopCartController.php b/src/Front/Controllers/ShopCartController.php
+index 660d4e2..54ef61d 100644
+--- a/src/Front/Controllers/ShopCartController.php
++++ b/src/Front/Controllers/ShopCartController.php
+@@ -416,6 +416,10 @@ public function getCheckout()
+     public function addToCart()
+     {
+         $data      = request()->all();
++        
++        //Process escape
++        $data      = sc_clean($data);
++
+         $productId = $data['product_id'];
+         $qty       = $data['qty'] ?? 0;
+         $storeId   = $data['storeId'] ?? config('app.storeId');
+@@ -574,7 +578,6 @@ public function addOrder(Request $request)
+         //Set session info order
+         session(['dataOrder' => $dataOrder]);
+         session(['arrCartDetail' => $arrCartDetail]);
+-
+         //Create new order
+         $newOrder = (new ShopOrder)->createOrder($dataOrder, $dataTotal, $arrCartDetail);
+ 
+@@ -597,6 +600,10 @@ public function addOrder(Request $request)
+                 'country'         => $shippingAddress['country'] ?? '',
+                 'phone'           => $shippingAddress['phone'] ?? '',
+             ];
++
++            //Process escape
++            $addressNew = sc_clean($addressNew);
++
+             ShopCustomer::find($uID)->addresses()->save(new ShopCustomerAddress(sc_clean($addressNew)));
+             session()->forget('address_process'); //destroy address_process
+         }
+diff --git a/src/Front/Controllers/ShopContentController.php b/src/Front/Controllers/ShopContentController.php
+index 2bd6eb2..9153b56 100644
+--- a/src/Front/Controllers/ShopContentController.php
++++ b/src/Front/Controllers/ShopContentController.php
+@@ -200,6 +200,9 @@ public function postContact(Request $request)
+                         ->withErrors($validator)
+                         ->withInput();
+         }
++        // Process escape
++        $data = sc_clean($data);
++        
+         //Send email
+         $data['content'] = str_replace("\n", "<br>", $data['content']);
+ 
+diff --git a/src/Front/Models/ShopOrder.php b/src/Front/Models/ShopOrder.php
+index b7bcf31..d882281 100644
+--- a/src/Front/Models/ShopOrder.php
++++ b/src/Front/Models/ShopOrder.php
+@@ -106,9 +106,13 @@ public function scopeSort($query, $sortBy = null, $sortOrder = 'desc')
+      */
+     public function createOrder($dataOrder, $dataTotal, $arrCartDetail)
+     {
++        //Process escape
++        $dataOrder     = sc_clean($dataOrder);
++        $dataTotal     = sc_clean($dataTotal);
++        $arrCartDetail = sc_clean($arrCartDetail);
++
+         try {
+             DB::connection(SC_CONNECTION)->beginTransaction();
+-            $dataOrder = sc_clean($dataOrder);
+             $dataOrder['domain'] = url('/');
+             $uID = $dataOrder['customer_id'];
+             $currency = $dataOrder['currency'];

@@ -1,0 +1,44 @@
+From e2f0ccf939d9f82931d085acb6df8e9a182a4261 Mon Sep 17 00:00:00 2001
+From: Petteri Aimonen <jpa@git.mail.kapsi.fi>
+Date: Sat, 20 Mar 2021 09:45:04 +0200
+Subject: [PATCH] Fix invalid free() with oneof (#647)
+
+Nanopb would call free() or realloc() on an invalid
+(attacker controlled) pointer value when all the following
+conditions are true:
+
+- PB_ENABLE_MALLOC is defined at the compile time
+- Message definition contains an oneof field, and the oneof
+  contains at least one pointer type field and at least one
+  non-pointer type field.
+- Data being decoded first contains a non-pointer value for
+  the oneof field, and later contains an overwriting pointer
+  value.
+
+Depending on message layout, the bug may not be exploitable in all
+cases, but it is known to be exploitable at least with string and
+bytes fields. Actual security impact will also depend on the heap
+implementation used.
+---
+ pb_decode.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/pb_decode.c b/pb_decode.c
+index 5f3b51ee..b1948254 100644
+--- a/pb_decode.c
++++ b/pb_decode.c
+@@ -1203,6 +1203,14 @@ static bool pb_release_union_field(pb_istream_t *stream, pb_field_iter_t *field)
+ 
+     pb_release_single_field(&old_field);
+ 
++    if (PB_ATYPE(field->type) == PB_ATYPE_POINTER)
++    {
++        /* Initialize the pointer to NULL to make sure it is valid
++         * even in case of error return. */
++        *(void**)field->pField = NULL;
++        field->pData = NULL;
++    }
++
+     return true;
+ }
+ 

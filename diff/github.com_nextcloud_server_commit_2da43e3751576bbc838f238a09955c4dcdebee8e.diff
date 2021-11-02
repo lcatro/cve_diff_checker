@@ -1,0 +1,43 @@
+From 2da43e3751576bbc838f238a09955c4dcdebee8e Mon Sep 17 00:00:00 2001
+From: Lukas Reschke <lukas@owncloud.com>
+Date: Fri, 1 Jul 2016 13:33:00 +0200
+Subject: [PATCH] Do not allow directory traversal using "../"
+
+We should not allow directory traversals using "../" here.
+
+To test access the following URL once with and then without this patch:
+
+http://localhost/server/index.php/apps/files/?dir=../../This+Should+Not+Be+Here
+---
+ apps/files/js/filelist.js           | 2 +-
+ apps/files/tests/js/filelistSpec.js | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/apps/files/js/filelist.js b/apps/files/js/filelist.js
+index b79dd0f66f2a..649661a5f013 100644
+--- a/apps/files/js/filelist.js
++++ b/apps/files/js/filelist.js
+@@ -1333,7 +1333,7 @@
+ 		 * @param changeUrl true to also update the URL, false otherwise (default)
+ 		 */
+ 		_setCurrentDir: function(targetDir, changeUrl) {
+-			targetDir = targetDir.replace(/\\/g, '/');
++			targetDir = targetDir.replace(/\\/g, '/').replace(/\.\.\//g, '');
+ 			var previousDir = this.getCurrentDirectory(),
+ 				baseDir = OC.basename(targetDir);
+ 
+diff --git a/apps/files/tests/js/filelistSpec.js b/apps/files/tests/js/filelistSpec.js
+index a83c8c4c0bc6..bab3d45be4ae 100644
+--- a/apps/files/tests/js/filelistSpec.js
++++ b/apps/files/tests/js/filelistSpec.js
+@@ -1323,6 +1323,10 @@ describe('OCA.Files.FileList tests', function() {
+ 			fileList.changeDirectory('/another\\subdir');
+ 			expect(fileList.getCurrentDirectory()).toEqual('/another/subdir');
+ 		});
++		it('converts backslashes to slashes and removes traversals when calling changeDirectory()', function() {
++			fileList.changeDirectory('/another\\subdir/../foo\\../bar\\..\\file/..\\folder/../');
++			expect(fileList.getCurrentDirectory()).toEqual('/another/subdir/foo/bar/file/folder/');
++		});
+ 		it('switches to root dir when current directory does not exist', function() {
+ 			fileList.changeDirectory('/unexist');
+ 			deferredList.reject(404);

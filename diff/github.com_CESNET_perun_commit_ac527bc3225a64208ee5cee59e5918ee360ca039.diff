@@ -1,0 +1,59 @@
+From 48cb4ec437ad95ba0a16b4da5097aa4fd747f697 Mon Sep 17 00:00:00 2001
+From: Michal Stava <stavamichal@gmail.com>
+Date: Tue, 24 Mar 2020 11:00:07 +0100
+Subject: [PATCH] Fix vulnerability in communication with LDAP connector
+
+ - we need to properly escape some characters to prevent LDAP query
+   injection
+ - new method for escaping character was added
+ - method was used for every input from outside (on searchString)
+ - we need to use replace instead of replaceAll, because '\' and '$'
+   could work in different meanings here
+---
+ .../metacentrum/perun/core/impl/ExtSourceLdap.java   |  4 ++--
+ .../java/cz/metacentrum/perun/core/impl/Utils.java   | 12 ++++++++++++
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/perun-core/src/main/java/cz/metacentrum/perun/core/impl/ExtSourceLdap.java b/perun-core/src/main/java/cz/metacentrum/perun/core/impl/ExtSourceLdap.java
+index b82edac1e7..8d8f06eec7 100644
+--- a/perun-core/src/main/java/cz/metacentrum/perun/core/impl/ExtSourceLdap.java
++++ b/perun-core/src/main/java/cz/metacentrum/perun/core/impl/ExtSourceLdap.java
+@@ -70,7 +70,7 @@ public static PerunBlImpl setPerunBlImpl(PerunBlImpl perun) {
+ 		if (query == null) {
+ 			throw new InternalErrorException("query attributes is required");
+ 		}
+-		query = query.replaceAll("\\?", searchString);
++		query = query.replace("?", Utils.escapeStringForLDAP(searchString));
+ 
+ 		String base = getAttributes().get("base");
+ 		if (base == null) {
+@@ -87,7 +87,7 @@ public static PerunBlImpl setPerunBlImpl(PerunBlImpl perun) {
+ 		if (query == null) {
+ 			throw new InternalErrorException("loginQuery attributes is required");
+ 		}
+-		query = query.replaceAll("\\?", login);
++		query = query.replace("?", Utils.escapeStringForLDAP(login));
+ 
+ 		String base = getAttributes().get("base");
+ 		if (base == null) {
+diff --git a/perun-core/src/main/java/cz/metacentrum/perun/core/impl/Utils.java b/perun-core/src/main/java/cz/metacentrum/perun/core/impl/Utils.java
+index 7518918fb7..c8621daf7d 100644
+--- a/perun-core/src/main/java/cz/metacentrum/perun/core/impl/Utils.java
++++ b/perun-core/src/main/java/cz/metacentrum/perun/core/impl/Utils.java
+@@ -1585,4 +1585,16 @@ public static LocalDate getClosestExpirationFromStaticDate(Matcher matcher) {
+ 
+ 		return new Pair<>(amount, field);
+ 	}
++
++	/**
++	 * We need to escape some special characters for LDAP filtering.
++	 * We need to escape these characters: '\\', '*', '(', ')', '\000'
++	 *
++	 * @param searchString search string which need to be escaped properly
++	 * @return properly escaped search string
++	 */
++	public static String escapeStringForLDAP(String searchString) {
++		if(searchString == null) return "";
++		return searchString.replace("\\", "\\5C").replace("*", "\\2A").replace("(", "\\28").replace(")", "\\29").replace("\000", "\\00");
++	}
+ }

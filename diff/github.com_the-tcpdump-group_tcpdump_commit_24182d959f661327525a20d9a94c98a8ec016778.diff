@@ -1,0 +1,33 @@
+From 24182d959f661327525a20d9a94c98a8ec016778 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Fri, 7 Sep 2018 21:10:36 +0100
+Subject: [PATCH] (for 4.9.3) CVE-2018-16452/SMB: prevent stack exhaustion
+
+Enforce a limit on how many times smb_fdata() can recurse.
+
+This fixes a stack exhaustion discovered by Include Security working
+under the Mozilla SOS program in 2018 by means of code audit.
+---
+ smbutil.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/smbutil.c b/smbutil.c
+index fc9b3cc6f..7b01f487d 100644
+--- a/smbutil.c
++++ b/smbutil.c
+@@ -807,7 +807,14 @@ smb_fdata(netdissect_options *ndo,
+ 	    while (buf < maxbuf) {
+ 		const u_char *buf2;
+ 		depth++;
+-		buf2 = smb_fdata(ndo, buf, fmt, maxbuf, unicodestr);
++		/* Not sure how this relates with the protocol specification,
++		 * but in order to avoid stack exhaustion recurse at most that
++		 * many levels.
++		 */
++		if (depth == 10)
++			ND_PRINT((ndo, "(too many nested levels, not recursing)"));
++		else
++			buf2 = smb_fdata(ndo, buf, fmt, maxbuf, unicodestr);
+ 		depth--;
+ 		if (buf2 == NULL)
+ 		    return(NULL);

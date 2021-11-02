@@ -1,0 +1,154 @@
+From 3cdc6cb555173130d64ea6d90033a6e00cbde330 Mon Sep 17 00:00:00 2001
+From: Owen Synge <osynge@suse.com>
+Date: Tue, 17 Mar 2015 14:09:42 +0100
+Subject: [PATCH] Fix: keyring permissions where world readable
+
+Reported in https://bugzilla.suse.com/show_bug.cgi?id=920926
+by  Andreas Stieger <astieger@suse.com>
+
+Before thsi fix to umask for keyring handling, After execution
+of ceph-deploy, all keyrings have mode 644.
+
+The documented ceph-deploy procedure by creating a dedicated
+admin user, and keys will be readable to all other (non-admin)
+users as well, thus leaking authentication credentials.
+
+The fix uses umask to resolve the writing of keyfiles.
+
+Signed-off-by: Owen Synge <osynge@suse.com>
+---
+ ceph_deploy/gatherkeys.py | 75 ++++++++++++++++++++-------------------
+ ceph_deploy/new.py        | 23 ++++++------
+ 2 files changed, 52 insertions(+), 46 deletions(-)
+
+diff --git a/ceph_deploy/gatherkeys.py b/ceph_deploy/gatherkeys.py
+index bd856628..d35a9ae3 100644
+--- a/ceph_deploy/gatherkeys.py
++++ b/ceph_deploy/gatherkeys.py
+@@ -30,51 +30,54 @@ def fetch_file(args, frompath, topath, _hosts):
+ 
+ 
+ def gatherkeys(args):
+-    # client.admin
+-    keyring = '/etc/ceph/{cluster}.client.admin.keyring'.format(
+-        cluster=args.cluster)
+-    r = fetch_file(
+-        args=args,
+-        frompath=keyring,
+-        topath='{cluster}.client.admin.keyring'.format(
+-            cluster=args.cluster),
+-        _hosts=args.mon,
+-        )
+-    if not r:
+-        raise exc.KeyNotFoundError(keyring, args.mon)
+-
+-    # mon.
+-    keyring = '/var/lib/ceph/mon/{cluster}-{{hostname}}/keyring'.format(
+-        cluster=args.cluster)
+-    r = fetch_file(
+-        args=args,
+-        frompath=keyring,
+-        topath='{cluster}.mon.keyring'.format(cluster=args.cluster),
+-        _hosts=args.mon,
+-        )
+-    if not r:
+-        raise exc.KeyNotFoundError(keyring, args.mon)
++    oldmask = os.umask(077)
++    try:
++        # client.admin
++        keyring = '/etc/ceph/{cluster}.client.admin.keyring'.format(
++            cluster=args.cluster)
++        r = fetch_file(
++            args=args,
++            frompath=keyring,
++            topath='{cluster}.client.admin.keyring'.format(
++                cluster=args.cluster),
++            _hosts=args.mon,
++            )
++        if not r:
++            raise exc.KeyNotFoundError(keyring, args.mon)
+ 
+-    # bootstrap
+-    for what in ['osd', 'mds', 'rgw']:
+-        keyring = '/var/lib/ceph/bootstrap-{what}/{cluster}.keyring'.format(
+-            what=what,
++        # mon.
++        keyring = '/var/lib/ceph/mon/{cluster}-{{hostname}}/keyring'.format(
+             cluster=args.cluster)
+         r = fetch_file(
+             args=args,
+             frompath=keyring,
+-            topath='{cluster}.bootstrap-{what}.keyring'.format(
+-                cluster=args.cluster,
+-                what=what),
++            topath='{cluster}.mon.keyring'.format(cluster=args.cluster),
+             _hosts=args.mon,
+             )
+         if not r:
+-            if what in ['osd', 'mds']:
+-                raise exc.KeyNotFoundError(keyring, args.mon)
+-            else:
+-                LOG.warning(("No RGW bootstrap key found. Will not be able to "
+-                             "deploy RGW daemons"))
++            raise exc.KeyNotFoundError(keyring, args.mon)
+ 
++        # bootstrap
++        for what in ['osd', 'mds', 'rgw']:
++            keyring = '/var/lib/ceph/bootstrap-{what}/{cluster}.keyring'.format(
++                what=what,
++                cluster=args.cluster)
++            r = fetch_file(
++                args=args,
++                frompath=keyring,
++                topath='{cluster}.bootstrap-{what}.keyring'.format(
++                    cluster=args.cluster,
++                    what=what),
++                _hosts=args.mon,
++                )
++            if not r:
++                if what in ['osd', 'mds']:
++                    raise exc.KeyNotFoundError(keyring, args.mon)
++                else:
++                    LOG.warning(("No RGW bootstrap key found. Will not be able to "
++                                 "deploy RGW daemons"))
++    finally:
++        os.umask(oldmask)
+ 
+ @priority(40)
+ def make(parser):
+diff --git a/ceph_deploy/new.py b/ceph_deploy/new.py
+index 902e87d9..ab1dfc03 100644
+--- a/ceph_deploy/new.py
++++ b/ceph_deploy/new.py
+@@ -211,18 +211,21 @@ def new_mon_keyring(args):
+     keypath = '{name}.mon.keyring'.format(
+         name=args.cluster,
+         )
+-
++    oldmask = os.umask(077)
+     LOG.debug('Writing monitor keyring to %s...', keypath)
+-    tmp = '%s.tmp' % keypath
+-    with file(tmp, 'w') as f:
+-        f.write(mon_keyring)
+     try:
+-        os.rename(tmp, keypath)
+-    except OSError as e:
+-        if e.errno == errno.EEXIST:
+-            raise exc.ClusterExistsError(keypath)
+-        else:
+-            raise
++        tmp = '%s.tmp' % keypath
++        with open(tmp, 'w', 0600) as f:
++            f.write(mon_keyring)
++        try:
++            os.rename(tmp, keypath)
++        except OSError as e:
++            if e.errno == errno.EEXIST:
++                raise exc.ClusterExistsError(keypath)
++            else:
++                raise
++    finally:
++        os.umask(oldmask)
+ 
+ 
+ @priority(10)

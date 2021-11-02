@@ -1,0 +1,49 @@
+From f72b21af23da6b6d54208e5c1d65ececdaa109c8 Mon Sep 17 00:00:00 2001
+From: Nikolay Bachiyski <nb@nikolay.bg>
+Date: Mon, 14 Sep 2015 22:47:23 +0000
+Subject: [PATCH] Shortcodes: don't allow unclosed HTML elements in attributes
+
+Merges [34134] for 4.3 branch
+
+Built from https://develop.svn.wordpress.org/branches/4.3@34144
+
+
+git-svn-id: http://core.svn.wordpress.org/branches/4.3@34112 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/media.php      | 2 ++
+ wp-includes/shortcodes.php | 9 +++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/wp-includes/media.php b/wp-includes/media.php
+index 95bbca732e46..49d1717c2d73 100644
+--- a/wp-includes/media.php
++++ b/wp-includes/media.php
+@@ -863,6 +863,8 @@ function img_caption_shortcode( $attr, $content = null ) {
+ 			$content = $matches[1];
+ 			$attr['caption'] = trim( $matches[2] );
+ 		}
++	} elseif ( strpos( $attr['caption'], '<' ) !== false ) {
++		$attr['caption'] = wp_kses( $attr['caption'], 'post' );
+ 	}
+ 
+ 	/**
+diff --git a/wp-includes/shortcodes.php b/wp-includes/shortcodes.php
+index c63958b12f5e..86976a21ce34 100644
+--- a/wp-includes/shortcodes.php
++++ b/wp-includes/shortcodes.php
+@@ -462,6 +462,15 @@ function shortcode_parse_atts($text) {
+ 			elseif (isset($m[8]))
+ 				$atts[] = stripcslashes($m[8]);
+ 		}
++
++		// Reject any unclosed HTML elements
++		foreach( $atts as &$value ) {
++			if ( false !== strpos( $value, '<' ) ) {
++				if ( 1 !== preg_match( '/^[^<]*+(?:<[^>]*+>[^<]*+)*+$/', $value ) ) {
++					$value = '';
++				}
++			}
++		}
+ 	} else {
+ 		$atts = ltrim($text);
+ 	}

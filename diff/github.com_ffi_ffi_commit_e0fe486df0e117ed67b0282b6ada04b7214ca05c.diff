@@ -1,0 +1,44 @@
+From e0fe486df0e117ed67b0282b6ada04b7214ca05c Mon Sep 17 00:00:00 2001
+From: Lars Kanis <lars@greiz-reinsdorf.de>
+Date: Fri, 1 Jun 2018 22:18:25 +0200
+Subject: [PATCH] Don't treat Symbol args different to Strings in ffi_lib
+
+Symbols were sent directly to FFI::DynamicLibrary.open in the first
+attempt, resulting in a TypeError, so that only the mangled library
+name was actually loaded.
+
+This moves conversion to String to the front, so that subsequent
+calls can assume Strings only.
+---
+ lib/ffi/library.rb | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/lib/ffi/library.rb b/lib/ffi/library.rb
+index adfa106a..200ce7a9 100644
+--- a/lib/ffi/library.rb
++++ b/lib/ffi/library.rb
+@@ -43,7 +43,6 @@ module FFI
+   #  FFI.map_library_name 'jpeg'  # -> "jpeg.dll"
+   def self.map_library_name(lib)
+     # Mangle the library name to reflect the native library naming conventions
+-    lib = lib.to_s unless lib.kind_of?(String)
+     lib = Library::LIBC if lib == 'c'
+ 
+     if lib && File.basename(lib) == lib
+@@ -103,7 +102,7 @@ def ffi_lib(*names)
+           FFI::DynamicLibrary.open(nil, FFI::DynamicLibrary::RTLD_LAZY | FFI::DynamicLibrary::RTLD_LOCAL)
+ 
+         else
+-          libnames = (name.is_a?(::Array) ? name : [ name ]).map { |n| [ n, FFI.map_library_name(n) ].uniq }.flatten.compact
++          libnames = (name.is_a?(::Array) ? name : [ name ]).map(&:to_s).map { |n| [ n, FFI.map_library_name(n) ].uniq }.flatten.compact
+           lib = nil
+           errors = {}
+ 
+@@ -126,7 +125,6 @@ def ffi_lib(*names)
+                 retry
+               else
+                 # TODO better library lookup logic
+-                libname = libname.to_s
+                 unless libname.start_with?("/")
+                   path = ['/usr/lib/','/usr/local/lib/'].find do |pth|
+                     File.exist?(pth + libname)

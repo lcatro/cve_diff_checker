@@ -1,0 +1,136 @@
+From ca1eb702507fdc4400fe21c905a9f85702f92a14 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Sa=C3=BAl=20Ibarra=20Corretg=C3=A9?= <s@saghul.net>
+Date: Tue, 30 Jun 2020 11:16:21 +0200
+Subject: [PATCH] Share logic for opening external links
+
+---
+ app/features/utils/openExternalLink.js | 25 ++++++++++++++++++++++++
+ app/preload/preload.js                 | 27 ++------------------------
+ main.js                                |  6 +++---
+ package.json                           |  4 ++--
+ 4 files changed, 32 insertions(+), 30 deletions(-)
+ create mode 100644 app/features/utils/openExternalLink.js
+
+diff --git a/app/features/utils/openExternalLink.js b/app/features/utils/openExternalLink.js
+new file mode 100644
+index 00000000..7694b533
+--- /dev/null
++++ b/app/features/utils/openExternalLink.js
+@@ -0,0 +1,25 @@
++const { shell } = require('electron');
++const url = require('url');
++
++
++const protocolRegex = /^https?:/i;
++
++/**
++ * Opens the given link in an external browser.
++ *
++ * @param {string} link - The link (URL) that should be opened in the external browser.
++ * @returns {void}
++ */
++export function openExternalLink(link) {
++    let u;
++
++    try {
++        u = url.parse(link);
++    } catch (e) {
++        return;
++    }
++
++    if (protocolRegex.test(u.protocol)) {
++        shell.openExternal(link);
++    }
++}
+diff --git a/app/preload/preload.js b/app/preload/preload.js
+index 538b82f2..ccc65ccd 100644
+--- a/app/preload/preload.js
++++ b/app/preload/preload.js
+@@ -1,31 +1,9 @@
+ const createElectronStorage = require('redux-persist-electron-storage');
+-const { ipcRenderer, shell, remote } = require('electron');
++const { ipcRenderer, remote } = require('electron');
+ const os = require('os');
+-const url = require('url');
+-
+ const jitsiMeetElectronUtils = require('jitsi-meet-electron-utils');
++const { openExternalLink } = require('../features/utils/openExternalLink');
+ 
+-const protocolRegex = /^https?:/i;
+-
+-/**
+- * Opens the given link in an external browser.
+- *
+- * @param {string} link - The link (URL) that should be opened in the external browser.
+- * @returns {void}
+- */
+-function openExternalLink(link) {
+-    let u;
+-
+-    try {
+-        u = url.parse(link);
+-    } catch (e) {
+-        return;
+-    }
+-
+-    if (protocolRegex.test(u.protocol)) {
+-        shell.openExternal(link);
+-    }
+-}
+ 
+ const whitelistedIpcChannels = [ 'protocol-data-msg', 'renderer-ready' ];
+ 
+@@ -34,7 +12,6 @@ window.jitsiNodeAPI = {
+     osUserInfo: os.userInfo,
+     openExternalLink,
+     jitsiMeetElectronUtils,
+-    shellOpenExternal: shell.openExternal,
+     getLocale: remote.app.getLocale,
+     ipc: {
+         on: (channel, listener) => {
+diff --git a/main.js b/main.js
+index 0ca6cde1..137fe8d5 100644
+--- a/main.js
++++ b/main.js
+@@ -4,8 +4,7 @@ const {
+     BrowserWindow,
+     Menu,
+     app,
+-    ipcMain,
+-    shell
++    ipcMain
+ } = require('electron');
+ const contextMenu = require('electron-context-menu');
+ const debug = require('electron-debug');
+@@ -22,6 +21,7 @@ const {
+ const path = require('path');
+ const URL = require('url');
+ const config = require('./app/features/config');
++const { openExternalLink } = require('./app/features/utils/openExternalLink');
+ 
+ const showDevTools = Boolean(process.env.SHOW_DEV_TOOLS) || (process.argv.indexOf('--show-dev-tools') > -1);
+ 
+@@ -211,7 +211,7 @@ function createJitsiMeetWindow() {
+ 
+         if (!target || target === 'browser') {
+             event.preventDefault();
+-            shell.openExternal(url);
++            openExternalLink(url);
+         }
+     });
+     mainWindow.on('closed', () => {
+diff --git a/package.json b/package.json
+index ba7dbb98..015bab86 100644
+--- a/package.json
++++ b/package.json
+@@ -15,8 +15,8 @@
+     "validate": "npm ls",
+     "watch": "webpack --config ./webpack.renderer.js --mode development --watch --watch-poll"
+   },
+-  "engines" : {
+-    "node" : ">=12.0.0"
++  "engines": {
++    "node": ">=12.0.0"
+   },
+   "build": {
+     "appId": "org.jitsi.jitsi-meet",

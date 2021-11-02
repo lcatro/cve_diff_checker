@@ -1,0 +1,56 @@
+From 3270dfac43da861c714df76513456b46765ff47f Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sun, 1 May 2016 16:29:41 -0700
+Subject: [PATCH] Don't treat the packet length as unsigned.
+
+The scanf family of functions are as annoyingly bad at handling unsigned
+numbers as strtoul() is - both of them are perfectly willing to accept a
+value beginning with a negative sign as an unsigned value.  When using
+strtoul(), you can compensate for this by explicitly checking for a '-'
+as the first character of the string, but you can't do that with
+sscanf().
+
+So revert to having pkt_len be signed, and scanning it with %d, but
+check for a negative value and fail if we see a negative value.
+
+Bug: 12394
+Change-Id: I4b19b95f2e1ffc96dac5c91bff6698c246f52007
+Reviewed-on: https://code.wireshark.org/review/15230
+Reviewed-by: Guy Harris <guy@alum.mit.edu>
+---
+ wiretap/toshiba.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/wiretap/toshiba.c b/wiretap/toshiba.c
+index 9a066811892..091b7908840 100644
+--- a/wiretap/toshiba.c
++++ b/wiretap/toshiba.c
+@@ -248,8 +248,7 @@ parse_toshiba_packet(FILE_T fh, struct wtap_pkthdr *phdr, Buffer *buf,
+ 	union wtap_pseudo_header *pseudo_header = &phdr->pseudo_header;
+ 	char	line[TOSHIBA_LINE_LENGTH];
+ 	int	num_items_scanned;
+-	guint	pkt_len;
+-	int	pktnum, hr, min, sec, csec;
++	int	pkt_len, pktnum, hr, min, sec, csec;
+ 	char	channel[10], direction[10];
+ 	int	i, hex_lines;
+ 	guint8	*pd;
+@@ -301,12 +300,17 @@ parse_toshiba_packet(FILE_T fh, struct wtap_pkthdr *phdr, Buffer *buf,
+ 
+ 	} while (strcmp(line, "OFFSET 0001-0203") != 0);
+ 
+-	num_items_scanned = sscanf(line+64, "LEN=%9u", &pkt_len);
++	num_items_scanned = sscanf(line+64, "LEN=%9d", &pkt_len);
+ 	if (num_items_scanned != 1) {
+ 		*err = WTAP_ERR_BAD_FILE;
+ 		*err_info = g_strdup("toshiba: OFFSET line doesn't have valid LEN item");
+ 		return FALSE;
+ 	}
++	if (pkt_len < 0) {
++		*err = WTAP_ERR_BAD_FILE;
++		*err_info = g_strdup("toshiba: packet header has a negative packet length");
++		return FALSE;
++	}
+ 	if (pkt_len > WTAP_MAX_PACKET_SIZE) {
+ 		/*
+ 		 * Probably a corrupt capture file; don't blow up trying

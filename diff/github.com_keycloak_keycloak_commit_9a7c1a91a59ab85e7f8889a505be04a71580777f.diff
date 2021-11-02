@@ -1,0 +1,70 @@
+From 9a7c1a91a59ab85e7f8889a505be04a71580777f Mon Sep 17 00:00:00 2001
+From: Stefan Guilhen <sguilhen@redhat.com>
+Date: Fri, 25 Oct 2019 11:46:27 -0300
+Subject: [PATCH] KEYCLOAK-10780 Stop creating placeholder e-mails for service
+ accounts (#228)
+
+---
+ examples/demo-template/testrealm.json                           | 1 -
+ .../main/java/org/keycloak/services/managers/ClientManager.java | 2 --
+ .../integration-arquillian/test-apps/photoz/photoz-realm.json   | 1 -
+ .../src/test/java/org/keycloak/testsuite/admin/ClientTest.java  | 2 ++
+ 4 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/examples/demo-template/testrealm.json b/examples/demo-template/testrealm.json
+index 7b9db36b1f51..00fb4075bf76 100755
+--- a/examples/demo-template/testrealm.json
++++ b/examples/demo-template/testrealm.json
+@@ -76,7 +76,6 @@
+         {
+             "username" : "service-account-product-sa-client",
+             "enabled": true,
+-            "email" : "service-account-product-sa-client@placeholder.org",
+             "serviceAccountClientId": "product-sa-client",
+             "realmRoles": [ "user" ]
+         }
+diff --git a/services/src/main/java/org/keycloak/services/managers/ClientManager.java b/services/src/main/java/org/keycloak/services/managers/ClientManager.java
+index b78aaeec5c38..61a7dfe61b5a 100644
+--- a/services/src/main/java/org/keycloak/services/managers/ClientManager.java
++++ b/services/src/main/java/org/keycloak/services/managers/ClientManager.java
+@@ -164,7 +164,6 @@ public void enableServiceAccount(ClientModel client) {
+             // Don't use federation for service account user
+             UserModel user = realmManager.getSession().userLocalStorage().addUser(client.getRealm(), username);
+             user.setEnabled(true);
+-            user.setEmail(username + "@placeholder.org");
+             user.setServiceAccountClientLink(client.getId());
+         }
+ 
+@@ -205,7 +204,6 @@ public void clientIdChanged(ClientModel client, String newClientId) {
+         if (serviceAccountUser != null) {
+             String username = ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + newClientId;
+             serviceAccountUser.setUsername(username);
+-            serviceAccountUser.setEmail(username + "@placeholder.org");
+         }
+     }
+ 
+diff --git a/testsuite/integration-arquillian/test-apps/photoz/photoz-realm.json b/testsuite/integration-arquillian/test-apps/photoz/photoz-realm.json
+index 83019c909f57..0c42512c08f3 100644
+--- a/testsuite/integration-arquillian/test-apps/photoz/photoz-realm.json
++++ b/testsuite/integration-arquillian/test-apps/photoz/photoz-realm.json
+@@ -111,7 +111,6 @@
+     {
+       "username": "service-account-photoz-restful-api",
+       "enabled": true,
+-      "email": "service-account-photoz-restful-api@placeholder.org",
+       "serviceAccountClientId": "photoz-restful-api",
+       "clientRoles": {
+         "photoz-restful-api" : ["uma_protection"]
+diff --git a/testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/admin/ClientTest.java b/testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/admin/ClientTest.java
+index 0c48fa629415..905f29c075f0 100644
+--- a/testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/admin/ClientTest.java
++++ b/testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/admin/ClientTest.java
+@@ -231,6 +231,8 @@ public void serviceAccount() {
+         response.close();
+         UserRepresentation userRep = realm.clients().get(id).getServiceAccountUser();
+         assertEquals("service-account-serviceclient", userRep.getUsername());
++        // KEYCLOAK-11197 service accounts are no longer created with a placeholder e-mail.
++        assertNull(userRep.getEmail());
+     }
+ 
+     // KEYCLOAK-3421

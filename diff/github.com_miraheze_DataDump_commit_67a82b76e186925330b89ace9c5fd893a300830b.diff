@@ -1,0 +1,122 @@
+From 67a82b76e186925330b89ace9c5fd893a300830b Mon Sep 17 00:00:00 2001
+From: RhinosF1 <rhinosf1@miraheze.org>
+Date: Thu, 8 Jul 2021 02:40:02 +0100
+Subject: [PATCH] Merge pull request from GHSA-29mh-4vhv-x8mr
+
+* Add CSRF token check for generating dumps
+
+* Update SpecialDataDump.php
+
+* Add token for action=download
+
+* Fix indendation
+
+* Fix indendation
+
+* fix indentation
+
+* Convert to forms
+
+* fix link generation
+
+* don't check on download pt1
+
+* don't check on download pt2
+
+* rm stray code
+
+* rm accidentally added character
+
+* rm stray whitespace
+
+* rm unused variable
+
+* standardize
+
+Co-authored-by: R4356th <61620631+R4356th@users.noreply.github.com>
+Co-authored-by: The-Voidwalker <voidwalker.wikipedia@gmail.com>
+Co-authored-by: R4356th <radman.siddiki@gmail.com>
+---
+ includes/DataDumpPager.php            | 30 +++++++++++++++++++++++----
+ includes/specials/SpecialDataDump.php |  8 ++++++-
+ 2 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/includes/DataDumpPager.php b/includes/DataDumpPager.php
+index c81dbcd..621d567 100644
+--- a/includes/DataDumpPager.php
++++ b/includes/DataDumpPager.php
+@@ -75,15 +75,35 @@ public function formatValue( $name, $value ) {
+ 					$this->getLanguage()->formatSize( isset( $row->dumps_size ) ? $row->dumps_size : 0 ) );
+ 				break;
+ 			case 'dumps_delete':
+-				$linkRenderer = MediaWikiServices::getInstance()->getLinkRenderer();
+-
+ 				$query = [
+ 					'action' => 'delete',
+ 					'type' => $row->dumps_type,
+ 					'dump' => $row->dumps_filename
+ 				];
+-
+-				$formatted = $linkRenderer->makeLink( $this->pageTitle, wfMessage( 'datadump-delete-button' )->text(), [], $query );
++				$link = $this->pageTitle->getLinkURL( $query );
++				$element = Html::element(
++					'input', 
++					[
++						'type' => 'submit',
++						'title' => $this->pageTitle,
++						'value' => wfMessage('datadump-delete-button')->text()
++					]
++				);
++				$token = Html::element(
++					'input',
++					[
++						'type' => 'hidden',
++						'name' => 'token',
++						'value' => $this->getUser()->getEditToken()
++					]
++				);
++				$formatted = Html::openElement(
++					'form',
++					[
++						'action' => $link,
++						'method' => 'POST'
++					]
++				) . $element . $token . Html::closeElement('form');
+ 				break;
+ 			default:
+ 				$formatted = "Unable to format $name";
+@@ -204,6 +224,8 @@ public function onGenerate( array $params ) {
+ 			$perm = $dataDumpConfig[$type]['permissions']['generate'];
+ 			if ( !$this->permissionManager->userHasRight( $user, $perm) ) {
+ 				throw new PermissionsError( $perm );
++			} elseif ( !$user->matchEditToken( $this->getContext()->getRequest()->getText( 'wpEditToken' ) ) ) {
++				return;
+ 			}
+ 
+ 			if ( $this->getGenerateLimit( $type ) ) {
+diff --git a/includes/specials/SpecialDataDump.php b/includes/specials/SpecialDataDump.php
+index 89ea552..49a6ae9 100644
+--- a/includes/specials/SpecialDataDump.php
++++ b/includes/specials/SpecialDataDump.php
+@@ -30,6 +30,8 @@ public function execute( $par ) {
+ 		$out = $this->getOutput();
+ 	
+ 		$request = $this->getRequest();
++		
++		$user = $this->getUser();
+ 
+ 		$dataDumpConfig = $this->config->get( 'DataDump' );
+ 		if ( !$dataDumpConfig ) {
+@@ -52,7 +54,11 @@ public function execute( $par ) {
+ 			if ( $action === 'download' && $dump ) {
+ 				$this->doDownload( $dump );
+ 			} elseif ( $action === 'delete' && $type && $dump ) {
+-				$this->doDelete( $type, $dump );
++				if ( $user->matchEditToken($request->getVal('token'))) {
++					$this->doDelete( $type, $dump );
++				} else { 
++					$out->addWikiMsg( 'sessionfailure' );
++				}
+ 			}
+ 		}
+ 

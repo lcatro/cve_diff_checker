@@ -1,0 +1,40 @@
+From ed188f6dcdf0935c939ed813cf8745d50742014b Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Tue, 16 Apr 2019 23:56:43 +0200
+Subject: [PATCH] avformat/aadec: Check for scanf() failure
+
+Fixes: use of uninitialized variables
+Fixes: blank.aa
+
+Found-by: Chamal De Silva <chamal.desilva@gmail.com>
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavformat/aadec.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/libavformat/aadec.c b/libavformat/aadec.c
+index dc94061dcf11..b9dd51ebfc3d 100644
+--- a/libavformat/aadec.c
++++ b/libavformat/aadec.c
+@@ -85,6 +85,7 @@ static int aa_read_header(AVFormatContext *s)
+     AADemuxContext *c = s->priv_data;
+     AVIOContext *pb = s->pb;
+     AVStream *st;
++    int ret;
+ 
+     /* parse .aa header */
+     avio_skip(pb, 4); // file size
+@@ -118,8 +119,12 @@ static int aa_read_header(AVFormatContext *s)
+             header_seed = atoi(val);
+         } else if (!strcmp(key, "HeaderKey")) { // this looks like "1234567890 1234567890 1234567890 1234567890"
+             av_log(s, AV_LOG_DEBUG, "HeaderKey is <%s>\n", val);
+-            sscanf(val, "%"SCNu32"%"SCNu32"%"SCNu32"%"SCNu32,
++
++            ret = sscanf(val, "%"SCNu32"%"SCNu32"%"SCNu32"%"SCNu32,
+                    &header_key_part[0], &header_key_part[1], &header_key_part[2], &header_key_part[3]);
++            if (ret != 4)
++                return AVERROR_INVALIDDATA;
++
+             for (idx = 0; idx < 4; idx++) {
+                 AV_WB32(&header_key[idx * 4], header_key_part[idx]); // convert each part to BE!
+             }

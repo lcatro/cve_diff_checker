@@ -1,0 +1,43 @@
+From 25c891a949bf918b59cbc6e4932015ba4c35c333 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Fri, 9 Apr 2021 13:10:37 -0500
+Subject: UBUNTU: SAUCE: shiftfs: handle copy_to_user() return values correctly
+
+shiftfs expects copy_to_user() to return a negative error code on
+failure, when it actually returns the amount of uncopied data. Fix all
+code using copy_to_user() to handle the return values correctly.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+CVE-2021-3492
+Signed-off-by: Thadeu Lima de Souza Cascardo <cascardo@canonical.com>
+Acked-by: Stefan Bader <stefan.bader@canonical.com>
+Acked-by: Marcelo Cerri <marcelo.cerri@canonical.com>
+Signed-off-by: Stefan Bader <stefan.bader@canonical.com>
+---
+ fs/shiftfs.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/shiftfs.c b/fs/shiftfs.c
+index 5dfa414..e73b121 100644
+--- a/fs/shiftfs.c
++++ b/fs/shiftfs.c
+@@ -1423,7 +1423,7 @@ static int shiftfs_btrfs_ioctl_fd_restore(int cmd, int fd, void __user *arg,
+ 	kfree(v1);
+ 	kfree(v2);
+ 
+-	return ret;
++	return ret ? -EFAULT: 0;
+ }
+ 
+ static int shiftfs_btrfs_ioctl_fd_replace(int cmd, void __user *arg,
+@@ -1500,6 +1500,7 @@ static int shiftfs_btrfs_ioctl_fd_replace(int cmd, void __user *arg,
+ 		*b2 = v2;
+ 	} else {
+ 		shiftfs_btrfs_ioctl_fd_restore(cmd, *newfd, arg, v1, v2);
++		ret = -EFAULT;
+ 	}
+ 
+ 	return ret;
+-- 
+cgit v1.1
+

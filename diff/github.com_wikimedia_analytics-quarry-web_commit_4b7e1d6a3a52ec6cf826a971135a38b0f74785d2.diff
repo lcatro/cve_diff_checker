@@ -1,0 +1,47 @@
+From 4b7e1d6a3a52ec6cf826a971135a38b0f74785d2 Mon Sep 17 00:00:00 2001
+From: Reedy <reedy@wikimedia.org>
+Date: Tue, 15 Dec 2020 16:55:55 +0000
+Subject: [PATCH] SECURITY: Set correct Mime Type on /api/preferences
+
+Prevents a Reflected Cross-Site scripting (XSS) vulnerability
+
+Bug: T270195
+Change-Id: I04bf53d2a939da369e54e91899615a3ffc3e5caf
+---
+ quarry/web/app.py | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/quarry/web/app.py b/quarry/web/app.py
+index 13251eb..845a60f 100644
+--- a/quarry/web/app.py
++++ b/quarry/web/app.py
+@@ -398,9 +398,15 @@ def pref_get(key):
+         return "Authentication required", 401
+ 
+     if key in get_preferences():
+-        return Response(json.dumps({'key': key, 'value': get_preferences()[key]}))
++        return Response(
++            json.dumps({'key': key, 'value': get_preferences()[key]}),
++            mimetype='application/json'
++        )
+     else:
+-        return Response(json.dumps({'key': key, 'error': 'novalue'}))
++        return Response(
++            json.dumps({'key': key, 'error': 'novalue'}),
++            mimetype='application/json'
++        )
+ 
+ 
+ @app.route("/api/preferences/set/<key>/<value>")
+@@ -409,7 +415,10 @@ def pref_set(key, value):
+         return "Authentication required", 401
+ 
+     get_preferences()[key] = (None if value == 'null' else value)
+-    return Response(json.dumps({'key': key, 'success': ''})), 201
++    return Response(
++        json.dumps({'key': key, 'success': ''}),
++        mimetype='application/json'
++    ), 201
+ 
+ 
+ if __name__ == '__main__':

@@ -1,0 +1,28 @@
+From ed0926bff0e423cd122a18b3d2fc772817f66825 Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Fri, 25 Sep 2020 11:11:32 -0700
+Subject: [PATCH] Check return pointer is outside enclave in realloc
+
+PiperOrigin-RevId: 333769459
+Change-Id: If53b5f4317080b8abaf5c4f80ce751f150630bcb
+---
+ asylo/platform/host_call/trusted/host_calls.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/asylo/platform/host_call/trusted/host_calls.cc b/asylo/platform/host_call/trusted/host_calls.cc
+index 3e6bf1034..0532b334f 100644
+--- a/asylo/platform/host_call/trusted/host_calls.cc
++++ b/asylo/platform/host_call/trusted/host_calls.cc
+@@ -644,6 +644,12 @@ void *enc_untrusted_realloc(void *ptr, size_t size) {
+   if (!result && size != 0) {
+     errno = FromkLinuxErrorNumber(klinux_errno);
+   }
++
++  if (!::asylo::primitives::TrustedPrimitives::IsOutsideEnclave(result, size)) {
++    ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
++        "enc_untrusted_realloc: realloc result should be in untrusted "
++        "memory");
++  }
+   return result;
+ }
+ 

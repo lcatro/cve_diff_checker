@@ -1,0 +1,68 @@
+From cc1401043c075268ecc652eac557ef8076b5eaba Mon Sep 17 00:00:00 2001
+From: Simon McVittie <smcv@collabora.com>
+Date: Sun, 10 Jan 2021 16:25:29 +0000
+Subject: [PATCH] portal: Do not use caller-supplied variables in environment
+
+If the caller specifies a variable that can be used to inject arbitrary
+code into processes, we must not allow it to enter the environment
+block used to run `flatpak run`, which runs unsandboxed.
+
+This change requires the previous commit "context: Add --env-fd option",
+which adds infrastructure used here.
+
+To be secure, this change also requires the previous commit
+"run: Convert all environment variables into bwrap arguments", which
+protects a non-setuid bwrap(1) from the same attack.
+
+Signed-off-by: Simon McVittie <smcv@collabora.com>
+Part-of: https://github.com/flatpak/flatpak/security/advisories/GHSA-4ppf-fxf6-vxg2
+---
+ portal/flatpak-portal.c | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/portal/flatpak-portal.c b/portal/flatpak-portal.c
+index 88eb02b3e8..28ce22d5f3 100644
+--- a/portal/flatpak-portal.c
++++ b/portal/flatpak-portal.c
+@@ -998,6 +998,13 @@ handle_spawn (PortalFlatpak         *object,
+   else
+     env = g_get_environ ();
+ 
++  /* Let the environment variables given by the caller override the ones
++   * from extra_args. Don't add them to @env, because they are controlled
++   * by our caller, which might be trying to use them to inject code into
++   * flatpak(1); add them to the environment block instead.
++   *
++   * We don't use --env= here, so that if the values are something that
++   * should not be exposed to other uids, they can remain confidential. */
+   n_envs = g_variant_n_children (arg_envs);
+   for (i = 0; i < n_envs; i++)
+     {
+@@ -1005,7 +1012,26 @@ handle_spawn (PortalFlatpak         *object,
+       const char *val = NULL;
+       g_variant_get_child (arg_envs, i, "{&s&s}", &var, &val);
+ 
+-      env = g_environ_setenv (env, var, val, TRUE);
++      if (var[0] == '\0')
++        {
++          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                                 G_DBUS_ERROR_INVALID_ARGS,
++                                                 "Environment variable cannot have empty name");
++          return G_DBUS_METHOD_INVOCATION_HANDLED;
++        }
++
++      if (strchr (var, '=') != NULL)
++        {
++          g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                                 G_DBUS_ERROR_INVALID_ARGS,
++                                                 "Environment variable name cannot contain '='");
++          return G_DBUS_METHOD_INVOCATION_HANDLED;
++        }
++
++      g_string_append (env_string, var);
++      g_string_append_c (env_string, '=');
++      g_string_append (env_string, val);
++      g_string_append_c (env_string, '\0');
+     }
+ 
+   g_ptr_array_add (flatpak_argv, g_strdup ("flatpak"));

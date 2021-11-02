@@ -1,0 +1,33 @@
+From fd637e2919e7f77c498a91a8e9d353f8e12afc9a Mon Sep 17 00:00:00 2001
+From: juek <jk@grafikrausz.at>
+Date: Wed, 23 May 2018 21:55:50 +0200
+Subject: [PATCH] prevent code injection (XSS)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+fix for reflected XSS vulnerability spotted by Mithat Gögebakan,
+www.netsparker.com
+---
+ include/admin/Menu/Ajax.php | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/include/admin/Menu/Ajax.php b/include/admin/Menu/Ajax.php
+index 9deb8968..5e4b688c 100644
+--- a/include/admin/Menu/Ajax.php
++++ b/include/admin/Menu/Ajax.php
+@@ -155,10 +155,13 @@ public function AddHidden(){
+ 		echo '<tr><th colspan="2">'.$langmessage['options'].'</th></tr>';
+ 
+ 		//title
++		$new_title = htmlspecialchars($_REQUEST['title']);
++		// prevent code injections
++		$new_title = str_replace(array('=', '/', '{', '}', ':', ',', ';'), '', $new_title);
+ 		echo '<tr><td>';
+ 		echo $langmessage['label'];
+ 		echo '</td><td>';
+-		echo '<input type="text" name="title" maxlength="100" size="50" value="'.htmlspecialchars($_REQUEST['title']).'" class="gpinput full_width" required/>';
++		echo '<input type="text" name="title" maxlength="100" size="50" value="'. $new_title .'" class="gpinput full_width" required/>';
+ 		echo '</td></tr>';
+ 
+ 		//copy

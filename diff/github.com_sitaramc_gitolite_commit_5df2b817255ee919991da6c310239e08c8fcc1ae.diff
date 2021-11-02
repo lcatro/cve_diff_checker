@@ -1,0 +1,123 @@
+From 5df2b817255ee919991da6c310239e08c8fcc1ae Mon Sep 17 00:00:00 2001
+From: Sitaram Chamarty <sitaramc@gmail.com>
+Date: Tue, 25 Dec 2018 14:44:51 +0530
+Subject: [PATCH] tighten up security for rsync
+
+Nick Cleaton (nick@cleaton.net) found and reported a security issue
+caused by trusting the remote rsync too much.  It appears that rsync
+cannot -- without special precautions -- be used in any "restricted"
+environment.
+
+Gitolite ships with a "bundle helper" called "rsync" (disabled
+by default; more details below).  This fix tightens up this
+helper to close this hole.
+
+TLDR for administrators and packagers:
+
+1.  Am I affected?
+
+    Look in ~/.gitolite.rc for "rsync"; if it is there, you are
+    affected.
+
+    This is NOT an essential program, and it is not enabled by
+    default.  You (or a previous administrator of your site)
+    would have to have explicitly enabled it for you to be
+    affected.
+
+2.  What's the quick fix?
+
+    Comment out the "rsync" line in ~/.gitolite.rc IMMEDIATELY.
+
+    DO NOT LEAVE IT ENABLED IF YOU ARE UNABLE TO UPGRADE IMMEDIATELY!
+    Uncomment it only after you have upgraded or patched.
+
+3.  That bad, huh?
+
+    Sadly, yes :(
+
+DETAILS:
+
+This program is not a core program.  Despite the name, it will not
+function as a generic "rsync".
+
+This is *only* meant to help out people who are on flaky connections,
+trying to clone a large repo.
+
+Because git clone is not resumable, one common technique is to have
+someone create a "bundle", then download the bundle to seed the local
+repo, then "git fetch" to finish off.  Since the bundle is a single
+file, you can use resumable mechanisms (like rsync) to download it.
+
+What this command does is allow that kind of bundling to happen
+automatically, if an administrator enables it.
+
+The user simply rsyncs a bundle file using his gitolite
+credentials.  As a result, the rsync helper command that ships
+with gitolite is executed.  This program manages the creation
+and expiry of bundle files, then passes control to the *real*
+rsync program to perform the actual data transfer.
+
+It is this last step that requires special care when used in a
+restricted environment, resulting in the need for this patch.
+---
+ src/commands/rsync | 18 ++++++------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/src/commands/rsync b/src/commands/rsync
+index 1109ac4d3..c7b25d187 100755
+--- a/src/commands/rsync
++++ b/src/commands/rsync
+@@ -28,11 +28,6 @@ BUNDLE SUPPORT
+ 
+     (2) Add 'rsync' to the ENABLE list in the rc file
+ 
+-
+-GENERIC RSYNC SUPPORT
+-
+-    TBD
+-
+ =cut
+ 
+ =for usage
+@@ -43,7 +38,7 @@ BUNDLE SUPPORT
+     Admins: see src/commands/rsync for setup instructions
+ 
+     Users:
+-        rsync -P git@host:repo.bundle .
++        rsync git@host:repo.bundle .
+             # downloads a file called "<basename of repo>.bundle"; repeat as
+             # needed till the whole thing is downloaded
+         git clone repo.bundle repo
+@@ -51,9 +46,8 @@ BUNDLE SUPPORT
+         git remote set-url origin git@host:repo
+         git fetch origin    # and maybe git pull, etc. to freshen the clone
+ 
+-GENERIC RSYNC SUPPORT
+-
+-    TBD
++    NOTE on options to the rsync command: you are only allowed to use the
++    "-v", "-n", "-q", and "-P" options.
+ 
+ =cut
+ 
+@@ -62,9 +56,9 @@ usage() if not @ARGV or $ARGV[0] eq '-h';
+ # rsync driver program.  Several things can be done later, but for now it
+ # drives just the 'bundle' transfer.
+ 
+-if ( $ENV{SSH_ORIGINAL_COMMAND} =~ /^rsync --server --sender (-[-\w=.]+ )+\. (\S+)\.bundle$/ ) {
++if ( $ENV{SSH_ORIGINAL_COMMAND} =~ /^rsync --server --sender (?:-[vn]*(?:e\d*\.\w*)? )?\. (\S+)\.bundle$/ ) {
+ 
+-    my $repo = $2;
++    my $repo = $1;
+     $repo =~ s/\.git$//;
+ 
+     # all errors have the same message to avoid leaking info
+@@ -81,7 +75,7 @@ if ( $ENV{SSH_ORIGINAL_COMMAND} =~ /^rsync --server --sender (-[-\w=.]+ )+\. (\S
+     exit 0;
+ }
+ 
+-_warn "invalid rsync command '$ENV{SSH_ORIGINAL_COMMAND}'";
++_warn "Sorry, you are only allowed to use the '-v', '-n', '-q', and '-P' options.";
+ usage();
+ 
+ # ----------------------------------------------------------------------

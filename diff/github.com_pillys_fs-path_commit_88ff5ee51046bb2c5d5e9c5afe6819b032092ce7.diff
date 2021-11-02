@@ -1,0 +1,128 @@
+From 88ff5ee51046bb2c5d5e9c5afe6819b032092ce7 Mon Sep 17 00:00:00 2001
+From: Alejandro Romero Herrera <alromh87@gmail.com>
+Date: Wed, 7 Oct 2020 00:21:00 +0300
+Subject: [PATCH] Fix Arbitary Code Execution
+
+---
+ lib/index.js | 31 ++++++++++++++++---------------
+ package.json |  5 +++--
+ 2 files changed, 19 insertions(+), 17 deletions(-)
+
+diff --git a/lib/index.js b/lib/index.js
+index b8216e8..6423edd 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -3,6 +3,7 @@ var fs = require('fs');
+ var path = require('path');
+ var async = require('async');
+ var child_process = require('child_process');
++const shellescape = require('shell-escape')
+ 
+ var fsPath = {
+   _win32: process.platform === 'win32',
+@@ -55,9 +56,9 @@ var fsPath = {
+               callback(err);
+             } else {
+               if (that._win32) {
+-                cmd = 'echo d|xcopy /s /e /y "' + path.join(from, '*') + '" "' + dist + '"';
++                cmd = 'echo d|xcopy /s /e /y ' + shellescape([path.join(from, '*')]) + ' ' + shellescape([dist]);
+               } else {
+-                cmd = 'cp -f -R -p ' + path.join(from, '*').replace(/ /g, '\\ ') + ' ' + dist.replace(/ /g, '\\ ');
++                cmd = 'cp -f -R -p ' + shellescape([path.join(from, '*')]) + ' ' + shellescape([dist]);
+               }
+               child_process.exec(cmd, function (error, stdout, stderr) {
+                 callback && callback(error);
+@@ -66,9 +67,9 @@ var fsPath = {
+           });
+         } else if (stats.isFile()) {
+           if (that._win32) {
+-            cmd = 'echo f|xcopy /y "' + from + '" "' + dist + '"';
++            cmd = 'echo f|xcopy /y ' + shellescape([from]) + ' ' + shellescape([dist]);
+           } else {
+-            cmd = 'cp -f -p ' + from.replace(/ /g, '\\ ') + ' ' + dist.replace(/ /g, '\\ ');
++            cmd = 'cp -f -p ' + shellescape([from]) + ' ' + shellescape([dist]);
+           }
+           child_process.exec(cmd, function (error, stdout, stderr) {
+             callback && callback(error);
+@@ -88,18 +89,18 @@ var fsPath = {
+       if (stats.isDirectory()) {
+         if (this._win32) {
+           // windows
+-          cmd = 'echo da|xcopy /s /e "' + path.join(from, '*') + '" "' + dist + '"';
++          cmd = 'echo da|xcopy /s /e ' + shellescape([path.join(from, '*')]) + ' ' + shellescape([dist]);
+         } else {
+           // linux or mac
+-          cmd = 'cp -f -R -p ' + path.join(from, '*').replace(/ /g, '\\ ') + ' ' + dist.replace(/ /g, '\\ ');
++          cmd = 'cp -f -R -p ' + shellescape([path.join(from, '*')]) + ' ' + shellescape([dist]);
+         }
+       } else if (stats.isFile()) {
+         if (this._win32) {
+           // windows
+-          cmd = 'echo fa|xcopy "' + from + '" "' + dist + '"';
++          cmd = 'echo fa|xcopy ' + shellescape([from]) + ' ' + shellescape([dist]);
+         } else {
+           // linux or mac
+-          cmd = 'cp -f -p ' + from.replace(/ /g, '\\ ') + ' ' + dist.replace(/ /g, '\\ ');
++          cmd = 'cp -f -p ' + shellescape([from]) + ' ' + shellescape([dist]);
+         }
+       }
+       cmd && child_process.execSync(cmd);
+@@ -115,13 +116,13 @@ var fsPath = {
+         if (that._win32) {
+           // windows
+           if (stats.isDirectory()) {
+-            cmd = 'rd /s /q "' + from + '"';
++            cmd = 'rd /s /q ' + shellescape([from]);
+           } else if (stats.isFile()) {
+-            cmd = 'del /f "' + from + '"';
++            cmd = 'del /f ' + shellescape([from]);
+           }
+         } else {
+           // linux or mac
+-          cmd = 'rm -rf ' + from.replace(/ /g, '\\ ');
++          cmd = 'rm -rf ' + shellescape([from]);
+         }
+         if (cmd) {
+           child_process.exec(cmd, function (error, stdout, stderr) {
+@@ -141,13 +142,13 @@ var fsPath = {
+       if (this._win32) {
+         // windows
+         if (stats.isDirectory()) {
+-          cmd = 'rd /s /q "' + from + '"';
++          cmd = 'rd /s /q ' + shellescape([from]);
+         } else if (stats.isFile()) {
+-          cmd = 'del /f "' + from + '"';
++          cmd = 'del /f ' + shellescape([from]);
+         }
+       } else {
+         // linux or mac
+-        cmd = 'rm -rf "' + from + '"';
++        cmd = 'rm -rf ' + shellescape([from]);
+       }
+       cmd && child_process.execSync(cmd);
+     } catch (e) {}
+@@ -261,4 +262,4 @@ var fsPath = {
+     });
+   }
+ };
+-module.exports = fsPath;
+\ No newline at end of file
++module.exports = fsPath;
+diff --git a/package.json b/package.json
+index 8fb5e87..b40ba18 100644
+--- a/package.json
++++ b/package.json
+@@ -21,9 +21,10 @@
+   },
+   "homepage": "https://github.com/pillys/fs-path",
+   "dependencies": {
+-    "async": "~0.9.0"
++    "async": "~0.9.0",
++    "shell-escape": "^0.2.0"
+   },
+   "description": "file and directory op libs, find, findSync, mkdir, mkdirSync, copy, copySync, remove, removeSync, writeFile, writeFileSync",
+   "readmeFilename": "README.md",
+   "license": "MIT"
+-}
+\ No newline at end of file
++}

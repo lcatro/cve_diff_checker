@@ -1,0 +1,23 @@
+From 2de6cf70c5ef31e22ed119a25ac2daeefd3d18a1 Mon Sep 17 00:00:00 2001
+From: Andrew Scheidecker <andrew@scheidecker.net>
+Date: Sun, 16 Sep 2018 08:20:54 -0400
+Subject: [PATCH] Fix out-of-bounds array access when passing a <4 byte input
+ file to wavm or wavm-compile
+
+---
+ Include/Inline/CLI.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Include/Inline/CLI.h b/Include/Inline/CLI.h
+index 2cd490c0a..05d0c6149 100644
+--- a/Include/Inline/CLI.h
++++ b/Include/Inline/CLI.h
+@@ -144,7 +144,7 @@ inline bool loadModule(const char* filename, IR::Module& outModule)
+ 	if(!loadFile(filename, fileBytes)) { return false; }
+ 
+ 	// If the file starts with the WASM binary magic number, load it as a binary irModule.
+-	if(*(U32*)fileBytes.data() == 0x6d736100)
++	if(fileBytes.size() >= 4 && *(U32*)fileBytes.data() == 0x6d736100)
+ 	{ return loadBinaryModule(fileBytes.data(), fileBytes.size(), outModule); }
+ 	else
+ 	{

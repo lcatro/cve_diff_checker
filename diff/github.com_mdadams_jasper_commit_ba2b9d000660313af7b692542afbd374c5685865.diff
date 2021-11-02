@@ -1,0 +1,37 @@
+From ba2b9d000660313af7b692542afbd374c5685865 Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Tue, 25 Oct 2016 16:18:51 -0700
+Subject: [PATCH] Ensure that not all tiles lie outside the image area.
+
+---
+ src/libjasper/jpc/jpc_cs.c  | 4 ++++
+ src/libjasper/jpc/jpc_dec.c | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/src/libjasper/jpc/jpc_cs.c b/src/libjasper/jpc/jpc_cs.c
+index 1e0c9afa..cf7199e5 100644
+--- a/src/libjasper/jpc/jpc_cs.c
++++ b/src/libjasper/jpc/jpc_cs.c
+@@ -508,6 +508,10 @@ static int jpc_siz_getparms(jpc_ms_t *ms, jpc_cstate_t *cstate,
+ 	  !siz->tileheight || !siz->numcomps || siz->numcomps > 16384) {
+ 		return -1;
+ 	}
++	if (siz->tilexoff >= siz->width || siz->tileyoff >= siz->height) {
++		jas_eprintf("all tiles are outside the image area\n");
++		return -1;
++	}
+ 	if (!(siz->comps = jas_alloc2(siz->numcomps, sizeof(jpc_sizcomp_t)))) {
+ 		return -1;
+ 	}
+diff --git a/src/libjasper/jpc/jpc_dec.c b/src/libjasper/jpc/jpc_dec.c
+index 2dc3db8a..4bddb229 100644
+--- a/src/libjasper/jpc/jpc_dec.c
++++ b/src/libjasper/jpc/jpc_dec.c
+@@ -1216,6 +1216,7 @@ static int jpc_dec_process_siz(jpc_dec_t *dec, jpc_ms_t *ms)
+ 	dec->tilexoff = siz->tilexoff;
+ 	dec->tileyoff = siz->tileyoff;
+ 	dec->numcomps = siz->numcomps;
++
+ 	if (!(dec->cp = jpc_dec_cp_create(dec->numcomps))) {
+ 		return -1;
+ 	}

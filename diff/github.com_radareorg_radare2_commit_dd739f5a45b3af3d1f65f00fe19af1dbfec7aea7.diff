@@ -1,0 +1,47 @@
+From dd739f5a45b3af3d1f65f00fe19af1dbfec7aea7 Mon Sep 17 00:00:00 2001
+From: pancake <pancake@nopcode.org>
+Date: Mon, 9 Sep 2019 06:28:11 +0200
+Subject: [PATCH] Fix #14990 - multiple quoted command parsing issue ##core
+
+	> "?e hello""?e world"
+	hello
+	world"
+	> "?e hello";"?e world"
+	hello
+	world
+---
+ libr/core/cmd.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/libr/core/cmd.c b/libr/core/cmd.c
+index 9fd43c9d405..7c48a6482bb 100644
+--- a/libr/core/cmd.c
++++ b/libr/core/cmd.c
+@@ -2580,6 +2580,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
+ 				cmd = sc + 1;
+ 				continue;
+ 			}
++			char op0 = 0;
+ 			if (*p) {
+ 				// workaround :D
+ 				if (p[0] == '@') {
+@@ -2591,6 +2592,7 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
+ 				if (p[1] == '@' || (p[1] && p[2] == '@')) {
+ 					char *q = strchr (p + 1, '"');
+ 					if (q) {
++						op0 = *q;
+ 						*q = 0;
+ 					}
+ 					haveQuote = q != NULL;
+@@ -2644,9 +2646,9 @@ static int r_core_cmd_subst_i(RCore *core, char *cmd, char *colon, bool *tmpseek
+ 					cmd = p + 1;
+ 				} else {
+ 					if (*p == '"') {
+-						cmd = p + 1;
++						cmd = p;
+ 					} else {
+-						*p = '"';
++						*p = op0;
+ 						cmd = p;
+ 					}
+ 				}

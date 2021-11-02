@@ -1,0 +1,36 @@
+From 2ad6d33493750a28a5a655d319a8e0b16c392de1 Mon Sep 17 00:00:00 2001
+From: dirk <dirk@git.imagemagick.org>
+Date: Mon, 5 Oct 2015 22:11:31 +0200
+Subject: [PATCH] Fixed check for the number of pixels that will be allocated.
+
+---
+ coders/rle.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/coders/rle.c b/coders/rle.c
+index a5c27ffaf7..9809fa7f29 100644
+--- a/coders/rle.c
++++ b/coders/rle.c
+@@ -173,6 +173,7 @@ static Image *ReadRLEImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     map_length,
+     number_colormaps,
+     number_planes,
++    number_planes_filled,
+     one,
+     offset,
+     pixel_info_length;
+@@ -308,9 +309,12 @@ static Image *ReadRLEImage(const ImageInfo *image_info,ExceptionInfo *exception)
+     if (image->alpha_trait != UndefinedPixelTrait)
+       number_planes++;
+     number_pixels=(MagickSizeType) image->columns*image->rows;
+-    if ((number_pixels*number_planes) != (size_t) (number_pixels*number_planes))
++    number_planes_filled=(number_planes % 2 == 0) ? number_planes :
++      number_planes+1;
++    if ((number_pixels*number_planes_filled) != (size_t) (number_pixels*
++         number_planes_filled))
+       ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
+-    pixel_info_length=image->columns*image->rows*MagickMax(number_planes,4);
++    pixel_info_length=image->columns*image->rows*number_planes_filled;
+     pixel_info=AcquireVirtualMemory(pixel_info_length,sizeof(*pixels));
+     if (pixel_info == (MemoryInfo *) NULL)
+       ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");

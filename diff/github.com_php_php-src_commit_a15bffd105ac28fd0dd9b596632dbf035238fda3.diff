@@ -1,0 +1,66 @@
+From a15bffd105ac28fd0dd9b596632dbf035238fda3 Mon Sep 17 00:00:00 2001
+From: Nikita Popov <nikita.ppv@gmail.com>
+Date: Thu, 2 Feb 2017 16:04:02 +0100
+Subject: [PATCH] Fix bug #73807
+
+---
+ NEWS                 |  4 ++++
+ main/php_variables.c | 10 ++++++++--
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/NEWS b/NEWS
+index 690c7638a3fc..3d402c67989b 100644
+--- a/NEWS
++++ b/NEWS
+@@ -2,6 +2,10 @@ PHP                                                                        NEWS
+ |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+ ?? ??? 2017 PHP 7.0.17
+ 
++- Core:
++  . Fixed bug #73807 (Performance problem with processing large post request).
++    (Nikita)
++
+ - OpenSSL:
+   . Fixed bug #74022 (PHP Fast CGI crashes when reading from a pfx file).
+     (Anatol)
+diff --git a/main/php_variables.c b/main/php_variables.c
+index dc4390c6c821..aa6e426ba382 100644
+--- a/main/php_variables.c
++++ b/main/php_variables.c
+@@ -239,11 +239,14 @@ typedef struct post_var_data {
+ 	char *ptr;
+ 	char *end;
+ 	uint64_t cnt;
++
++	/* Bytes in ptr that have already been scanned for '&' */
++	size_t already_scanned;
+ } post_var_data_t;
+ 
+ static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
+ {
+-	char *ksep, *vsep, *val;
++	char *start, *ksep, *vsep, *val;
+ 	size_t klen, vlen;
+ 	size_t new_vlen;
+ 
+@@ -251,9 +254,11 @@ static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
+ 		return 0;
+ 	}
+ 
+-	vsep = memchr(var->ptr, '&', var->end - var->ptr);
++	start = var->ptr + var->already_scanned;
++	vsep = memchr(start, '&', var->end - start);
+ 	if (!vsep) {
+ 		if (!eof) {
++			var->already_scanned = var->end - var->ptr;
+ 			return 0;
+ 		} else {
+ 			vsep = var->end;
+@@ -286,6 +291,7 @@ static zend_bool add_post_var(zval *arr, post_var_data_t *var, zend_bool eof)
+ 	efree(val);
+ 
+ 	var->ptr = vsep + (vsep != var->end);
++	var->already_scanned = 0;
+ 	return 1;
+ }
+ 

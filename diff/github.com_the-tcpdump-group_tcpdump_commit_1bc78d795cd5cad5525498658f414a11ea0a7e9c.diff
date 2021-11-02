@@ -1,0 +1,109 @@
+From 1bc78d795cd5cad5525498658f414a11ea0a7e9c Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 22 Mar 2017 15:38:02 -0700
+Subject: [PATCH] CVE-2017-13032/RADIUS: Check whether a byte exists before
+ testing its value.
+
+Reverse the test in a for loop to test the length before testing whether
+we have a null byte.
+
+This fixes a buffer over-read discovered by Bhargava Shastry.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+
+Clean up other length tests while we're at it.
+---
+ print-radius.c              |  14 +++++---------
+ tests/TESTLIST              |   1 +
+ tests/radius_attr_asan.out  |   9 +++++++++
+ tests/radius_attr_asan.pcap | Bin 0 -> 135 bytes
+ 4 files changed, 15 insertions(+), 9 deletions(-)
+ create mode 100644 tests/radius_attr_asan.out
+ create mode 100644 tests/radius_attr_asan.pcap
+
+diff --git a/print-radius.c b/print-radius.c
+index 582795a12..8555188ee 100644
+--- a/print-radius.c
++++ b/print-radius.c
+@@ -503,10 +503,7 @@ print_attr_string(netdissect_options *ndo,
+    {
+       case TUNNEL_PASS:
+            if (length < 3)
+-           {
+-              ND_PRINT((ndo, "%s", tstr));
+-              return;
+-           }
++              goto trunc;
+            if (*data && (*data <=0x1F) )
+               ND_PRINT((ndo, "Tag[%u] ", *data));
+            else
+@@ -526,10 +523,7 @@ print_attr_string(netdissect_options *ndo,
+            if (*data <= 0x1F)
+            {
+               if (length < 1)
+-              {
+-                 ND_PRINT((ndo, "%s", tstr));
+-                 return;
+-              }
++                 goto trunc;
+               if (*data)
+                 ND_PRINT((ndo, "Tag[%u] ", *data));
+               else
+@@ -539,6 +533,8 @@ print_attr_string(netdissect_options *ndo,
+            }
+         break;
+       case EGRESS_VLAN_NAME:
++           if (length < 1)
++              goto trunc;
+            ND_PRINT((ndo, "%s (0x%02x) ",
+                   tok2str(rfc4675_tagged,"Unknown tag",*data),
+                   *data));
+@@ -547,7 +543,7 @@ print_attr_string(netdissect_options *ndo,
+         break;
+    }
+ 
+-   for (i=0; *data && i < length ; i++, data++)
++   for (i=0; i < length && *data; i++, data++)
+        ND_PRINT((ndo, "%c", (*data < 32 || *data > 126) ? '.' : *data));
+ 
+    return;
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 9cb2bdb6b..314afa223 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -541,6 +541,7 @@ pim_header_asan		pim_header_asan.pcap		pim_header_asan.out	-v
+ pim_header_asan-2	pim_header_asan-2.pcap		pim_header_asan-2.out	-v
+ pim_header_asan-3	pim_header_asan-3.pcap		pim_header_asan-3.out	-v
+ ip6_frag_asan		ip6_frag_asan.pcap		ip6_frag_asan.out	-v
++radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/radius_attr_asan.out b/tests/radius_attr_asan.out
+new file mode 100644
+index 000000000..faef3ddf1
+--- /dev/null
++++ b/tests/radius_attr_asan.out
+@@ -0,0 +1,9 @@
++IP (tos 0x64, ttl 249, id 40192, offset 0, flags [+, DF, rsvd], proto UDP (17), length 299, options (unknown 235 [bad length 252]), bad cksum 8000 (->1faa)!)
++    0.0.86.32.258 > 0.2.250.99.3799: RADIUS, length: 263
++	Unknown Command (58), id: 0x6a, Authenticator: 0901020ed7ff03edb63a0f00cb0f00cb
++	  NAS-Port Attribute (5), length: 5, Value: ERROR: length 3 != 4
++	  Unknown Attribute (127), length: 4, Value: 
++	  NAS-IP-Address Attribute (4), length: 4, Value: ERROR: length 2 != 4
++	  NAS-IP-Address Attribute (4), length: 4, Value: ERROR: length 2 != 4
++	  NAS-IP-Address Attribute (4), length: 4, Value: ERROR: length 2 != 4
++	  Callback-Id Attribute (20), length: 4, Value: .. [|radius]
+diff --git a/tests/radius_attr_asan.pcap b/tests/radius_attr_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a7ed160d07b00faa7f6dacb8a0d90c94d57edf5
+GIT binary patch
+literal 135
+zcmca|c+)~A1{MY&U<48IFvhQ{U}j!MWf1>=JtNcFm2+24i#~9$0jQLN!99ghdoIHR
+zhM$5BK>08Q2Bu%humAjS_`muY6C)Gf_5aLow^?Pae#Qys@H3nSB32+^sb@h3%-=;=
+GSeO9}1|^&T
+
+literal 0
+HcmV?d00001
+

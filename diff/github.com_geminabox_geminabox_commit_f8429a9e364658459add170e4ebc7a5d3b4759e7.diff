@@ -1,0 +1,58 @@
+From f8429a9e364658459add170e4ebc7a5d3b4759e7 Mon Sep 17 00:00:00 2001
+From: sonots <sonots@gmail.com>
+Date: Sat, 11 Nov 2017 09:27:52 +0900
+Subject: [PATCH] Fix CVE-2017-16792 - Stored XSS
+
+Reject Javascript Link
+---
+ lib/geminabox/server.rb | 9 +++++++++
+ views/gem.erb           | 2 +-
+ views/index.erb         | 2 +-
+ 3 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/lib/geminabox/server.rb b/lib/geminabox/server.rb
+index a004367..04ae5c8 100644
+--- a/lib/geminabox/server.rb
++++ b/lib/geminabox/server.rb
+@@ -307,6 +307,15 @@ def combined_gem_list
+     end
+ 
+     helpers do
++      def href(text)
++        escaped_text = Rack::Utils.escape_html(text)
++        if escaped_text.start_with?('http://') || escaped_text.start_with?('https://')
++          escaped_text
++        else
++          '#'
++        end
++      end
++
+       def h(text)
+         Rack::Utils.escape_html(text)
+       end
+diff --git a/views/gem.erb b/views/gem.erb
+index 6517c2b..f38274a 100644
+--- a/views/gem.erb
++++ b/views/gem.erb
+@@ -27,7 +27,7 @@
+           <%= spec.description %>
+           <br/>
+           <span class="author">– <%= spec.authors.map do |author|
+-            "<a href='#{h(spec.homepage)}'>#{author}</a>"
++            "<a href='#{href(spec.homepage)}'>#{author}</a>"
+           end.join(', ') %></span>
+         <% end %>
+         </p>
+diff --git a/views/index.erb b/views/index.erb
+index 2948f15..8e89c53 100644
+--- a/views/index.erb
++++ b/views/index.erb
+@@ -46,7 +46,7 @@
+               <%= spec.description %>
+               <br/>
+               <span class="author">– <%= spec.authors.map do |author|
+-                "<a href='#{h(spec.homepage)}'>#{author}</a>"
++                "<a href='#{href(spec.homepage)}'>#{author}</a>"
+               end.join(', ') %></span>
+             <% end %>
+           </p>

@@ -1,0 +1,40 @@
+From 5b048e87e4e55990dae6b547add4dae59f4e1c76 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 16 Jul 2021 09:14:31 -0700
+Subject: [PATCH] Fix a null pointer exception in SVDF
+
+This is due to not checking that `GetVariableInput` returns non-null tensor.
+
+Also fix a potential null pointer exception in `GetVariableInput`.
+
+PiperOrigin-RevId: 385160147
+Change-Id: Iadf3f0705b036a9014d27caa5a8bbd91f4c4c401
+---
+ tensorflow/lite/kernels/kernel_util.cc | 1 +
+ tensorflow/lite/kernels/svdf.cc        | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/kernel_util.cc b/tensorflow/lite/kernels/kernel_util.cc
+index c64a49d316b21..6a53757bbdff6 100644
+--- a/tensorflow/lite/kernels/kernel_util.cc
++++ b/tensorflow/lite/kernels/kernel_util.cc
+@@ -119,6 +119,7 @@ TfLiteStatus GetInputSafe(const TfLiteContext* context, const TfLiteNode* node,
+ TfLiteTensor* GetVariableInput(TfLiteContext* context, const TfLiteNode* node,
+                                int index) {
+   TfLiteTensor* tensor = GetMutableInput(context, node, index);
++  if (tensor == nullptr) return nullptr;
+   return tensor->is_variable ? tensor : nullptr;
+ }
+ 
+diff --git a/tensorflow/lite/kernels/svdf.cc b/tensorflow/lite/kernels/svdf.cc
+index 31b8b32c98295..6c02508e26b1d 100644
+--- a/tensorflow/lite/kernels/svdf.cc
++++ b/tensorflow/lite/kernels/svdf.cc
+@@ -299,6 +299,7 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+                     GetTemporarySafe(context, node, /*index=*/0, &scratch));
+ 
+   TfLiteTensor* state = GetVariableInput(context, node, kStateTensor);
++  TF_LITE_ENSURE(context, state != nullptr);
+   TfLiteTensor* output;
+   TF_LITE_ENSURE_OK(context,
+                     GetOutputSafe(context, node, kOutputTensor, &output));

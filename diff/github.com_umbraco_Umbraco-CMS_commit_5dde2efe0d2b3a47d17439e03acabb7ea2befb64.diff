@@ -1,0 +1,37 @@
+From 5dde2efe0d2b3a47d17439e03acabb7ea2befb64 Mon Sep 17 00:00:00 2001
+From: Sebastiaan Janssen <sebastiaan@umbraco.com>
+Date: Fri, 6 Oct 2017 15:14:41 +0200
+Subject: [PATCH] U4-10506 Importing a specially crafted document type file can
+ cause XXE attack
+
+---
+ .../umbraco/dialogs/importDocumenttype.aspx.cs              | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/Umbraco.Web/umbraco.presentation/umbraco/dialogs/importDocumenttype.aspx.cs b/src/Umbraco.Web/umbraco.presentation/umbraco/dialogs/importDocumenttype.aspx.cs
+index 27c1724bfff..147e7604c12 100644
+--- a/src/Umbraco.Web/umbraco.presentation/umbraco/dialogs/importDocumenttype.aspx.cs
++++ b/src/Umbraco.Web/umbraco.presentation/umbraco/dialogs/importDocumenttype.aspx.cs
+@@ -70,10 +70,11 @@ private void InitializeComponent()
+ 		private void import_Click(object sender, EventArgs e)
+ 		{
+             var xd = new XmlDocument();
++		    xd.XmlResolver = null;
+             xd.Load(tempFile.Value);
+ 
+ 		    var userId = base.getUser().Id;
+-
++            
+             var element = XElement.Parse(xd.InnerXml);
+ 		    var importContentTypes = ApplicationContext.Current.Services.PackagingService.ImportContentTypes(element, userId);
+ 		    var contentType = importContentTypes.FirstOrDefault();
+@@ -104,7 +105,8 @@ private void submit_Click(object sender, EventArgs e)
+ 			documentTypeFile.PostedFile.SaveAs(fileName);
+ 
+ 			var xd = new XmlDocument();
+-			xd.Load(fileName);
++		    xd.XmlResolver = null;
++            xd.Load(fileName);
+ 			dtName.Text = xd.DocumentElement.SelectSingleNode("//DocumentType/Info/Name").FirstChild.Value;
+ 			dtAlias.Text = xd.DocumentElement.SelectSingleNode("//DocumentType/Info/Alias").FirstChild.Value;
+ 

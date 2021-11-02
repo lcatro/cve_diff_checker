@@ -1,0 +1,170 @@
+From 1bf477d3cdf1a864646d59820878783d42357a1d Mon Sep 17 00:00:00 2001
+From: "djm@openbsd.org" <djm@openbsd.org>
+Date: Wed, 1 Jul 2015 02:26:31 +0000
+Subject: upstream commit
+
+better refuse ForwardX11Trusted=no connections attempted
+ after ForwardX11Timeout expires; reported by Jann Horn
+
+Upstream-ID: bf0fddadc1b46a0334e26c080038313b4b6dea21
+---
+ channels.c   | 18 +++++++++++++++++-
+ channels.h   |  3 ++-
+ clientloop.c | 29 +++++++++++++++++++++--------
+ 3 files changed, 40 insertions(+), 10 deletions(-)
+
+diff --git a/channels.c b/channels.c
+index 3fe836aa..a84b487e 100644
+--- a/channels.c
++++ b/channels.c
+@@ -1,4 +1,4 @@
+-/* $OpenBSD: channels.c,v 1.346 2015/06/30 05:25:07 djm Exp $ */
++/* $OpenBSD: channels.c,v 1.347 2015/07/01 02:26:31 djm Exp $ */
+ /*
+  * Author: Tatu Ylonen <ylo@cs.hut.fi>
+  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+@@ -161,6 +161,9 @@ static char *x11_saved_proto = NULL;
+ static char *x11_saved_data = NULL;
+ static u_int x11_saved_data_len = 0;
+ 
++/* Deadline after which all X11 connections are refused */
++static u_int x11_refuse_time;
++
+ /*
+  * Fake X11 authentication data.  This is what the server will be sending us;
+  * we should replace any occurrences of this by the real data.
+@@ -912,6 +915,13 @@ x11_open_helper(Buffer *b)
+ 	u_char *ucp;
+ 	u_int proto_len, data_len;
+ 
++	/* Is this being called after the refusal deadline? */
++	if (x11_refuse_time != 0 && (u_int)monotime() >= x11_refuse_time) {
++		verbose("Rejected X11 connection after ForwardX11Timeout "
++		    "expired");
++		return -1;
++	}
++
+ 	/* Check if the fixed size part of the packet is in buffer. */
+ 	if (buffer_len(b) < 12)
+ 		return 0;
+@@ -1483,6 +1493,12 @@ channel_set_reuseaddr(int fd)
+ 		error("setsockopt SO_REUSEADDR fd %d: %s", fd, strerror(errno));
+ }
+ 
++void
++channel_set_x11_refuse_time(u_int refuse_time)
++{
++	x11_refuse_time = refuse_time;
++}
++
+ /*
+  * This socket is listening for connections to a forwarded TCP/IP port.
+  */
+diff --git a/channels.h b/channels.h
+index b9b48602..9d76c9d2 100644
+--- a/channels.h
++++ b/channels.h
+@@ -1,4 +1,4 @@
+-/* $OpenBSD: channels.h,v 1.117 2015/05/08 06:45:13 djm Exp $ */
++/* $OpenBSD: channels.h,v 1.118 2015/07/01 02:26:31 djm Exp $ */
+ 
+ /*
+  * Author: Tatu Ylonen <ylo@cs.hut.fi>
+@@ -284,6 +284,7 @@ int	 permitopen_port(const char *);
+ 
+ /* x11 forwarding */
+ 
++void	 channel_set_x11_refuse_time(u_int);
+ int	 x11_connect_display(void);
+ int	 x11_create_display_inet(int, int, int, u_int *, int **);
+ int      x11_input_open(int, u_int32_t, void *);
+diff --git a/clientloop.c b/clientloop.c
+index 040deb99..dc0e557a 100644
+--- a/clientloop.c
++++ b/clientloop.c
+@@ -1,4 +1,4 @@
+-/* $OpenBSD: clientloop.c,v 1.273 2015/05/04 06:10:48 djm Exp $ */
++/* $OpenBSD: clientloop.c,v 1.274 2015/07/01 02:26:31 djm Exp $ */
+ /*
+  * Author: Tatu Ylonen <ylo@cs.hut.fi>
+  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
+@@ -163,7 +163,7 @@ static int connection_in;	/* Connection to server (input). */
+ static int connection_out;	/* Connection to server (output). */
+ static int need_rekeying;	/* Set to non-zero if rekeying is requested. */
+ static int session_closed;	/* In SSH2: login session closed. */
+-static int x11_refuse_time;	/* If >0, refuse x11 opens after this time. */
++static u_int x11_refuse_time;	/* If >0, refuse x11 opens after this time. */
+ 
+ static void client_init_dispatch(void);
+ int	session_ident = -1;
+@@ -298,7 +298,8 @@ client_x11_display_valid(const char *display)
+ 	return 1;
+ }
+ 
+-#define SSH_X11_PROTO "MIT-MAGIC-COOKIE-1"
++#define SSH_X11_PROTO		"MIT-MAGIC-COOKIE-1"
++#define X11_TIMEOUT_SLACK	60
+ void
+ client_x11_get_proto(const char *display, const char *xauth_path,
+     u_int trusted, u_int timeout, char **_proto, char **_data)
+@@ -311,7 +312,7 @@ client_x11_get_proto(const char *display, const char *xauth_path,
+ 	int got_data = 0, generated = 0, do_unlink = 0, i;
+ 	char *xauthdir, *xauthfile;
+ 	struct stat st;
+-	u_int now;
++	u_int now, x11_timeout_real;
+ 
+ 	xauthdir = xauthfile = NULL;
+ 	*_proto = proto;
+@@ -344,6 +345,15 @@ client_x11_get_proto(const char *display, const char *xauth_path,
+ 			xauthdir = xmalloc(PATH_MAX);
+ 			xauthfile = xmalloc(PATH_MAX);
+ 			mktemp_proto(xauthdir, PATH_MAX);
++			/*
++			 * The authentication cookie should briefly outlive
++			 * ssh's willingness to forward X11 connections to
++			 * avoid nasty fail-open behaviour in the X server.
++			 */
++			if (timeout >= UINT_MAX - X11_TIMEOUT_SLACK)
++				x11_timeout_real = UINT_MAX;
++			else
++				x11_timeout_real = timeout + X11_TIMEOUT_SLACK;
+ 			if (mkdtemp(xauthdir) != NULL) {
+ 				do_unlink = 1;
+ 				snprintf(xauthfile, PATH_MAX, "%s/xauthfile",
+@@ -351,17 +361,20 @@ client_x11_get_proto(const char *display, const char *xauth_path,
+ 				snprintf(cmd, sizeof(cmd),
+ 				    "%s -f %s generate %s " SSH_X11_PROTO
+ 				    " untrusted timeout %u 2>" _PATH_DEVNULL,
+-				    xauth_path, xauthfile, display, timeout);
++				    xauth_path, xauthfile, display,
++				    x11_timeout_real);
+ 				debug2("x11_get_proto: %s", cmd);
+-				if (system(cmd) == 0)
+-					generated = 1;
+ 				if (x11_refuse_time == 0) {
+ 					now = monotime() + 1;
+ 					if (UINT_MAX - timeout < now)
+ 						x11_refuse_time = UINT_MAX;
+ 					else
+ 						x11_refuse_time = now + timeout;
++					channel_set_x11_refuse_time(
++					    x11_refuse_time);
+ 				}
++				if (system(cmd) == 0)
++					generated = 1;
+ 			}
+ 		}
+ 
+@@ -1889,7 +1902,7 @@ client_request_x11(const char *request_type, int rchan)
+ 		    "malicious server.");
+ 		return NULL;
+ 	}
+-	if (x11_refuse_time != 0 && monotime() >= x11_refuse_time) {
++	if (x11_refuse_time != 0 && (u_int)monotime() >= x11_refuse_time) {
+ 		verbose("Rejected X11 connection after ForwardX11Timeout "
+ 		    "expired");
+ 		return NULL;
+-- 
+cgit v1.2.3
+

@@ -1,0 +1,74 @@
+From 5aa663cfc79b54e04c79253b033a476b2fee0f60 Mon Sep 17 00:00:00 2001
+From: Mark <mark@netalico.com>
+Date: Tue, 29 Dec 2020 07:23:57 -0500
+Subject: [PATCH] CMS Editor code execution update
+
+---
+ app/code/core/Mage/Core/Block/Abstract.php  |  1 +
+ app/code/core/Mage/Core/Helper/Security.php | 31 +++++++++++++++++++++
+ app/code/core/Mage/Core/Model/Layout.php    |  2 ++
+ 3 files changed, 34 insertions(+)
+ create mode 100644 app/code/core/Mage/Core/Helper/Security.php
+
+diff --git a/app/code/core/Mage/Core/Block/Abstract.php b/app/code/core/Mage/Core/Block/Abstract.php
+index edaedb2444..606497a9b8 100644
+--- a/app/code/core/Mage/Core/Block/Abstract.php
++++ b/app/code/core/Mage/Core/Block/Abstract.php
+@@ -536,6 +536,7 @@ public function unsetCallChild($alias, $callback, $result, $params)
+                 $params = $args;
+             }
+ 
++            Mage::helper('core/security')->validateAgainstBlockMethodBlacklist($child, $callback, $params);
+             if ($result == call_user_func_array(array(&$child, $callback), $params)) {
+                 $this->unsetChild($alias);
+             }
+diff --git a/app/code/core/Mage/Core/Helper/Security.php b/app/code/core/Mage/Core/Helper/Security.php
+new file mode 100644
+index 0000000000..00c4c53964
+--- /dev/null
++++ b/app/code/core/Mage/Core/Helper/Security.php
+@@ -0,0 +1,31 @@
++<?php
++
++class Mage_Core_Helper_Security
++{
++
++    private $invalidBlockActions
++        = [
++            // explicitly not using class constant here Mage_Page_Block_Html_Topmenu_Renderer::class
++            // if the class does not exists it breaks.
++            ['block' => Mage_Page_Block_Html_Topmenu_Renderer::class, 'method' => 'render'],
++            ['block' => Mage_Core_Block_Template::class, 'method' => 'fetchView'],
++        ];
++
++    /**
++     * @param Mage_Core_Block_Abstract $block
++     * @param string                   $method
++     * @param string[]                 $args
++     *
++     * @throws Mage_Core_Exception
++     */
++    public function validateAgainstBlockMethodBlacklist(Mage_Core_Block_Abstract $block, $method, array $args)
++    {
++        foreach ($this->invalidBlockActions as $action) {
++            if ($block instanceof $action['block'] && strtolower($action['method']) === strtolower($method)) {
++                Mage::throwException(
++                    sprintf('Action with combination block %s and method %s is forbidden.', get_class($block), $method)
++                );
++            }
++        }
++    }
++}
+diff --git a/app/code/core/Mage/Core/Model/Layout.php b/app/code/core/Mage/Core/Model/Layout.php
+index 458b1514f0..4cf84b04d7 100644
+--- a/app/code/core/Mage/Core/Model/Layout.php
++++ b/app/code/core/Mage/Core/Model/Layout.php
+@@ -345,6 +345,8 @@ protected function _generateAction($node, $parent)
+                 }
+             }
+ 
++            Mage::helper('core/security')->validateAgainstBlockMethodBlacklist($block, $method, $args);
++
+             $this->_translateLayoutNode($node, $args);
+             call_user_func_array(array($block, $method), array_values($args));
+         }

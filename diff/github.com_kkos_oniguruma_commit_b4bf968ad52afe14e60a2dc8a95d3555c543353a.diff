@@ -1,0 +1,24 @@
+From b4bf968ad52afe14e60a2dc8a95d3555c543353a Mon Sep 17 00:00:00 2001
+From: "K.Kosako" <kosako@sofnec.co.jp>
+Date: Thu, 18 May 2017 17:05:27 +0900
+Subject: [PATCH] fix #55 : check too big code point value for single byte
+ value in next_state_val()
+
+---
+ src/regparse.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/regparse.c b/src/regparse.c
+index 11f9e341..665998ec 100644
+--- a/src/regparse.c
++++ b/src/regparse.c
+@@ -4044,6 +4044,9 @@ next_state_val(CClassNode* cc, OnigCodePoint *vs, OnigCodePoint v,
+   switch (*state) {
+   case CCS_VALUE:
+     if (*type == CCV_SB) {
++      if (*vs > 0xff)
++          return ONIGERR_INVALID_CODE_POINT_VALUE;
++
+       BITSET_SET_BIT(cc->bs, (int )(*vs));
+     }
+     else if (*type == CCV_CODE_POINT) {

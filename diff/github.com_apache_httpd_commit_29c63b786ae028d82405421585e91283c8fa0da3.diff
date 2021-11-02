@@ -1,0 +1,145 @@
+From 29c63b786ae028d82405421585e91283c8fa0da3 Mon Sep 17 00:00:00 2001
+From: Stefan Eissing <icing@apache.org>
+Date: Sun, 4 Dec 2016 22:06:30 +0000
+Subject: [PATCH] SECURITY: CVE-2016-8740
+
+mod_http2: properly crafted, endless HTTP/2 CONTINUATION frames could be used to exhaust all server's memory.
+
+Reported by: Naveen Tiwari <naveen.tiwari@asu.edu> and CDF/SEFCOM at Arizona State University
+
+
+
+git-svn-id: https://svn.apache.org/repos/asf/httpd/httpd/trunk@1772576 13f79535-47bb-0310-9956-ffa450edef68
+---
+ CHANGES                    |  4 +++
+ modules/http2/h2_session.c | 11 +++++--
+ modules/http2/h2_stream.c  | 61 +++++++++++++++++++++-----------------
+ 3 files changed, 46 insertions(+), 30 deletions(-)
+
+diff --git a/CHANGES b/CHANGES
+index bb840c0edde..bb92454986f 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -1,6 +1,10 @@
+                                                          -*- coding: utf-8 -*-
+ Changes with Apache 2.5.0
+ 
++  *) mod_http2: CVE-2016-8740: Mitigate DoS memory exhaustion via endless
++     CONTINUATION frames.
++     [Naveen Tiwari <naveen.tiwari@asu.edu> and CDF/SEFCOM at Arizona State University, Stefan Eissing]
++
+   *) mod_lua: Fix default value of LuaInherit directive. It should be 
+      'parent-first' instead of 'none', as per documentation.  PR 60419
+      [Christophe Jaillet]
+diff --git a/modules/http2/h2_session.c b/modules/http2/h2_session.c
+index 0a29a3b18cc..44eed633256 100644
+--- a/modules/http2/h2_session.c
++++ b/modules/http2/h2_session.c
+@@ -394,7 +394,7 @@ static int on_header_cb(nghttp2_session *ngh2, const nghttp2_frame *frame,
+     (void)flags;
+     stream = get_stream(session, frame->hd.stream_id);
+     if (!stream) {
+-        ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, session->c,
++        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, session->c,
+                       APLOGNO(02920) 
+                       "h2_session:  stream(%ld-%d): on_header unknown stream",
+                       session->id, (int)frame->hd.stream_id);
+@@ -403,7 +403,14 @@ static int on_header_cb(nghttp2_session *ngh2, const nghttp2_frame *frame,
+     
+     status = h2_stream_add_header(stream, (const char *)name, namelen,
+                                   (const char *)value, valuelen);
+-    if (status != APR_SUCCESS && !h2_stream_is_ready(stream)) {
++    if (status == APR_ECONNRESET) {
++        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, status, session->c,
++                      "h2-stream(%ld-%d): on_header, reset stream",
++                      session->id, stream->id);
++        nghttp2_submit_rst_stream(ngh2, NGHTTP2_FLAG_NONE, stream->id,
++                                  NGHTTP2_INTERNAL_ERROR);
++    }
++    else if (status != APR_SUCCESS && !h2_stream_is_ready(stream)) {
+         return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
+     }
+     return 0;
+diff --git a/modules/http2/h2_stream.c b/modules/http2/h2_stream.c
+index 2d179d0b0fc..d31193909c7 100644
+--- a/modules/http2/h2_stream.c
++++ b/modules/http2/h2_stream.c
+@@ -333,45 +333,50 @@ apr_status_t h2_stream_add_header(h2_stream *stream,
+                                   const char *name, size_t nlen,
+                                   const char *value, size_t vlen)
+ {
++    int error = 0;
+     ap_assert(stream);
+     
+-    if (!stream->has_response) {
+-        if (name[0] == ':') {
+-            if ((vlen) > stream->session->s->limit_req_line) {
+-                /* pseudo header: approximation of request line size check */
+-                ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, stream->session->c,
+-                              "h2_stream(%ld-%d): pseudo header %s too long", 
+-                              stream->session->id, stream->id, name);
+-                return h2_stream_set_error(stream, 
+-                                           HTTP_REQUEST_URI_TOO_LARGE);
+-            }
+-        }
+-        else if ((nlen + 2 + vlen) > stream->session->s->limit_req_fieldsize) {
+-            /* header too long */
++    if (stream->has_response) {
++        return APR_EINVAL;    
++    }
++    ++stream->request_headers_added;
++    if (name[0] == ':') {
++        if ((vlen) > stream->session->s->limit_req_line) {
++            /* pseudo header: approximation of request line size check */
+             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, stream->session->c,
+-                          "h2_stream(%ld-%d): header %s too long", 
++                          "h2_stream(%ld-%d): pseudo header %s too long", 
+                           stream->session->id, stream->id, name);
+-            return h2_stream_set_error(stream, 
+-                                       HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE);
++            error = HTTP_REQUEST_URI_TOO_LARGE;
+         }
+-        
+-        if (name[0] != ':') {
+-            ++stream->request_headers_added;
+-            if (stream->request_headers_added 
+-                > stream->session->s->limit_req_fields) {
+-                /* too many header lines */
+-                ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, stream->session->c,
+-                              "h2_stream(%ld-%d): too many header lines", 
+-                              stream->session->id, stream->id);
+-                return h2_stream_set_error(stream, 
+-                                           HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE);
+-            }
++    }
++    else if ((nlen + 2 + vlen) > stream->session->s->limit_req_fieldsize) {
++        /* header too long */
++        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, stream->session->c,
++                      "h2_stream(%ld-%d): header %s too long", 
++                      stream->session->id, stream->id, name);
++        error = HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
++    }
++    
++    if (stream->request_headers_added 
++        > stream->session->s->limit_req_fields + 4) {
++        /* too many header lines, include 4 pseudo headers */
++        if (stream->request_headers_added 
++            > stream->session->s->limit_req_fields + 4 + 100) {
++            /* yeah, right */
++            return APR_ECONNRESET;
+         }
++        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, stream->session->c,
++                      "h2_stream(%ld-%d): too many header lines", 
++                      stream->session->id, stream->id);
++        error = HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
+     }
+     
+     if (h2_stream_is_scheduled(stream)) {
+         return add_trailer(stream, name, nlen, value, vlen);
+     }
++    else if (error) {
++        return h2_stream_set_error(stream, error); 
++    }
+     else {
+         if (!stream->rtmp) {
+             stream->rtmp = h2_req_create(stream->id, stream->pool, 

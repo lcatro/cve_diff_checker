@@ -1,0 +1,39 @@
+From 330359921e2e4c2f3f3a10b5bab86942d63c4428 Mon Sep 17 00:00:00 2001
+From: Liu Long <long.liu@intel.com>
+Date: Tue, 8 Jun 2021 13:46:03 +0800
+Subject: [PATCH] DM: xHCI: Check trb pointer before use it
+
+The trb pointer may be NULL when get the address from user space, add
+the pointer check before use the trb.
+
+Tracked-On: #6172
+Signed-off-by: Liu Long <long.liu@intel.com>
+Reviewed-by: Shuo A Liu <shuo.a.liu@intel.com>
+Acked-by: Yu Wang <yu1.wang@intel.com>
+---
+ devicemodel/hw/pci/xhci.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/devicemodel/hw/pci/xhci.c b/devicemodel/hw/pci/xhci.c
+index c3c8410e34..8ab216bcce 100644
+--- a/devicemodel/hw/pci/xhci.c
++++ b/devicemodel/hw/pci/xhci.c
+@@ -2627,6 +2627,10 @@ pci_xhci_complete_commands(struct pci_xhci_vdev *xdev)
+ 	trb = xdev->opregs.cr_p;
+ 	ccs = xdev->opregs.crcr & XHCI_CRCR_LO_RCS;
+ 	crcr = xdev->opregs.crcr & ~0xF;
++	if (!trb) {
++		UPRINTF(LDBG, "Get the invalid guest address!\r\n");
++		goto out;
++	}
+ 
+ 	while (1) {
+ 		xdev->opregs.cr_p = trb;
+@@ -2759,6 +2763,7 @@ pci_xhci_complete_commands(struct pci_xhci_vdev *xdev)
+ 		}
+ 	}
+ 
++out:
+ 	xdev->opregs.crcr = crcr | (xdev->opregs.crcr & XHCI_CRCR_LO_CA) | ccs;
+ 	xdev->opregs.crcr &= ~XHCI_CRCR_LO_CRR;
+ 	return 0;

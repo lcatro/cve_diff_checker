@@ -1,0 +1,80 @@
+From 50ab589e9a5a84592ee4c0ac5a49506bb6c552fc Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Timo=20Ter=C3=A4s?= <timo.teras@iki.fi>
+Date: Mon, 25 Oct 2021 13:29:41 +0300
+Subject: version: increase number of digits supported in version component
+
+Report also version numbers as invalid if there's more than 18
+digits.
+
+fixes #10774
+---
+ src/version.c      | 9 ++++++---
+ test/version.data  | 1 +
+ tests/version.data | 1 +
+ 3 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/version.c b/src/version.c
+index 7c1c0b4..f93e4c5 100644
+--- a/src/version.c
++++ b/src/version.c
+@@ -68,11 +68,12 @@ static void next_token(int *type, apk_blob_t *blob)
+ 	*type = n;
+ }
+ 
+-static int get_token(int *type, apk_blob_t *blob)
++static int64_t get_token(int *type, apk_blob_t *blob)
+ {
+ 	static const char *pre_suffixes[] = { "alpha", "beta", "pre", "rc" };
+ 	static const char *post_suffixes[] = { "cvs", "svn", "git", "hg", "p" };
+-	int v = 0, i = 0, nt = TOKEN_INVALID;
++	int i = 0, nt = TOKEN_INVALID;
++	int64_t v = 0;
+ 
+ 	if (blob->len <= 0) {
+ 		*type = TOKEN_END;
+@@ -96,6 +97,7 @@ static int get_token(int *type, apk_blob_t *blob)
+ 			v *= 10;
+ 			v += blob->ptr[i++] - '0';
+ 		}
++		if (i >= 18) goto invalid;
+ 		break;
+ 	case TOKEN_LETTER:
+ 		v = blob->ptr[i++];
+@@ -121,6 +123,7 @@ static int get_token(int *type, apk_blob_t *blob)
+ 			break;
+ 		/* fallthrough: invalid suffix */
+ 	default:
++	invalid:
+ 		*type = TOKEN_INVALID;
+ 		return -1;
+ 	}
+@@ -200,7 +203,7 @@ int apk_version_validate(apk_blob_t ver)
+ int apk_version_compare_blob_fuzzy(apk_blob_t a, apk_blob_t b, int fuzzy)
+ {
+ 	int at = TOKEN_DIGIT, bt = TOKEN_DIGIT, tt;
+-	int av = 0, bv = 0;
++	int64_t av = 0, bv = 0;
+ 
+ 	if (APK_BLOB_IS_NULL(a) || APK_BLOB_IS_NULL(b)) {
+ 		if (APK_BLOB_IS_NULL(a) && APK_BLOB_IS_NULL(b))
+diff --git a/test/version.data b/test/version.data
+index 59d93cf..bb1aa9e 100644
+--- a/test/version.data
++++ b/test/version.data
+@@ -726,3 +726,4 @@
+ 1.3_pre1-r1 < 1.3.2
+ 1.0_p10-r0 > 1.0_p9-r0
+ 0.1.0_alpha_pre2 < 0.1.0_alpha
++1.0.0_pre20191002222144-r0 < 1.0.0_pre20210530193627-r0
+diff --git a/tests/version.data b/tests/version.data
+index 59d93cf..bb1aa9e 100644
+--- a/tests/version.data
++++ b/tests/version.data
+@@ -726,3 +726,4 @@
+ 1.3_pre1-r1 < 1.3.2
+ 1.0_p10-r0 > 1.0_p9-r0
+ 0.1.0_alpha_pre2 < 0.1.0_alpha
++1.0.0_pre20191002222144-r0 < 1.0.0_pre20210530193627-r0
+-- 
+cgit v1.2.1
+

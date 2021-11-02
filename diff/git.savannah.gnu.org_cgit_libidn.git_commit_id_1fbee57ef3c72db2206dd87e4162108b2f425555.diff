@@ -1,0 +1,130 @@
+From 1fbee57ef3c72db2206dd87e4162108b2f425555 Mon Sep 17 00:00:00 2001
+From: Simon Josefsson <simon@josefsson.org>
+Date: Thu, 14 Jan 2016 14:31:33 +0100
+Subject: stringprep_utf8_nfkc_normalize: Reject invalid UTF8 instead of
+ crashing.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Also add regression self check.  Reported by Hanno Böck.
+---
+ .gitignore              |  2 ++
+ lib/nfkc.c              | 12 +++++++++++-
+ tests/Makefile.am       |  5 +++--
+ tests/tst_badutf8nfkc.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 57 insertions(+), 3 deletions(-)
+ create mode 100644 tests/tst_badutf8nfkc.c
+
+diff --git a/.gitignore b/.gitignore
+index ee53963c..d207b3cb 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -619,6 +619,8 @@ tests/Makefile.in
+ tests/libutils.a
+ tests/tst_badutf8
+ tests/tst_badutf8.o
++tests/tst_badutf8nfkc
++tests/tst_badutf8nfkc.o
+ tests/tst_idna
+ tests/tst_idna.o
+ tests/tst_idna2
+diff --git a/lib/nfkc.c b/lib/nfkc.c
+index 49920740..edc62c4f 100644
+--- a/lib/nfkc.c
++++ b/lib/nfkc.c
+@@ -1,5 +1,5 @@
+ /* nfkc.c --- Unicode normalization utilities.
+-   Copyright (C) 2002-2015 Simon Josefsson
++   Copyright (C) 2002-2016 Simon Josefsson
+ 
+    This file is part of GNU Libidn.
+ 
+@@ -1086,6 +1086,16 @@ stringprep_ucs4_to_utf8 (const uint32_t * str, ssize_t len,
+ char *
+ stringprep_utf8_nfkc_normalize (const char *str, ssize_t len)
+ {
++  size_t n;
++
++  if (len < 0)
++    n = strlen (str);
++  else
++    n = len;
++
++  if (u8_check ((const uint8_t *) str, n))
++    return NULL;
++
+   return g_utf8_normalize (str, len, G_NORMALIZE_NFKC);
+ }
+ 
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 9130c329..5f4cb247 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -1,5 +1,5 @@
+ ## Process this file with automake to produce Makefile.in
+-# Copyright (C) 2002-2015 Simon Josefsson
++# Copyright (C) 2002-2016 Simon Josefsson
+ #
+ # This file is part of GNU Libidn.
+ #
+@@ -27,7 +27,8 @@ libutils_a_SOURCES = utils.h utils.c
+ 
+ ctests = tst_stringprep tst_punycode tst_idna tst_idna2 tst_idna3	\
+ 	tst_idna4 tst_nfkc tst_pr29 tst_strerror tst_toutf8		\
+-	tst_symbols tst_badutf8 tst_utf8crash tst_toascii64oob
++	tst_symbols tst_badutf8 tst_utf8crash tst_toascii64oob		\
++	tst_badutf8nfkc
+ if TLD
+ ctests += tst_tld
+ endif
+diff --git a/tests/tst_badutf8nfkc.c b/tests/tst_badutf8nfkc.c
+new file mode 100644
+index 00000000..e67076ba
+--- /dev/null
++++ b/tests/tst_badutf8nfkc.c
+@@ -0,0 +1,41 @@
++/* tst_badutf8nfkc.c --- Self tests for malformed UTF-8 NFKC input.
++ * Copyright (C) 2016 Simon Josefsson
++ *
++ * This file is part of GNU Libidn.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ */
++
++#ifdef HAVE_CONFIG_H
++# include "config.h"
++#endif
++
++#include <string.h>
++#include <stdlib.h>
++
++#include <stringprep.h>
++
++#include "utils.h"
++
++void
++doit (void)
++{
++  char *badutf8 = strdup ("\xe4");
++  char *s = NULL;
++
++  s = stringprep_utf8_nfkc_normalize (badutf8, -1);
++  free (s);
++  free (badutf8);
++}
+-- 
+cgit v1.2.1
+

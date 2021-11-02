@@ -1,0 +1,25 @@
+From d6b57f461b39fd1aa8c1b870f1b974aac3554955 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Jul 2021 16:20:45 -0700
+Subject: [PATCH] Prevent nullptr dereference in MLIR TFLite dialect/optimizer.
+
+PiperOrigin-RevId: 387220762
+Change-Id: Id136ef04bb3d36123b4685d316ae81a9ec924d6b
+---
+ tensorflow/compiler/mlir/lite/transforms/optimize.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/compiler/mlir/lite/transforms/optimize.cc b/tensorflow/compiler/mlir/lite/transforms/optimize.cc
+index d457612bf70ee..6a8803d246159 100644
+--- a/tensorflow/compiler/mlir/lite/transforms/optimize.cc
++++ b/tensorflow/compiler/mlir/lite/transforms/optimize.cc
+@@ -68,6 +68,9 @@ constexpr char kRelu6[] = "RELU6";
+ constexpr char kRelu1[] = "RELU_N1_TO_1";
+ 
+ bool L2NormalizeReduceAxis(Value sq_op, DenseElementsAttr axis) {
++  if (axis.getNumElements() == 0) {
++    return false;
++  }
+   if (sq_op.getType().cast<ShapedType>().getRank() - 1 ==
+           *axis.getValues<int>().begin() ||
+       *axis.getValues<int>().begin() == -1) {

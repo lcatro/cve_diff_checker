@@ -1,0 +1,77 @@
+From 7effe011d4fea8fac7f78c00615e0a6e69af68ec Mon Sep 17 00:00:00 2001
+From: Joran Dirk Greef <joran@ronomon.com>
+Date: Wed, 14 Apr 2021 19:30:33 +0200
+Subject: [PATCH] Fix command injection vulnerability
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+@ronomon/opened was vulnerable to a command injection vulnerability
+that would allow a remote attacker to execute commands on the system if
+the library was used with untrusted input.
+
+The root cause of the problem was line 87 in index.js which took
+potential untrusted input as part of a string executed as a command
+by `child_process.exec()`. While the arguments were escaped by
+@ronomon/opened, an attacker could still bypass this sanitization
+because `child_process.exec()` will also interpret the string as a
+shell command.
+
+This fix moves to `execFile` to spawn the binary with separate
+arguments that will not also be interpreted as shell commands.
+
+Thanks to Fábio Freitas, a security analyst at Checkmarx's CxSCA group,
+for discovering and disclosing the vulnerability, providing clear steps
+to reproduce and suggestions for mitigation.
+---
+ index.js          | 10 +++-------
+ test-injection.js | 15 +++++++++++++++
+ 2 files changed, 18 insertions(+), 7 deletions(-)
+ create mode 100644 test-injection.js
+
+diff --git a/index.js b/index.js
+index 64fb0e4..7714888 100644
+--- a/index.js
++++ b/index.js
+@@ -79,17 +79,13 @@ Unix.files = function(paths, end) {
+   var files = {};
+   var queue = new Queue(1); // Concurrency yields no improvement with lsof.
+   queue.onData = function(paths, end) {
+-    var escapedPaths = paths.map(
+-      function(path) {
+-        return '"' + path.replace(/"/g, '\\"') + '"';
+-      }
+-    );
+-    var command = 'lsof -F n -- ' + escapedPaths.join(' ');
++    var command = 'lsof';
++    var args = ['-F', 'n', '--'].concat(paths);
+     var options = {
+       encoding: 'utf-8',
+       maxBuffer: 2 * 1024 * 1024
+     };
+-    Node.child.exec(command, options,
++    Node.child.execFile(command, args, options,
+       function(error, stdout, stderr) {
+         // lsof returns an error and a status code of 1 if a file is not open:
+         if (error && error.code === 1 && stderr.length === 0) error = undefined;
+diff --git a/test-injection.js b/test-injection.js
+new file mode 100644
+index 0000000..7989bce
+--- /dev/null
++++ b/test-injection.js
+@@ -0,0 +1,15 @@
++const assert = require('assert');
++const fs = require('fs');
++
++const Opened = require('./index.js');
++
++const paths = ['$(touch command_line_injection)'];
++
++Opened.files(paths,
++  function(error, hashTable) {
++    assert(!!error);
++    assert(fs.existsSync('command_line_injection') === false);
++    console.log('PASS');
++  }
++);
++

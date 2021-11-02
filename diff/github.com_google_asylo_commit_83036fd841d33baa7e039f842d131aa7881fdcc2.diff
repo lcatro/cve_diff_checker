@@ -1,0 +1,27 @@
+From 83036fd841d33baa7e039f842d131aa7881fdcc2 Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Fri, 25 Sep 2020 12:10:12 -0700
+Subject: [PATCH] Verify UntrustedCall output is outside enclave
+
+PiperOrigin-RevId: 333781703
+Change-Id: I9df55c04dc8b04f4bf0bda8e68cc32bca81b933a
+---
+ asylo/platform/primitives/sgx/trusted_sgx.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/asylo/platform/primitives/sgx/trusted_sgx.cc b/asylo/platform/primitives/sgx/trusted_sgx.cc
+index 173d1a933..092a2040f 100644
+--- a/asylo/platform/primitives/sgx/trusted_sgx.cc
++++ b/asylo/platform/primitives/sgx/trusted_sgx.cc
+@@ -288,6 +288,11 @@ PrimitiveStatus TrustedPrimitives::UntrustedCall(uint64_t untrusted_selector,
+   if (sgx_params->input) {
+     untrusted_cache->Free(const_cast<void *>(sgx_params->input));
+   }
++  if (!TrustedPrimitives::IsOutsideEnclave(sgx_params->output,
++                                           sgx_params->output_size)) {
++    TrustedPrimitives::BestEffortAbort(
++        "UntrustedCall: sgx_param output should be in untrusted memory");
++  }
+   if (sgx_params->output) {
+     // For the results obtained in |output_buffer|, copy them to |output|
+     // before freeing the buffer.

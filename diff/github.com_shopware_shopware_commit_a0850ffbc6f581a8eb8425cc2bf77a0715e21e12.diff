@@ -1,0 +1,157 @@
+From abdc2b450435e8dcfa1efe01adcde81a630962ba Mon Sep 17 00:00:00 2001
+From: Philip Gatzka <p.gatzka@shopware.com>
+Date: Mon, 3 May 2021 09:43:08 +0200
+Subject: [PATCH] SW-26049 - Adjust product name rendering, use DOMParser in
+ getText instead of actual DOM insertion
+
+---
+ engine/Library/ExtJs/overrides/Ext.String.js  | 20 ++++++++++++++-----
+ .../backend/article/controller/detail.js      |  5 ++++-
+ .../backend/article/view/detail/window.js     |  5 ++++-
+ .../Bare/frontend/detail/content/header.tpl   |  2 +-
+ .../Frontend/Bare/frontend/detail/header.tpl  |  2 +-
+ .../Bare/frontend/detail/tabs/comment.tpl     |  2 +-
+ .../Bare/frontend/detail/tabs/description.tpl |  6 +++---
+ 7 files changed, 29 insertions(+), 13 deletions(-)
+
+diff --git a/engine/Library/ExtJs/overrides/Ext.String.js b/engine/Library/ExtJs/overrides/Ext.String.js
+index 3c70e183907..a2c1d202530 100644
+--- a/engine/Library/ExtJs/overrides/Ext.String.js
++++ b/engine/Library/ExtJs/overrides/Ext.String.js
+@@ -24,19 +24,29 @@
+ /** @lends Ext.String */
+ //{block name="extjs/overrides/string"}
+ Ext.override(Ext.String, {
++    /**
++     * @var DOMParser _domParser
++     */
++    _domParser: new DOMParser(),
++
+     /**
+      * Return the text content of the element
+      *
+      * @returns string
+      */
+     getText: function(value) {
+-        var me = this,
+-            elementNode;
++        var me = this;
++
++        if (!value) {
++            return '';
++        }
+ 
+-        elementNode = document.createElement('div');
+-        elementNode.innerHTML = value;
++        var elementNodes = me._domParser
++            .parseFromString(Ext.String.format('<div>[0]</div>', value), "text/html")
++            .documentElement
++            .querySelectorAll('div');
+ 
+-        return me._getText([elementNode]);
++        return me._getText(elementNodes);
+     },
+ 
+     /**
+diff --git a/themes/Backend/ExtJs/backend/article/controller/detail.js b/themes/Backend/ExtJs/backend/article/controller/detail.js
+index e9e57c6aa45..a20e47683eb 100644
+--- a/themes/Backend/ExtJs/backend/article/controller/detail.js
++++ b/themes/Backend/ExtJs/backend/article/controller/detail.js
+@@ -267,7 +267,10 @@ Ext.define('Shopware.apps.Article.controller.Detail', {
+             success: function(record, operation) {
+ 
+                 var newArticle = operation.getResultSet().records[0],
+-                    message = Ext.String.format(me.snippets.saved.message, article.get('name'));
++                    message = Ext.String.format(
++                        me.snippets.saved.message,
++                        Ext.String.htmlEncode(article.get('name'))
++                    );
+ 
+                 if (supplierNeedsReload) {
+                     mainWindow.supplierStore.filters.clear();
+diff --git a/themes/Backend/ExtJs/backend/article/view/detail/window.js b/themes/Backend/ExtJs/backend/article/view/detail/window.js
+index ddaed3bec58..b34d64eadc2 100644
+--- a/themes/Backend/ExtJs/backend/article/view/detail/window.js
++++ b/themes/Backend/ExtJs/backend/article/view/detail/window.js
+@@ -361,7 +361,10 @@ Ext.define('Shopware.apps.Article.view.detail.Window', {
+ 
+         title = me.snippets.titleNew;
+         if (me.article && me.article.get('id')>0) {
+-            title = Ext.String.format(me.snippets.titleEdit, me.article.get('name'));
++            title = Ext.String.format(
++                me.snippets.titleEdit,
++                Ext.String.htmlEncode(me.article.get('name'))
++            );
+         }
+         me.setTitle(title);
+ 
+diff --git a/themes/Frontend/Bare/frontend/detail/content/header.tpl b/themes/Frontend/Bare/frontend/detail/content/header.tpl
+index 606b1f6b719..a79c5c6eefc 100644
+--- a/themes/Frontend/Bare/frontend/detail/content/header.tpl
++++ b/themes/Frontend/Bare/frontend/detail/content/header.tpl
+@@ -7,7 +7,7 @@
+                     {* Product name *}
+                     {block name='frontend_detail_index_name'}
+                         <h1 class="product--title" itemprop="name">
+-                            {$sArticle.articleName}
++                            {$sArticle.articleName|escape}
+                         </h1>
+                     {/block}
+ 
+diff --git a/themes/Frontend/Bare/frontend/detail/header.tpl b/themes/Frontend/Bare/frontend/detail/header.tpl
+index 1b14f475bec..b0ee4bbe380 100644
+--- a/themes/Frontend/Bare/frontend/detail/header.tpl
++++ b/themes/Frontend/Bare/frontend/detail/header.tpl
+@@ -1,7 +1,7 @@
+ {extends file='frontend/index/header.tpl'}
+ 
+ {* Meta title *}
+-{block name="frontend_index_header_title"}{if $sArticle.metaTitle}{$sArticle.metaTitle|escapeHtml} | {{config name=sShopname}|escapeHtml}{else}{$sArticle.articleName} | {$smarty.block.parent}{/if}{/block}
++{block name="frontend_index_header_title"}{if $sArticle.metaTitle}{$sArticle.metaTitle|escapeHtml} | {{config name=sShopname}|escapeHtml}{else}{$sArticle.articleName|escape} | {$smarty.block.parent}{/if}{/block}
+ 
+ {* Meta opengraph tags *}
+ {block name='frontend_index_header_meta_tags_opengraph'}
+diff --git a/themes/Frontend/Bare/frontend/detail/tabs/comment.tpl b/themes/Frontend/Bare/frontend/detail/tabs/comment.tpl
+index ed4833304f9..9272cbe8b96 100644
+--- a/themes/Frontend/Bare/frontend/detail/tabs/comment.tpl
++++ b/themes/Frontend/Bare/frontend/detail/tabs/comment.tpl
+@@ -47,7 +47,7 @@
+     {* Review title *}
+     {block name="frontend_detail_tabs_rating_title"}
+         <div class="content--title">
+-            {s name="DetailCommentHeader"}{/s} "{$sArticle.articleName}"
++            {s name="DetailCommentHeader"}{/s} "{$sArticle.articleName|escape}"
+         </div>
+     {/block}
+ 
+diff --git a/themes/Frontend/Bare/frontend/detail/tabs/description.tpl b/themes/Frontend/Bare/frontend/detail/tabs/description.tpl
+index 42115a1f98b..4fca7fda314 100644
+--- a/themes/Frontend/Bare/frontend/detail/tabs/description.tpl
++++ b/themes/Frontend/Bare/frontend/detail/tabs/description.tpl
+@@ -19,7 +19,7 @@
+     {* Headline *}
+     {block name='frontend_detail_description_title'}
+         <div class="content--title">
+-            {s name="DetailDescriptionHeader"}{/s} "{$sArticle.articleName}"
++            {s name="DetailDescriptionHeader"}{/s} "{$sArticle.articleName|escape}"
+         </div>
+     {/block}
+ 
+@@ -59,7 +59,7 @@
+         {* Further links title *}
+         {block name='frontend_detail_description_links_title'}
+             <div class="content--title">
+-                {s name="ArticleTipMoreInformation"}{/s} "{$sArticle.articleName}"
++                {s name="ArticleTipMoreInformation"}{/s} "{$sArticle.articleName|escape}"
+             </div>
+         {/block}
+ 
+@@ -148,7 +148,7 @@
+             {* Comment title  *}
+             {block name='frontend_detail_description_our_comment_title'}
+                 <div class="content--title">
+-                    {s name='DetailDescriptionComment'}{/s} "{$sArticle.articleName}"
++                    {s name='DetailDescriptionComment'}{/s} "{$sArticle.articleName|escape}"
+                 </div>
+             {/block}
+ 

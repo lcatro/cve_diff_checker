@@ -1,0 +1,81 @@
+From d8e069cc3410082e44eb18fcf8e7f3d08ebe1d4a Mon Sep 17 00:00:00 2001
+From: John-David Dalton <john.david.dalton@gmail.com>
+Date: Tue, 30 Jan 2018 23:21:12 -0800
+Subject: [PATCH] Avoid merging properties on to __proto__ objects.
+
+---
+ lodash.js    | 20 +++++++++++++++++---
+ test/test.js | 15 +++++++++++++++
+ 2 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/lodash.js b/lodash.js
+index b39ddce69b3..f8a1b96d858 100644
+--- a/lodash.js
++++ b/lodash.js
+@@ -1245,6 +1245,20 @@
+     return result;
+   }
+ 
++  /**
++   * Gets the value at `key`, unless `key` is "__proto__".
++   *
++   * @private
++   * @param {Object} object The object to query.
++   * @param {string} key The key of the property to get.
++   * @returns {*} Returns the property value.
++   */
++  function safeGet(object, key) {
++    return key == '__proto__'
++      ? undefined
++      : object[key];
++  }
++
+   /**
+    * Converts `set` to an array of its values.
+    *
+@@ -3615,7 +3629,7 @@
+         }
+         else {
+           var newValue = customizer
+-            ? customizer(object[key], srcValue, (key + ''), object, source, stack)
++            ? customizer(safeGet(object, key), srcValue, (key + ''), object, source, stack)
+             : undefined;
+ 
+           if (newValue === undefined) {
+@@ -3642,8 +3656,8 @@
+      *  counterparts.
+      */
+     function baseMergeDeep(object, source, key, srcIndex, mergeFunc, customizer, stack) {
+-      var objValue = object[key],
+-          srcValue = source[key],
++      var objValue = safeGet(object, key),
++          srcValue = safeGet(source, key),
+           stacked = stack.get(srcValue);
+ 
+       if (stacked) {
+diff --git a/test/test.js b/test/test.js
+index c75e2e923ef..a87c892c709 100644
+--- a/test/test.js
++++ b/test/test.js
+@@ -7539,6 +7539,21 @@
+       actual = _.groupBy([{ 'a': '__proto__' }], 'a');
+       assert.notOk(actual instanceof Array);
+     });
++
++    QUnit.test('should not merge "__proto__" properties', function(assert) {
++      assert.expect(1);
++
++      if (JSON) {
++        _.merge({}, JSON.parse('{"__proto__":{"a":1}}'));
++
++        var actual = "a" in objectProto;
++        delete objectProto.a;
++
++        assert.notOk(actual);
++      } else {
++        skipAssert(assert);
++      }
++    });
+   }());
+ 
+   /*--------------------------------------------------------------------------*/

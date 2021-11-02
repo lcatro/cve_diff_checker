@@ -1,0 +1,38 @@
+From 9ba91381954ad325ea4fd26b9c65a8bd9a2a85b6 Mon Sep 17 00:00:00 2001
+From: Denis Ovsienko <denis@ovsienko.info>
+Date: Sun, 17 Jun 2018 22:15:19 +0100
+Subject: [PATCH] (for 4.9.3) CVE-2018-14879/fix -V to fail invalid input
+ safely
+
+get_next_file() did not check the return value of strlen() and
+underflowed an array index if the line read by fgets() from the file
+started with \0. This caused an out-of-bounds read and could cause a
+write. Add the missing check.
+
+This vulnerability was discovered by Brian Carpenter & Geeknik Labs.
+---
+ tcpdump.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/tcpdump.c b/tcpdump.c
+index 128e41ed9..043bda1d7 100644
+--- a/tcpdump.c
++++ b/tcpdump.c
+@@ -699,13 +699,15 @@ static char *
+ get_next_file(FILE *VFile, char *ptr)
+ {
+ 	char *ret;
++	size_t len;
+ 
+ 	ret = fgets(ptr, PATH_MAX, VFile);
+ 	if (!ret)
+ 		return NULL;
+ 
+-	if (ptr[strlen(ptr) - 1] == '\n')
+-		ptr[strlen(ptr) - 1] = '\0';
++	len = strlen (ptr);
++	if (len > 0 && ptr[len - 1] == '\n')
++		ptr[len - 1] = '\0';
+ 
+ 	return ret;
+ }

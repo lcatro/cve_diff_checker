@@ -1,0 +1,51 @@
+From 181d7d583ae5293cd47cc99b14ad13352875f3e3 Mon Sep 17 00:00:00 2001
+From: commenthol <commenthol@gmail.com>
+Date: Fri, 6 Dec 2019 18:14:54 +0100
+Subject: [PATCH] fix: for ghsa-3fjq-93xj-3f3f
+
+---
+ lib/index.js     |  2 +-
+ test/fixtures.js | 10 +++++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/lib/index.js b/lib/index.js
+index 29b11f9..c028f06 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -75,7 +75,7 @@ function serialize (source, opts) {
+     out += !/^\s*(function|\([^)]*\)\s*=>)/m.test(tmp) ? 'function ' + tmp : tmp
+   } else if (util.isObject(source)) {
+     if (util.isRegExp(source)) {
+-      out += source.toString()
++      out += 'new RegExp("' + source.source + '", "' + source.flags + '")'
+     } else if (util.isDate(source)) {
+       out += 'new Date("' + source.toJSON() + '")'
+     } else if (util.isError(source)) {
+diff --git a/test/fixtures.js b/test/fixtures.js
+index 83b389f..220bd75 100644
+--- a/test/fixtures.js
++++ b/test/fixtures.js
+@@ -33,7 +33,7 @@ module.exports = {
+   ],
+   'regex': [
+     /test(?:it)?/ig,
+-    '/test(?:it)?/gi'
++    'new RegExp("test(?:it)?", "gi")'
+   ],
+   'object': [
+     { a: 1, b: 2 },
+@@ -138,6 +138,14 @@ module.exports = {
+     new Float64Array([1e12, 2000000, 3.1415, -4.9e2, 5]),
+     'new Float64Array([1000000000000, 2000000, 3.1415, -490, 5])',
+     'toString'
++  ],
++  'regexXss': [
++    /[</script><script>alert('xss')//]/i,
++    'new RegExp("[</script><script>alert(\'xss\')//]", "i")'
++  ],
++  'regex no flags': [
++    /abc/,
++    'new RegExp("abc", "")'
+   ]
+ }
+ 

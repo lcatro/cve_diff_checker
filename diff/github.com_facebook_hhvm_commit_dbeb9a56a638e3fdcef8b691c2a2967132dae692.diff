@@ -1,0 +1,64 @@
+From dbeb9a56a638e3fdcef8b691c2a2967132dae692 Mon Sep 17 00:00:00 2001
+From: Dhaval Kapil <dhavalkapil@fb.com>
+Date: Wed, 18 Sep 2019 01:44:34 -0700
+Subject: [PATCH] string_number_format: Correctly handles return value of
+ snprintf
+
+Summary: `snprintf` can return a value greater than the number of bytes copied. In case the first byte of the string is not a digit (could be '-'), size of `tmpstr` was being updated without checking `tmplen`. This resulted in either an assertion error or a heap overflow depending on whether the assertion is compiled or not.
+
+Reviewed By: mofarrell, qianxuweiren
+
+Differential Revision: D17327899
+
+fbshipit-source-id: ee53875d21e02608c6d870388eecf1464de24ff1
+---
+ hphp/runtime/base/zend-string.cpp                        | 6 +++++-
+ hphp/test/slow/string/number_format_t53795309.php        | 9 +++++++++
+ hphp/test/slow/string/number_format_t53795309.php.expect | 1 +
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+ create mode 100644 hphp/test/slow/string/number_format_t53795309.php
+ create mode 100644 hphp/test/slow/string/number_format_t53795309.php.expect
+
+diff --git a/hphp/runtime/base/zend-string.cpp b/hphp/runtime/base/zend-string.cpp
+index 8a5ec8933691..7caef317c51f 100644
+--- a/hphp/runtime/base/zend-string.cpp
++++ b/hphp/runtime/base/zend-string.cpp
+@@ -1618,11 +1618,15 @@ String string_number_format(double d, int dec,
+   d = php_math_round(d, dec);
+ 
+   // departure from PHP: we got rid of dependencies on spprintf() here.
++  // This actually means 63 bytes for characters + 1 byte for '\0'
+   String tmpstr(63, ReserveString);
+   tmpbuf = tmpstr.mutableData();
+   tmplen = snprintf(tmpbuf, 64, "%.*F", dec, d);
++  // From the man page of snprintf, the return value is:
++  // The number of characters that would have been written if n had been
++  // sufficiently large, not counting the terminating null character.
+   if (tmplen < 0) return empty_string();
+-  if (tmpbuf == nullptr || !isdigit((int)tmpbuf[0])) {
++  if (tmplen < 64 && (tmpbuf == nullptr || !isdigit((int)tmpbuf[0]))) {
+     tmpstr.setSize(tmplen);
+     return tmpstr;
+   }
+diff --git a/hphp/test/slow/string/number_format_t53795309.php b/hphp/test/slow/string/number_format_t53795309.php
+new file mode 100644
+index 000000000000..c6fee71a722f
+--- /dev/null
++++ b/hphp/test/slow/string/number_format_t53795309.php
+@@ -0,0 +1,9 @@
++<?hh
++// Copyright 2004-present Facebook. All Rights Reserved.
++
++<<__EntryPoint>>
++function main() {
++  $bin_repr = "\x00\x00\x00\x00\x00\x00\x00\x80";
++  $double_num = unpack("dnum", $bin_repr)['num'];
++  var_dump(number_format($double_num, 100));
++}
+diff --git a/hphp/test/slow/string/number_format_t53795309.php.expect b/hphp/test/slow/string/number_format_t53795309.php.expect
+new file mode 100644
+index 000000000000..f4417f7682bb
+--- /dev/null
++++ b/hphp/test/slow/string/number_format_t53795309.php.expect
+@@ -0,0 +1 @@
++string(103) "-0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"

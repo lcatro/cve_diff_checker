@@ -1,0 +1,48 @@
+From 0f764a1720a3a68fd2842e21377c8bfad6d7126f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ivan=20Ne=C4=8Das?= <inecas@redhat.com>
+Date: Thu, 14 Apr 2016 12:36:13 +0200
+Subject: [PATCH] Remove `inspect` from allowed methods
+
+The `inspect` method is pretty unsafe, as by default it includes
+a lot of data from the object.
+---
+ lib/safemode/blankslate.rb | 4 ++--
+ test/test_jail.rb          | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/lib/safemode/blankslate.rb b/lib/safemode/blankslate.rb
+index 39d0fa1..88a8340 100644
+--- a/lib/safemode/blankslate.rb
++++ b/lib/safemode/blankslate.rb
+@@ -1,7 +1,7 @@
+ module Safemode
+   class Blankslate
+-    @@allow_instance_methods = ['class', 'inspect', 'methods', 'respond_to?', 'respond_to_missing?', 'to_s', 'instance_variable_get']
+-    @@allow_class_methods    = ['methods', 'new', 'name', 'inspect', '<', 'ancestors', '=='] # < needed in Rails Object#subclasses_of
++    @@allow_instance_methods = ['class', 'methods', 'respond_to?', 'respond_to_missing?', 'to_s', 'instance_variable_get']
++    @@allow_class_methods    = ['methods', 'new', 'name', '<', 'ancestors', '=='] # < needed in Rails Object#subclasses_of
+ 
+     silently { undef_methods(*instance_methods.map(&:to_s) - @@allow_instance_methods) }
+     class << self
+diff --git a/test/test_jail.rb b/test/test_jail.rb
+index 57e324a..42ce3ef 100644
+--- a/test/test_jail.rb
++++ b/test/test_jail.rb
+@@ -19,7 +19,7 @@ def test_sending_to_jail_to_an_object_should_return_a_jail
+   end
+ 
+   def test_jail_instances_should_have_limited_methods
+-    expected = ["class", "inspect", "method_missing", "methods", "respond_to?", "respond_to_missing?", "to_jail", "to_s", "instance_variable_get"]
++    expected = ["class", "method_missing", "methods", "respond_to?", "respond_to_missing?", "to_jail", "to_s", "instance_variable_get"]
+     expected.delete('respond_to_missing?') if RUBY_VERSION > '1.9.3' # respond_to_missing? is private in rubies above 1.9.3
+     objects.each do |object|
+       assert_equal expected.sort, reject_pretty_methods(object.to_jail.methods.map(&:to_s).sort)
+@@ -27,7 +27,7 @@ def test_jail_instances_should_have_limited_methods
+   end
+ 
+   def test_jail_classes_should_have_limited_methods
+-    expected = ["new", "methods", "name", "inherited", "method_added", "inspect",
++    expected = ["new", "methods", "name", "inherited", "method_added",
+                 "allow", "allowed?", "allowed_methods", "init_allowed_methods",
+                 "<", # < needed in Rails Object#subclasses_of
+                 "ancestors", "==" # ancestors and == needed in Rails::Generator::Spec#lookup_class

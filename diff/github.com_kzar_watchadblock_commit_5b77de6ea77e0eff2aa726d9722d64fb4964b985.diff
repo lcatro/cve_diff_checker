@@ -1,0 +1,399 @@
+From 5b77de6ea77e0eff2aa726d9722d64fb4964b985 Mon Sep 17 00:00:00 2001
+From: Dave Barker <kzar@kzar.co.uk>
+Date: Fri, 20 Mar 2015 20:00:12 +0000
+Subject: [PATCH] Release new version 2.21
+
++2.21:
++- Removed the Norwegian filter list since it is no longer active. (#489)
++- For each subscribe filter list, added the last update timestamp to debug data. (#482)
++- Added the malware notification setting to debug data. (#458)
++- Added additional CSS to whitelist/blacklist dialogs to avoid display issues on some websites. (#460)
++- Removed an unnecessary call to sendResponse. (#484)
++- Added a user confirmation prompt when subscribing to a new filter lists using the ABP syntax. (#486)
++- Fixed an issue when the request URL didn't contain a '.' (#500)
++- Updated the Chrome web store description.(#501)
++
+---
+ .git_cache_meta                     |  1 +
+ md5sum.txt                          |  1 +
+ src/CHANGELOG.txt                   | 10 ++++++++
+ src/Info.plist                      |  4 ++--
+ src/_locales/en/messages.json       | 12 +++++++++-
+ src/adblock_start_common.js         | 13 +++++++----
+ src/background.js                   | 36 +++++++++++++++--------------
+ src/filtering/myfilters.js          |  7 +-----
+ src/jquery/css/jquery-ui.custom.css |  6 ++---
+ src/jquery/css/override-page.css    | 12 +++++++---
+ src/manifest.json                   |  2 +-
+ src/options/customize.js            |  2 +-
+ src/pages/adreport.html             |  1 -
+ src/tools/update_l10n.pl            | 25 ++++++++++++--------
+ 14 files changed, 84 insertions(+), 48 deletions(-)
+
+diff --git a/.git_cache_meta b/.git_cache_meta
+index 9fd925db..ec11c9e1 100644
+--- a/.git_cache_meta
++++ b/.git_cache_meta
+@@ -72,3 +72,4 @@ touch -d "2015-02-26 21:50:39.0000000000" releases/AdBlock-v2.18.1.zip
+ touch -d "2015-03-11 19:38:35.0000000000" releases/AdBlock-v2.19.zip
+ touch -d "2015-03-17 20:16:47.0000000000" releases/AdBlock-v2.20.zip
+ touch -d "2015-03-17 20:33:55.0000000000" releases/AdBlock-v2.20.1.zip
++touch -d "2015-03-20 19:47:57.0000000000" releases/AdBlock-v2.21.zip
+diff --git a/md5sum.txt b/md5sum.txt
+index cc0f8309..3b7fec18 100644
+--- a/md5sum.txt
++++ b/md5sum.txt
+@@ -24,6 +24,7 @@
+ 61273ec7509264b447108d66bc6b81de  releases/AdBlock-v2.6.29.zip
+ 62cfe86c044c1bf08b0668bc60077f9a  releases/AdBlock-v2.6.27.zip
+ 6ca3b084d79281085924a1d09b33b08a  releases/AdBlock-v2.14.zip
++755502d4262c519647a7f0e590ced244  releases/AdBlock-v2.21.zip
+ 76b4d5369176778c8a0a0430fa6ee77c  releases/AdBlock-v2.6.11.zip
+ 81fd635b3dab023db09b6735d0c7257e  releases/AdBlock-v2.9.2.zip
+ 82a19af02b1468a6b0461c5c88eec9cc  releases/AdBlock-v2.14.4.zip
+diff --git a/src/CHANGELOG.txt b/src/CHANGELOG.txt
+index c01838d2..ec0b40a4 100644
+--- a/src/CHANGELOG.txt
++++ b/src/CHANGELOG.txt
+@@ -2,6 +2,16 @@
+ 
+ UNRELEASED:
+ 
++2.21:
++- Removed the Norwegian filter list since it is no longer active. (#489)
++- For each subscribe filter list, added the last update timestamp to debug data. (#482)
++- Added the malware notification setting to debug data. (#458)
++- Added additional CSS to whitelist/blacklist dialogs to avoid display issues on some websites. (#460)
++- Removed an unnecessary call to sendResponse. (#484)
++- Added a user confirmation prompt when subscribing to a new filter lists using the ABP syntax. (#486)
++- Fixed an issue when the request URL didn't contain a '.' (#500)
++- Updated the Chrome web store description.(#501)
++
+ 2.20.1:
+ - Updated Translations
+ - In Chrome, added an uninstall URL (#493)
+diff --git a/src/Info.plist b/src/Info.plist
+index d8559c50..c7241104 100755
+--- a/src/Info.plist
++++ b/src/Info.plist
+@@ -13,9 +13,9 @@
+ 	<key>CFBundleInfoDictionaryVersion</key>
+ 	<string>6.0</string>
+ 	<key>CFBundleShortVersionString</key>
+-	<string>2.20.1</string>
++	<string>2.21</string>
+ 	<key>CFBundleVersion</key>
+-	<string>102.20.1</string>
++	<string>102.21</string>
+ 	<key>Chrome</key>
+ 	<dict>
+ 		<key>Global Page</key>
+diff --git a/src/_locales/en/messages.json b/src/_locales/en/messages.json
+index 51c617ca..862514d3 100644
+--- a/src/_locales/en/messages.json
++++ b/src/_locales/en/messages.json
+@@ -1,6 +1,6 @@
+ {
+   "description2":{
+-    "message":"The most popular Chrome extension in the world, a customizable ad blocker that blocks ALL ads for free by default.",
++    "message":"AdBlock. The #1 ad blocker with over 200 million downloads. Blocks YouTube, Facebook and ALL ads by default (unlike Adblock Plus).",
+     "description":"Extension description in manifest. Should not exceed 132 characters."
+   },
+   "adblock_click_for_details":{
+@@ -191,6 +191,16 @@
+     "message":"This AdBlock feature does not work on this site because it uses out of date technology. You can blacklist or whitelist resources manually in the 'Customize' tab of the options page.",
+     "description":"Message (alert) shown when the user tries to use a blacklist\/whitelist wizard on an old website"
+   },
++  "subscribeconfirm":{
++    "message":"Are you sure that you want to subscribe to the $title$ filter list?",
++    "description":"Prompt question before subscribing to the filter list",
++    "placeholders":{
++      "title":{
++        "content":"$1",
++        "example":"Prebake"
++      }
++    }
++  },
+   "subscribingtitle":{
+     "message":"Subscribing to filter list...",
+     "description":"abp: link subscriber title"
+diff --git a/src/adblock_start_common.js b/src/adblock_start_common.js
+index 579b67e7..97a87056 100644
+--- a/src/adblock_start_common.js
++++ b/src/adblock_start_common.js
+@@ -1,3 +1,6 @@
++//cache a reference to window.confirm
++//so that web sites can not clobber the default implementation
++var abConfirm = window.confirm;
+ // Return the ElementType element type of the given element.
+ function typeForElement(el) {
+   // TODO: handle background images that aren't just the BODY.
+@@ -142,16 +145,18 @@ function handleABPLinkClicks() {
+       var reqLoc = queryparts.requiresLocation;
+       var reqList = (reqLoc ? "url:" + reqLoc : undefined);
+       var title = queryparts.title;
+-      BGcall("subscribe", {id: "url:" + loc, requires: reqList, title: title});
+-      // Open subscribe popup
+-      if (SAFARI) {
++      if (abConfirm(translate("subscribeconfirm", (title || loc)))) {
++        BGcall("subscribe", {id: "url:" + loc, requires: reqList, title: title});
++        // Open subscribe popup
++        if (SAFARI) {
+           // In Safari, window.open() cannot be used
+           // to open a new window from our global HTML file
+           window.open(chrome.extension.getURL('pages/subscribe.html?' + loc),
+                       "_blank",
+                       'scrollbars=0,location=0,resizable=0,width=450,height=150');
+-      } else {
++        } else {
+           BGcall("launch_subscribe_popup", loc);
++        }
+       }
+     }
+   };
+diff --git a/src/background.js b/src/background.js
+index 9cf1dc74..334664ac 100644
+--- a/src/background.js
++++ b/src/background.js
+@@ -304,24 +304,21 @@
+         }
+         var url = parseUri(details.url);
+         if (url && url.pathname) {
+-            var pos = url.pathname.lastIndexOf('.');
+-            if (pos === -1) {
+-                return type;
++          var pos = url.pathname.lastIndexOf('.');
++          if (pos > -1) {
++            var ext = url.pathname.slice(pos) + '.';
++            if ('.eot.ttf.otf.svg.woff.woff2.'.indexOf(ext) !== -1) {
++              return 'font';
+             }
++            // Still need this because often behind-the-scene requests are wrongly
++            // categorized as 'other'
++            if ('.ico.png.gif.jpg.jpeg.webp.'.indexOf(ext) !== -1) {
++              return 'image';
++            }
++          }
+         }
+-        var ext = url.pathname.slice(pos) + '.';
+-        if ('.eot.ttf.otf.svg.woff.woff2.'.indexOf(ext) !== -1) {
+-            return 'font';
+-        }
+-        // Still need this because often behind-the-scene requests are wrongly
+-        // categorized as 'other'
+-        if ('.ico.png.gif.jpg.jpeg.webp.'.indexOf(ext) !== -1) {
+-            return 'image';
+-        }
+-        // https://code.google.com/p/chromium/issues/detail?id=410382
+-        if (type === 'other') {
+-            return 'object';
+-        }
++        // see crbug.com/410382
++        return 'object';
+     };
+ 
+     // When a request starts, perhaps block it.
+@@ -1336,8 +1333,10 @@
+       var subscribed_filter_names = [];
+       var get_subscriptions = get_subscriptions_minus_text();
+       for (var id in get_subscriptions) {
+-          if (get_subscriptions[id].subscribed)
++          if (get_subscriptions[id].subscribed) {
+               subscribed_filter_names.push(id);
++              subscribed_filter_names.push("  last updated: " + new Date(get_subscriptions[id].last_update).toUTCString());
++          }
+       }
+ 
+       // Get last known error
+@@ -1354,6 +1353,9 @@
+       var settings = get_settings();
+       for (setting in settings)
+           adblock_settings.push(setting + ": "+ get_settings()[setting] + "\n");
++      // We need to hardcode malware-notification setting,
++      // because it isn't included in _settings object, but just in localStorage
++      adblock_settings.push("malware-notification: " + storage_get('malware-notification') + "\n");
+       adblock_settings = adblock_settings.join('');
+ 
+       // Create debug info for a bug report or an ad report
+diff --git a/src/filtering/myfilters.js b/src/filtering/myfilters.js
+index 7707caf9..104e39d3 100644
+--- a/src/filtering/myfilters.js
++++ b/src/filtering/myfilters.js
+@@ -94,7 +94,7 @@ MyFilters.prototype._updateDefaultSubscriptions = function() {
+     // Convert subscribed ex-user-submitted lists into official lists.
+     else {
+       // TODO: Remove this logic after a few releases
+-      if (id === "easylist_plus_spanish") {
++      if (id === "easylist_plus_spanish" || id === "norwegian") {
+           delete this._subscriptions[id];
+           continue;
+       }
+@@ -592,7 +592,6 @@ MyFilters.prototype._load_default_subscriptions = function() {
+       case 'ko': return 'easylist_plun_korean';
+       case 'lv': return 'latvian';
+       case 'nl': return 'dutch';
+-      case 'no': return 'norwegian';
+       case 'pl': return 'easylist_plus_polish';
+       case 'ro': return 'easylist_plus_romanian';
+       case 'ru': return 'russian';
+@@ -694,10 +693,6 @@ MyFilters.prototype._make_subscription_options = function() {
+     "latvian": {  // Latvian filters
+       url: "https://gitorious.org/adblock-latvian/adblock-latvian/blobs/raw/master/lists/latvian-list.txt",
+     },
+-    "norwegian": {  // Additional Norwegian filters
+-      url: "http://home.fredfiber.no/langsholt/adblock.txt",
+-      requiresList: "easylist",
+-    },
+     "swedish": {  // Swedish filters
+       url: "http://fanboy.co.nz/fanboy-swedish.txt",
+     },
+diff --git a/src/jquery/css/jquery-ui.custom.css b/src/jquery/css/jquery-ui.custom.css
+index 946ad9cc..071648e0 100644
+--- a/src/jquery/css/jquery-ui.custom.css
++++ b/src/jquery/css/jquery-ui.custom.css
+@@ -283,16 +283,16 @@
+  *
+  * http://docs.jquery.com/UI/Dialog#theming
+  */
+-.ui-dialog { position: absolute; width: 300px; overflow: hidden; background-color: #F1F1F1; box-shadow: 3px 1px 9px 1px rgba(0, 0, 0, 0.25);}
++.ui-dialog { position: absolute; width: 300px; overflow: hidden; background-color: #F1F1F1; box-shadow: 3px 1px 9px 1px rgba(0, 0, 0, 0.25); padding: 1px;}
+ .ui-dialog .ui-dialog-titlebar { padding: .4em 1em; position: relative; background: #F1F1F1; border: none;}
+ .ui-dialog .ui-dialog-title { float: left; margin: .1em 16px .1em 0; }
+ .ui-dialog .ui-dialog-titlebar-close { position: absolute; right: .3em; top: 50%; width: 19px; margin: -10px 0 0 0; height: 18px; }
+-.ui-dialog .ui-dialog-titlebar-close span { display: none; }
++.ui-dialog .ui-dialog-titlebar-close span { display: none !important; }
+ .ui-dialog .ui-dialog-titlebar-close:hover, .ui-dialog .ui-dialog-titlebar-close:focus { padding: 0; background-image: url(images/ui-icons_056b93_256x240.png);  background-position: 160px -128px; }
+ .ui-dialog .ui-dialog-content { position: relative; border: 0; padding: .5em 1em; background: none; overflow: auto; zoom: 1; }
+ .ui-dialog .ui-dialog-buttonpane { text-align: left; border-width: 1px 0 0 0; background-image: none;  padding: .3em 1em .5em .4em;}
+ .ui-dialog .ui-dialog-buttonpane .ui-dialog-buttonset { float: right; }
+-.ui-dialog .ui-dialog-buttonpane button { margin: .5em .4em; cursor: pointer; padding: 1px 4px; background: -webkit-gradient( linear, left top, left bottom, color-stop(0.05, #ededed), color-stop(1, #dfdfdf) ) !important;}
++.ui-dialog .ui-dialog-buttonpane button { margin: .5em .4em; cursor: pointer; padding: 1px 4px !important; background: -webkit-gradient( linear, left top, left bottom, color-stop(0.05, #ededed), color-stop(1, #dfdfdf) ) !important; float: none; line-height: inherit;}
+ .ui-dialog .ui-resizable-se { width: 14px; height: 0px; right: 3px; bottom: 3px; }
+ .ui-draggable .ui-dialog-titlebar { cursor: move; }
+ /*!
+diff --git a/src/jquery/css/override-page.css b/src/jquery/css/override-page.css
+index f8cef567..fd9b7ea5 100644
+--- a/src/jquery/css/override-page.css
++++ b/src/jquery/css/override-page.css
+@@ -5,6 +5,9 @@
+   z-index: 10000;
+   padding: 0px;
+ }
++.ui-button-text {
++  display: block !important;
++}
+ .ui-dialog a[href] {
+   text-decoration: underline !important;
+ }
+@@ -59,7 +62,10 @@
+   outline: none;
+   box-shadow: none;
+ }
+-.ui-dialog.ui-state-hover button {
++.ui-dialog .ui-corner-all {
++  border-radius: 5px;
++}
++.ui-dialog .ui-state-hover button {
+   background: #79C9EC !important;
+ }
+ .ui-dialog .ui-dialog-titlebar-close {
+@@ -83,7 +89,7 @@
+ .ui-dialog label {
+   cursor: pointer;
+ }
+-.ui-dialog .ui-dialog-buttonpane { 
++.ui-dialog .ui-dialog-buttonpane {
+   display: block !important;
+   background-color: white;
+   margin: 0px;
+@@ -195,4 +201,4 @@ input[type="checkbox"]:checked:before {
+   color: rgba(0, 0, 0, 0.7);
+   content: '\2713';
+   margin-left: 20%;
+-}
+\ No newline at end of file
++}
+diff --git a/src/manifest.json b/src/manifest.json
+index c2a4b83c..e201939f 100644
+--- a/src/manifest.json
++++ b/src/manifest.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "AdBlock",
+-  "version": "2.20.1",
++  "version": "2.21",
+   "background": {
+     "scripts": [
+       "jquery/jquery.min.js",
+diff --git a/src/options/customize.js b/src/options/customize.js
+index 2c9100cd..08e93f39 100644
+--- a/src/options/customize.js
++++ b/src/options/customize.js
+@@ -9,7 +9,7 @@ chrome.extension.onRequest.addListener(function(request, sender, sendResponse) {
+   BGcall("get_exclude_filters_text", function(text) {
+     $("#txtExcludeFiltersAdvanced").val(text);
+   });
+-  sendResponse({});
++  // a call to sendResponse is not needed because of the call in filters.js
+ });
+ 
+ $(function() {
+diff --git a/src/pages/adreport.html b/src/pages/adreport.html
+index a87aece5..82c5cd93 100644
+--- a/src/pages/adreport.html
++++ b/src/pages/adreport.html
+@@ -219,7 +219,6 @@ <h2 i18n="correctfilters" style="margin-bottom: 15px;"></h2>
+           <option value="easylist;easylist_plus_polish;mailto:adblockpolska at gmail.com" i18n="filtereasylist_plus_polish"></option>
+           <option value="easylist;easylist_plus_romanian;mailto:mail at zoso.ro" i18n="filtereasylist_plus_romanian"></option>
+           <option value="latvian;http://forums.lanik.us/viewforum.php?f=99" i18n="filterlatvian"></option>
+-          <option value="norwegian;mailto:mlan76 at gmail.com" i18n="filternorwegian"></option>
+           <option value="easylist;russian;http://forum.mozilla-russia.org/viewtopic.php?id=3679" i18n="lang_russian"></option>
+           <option value="czech;http://adblock.sk/forum" i18n="lang_slovak"></option>
+           <option value="swedish;http://forums.fanboy.co.nz/forums/viewforum.php?f=7" i18n="filterswedish"></option>
+diff --git a/src/tools/update_l10n.pl b/src/tools/update_l10n.pl
+index fadaac17..b39efc93 100755
+--- a/src/tools/update_l10n.pl
++++ b/src/tools/update_l10n.pl
+@@ -217,16 +217,19 @@ sub strings_in_use {
+ }
+ 
+ sub html_js_files {
+-    # take path to a folder to search as input
+-    my $folder = shift(@_);
++    # take paths to folders to search as input
++    my @folders = @_;
+     
+-    # search for html and js files and store list
+     my @files;
+-    find(sub{
+-        return unless -f;
+-        return unless (/\.html$/ || /\.js$/);
+-        push(@files,$File::Find::name);
+-    },$folder);
++    
++    foreach my $folder (@folders){
++        # search for html and js files and store list
++        find(sub{
++            return unless -f;
++            return unless (/\.html$/ || /\.js$/);
++            push(@files,$File::Find::name);
++        },$folder);
++    }
+     
+     # return list of files found
+     return @files;
+@@ -241,9 +244,13 @@ sub missing_unused {
+     my @files, my @strings;
+     
+     # get a list of used strings in the correct project
+-    if ($project eq "contributors" || $project eq "installed"){
++    if ($project eq "contributors"){
+         @files = html_js_files("$locale_dirs{$project}/../../");
+         @strings = strings_in_use(@files);
++    } elsif ($project eq "installed"){
++        # l10n for /installed also contains l10n for /pay
++        @files = html_js_files("$locale_dirs{$project}/../../", "$locale_dirs{$project}/../../../pay/");
++        @strings = strings_in_use(@files);
+     } elsif ($project eq "getadblock_com"){
+         find(sub{
+             # don't look in directories that are separate projects

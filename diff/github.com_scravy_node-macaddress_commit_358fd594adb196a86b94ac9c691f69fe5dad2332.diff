@@ -1,0 +1,180 @@
+From 99b23e61c791921ed90c1bc4c186f31fd405aecf Mon Sep 17 00:00:00 2001
+From: logikgate <nick.fredricks@flypaper.com>
+Date: Mon, 14 May 2018 17:35:09 -0400
+Subject: [PATCH 1/5] Fix arbitrary command injection, CWE-264
+
+---
+ lib/linux.js   | 6 +++---
+ lib/macosx.js  | 4 ++--
+ lib/unix.js    | 4 ++--
+ lib/windows.js | 4 ++--
+ 4 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/lib/linux.js b/lib/linux.js
+index 5b30418..fe16f79 100644
+--- a/lib/linux.js
++++ b/lib/linux.js
+@@ -1,11 +1,11 @@
+-var exec = require('child_process').exec;
++var execFile = require('child_process').execFile;
+ 
+ module.exports = function (iface, callback) {
+-    exec("cat /sys/class/net/" + iface + "/address", function (err, out) {
++    execFile("cat", ["/sys/class/net/", iface, "/address"], function (err, out) {
+         if (err) {
+             callback(err, null);
+             return;
+         }
+         callback(null, out.trim().toLowerCase());
+     });
+-};
++};
+\ No newline at end of file
+diff --git a/lib/macosx.js b/lib/macosx.js
+index 904ed2d..c92e366 100644
+--- a/lib/macosx.js
++++ b/lib/macosx.js
+@@ -1,7 +1,7 @@
+-var exec = require('child_process').exec;
++var execFile = require('child_process').execFile;
+ 
+ module.exports = function (iface, callback) {
+-    exec("networksetup -getmacaddress " + iface, function (err, out) {
++    execFile("networksetup", ["-getmacaddress", iface], function (err, out) {
+         if (err) {
+             callback(err, null);
+             return;
+diff --git a/lib/unix.js b/lib/unix.js
+index d5ca59a..f18ab14 100644
+--- a/lib/unix.js
++++ b/lib/unix.js
+@@ -1,7 +1,7 @@
+-var exec = require('child_process').exec;
++var execFile = require('child_process').execFile;
+ 
+ module.exports = function (iface, callback) {
+-    exec("ifconfig " + iface, function (err, out) {
++    execFile("ifconfig", [iface], function (err, out) {
+         if (err) {
+             callback(err, null);
+             return;
+diff --git a/lib/windows.js b/lib/windows.js
+index 87b1b6b..9f0263d 100644
+--- a/lib/windows.js
++++ b/lib/windows.js
+@@ -1,4 +1,4 @@
+-var exec = require('child_process').exec;
++var execFile = require('child_process').execFile;
+ 
+ var regexRegex = /[-\/\\^$*+?.()|[\]{}]/g;
+ 
+@@ -7,7 +7,7 @@ function escape(string) {
+ }
+ 
+ module.exports = function (iface, callback) {
+-    exec("ipconfig /all", function (err, out) {
++    execFile("ipconfig", ["/all"], function (err, out) {
+         if (err) {
+             callback(err, null);
+             return;
+
+From d55bb29c645052ad293d836ea5810f1b1ef757ba Mon Sep 17 00:00:00 2001
+From: logikgate <nick.fredricks@flypaper.com>
+Date: Mon, 14 May 2018 17:36:04 -0400
+Subject: [PATCH 2/5] remove unused macos implementation, unix covers it
+
+---
+ lib/macosx.js | 16 ----------------
+ 1 file changed, 16 deletions(-)
+ delete mode 100644 lib/macosx.js
+
+diff --git a/lib/macosx.js b/lib/macosx.js
+deleted file mode 100644
+index c92e366..0000000
+--- a/lib/macosx.js
++++ /dev/null
+@@ -1,16 +0,0 @@
+-var execFile = require('child_process').execFile;
+-
+-module.exports = function (iface, callback) {
+-    execFile("networksetup", ["-getmacaddress", iface], function (err, out) {
+-        if (err) {
+-            callback(err, null);
+-            return;
+-        }
+-        var match = /[a-f0-9]{2}(:[a-f0-9]{2}){5}/.exec(out.toLowerCase());
+-        if (!match) {
+-            callback("did not find a mac address", null);
+-            return;
+-        }
+-        callback(null, match[0]);
+-    });
+-};
+
+From b2124ef35549ec08d97515360d18aefae13d204d Mon Sep 17 00:00:00 2001
+From: logikgate <nick.fredricks@flypaper.com>
+Date: Mon, 14 May 2018 17:55:03 -0400
+Subject: [PATCH 3/5] Fixes arbitrary command execution
+
+---
+ package.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/package.json b/package.json
+index ba32f6f..515fb3c 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "macaddress",
+-  "version": "0.2.9",
++  "version": "0.2.10",
+   "description": "Get the MAC addresses (hardware addresses) of the hosts network interfaces.",
+   "main": "index.js",
+   "scripts": {
+
+From 7b0a488dab62c7258d9a3bdc0d6a72b803d9c717 Mon Sep 17 00:00:00 2001
+From: logikgate <nick.fredricks@flypaper.com>
+Date: Thu, 17 May 2018 13:25:29 -0400
+Subject: [PATCH 4/5] Fix for Node 0.8 thru 0.10
+
+---
+ lib/linux.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/linux.js b/lib/linux.js
+index fe16f79..799d7ac 100644
+--- a/lib/linux.js
++++ b/lib/linux.js
+@@ -1,7 +1,7 @@
+ var execFile = require('child_process').execFile;
+ 
+ module.exports = function (iface, callback) {
+-    execFile("cat", ["/sys/class/net/", iface, "/address"], function (err, out) {
++    execFile("cat", ["/sys/class/net/" + iface + "/address"], function (err, out) {
+         if (err) {
+             callback(err, null);
+             return;
+
+From 214ad005bc8612f40eab9a2006e0e2ea0bd16cc1 Mon Sep 17 00:00:00 2001
+From: logikgate <nick.fredricks@flypaper.com>
+Date: Thu, 17 May 2018 13:25:54 -0400
+Subject: [PATCH 5/5] Run travis against osx and linux, travis doesn't do
+ windows
+
+---
+ .travis.yml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/.travis.yml b/.travis.yml
+index e3758de..3856fc7 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -1,4 +1,7 @@
+ language: node_js
++os:
++  - linux
++  - osx
+ node_js:
+   - stable
+   - "0.12"

@@ -1,0 +1,52 @@
+From e67887343c433cc35bc26ad6a9392588f427e746 Mon Sep 17 00:00:00 2001
+From: Manuel Nickschas <sputnick@quassel-irc.org>
+Date: Sun, 24 Apr 2016 21:59:15 +0200
+Subject: [PATCH] Handle invalid handshake data properly in the core
+
+Clients sending invalid handshake data could make the core crash
+due to an unchecked pointer. This commit fixes this issue by having
+the core close the socket if a peer could not be created.
+
+Thanks to Bas Pape (Tucos) for finding this one!
+---
+ src/common/peerfactory.cpp   | 2 +-
+ src/core/coreauthhandler.cpp | 8 +++++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/peerfactory.cpp b/src/common/peerfactory.cpp
+index 580c2baa89..cd0987b4e9 100644
+--- a/src/common/peerfactory.cpp
++++ b/src/common/peerfactory.cpp
+@@ -56,5 +56,5 @@ RemotePeer *PeerFactory::createPeer(const ProtoList &protocols, AuthHandler *aut
+         }
+     }
+ 
+-    return 0;
++    return nullptr;
+ }
+diff --git a/src/core/coreauthhandler.cpp b/src/core/coreauthhandler.cpp
+index e380924600..34fc22276e 100644
+--- a/src/core/coreauthhandler.cpp
++++ b/src/core/coreauthhandler.cpp
+@@ -81,7 +81,7 @@ void CoreAuthHandler::onReadyRead()
+     }
+ 
+     // read the list of protocols supported by the client
+-    while (socket()->bytesAvailable() >= 4) {
++    while (socket()->bytesAvailable() >= 4 && _supportedProtos.size() < 16) { // sanity check
+         quint32 data;
+         socket()->read((char*)&data, 4);
+         data = qFromBigEndian<quint32>(data);
+@@ -98,6 +98,12 @@ void CoreAuthHandler::onReadyRead()
+                 level = Compressor::NoCompression;
+ 
+             RemotePeer *peer = PeerFactory::createPeer(_supportedProtos, this, socket(), level, this);
++            if (!peer) {
++                qWarning() << "Received invalid handshake data from client" << socket()->peerAddress().toString();
++                close();
++                return;
++            }
++
+             if (peer->protocol() == Protocol::LegacyProtocol) {
+                 _legacy = true;
+                 connect(peer, SIGNAL(protocolVersionMismatch(int,int)), SLOT(onProtocolVersionMismatch(int,int)));

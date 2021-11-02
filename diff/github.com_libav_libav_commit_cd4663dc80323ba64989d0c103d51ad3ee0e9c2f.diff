@@ -1,0 +1,39 @@
+From cd4663dc80323ba64989d0c103d51ad3ee0e9c2f Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michaelni@gmx.at>
+Date: Thu, 21 Jun 2012 16:01:52 +0200
+Subject: [PATCH] smacker: add sanity check for length in smacker_decode_tree()
+
+Signed-off-by: Michael Niedermayer <michaelni@gmx.at>
+
+Bug-Id: 1098
+Cc: libav-stable@libav.org
+Signed-off-by: Sean McGovern <gseanmcg@gmail.com>
+---
+ libavcodec/smacker.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/libavcodec/smacker.c b/libavcodec/smacker.c
+index 0e057a1c2a..7deccffa54 100644
+--- a/libavcodec/smacker.c
++++ b/libavcodec/smacker.c
+@@ -43,7 +43,7 @@
+ 
+ #define SMKTREE_BITS 9
+ #define SMK_NODE 0x80000000
+-
++#define SMKTREE_DECODE_MAX_RECURSION 32
+ 
+ typedef struct SmackVContext {
+     AVCodecContext *avctx;
+@@ -97,6 +97,11 @@ enum SmkBlockTypes {
+ static int smacker_decode_tree(BitstreamContext *bc, HuffContext *hc,
+                                uint32_t prefix, int length)
+ {
++    if (length > SMKTREE_DECODE_MAX_RECURSION) {
++        av_log(NULL, AV_LOG_ERROR, "Maximum tree recursion level exceeded.\n");
++        return AVERROR_INVALIDDATA;
++    }
++
+     if (!bitstream_read_bit(bc)) { // Leaf
+         if(hc->current >= 256){
+             av_log(NULL, AV_LOG_ERROR, "Tree size exceeded!\n");

@@ -1,0 +1,36 @@
+From b4ecd95debaf0a8712bd1d34def83f41fc6b3579 Mon Sep 17 00:00:00 2001
+From: saneki <s@neki.me>
+Date: Tue, 24 Mar 2015 17:13:21 -0500
+Subject: [PATCH] Sanitized crop input, logs with Paperclip log function if
+ anything weird happens
+
+---
+ lib/paperclip_processors/cropper.rb | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/lib/paperclip_processors/cropper.rb b/lib/paperclip_processors/cropper.rb
+index a2807f6..184afdd 100644
+--- a/lib/paperclip_processors/cropper.rb
++++ b/lib/paperclip_processors/cropper.rb
+@@ -16,11 +16,16 @@ def crop_command
+       target = @attachment.instance
+ 
+       if target.cropping?(@attachment.name)
+-        w = target.send :"#{@attachment.name}_crop_w"
+-        h = target.send :"#{@attachment.name}_crop_h"
+-        x = target.send :"#{@attachment.name}_crop_x"
+-        y = target.send :"#{@attachment.name}_crop_y"
+-        ["-crop", "#{w}x#{h}+#{x}+#{y}"]
++        begin
++          w = Integer(target.send :"#{@attachment.name}_crop_w")
++          h = Integer(target.send :"#{@attachment.name}_crop_h")
++          x = Integer(target.send :"#{@attachment.name}_crop_x")
++          y = Integer(target.send :"#{@attachment.name}_crop_y")
++          ["-crop", "#{w}x#{h}+#{x}+#{y}"]
++        rescue
++          Paperclip.log("[papercrop] #{@attachment.name} crop w/h/x/y were non-integer")
++          return
++        end
+       end
+     end
+ 

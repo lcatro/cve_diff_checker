@@ -1,0 +1,48 @@
+From 0d649bc9c2cdd1241d4510d67d85a39a87fd91ea Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 17 Mar 2020 15:12:19 +0100
+Subject: [PATCH] Test if it's a correct url before continue
+
+---
+ .../Controller/Admin/SecurityController.php       | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/PrestaShopBundle/Controller/Admin/SecurityController.php b/src/PrestaShopBundle/Controller/Admin/SecurityController.php
+index e01ca912ab8e..db09ea14790f 100644
+--- a/src/PrestaShopBundle/Controller/Admin/SecurityController.php
++++ b/src/PrestaShopBundle/Controller/Admin/SecurityController.php
+@@ -28,6 +28,7 @@
+ 
+ use PrestaShopBundle\Service\Routing\Router as PrestaShopRouter;
+ use Symfony\Component\HttpFoundation\Request;
++use Symfony\Component\Validator\Constraints as Assert;
+ 
+ /**
+  * Admin controller to manage security pages.
+@@ -37,6 +38,11 @@ class SecurityController extends FrameworkBundleAdminController
+     public function compromisedAccessAction(Request $request)
+     {
+         $requestUri = urldecode($request->query->get('uri'));
++        $url = new Assert\Url();
++        $violations = $this->get('validator')->validate($requestUri, [$url]);
++        if ($violations->count()) {
++            return $this->redirect('dashboard');
++        }
+ 
+         // getToken() actually generate a new token
+         $username = $this->get('prestashop.user_provider')->getUsername();
+@@ -47,8 +53,11 @@ public function compromisedAccessAction(Request $request)
+ 
+         $newUri = PrestaShopRouter::generateTokenizedUrl($requestUri, $newToken);
+ 
+-        return $this->render('@PrestaShop/Admin/Security/compromised.html.twig', array(
+-            'requestUri' => $newUri,
+-        ));
++        return $this->render(
++            '@PrestaShop/Admin/Security/compromised.html.twig',
++            array(
++                'requestUri' => $newUri,
++            )
++        );
+     }
+ }

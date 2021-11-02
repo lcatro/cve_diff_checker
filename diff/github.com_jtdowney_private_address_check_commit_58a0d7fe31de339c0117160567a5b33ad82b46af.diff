@@ -1,0 +1,39 @@
+From 58a0d7fe31de339c0117160567a5b33ad82b46af Mon Sep 17 00:00:00 2001
+From: John Downey <jdowney@gmail.com>
+Date: Sun, 5 Nov 2017 14:53:34 -0600
+Subject: [PATCH] Fix bypass bug with malformed addresses
+
+The Ruby Resolv library can return an empty array from getaddresses for
+some atypical IP address encodings. This was brought to my attention by
+@EdOverflow.
+---
+ lib/private_address_check.rb       | 2 ++
+ test/private_address_check_test.rb | 4 ++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/lib/private_address_check.rb b/lib/private_address_check.rb
+index b1d2995..3b82a43 100644
+--- a/lib/private_address_check.rb
++++ b/lib/private_address_check.rb
+@@ -31,6 +31,8 @@ def private_address?(address)
+ 
+   def resolves_to_private_address?(hostname)
+     ips = Resolv.getaddresses(hostname)
++    return true if ips.empty?
++
+     ips.any? do |ip| 
+       private_address?(ip)
+     end
+diff --git a/test/private_address_check_test.rb b/test/private_address_check_test.rb
+index 6560751..2afdf79 100644
+--- a/test/private_address_check_test.rb
++++ b/test/private_address_check_test.rb
+@@ -35,4 +35,8 @@ def test_private_hostname_for_public_addresses
+   def test_private_hostname_for_private_addresses
+     assert PrivateAddressCheck.resolves_to_private_address?("localhost")
+   end
++
++  def test_private_address_for_malformed_addresses
++    assert PrivateAddressCheck.resolves_to_private_address?("127.1")
++  end
+ end

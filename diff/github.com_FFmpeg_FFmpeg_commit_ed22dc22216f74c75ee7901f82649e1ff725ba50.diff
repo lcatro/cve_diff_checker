@@ -1,0 +1,35 @@
+From ed22dc22216f74c75ee7901f82649e1ff725ba50 Mon Sep 17 00:00:00 2001
+From: Michael Niedermayer <michael@niedermayer.cc>
+Date: Wed, 27 Jun 2018 16:51:51 +0200
+Subject: [PATCH] avformat/movenc: Check that frame_types other than
+ EAC3_FRAME_TYPE_INDEPENDENT have a supported substream id
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fixes: out of array access
+Fixes: ffmpeg_bof_1.avi
+
+Found-by: Thuan Pham, Marcel Böhme, Andrew Santosa and Alexandru Razvan Caciulescu with AFLSmart
+Signed-off-by: Michael Niedermayer <michael@niedermayer.cc>
+---
+ libavformat/movenc.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/libavformat/movenc.c b/libavformat/movenc.c
+index e2c5613f98df..6eabf32fce31 100644
+--- a/libavformat/movenc.c
++++ b/libavformat/movenc.c
+@@ -437,6 +437,12 @@ static int handle_eac3(MOVMuxContext *mov, AVPacket *pkt, MOVTrack *track)
+                 info->ec3_done = 1;
+                 goto concatenate;
+             }
++        } else {
++            if (hdr->substreamid != 0) {
++                avpriv_request_sample(mov->fc, "Multiple non EAC3 independent substreams");
++                ret = AVERROR_PATCHWELCOME;
++                goto end;
++            }
+         }
+ 
+         /* fill the info needed for the "dec3" atom */

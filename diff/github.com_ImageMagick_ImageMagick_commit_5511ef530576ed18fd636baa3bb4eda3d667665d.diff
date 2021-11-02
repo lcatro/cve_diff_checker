@@ -1,0 +1,75 @@
+From 5511ef530576ed18fd636baa3bb4eda3d667665d Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Mon, 30 May 2016 07:51:39 -0400
+Subject: [PATCH] =?UTF-8?q?Add=20additional=20checks=20to=20DCM=20reader?=
+ =?UTF-8?q?=20to=20prevent=20data-driven=20faults=20(bug=20report=20from?=
+ =?UTF-8?q?=20Hanno=20B=C3=B6ck?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ ChangeLog    |  2 ++
+ coders/dcm.c | 15 +++++++++++----
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 70f2d014da..de0b1fa589 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -5,6 +5,8 @@
+     https://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=29626).
+   * Don't interpret -fx option arguments (reference
+     https://www.imagemagick.org/discourse-server/viewtopic.php?f=3&t=29774);
++  * Add additional checks to DCM reader to prevent data-driven faults (bug
++    report from Hanno Böck).
+ 
+ 2016-05-21  7.0.1-6 Cristy  <quetzlzacatenango@image...>
+   * Release ImageMagick version 7.0.1-6, GIT revision 18241:d4f277c:20160521.
+diff --git a/coders/dcm.c b/coders/dcm.c
+index f86e573265..26125f778b 100644
+--- a/coders/dcm.c
++++ b/coders/dcm.c
+@@ -3216,6 +3216,8 @@ static Image *ReadDCMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+             /*
+               Photometric interpretation.
+             */
++            if (data == (unsigned char *) NULL)
++              break;
+             for (i=0; i < (ssize_t) MagickMin(length,MagickPathExtent-1); i++)
+               photometric[i]=(char) data[i];
+             photometric[i]='\0';
+@@ -3237,6 +3239,8 @@ static Image *ReadDCMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+             /*
+               Number of frames.
+             */
++            if (data == (unsigned char *) NULL)
++              break;
+             number_scenes=StringToUnsignedLong((char *) data);
+             break;
+           }
+@@ -3674,7 +3678,7 @@ static Image *ReadDCMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+       if (scale == (Quantum *) NULL)
+         ThrowReaderException(ResourceLimitError,"MemoryAllocationFailed");
+       range=GetQuantumRange(depth);
+-      for (i=0; i < (ssize_t) (GetQuantumRange(depth)+1); i++)
++      for (i=0; i <= (ssize_t) GetQuantumRange(depth); i++)
+         scale[i]=ScaleAnyToQuantum((size_t) i,range);
+     }
+   if (image->compression == RLECompression)
+@@ -3965,9 +3969,12 @@ static Image *ReadDCMImage(const ImageInfo *image_info,ExceptionInfo *exception)
+                 pixel.blue&=mask;
+                 if (scale != (Quantum *) NULL)
+                   {
+-                    pixel.red=scale[pixel.red];
+-                    pixel.green=scale[pixel.green];
+-                    pixel.blue=scale[pixel.blue];
++                    if (pixel.red <= GetQuantumRange(depth))
++                      pixel.red=scale[pixel.red];
++                    if (pixel.green <= GetQuantumRange(depth))
++                      pixel.green=scale[pixel.green];
++                    if (pixel.blue <= GetQuantumRange(depth))
++                      pixel.blue=scale[pixel.blue];
+                   }
+               }
+             SetPixelRed(image,(Quantum) pixel.red,q);

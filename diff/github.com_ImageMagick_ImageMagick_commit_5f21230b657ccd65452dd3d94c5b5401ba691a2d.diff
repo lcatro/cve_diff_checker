@@ -1,0 +1,47 @@
+From 5f21230b657ccd65452dd3d94c5b5401ba691a2d Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Sun, 23 Jun 2019 11:46:42 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/1616
+
+---
+ MagickWand/mogrify.c   | 3 +++
+ MagickWand/operation.c | 5 ++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/MagickWand/mogrify.c b/MagickWand/mogrify.c
+index 82b3c0c1c4..150b679230 100644
+--- a/MagickWand/mogrify.c
++++ b/MagickWand/mogrify.c
+@@ -7908,6 +7908,8 @@ WandExport MagickBooleanType MogrifyImageList(ImageInfo *image_info,
+               &distortion,exception);
+             if (difference_image == (Image *) NULL)
+               break;
++            reconstruct_image=DestroyImage(reconstruct_image);
++            image=DestroyImage(image);
+             if (*images != (Image *) NULL)
+               *images=DestroyImageList(*images);
+             *images=difference_image;
+@@ -8295,6 +8297,7 @@ WandExport MagickBooleanType MogrifyImageList(ImageInfo *image_info,
+                    q=GetImageFromList(*images,index-1);
+                    if (q == (Image *) NULL)
+                      {
++                       p=DestroyImage(p);
+                        (void) ThrowMagickException(exception,GetMagickModule(),
+                          OptionError,"NoSuchImage","`%s'",argv[i+1]);
+                        status=MagickFalse;
+diff --git a/MagickWand/operation.c b/MagickWand/operation.c
+index 9005da5887..b874574346 100644
+--- a/MagickWand/operation.c
++++ b/MagickWand/operation.c
+@@ -4171,7 +4171,10 @@ WandPrivate MagickBooleanType CLIListOperatorImages(MagickCLI *cli_wand,
+             {
+                index_image=GetImageFromList(_images,index-1);
+                if (index_image == (Image *) NULL)
+-                 CLIWandExceptArgBreak(OptionError,"NoSuchImage",option,arg1);
++                 {
++                   insert_image=DestroyImage(insert_image);
++                   CLIWandExceptArgBreak(OptionError,"NoSuchImage",option,arg1);
++                 }
+               InsertImageInList(&index_image,insert_image);
+             }
+           _images=GetFirstImageInList(index_image);

@@ -1,0 +1,197 @@
+From 9aee4112f36058cd28d5fe4a006d6981bd1eda57 Mon Sep 17 00:00:00 2001
+From: Jon Yurek <jyurek@thoughtbot.com>
+Date: Fri, 22 May 2015 15:21:01 -0400
+Subject: [PATCH] Fix a possible security issue with spoofing
+
+Thanks to MORI Shingo of DeNA Co., Ltd. for reporting this.
+
+There is an issue where if an HTML file is uploaded with a .html
+extension, but the content type is listed as being `image/jpeg`, this
+will bypass a validation checking for images. But it will also pass the
+spoof check, because a file named .html and containing actual HTML
+passes the spoof check.
+
+This change makes it so that we also check the supplied content type. So
+even if the file contains HTML and ends with .html, it doesn't match the
+content type of `image/jpeg` and so it fails.
+---
+ NEWS                                          |  4 ++
+ lib/paperclip/locales/en.yml                  |  2 +-
+ lib/paperclip/media_type_spoof_detector.rb    | 54 +++++++++++++------
+ .../media_type_spoof_detection_validator.rb   |  2 +-
+ .../media_type_spoof_detector_spec.rb         | 10 ++++
+ ...dia_type_spoof_detection_validator_spec.rb |  2 +-
+ 6 files changed, 54 insertions(+), 20 deletions(-)
+
+diff --git a/NEWS b/NEWS
+index a3953c26b..41923fc8c 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,3 +1,7 @@
++New in 4.2.2:
++
++* Security fix: Fix a potential security issue with spoofing
++
+ New in 4.2.1:
+ 
+ * Improvement: Added `validate_media_type` options to allow/bypass spoof check
+diff --git a/lib/paperclip/locales/en.yml b/lib/paperclip/locales/en.yml
+index 43fd583a5..2709a023b 100644
+--- a/lib/paperclip/locales/en.yml
++++ b/lib/paperclip/locales/en.yml
+@@ -2,7 +2,7 @@ en:
+   errors:
+     messages:
+       in_between: "must be in between %{min} and %{max}"
+-      spoofed_media_type: "has an extension that does not match its contents"
++      spoofed_media_type: "has contents that are not what they are reported to be"
+ 
+   number:
+     human:
+diff --git a/lib/paperclip/media_type_spoof_detector.rb b/lib/paperclip/media_type_spoof_detector.rb
+index 222efe5aa..9a578574f 100644
+--- a/lib/paperclip/media_type_spoof_detector.rb
++++ b/lib/paperclip/media_type_spoof_detector.rb
+@@ -1,18 +1,21 @@
+ module Paperclip
+   class MediaTypeSpoofDetector
+-    def self.using(file, name)
+-      new(file, name)
++    def self.using(file, name, content_type)
++      new(file, name, content_type)
+     end
+ 
+-    def initialize(file, name)
++    def initialize(file, name, content_type)
+       @file = file
+       @name = name
++      @content_type = content_type || ""
+     end
+ 
+     def spoofed?
+       if has_name? && has_extension? && media_type_mismatch? && mapping_override_mismatch?
+-        Paperclip.log("Content Type Spoof: Filename #{File.basename(@name)} (#{supplied_file_content_types}), content type discovered from file command: #{calculated_content_type}. See documentation to allow this combination.")
++        Paperclip.log("Content Type Spoof: Filename #{File.basename(@name)} (#{supplied_content_type} from Headers, #{content_types_from_name} from Extension), content type discovered from file command: #{calculated_content_type}. See documentation to allow this combination.")
+         true
++      else
++        false
+       end
+     end
+ 
+@@ -27,35 +30,44 @@ def has_extension?
+     end
+ 
+     def media_type_mismatch?
+-      ! supplied_file_media_types.include?(calculated_media_type)
++      supplied_type_mismatch? || calculated_type_mismatch?
++    end
++
++    def supplied_type_mismatch?
++      supplied_media_type.present? && !media_types_from_name.include?(supplied_media_type)
++    end
++
++    def calculated_type_mismatch?
++      !media_types_from_name.include?(calculated_media_type)
+     end
+ 
+     def mapping_override_mismatch?
+       mapped_content_type != calculated_content_type
+     end
+ 
+-    def supplied_file_media_types
+-      @supplied_file_media_types ||= MIME::Types.type_for(@name).collect(&:media_type)
++
++    def supplied_content_type
++      @content_type
+     end
+ 
+-    def calculated_media_type
+-      @calculated_media_type ||= calculated_content_type.split("/").first
++    def supplied_media_type
++      @content_type.split("/").first
+     end
+ 
+-    def supplied_file_content_types
+-      @supplied_file_content_types ||= MIME::Types.type_for(@name).collect(&:content_type)
++    def content_types_from_name
++      @content_types_from_name ||= MIME::Types.type_for(@name)
+     end
+ 
+-    def calculated_content_type
+-      @calculated_content_type ||= type_from_file_command.chomp
++    def media_types_from_name
++      @media_types_from_name ||= content_types_from_name.collect(&:media_type)
+     end
+ 
+-    def mapped_content_type
+-      Paperclip.options[:content_type_mappings][filename_extension]
++    def calculated_content_type
++      @calculated_content_type ||= type_from_file_command.chomp
+     end
+ 
+-    def filename_extension
+-      File.extname(@name.to_s.downcase).sub(/^\./, '').to_sym
++    def calculated_media_type
++      @calculated_media_type ||= calculated_content_type.split("/").first
+     end
+ 
+     def type_from_file_command
+@@ -65,5 +77,13 @@ def type_from_file_command
+         ""
+       end
+     end
++
++    def mapped_content_type
++      Paperclip.options[:content_type_mappings][filename_extension]
++    end
++
++    def filename_extension
++      File.extname(@name.to_s.downcase).sub(/^\./, '').to_sym
++    end
+   end
+ end
+diff --git a/lib/paperclip/validators/media_type_spoof_detection_validator.rb b/lib/paperclip/validators/media_type_spoof_detection_validator.rb
+index 851c5ff94..d3699acc1 100644
+--- a/lib/paperclip/validators/media_type_spoof_detection_validator.rb
++++ b/lib/paperclip/validators/media_type_spoof_detection_validator.rb
+@@ -5,7 +5,7 @@ module Validators
+     class MediaTypeSpoofDetectionValidator < ActiveModel::EachValidator
+       def validate_each(record, attribute, value)
+         adapter = Paperclip.io_adapters.for(value)
+-        if Paperclip::MediaTypeSpoofDetector.using(adapter, value.original_filename).spoofed?
++        if Paperclip::MediaTypeSpoofDetector.using(adapter, value.original_filename, value.content_type).spoofed?
+           record.errors.add(attribute, :spoofed_media_type)
+         end
+       end
+diff --git a/spec/paperclip/media_type_spoof_detector_spec.rb b/spec/paperclip/media_type_spoof_detector_spec.rb
+index 134d6d21c..b11095b0a 100644
+--- a/spec/paperclip/media_type_spoof_detector_spec.rb
++++ b/spec/paperclip/media_type_spoof_detector_spec.rb
+@@ -43,4 +43,14 @@
+       Paperclip.options[:content_type_mappings] = {}
+     end
+   end
++
++  it "rejects a file if named .html and is as HTML, but we're told JPG" do
++    file = File.open(fixture_file("empty.html"))
++    assert Paperclip::MediaTypeSpoofDetector.using(file, "empty.html", "image/jpg").spoofed?
++  end
++
++  it "does not reject is content_type is empty but otherwise checks out" do
++    file = File.open(fixture_file("empty.html"))
++    assert ! Paperclip::MediaTypeSpoofDetector.using(file, "empty.html", "").spoofed?
++  end
+ end
+diff --git a/spec/paperclip/validators/media_type_spoof_detection_validator_spec.rb b/spec/paperclip/validators/media_type_spoof_detection_validator_spec.rb
+index 157702bd7..384a10680 100644
+--- a/spec/paperclip/validators/media_type_spoof_detection_validator_spec.rb
++++ b/spec/paperclip/validators/media_type_spoof_detection_validator_spec.rb
+@@ -30,7 +30,7 @@ def build_validator(options = {})
+     Paperclip::MediaTypeSpoofDetector.stubs(:using).returns(detector)
+     @validator.validate(@dummy)
+ 
+-    assert_equal "has an extension that does not match its contents", @dummy.errors[:avatar].first
++    assert_equal I18n.t("errors.messages.spoofed_media_type"), @dummy.errors[:avatar].first
+   end
+ 
+   it "runs when attachment is dirty" do

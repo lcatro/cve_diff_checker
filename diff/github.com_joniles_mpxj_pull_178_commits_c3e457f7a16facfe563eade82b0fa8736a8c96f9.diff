@@ -1,0 +1,675 @@
+From c3e457f7a16facfe563eade82b0fa8736a8c96f9 Mon Sep 17 00:00:00 2001
+From: Jon Iles <jon.iles@bcs.org.uk>
+Date: Sat, 29 Aug 2020 13:01:57 +0100
+Subject: [PATCH] XXE fix
+
+---
+ CHANGELOG.md                                  |   1 +
+ src/changes/changes.xml                       |   1 +
+ .../net/sf/mpxj/common/UnmarshalHelper.java   | 104 ++++++++++++++++++
+ .../net/sf/mpxj/common/XmlReaderHelper.java   |  51 +++++++++
+ .../conceptdraw/ConceptDrawProjectReader.java |  32 ++----
+ .../ganttdesigner/GanttDesignerReader.java    |  26 ++---
+ .../mpxj/ganttproject/GanttProjectReader.java |  26 ++---
+ .../java/net/sf/mpxj/mspdi/MSPDIReader.java   |  48 ++------
+ .../net/sf/mpxj/phoenix/PhoenixReader.java    |  26 ++---
+ .../net/sf/mpxj/planner/PlannerReader.java    |  28 ++---
+ .../mpxj/primavera/PrimaveraPMFileReader.java |  22 +---
+ 11 files changed, 201 insertions(+), 164 deletions(-)
+ create mode 100644 src/main/java/net/sf/mpxj/common/UnmarshalHelper.java
+ create mode 100644 src/main/java/net/sf/mpxj/common/XmlReaderHelper.java
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index bab455a9dd..b39f028011 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,6 +1,7 @@
+ # Changelog
+ 
+ ## 8.1.4 (git master)
++* XXE security vulnerability
+ * Import milestone constraints from Asta schedules (Contributed by Dave McKay)
+ * Handle elapsed durations in Asta schedules (Based on a contribution by Dave McKay)
+ * Correctly determine the constraint type for tasks with ALAP placement with or without predecessors when reading from from Asta schedules (Contributed by Dave McKay)
+diff --git a/src/changes/changes.xml b/src/changes/changes.xml
+index 9f03c6e774..45fe5141a0 100644
+--- a/src/changes/changes.xml
++++ b/src/changes/changes.xml
+@@ -6,6 +6,7 @@
+ 	</properties>
+ 	<body>
+ 		<release date="git master" version="8.1.4">
++			<action dev="joniles" type="update">XXE security vulnerability</action>
+ 			<action dev="joniles" type="update">Import milestone constraints from Asta schedules (Contributed by Dave McKay)</action>
+ 			<action dev="joniles" type="update">Handle elapsed durations in Asta schedules (Based on a contribution by Dave McKay)</action>
+ 			<action dev="joniles" type="update">Correctly determine the constraint type for tasks with ALAP placement with or without predecessors when reading from from Asta schedules (Contributed by Dave McKay)</action>
+diff --git a/src/main/java/net/sf/mpxj/common/UnmarshalHelper.java b/src/main/java/net/sf/mpxj/common/UnmarshalHelper.java
+new file mode 100644
+index 0000000000..967adcdc05
+--- /dev/null
++++ b/src/main/java/net/sf/mpxj/common/UnmarshalHelper.java
+@@ -0,0 +1,104 @@
++/*
++ * file:       UnmarshalHelper.java
++ * author:     Jon Iles
++ * copyright:  (c) Packwood Software 2020
++ * date:       29/08/2020
++ */
++
++/*
++ * This library is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU Lesser General Public License as published by the
++ * Free Software Foundation; either version 2.1 of the License, or (at your
++ * option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
++ * License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this library; if not, write to the Free Software Foundation, Inc.,
++ * 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++package net.sf.mpxj.common;
++
++import java.io.IOException;
++import java.io.InputStream;
++
++import javax.xml.bind.JAXBContext;
++import javax.xml.bind.JAXBException;
++import javax.xml.bind.Unmarshaller;
++import javax.xml.bind.UnmarshallerHandler;
++import javax.xml.bind.ValidationEvent;
++import javax.xml.bind.ValidationEventHandler;
++import javax.xml.parsers.ParserConfigurationException;
++import javax.xml.transform.sax.SAXSource;
++
++import org.xml.sax.InputSource;
++import org.xml.sax.SAXException;
++import org.xml.sax.XMLFilter;
++
++/**
++ * Utility methods wrapping JAXB unmarshal.
++ */
++public final class UnmarshalHelper
++{
++   /**
++    * Unmarshal from an input stream.
++    *
++    * @param context JAXB context
++    * @param stream input stream
++    * @return Unmarshalled root node
++    */
++   public static final Object unmarshal(JAXBContext context, InputStream stream) throws JAXBException, SAXException, ParserConfigurationException
++   {
++      return context.createUnmarshaller().unmarshal(new SAXSource(XmlReaderHelper.createXmlReader(), new InputSource(stream)));
++   }
++
++   /**
++    * Unmarshall from an input stream and apply a filter.
++    *
++    * @param context JAXB context
++    * @param stream input stream
++    * @param filter XMLFilter instance
++    * @return Unmarshalled root node
++    */
++   public static final Object unmarshal(JAXBContext context, InputStream stream, XMLFilter filter) throws JAXBException, SAXException, ParserConfigurationException, IOException
++   {
++      return unmarshal(context, new InputSource(stream), filter, false);
++   }
++
++   /**
++    * Unmarshall from an input source and apply a filter, optionally ignore validation errors.
++    *
++    * @param context JAXB context
++    * @param source input source
++    * @param filter XMLFilter instance
++    * @param ignoreValidationErrors true if validation errors are ignored
++    * @return Unmarshalled root node
++    */
++   public static final Object unmarshal(JAXBContext context, InputSource source, XMLFilter filter, boolean ignoreValidationErrors) throws JAXBException, SAXException, ParserConfigurationException, IOException
++   {
++      Unmarshaller unmarshaller = context.createUnmarshaller();
++
++      if (ignoreValidationErrors)
++      {
++         unmarshaller.setEventHandler(new ValidationEventHandler()
++         {
++            @Override public boolean handleEvent(ValidationEvent event)
++            {
++               return true;
++            }
++         });
++      }
++
++      UnmarshallerHandler unmarshallerHandler = unmarshaller.getUnmarshallerHandler();
++      filter.setParent(XmlReaderHelper.createXmlReader());
++      filter.setContentHandler(unmarshallerHandler);
++      filter.parse(source);
++
++      return unmarshallerHandler.getResult();
++   }
++
++}
+diff --git a/src/main/java/net/sf/mpxj/common/XmlReaderHelper.java b/src/main/java/net/sf/mpxj/common/XmlReaderHelper.java
+new file mode 100644
+index 0000000000..64e4cdcd70
+--- /dev/null
++++ b/src/main/java/net/sf/mpxj/common/XmlReaderHelper.java
+@@ -0,0 +1,51 @@
++/*
++ * file:       XmlReaderHelper.java
++ * author:     Jon Iles
++ * copyright:  (c) Packwood Software 2020
++ * date:       29/08/2020
++ */
++
++/*
++ * This library is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU Lesser General Public License as published by the
++ * Free Software Foundation; either version 2.1 of the License, or (at your
++ * option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
++ * License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this library; if not, write to the Free Software Foundation, Inc.,
++ * 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++package net.sf.mpxj.common;
++
++import javax.xml.parsers.ParserConfigurationException;
++import javax.xml.parsers.SAXParser;
++import javax.xml.parsers.SAXParserFactory;
++
++import org.xml.sax.SAXException;
++import org.xml.sax.XMLReader;
++
++/**
++ * Utility methods for working with XmlReader.
++ */
++public final class XmlReaderHelper
++{
++   /**
++    * Create a new XmlReader instance.
++    *
++    * @return XmlReader instance
++    */
++   public static final XMLReader createXmlReader() throws SAXException, ParserConfigurationException
++   {
++      SAXParserFactory factory = SAXParserFactory.newInstance();
++      factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
++      factory.setNamespaceAware(true);
++      SAXParser saxParser = factory.newSAXParser();
++      return saxParser.getXMLReader();
++   }
++}
+diff --git a/src/main/java/net/sf/mpxj/conceptdraw/ConceptDrawProjectReader.java b/src/main/java/net/sf/mpxj/conceptdraw/ConceptDrawProjectReader.java
+index 576908beeb..3d95d542c2 100644
+--- a/src/main/java/net/sf/mpxj/conceptdraw/ConceptDrawProjectReader.java
++++ b/src/main/java/net/sf/mpxj/conceptdraw/ConceptDrawProjectReader.java
+@@ -25,7 +25,6 @@
+ 
+ import java.io.IOException;
+ import java.io.InputStream;
+-import java.io.InputStreamReader;
+ import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.Comparator;
+@@ -36,16 +35,9 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+-import javax.xml.bind.UnmarshallerHandler;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+ 
+-import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLFilter;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.DateRange;
+ import net.sf.mpxj.Duration;
+@@ -65,6 +57,7 @@
+ import net.sf.mpxj.Task;
+ import net.sf.mpxj.TimeUnit;
+ import net.sf.mpxj.common.AlphanumComparator;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.conceptdraw.schema.Document;
+ import net.sf.mpxj.conceptdraw.schema.Document.Calendars.Calendar;
+ import net.sf.mpxj.conceptdraw.schema.Document.Calendars.Calendar.ExceptedDays.ExceptedDay;
+@@ -99,6 +92,11 @@
+    {
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_eventManager = m_projectFile.getEventManager();
+          m_calendarMap = new HashMap<>();
+@@ -113,23 +111,7 @@
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         XMLFilter filter = new NamespaceFilter();
+-         filter.setParent(xmlReader);
+-         UnmarshallerHandler unmarshallerHandler = unmarshaller.getUnmarshallerHandler();
+-         filter.setContentHandler(unmarshallerHandler);
+-         filter.parse(new InputSource(new InputStreamReader(stream)));
+-         Document cdp = (Document) unmarshallerHandler.getResult();
++         Document cdp = (Document) UnmarshalHelper.unmarshal(CONTEXT, stream, new NamespaceFilter());
+ 
+          readProjectProperties(cdp);
+          readCalendars(cdp);
+diff --git a/src/main/java/net/sf/mpxj/ganttdesigner/GanttDesignerReader.java b/src/main/java/net/sf/mpxj/ganttdesigner/GanttDesignerReader.java
+index 4ae64205c6..cf3f4ab791 100644
+--- a/src/main/java/net/sf/mpxj/ganttdesigner/GanttDesignerReader.java
++++ b/src/main/java/net/sf/mpxj/ganttdesigner/GanttDesignerReader.java
+@@ -31,15 +31,9 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+-import javax.xml.transform.sax.SAXSource;
+ 
+-import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.ChildTaskContainer;
+ import net.sf.mpxj.Day;
+@@ -54,6 +48,7 @@
+ import net.sf.mpxj.ProjectProperties;
+ import net.sf.mpxj.RelationType;
+ import net.sf.mpxj.Task;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.ganttdesigner.schema.Gantt;
+ import net.sf.mpxj.ganttdesigner.schema.GanttDesignerRemark;
+ import net.sf.mpxj.listener.ProjectListener;
+@@ -83,6 +78,11 @@
+    {
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_eventManager = m_projectFile.getEventManager();
+          m_taskMap = new HashMap<>();
+@@ -95,19 +95,7 @@
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-         SAXSource doc = new SAXSource(xmlReader, new InputSource(stream));
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         Gantt gantt = (Gantt) unmarshaller.unmarshal(doc);
++         Gantt gantt = (Gantt) UnmarshalHelper.unmarshal(CONTEXT, stream);
+ 
+          readProjectProperties(gantt);
+          readCalendar(gantt);
+diff --git a/src/main/java/net/sf/mpxj/ganttproject/GanttProjectReader.java b/src/main/java/net/sf/mpxj/ganttproject/GanttProjectReader.java
+index 5abc818ac6..10084fd689 100644
+--- a/src/main/java/net/sf/mpxj/ganttproject/GanttProjectReader.java
++++ b/src/main/java/net/sf/mpxj/ganttproject/GanttProjectReader.java
+@@ -37,15 +37,9 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+-import javax.xml.transform.sax.SAXSource;
+ 
+-import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.ChildTaskContainer;
+ import net.sf.mpxj.ConstraintType;
+@@ -76,6 +70,7 @@
+ import net.sf.mpxj.common.Pair;
+ import net.sf.mpxj.common.ResourceFieldLists;
+ import net.sf.mpxj.common.TaskFieldLists;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.ganttproject.schema.Allocation;
+ import net.sf.mpxj.ganttproject.schema.Allocations;
+ import net.sf.mpxj.ganttproject.schema.Calendars;
+@@ -118,6 +113,11 @@
+    {
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_eventManager = m_projectFile.getEventManager();
+          m_resourcePropertyDefinitions = new HashMap<>();
+@@ -137,19 +137,7 @@
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-         SAXSource doc = new SAXSource(xmlReader, new InputSource(stream));
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         Project ganttProject = (Project) unmarshaller.unmarshal(doc);
++         Project ganttProject = (Project) UnmarshalHelper.unmarshal(CONTEXT, stream);
+ 
+          readProjectProperties(ganttProject);
+          readCalendars(ganttProject);
+diff --git a/src/main/java/net/sf/mpxj/mspdi/MSPDIReader.java b/src/main/java/net/sf/mpxj/mspdi/MSPDIReader.java
+index 87da42b149..71c3187d26 100644
+--- a/src/main/java/net/sf/mpxj/mspdi/MSPDIReader.java
++++ b/src/main/java/net/sf/mpxj/mspdi/MSPDIReader.java
+@@ -40,18 +40,10 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+-import javax.xml.bind.UnmarshallerHandler;
+-import javax.xml.bind.ValidationEvent;
+-import javax.xml.bind.ValidationEventHandler;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+ 
+ import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLFilter;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.AssignmentField;
+ import net.sf.mpxj.Availability;
+@@ -104,6 +96,7 @@
+ import net.sf.mpxj.common.Pair;
+ import net.sf.mpxj.common.SplitTaskFactory;
+ import net.sf.mpxj.common.TimephasedWorkNormaliser;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.listener.ProjectListener;
+ import net.sf.mpxj.mpp.CustomFieldValueItem;
+ import net.sf.mpxj.mspdi.schema.Project;
+@@ -177,6 +170,11 @@ private Charset getCharset()
+    {
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_eventManager = m_projectFile.getEventManager();
+ 
+@@ -193,41 +191,9 @@ private Charset getCharset()
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+-         factory.setNamespaceAware(true);
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+          DatatypeConverter.setParentFile(m_projectFile);
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         //
+-         // If we are matching the behaviour of MS project, then we need to
+-         // ignore validation warnings.
+-         //
+-         if (m_compatibleInput == true)
+-         {
+-            unmarshaller.setEventHandler(new ValidationEventHandler()
+-            {
+-               @Override public boolean handleEvent(ValidationEvent event)
+-               {
+-                  return (true);
+-               }
+-            });
+-         }
+ 
+-         XMLFilter filter = new NamespaceFilter();
+-         filter.setParent(xmlReader);
+-         UnmarshallerHandler unmarshallerHandler = unmarshaller.getUnmarshallerHandler();
+-         filter.setContentHandler(unmarshallerHandler);
+-         filter.parse(new InputSource(new InputStreamReader(stream, getCharset())));
+-         Project project = (Project) unmarshallerHandler.getResult();
++         Project project = (Project) UnmarshalHelper.unmarshal(CONTEXT, new InputSource(new InputStreamReader(stream, getCharset())), new NamespaceFilter(), !m_compatibleInput);
+ 
+          HashMap<BigInteger, ProjectCalendar> calendarMap = new HashMap<>();
+ 
+diff --git a/src/main/java/net/sf/mpxj/phoenix/PhoenixReader.java b/src/main/java/net/sf/mpxj/phoenix/PhoenixReader.java
+index 2d739188c9..a37b05f6d9 100644
+--- a/src/main/java/net/sf/mpxj/phoenix/PhoenixReader.java
++++ b/src/main/java/net/sf/mpxj/phoenix/PhoenixReader.java
+@@ -37,15 +37,9 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+-import javax.xml.transform.sax.SAXSource;
+ 
+-import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.ChildTaskContainer;
+ import net.sf.mpxj.Day;
+@@ -68,6 +62,7 @@
+ import net.sf.mpxj.common.DateHelper;
+ import net.sf.mpxj.common.DebugLogPrintWriter;
+ import net.sf.mpxj.common.NumberHelper;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.listener.ProjectListener;
+ import net.sf.mpxj.phoenix.schema.Project;
+ import net.sf.mpxj.phoenix.schema.Project.Layouts.Layout;
+@@ -112,6 +107,11 @@
+ 
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_activityMap = new HashMap<>();
+          m_activityCodeValues = new HashMap<>();
+@@ -134,19 +134,7 @@
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-         SAXSource doc = new SAXSource(xmlReader, new InputSource(new SkipNulInputStream(stream)));
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         Project phoenixProject = (Project) unmarshaller.unmarshal(doc);
++         Project phoenixProject = (Project) UnmarshalHelper.unmarshal(CONTEXT, new SkipNulInputStream(stream));
+          Storepoint storepoint = getCurrentStorepoint(phoenixProject);
+          readProjectProperties(phoenixProject.getSettings(), storepoint);
+          readCalendars(storepoint);
+diff --git a/src/main/java/net/sf/mpxj/planner/PlannerReader.java b/src/main/java/net/sf/mpxj/planner/PlannerReader.java
+index ea133e5434..cdca815592 100644
+--- a/src/main/java/net/sf/mpxj/planner/PlannerReader.java
++++ b/src/main/java/net/sf/mpxj/planner/PlannerReader.java
+@@ -39,15 +39,9 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+-import javax.xml.transform.sax.SAXSource;
+ 
+-import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.ConstraintType;
+ import net.sf.mpxj.DateRange;
+@@ -73,6 +67,7 @@
+ import net.sf.mpxj.TimeUnit;
+ import net.sf.mpxj.common.DateHelper;
+ import net.sf.mpxj.common.NumberHelper;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.listener.ProjectListener;
+ import net.sf.mpxj.planner.schema.Allocation;
+ import net.sf.mpxj.planner.schema.Allocations;
+@@ -114,6 +109,11 @@
+    {
+       try
+       {
++         if (CONTEXT == null)
++         {
++            throw CONTEXT_EXCEPTION;
++         }
++
+          m_projectFile = new ProjectFile();
+          m_eventManager = m_projectFile.getEventManager();
+ 
+@@ -129,21 +129,7 @@
+ 
+          m_eventManager.addProjectListeners(m_projectListeners);
+ 
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+-         factory.setNamespaceAware(true);
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-         SAXSource doc = new SAXSource(xmlReader, new InputSource(stream));
+-
+-         if (CONTEXT == null)
+-         {
+-            throw CONTEXT_EXCEPTION;
+-         }
+-
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-
+-         Project plannerProject = (Project) unmarshaller.unmarshal(doc);
++         Project plannerProject = (Project) UnmarshalHelper.unmarshal(CONTEXT, stream);
+ 
+          readProjectProperties(plannerProject);
+          readCalendars(plannerProject);
+diff --git a/src/main/java/net/sf/mpxj/primavera/PrimaveraPMFileReader.java b/src/main/java/net/sf/mpxj/primavera/PrimaveraPMFileReader.java
+index 76000af37d..cdebe09648 100644
+--- a/src/main/java/net/sf/mpxj/primavera/PrimaveraPMFileReader.java
++++ b/src/main/java/net/sf/mpxj/primavera/PrimaveraPMFileReader.java
+@@ -39,17 +39,11 @@
+ 
+ import javax.xml.bind.JAXBContext;
+ import javax.xml.bind.JAXBException;
+-import javax.xml.bind.Unmarshaller;
+-import javax.xml.bind.UnmarshallerHandler;
+ import javax.xml.parsers.ParserConfigurationException;
+-import javax.xml.parsers.SAXParser;
+-import javax.xml.parsers.SAXParserFactory;
+ 
+ import org.apache.poi.util.ReplacingInputStream;
+ import org.xml.sax.InputSource;
+ import org.xml.sax.SAXException;
+-import org.xml.sax.XMLFilter;
+-import org.xml.sax.XMLReader;
+ 
+ import net.sf.mpxj.ActivityCode;
+ import net.sf.mpxj.ActivityCodeContainer;
+@@ -84,6 +78,7 @@
+ import net.sf.mpxj.common.BooleanHelper;
+ import net.sf.mpxj.common.DateHelper;
+ import net.sf.mpxj.common.NumberHelper;
++import net.sf.mpxj.common.UnmarshalHelper;
+ import net.sf.mpxj.listener.ProjectListener;
+ import net.sf.mpxj.primavera.schema.APIBusinessObjects;
+ import net.sf.mpxj.primavera.schema.ActivityCodeType;
+@@ -265,25 +260,12 @@ private APIBusinessObjects processFile(InputStream stream) throws MPXJException
+    {
+       try
+       {
+-         SAXParserFactory factory = SAXParserFactory.newInstance();
+-         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+-         factory.setNamespaceAware(true);
+-         SAXParser saxParser = factory.newSAXParser();
+-         XMLReader xmlReader = saxParser.getXMLReader();
+-
+          if (CONTEXT == null)
+          {
+             throw CONTEXT_EXCEPTION;
+          }
+ 
+-         Unmarshaller unmarshaller = CONTEXT.createUnmarshaller();
+-         XMLFilter filter = new NamespaceFilter();
+-         filter.setParent(xmlReader);
+-         UnmarshallerHandler unmarshallerHandler = unmarshaller.getUnmarshallerHandler();
+-         filter.setContentHandler(unmarshallerHandler);
+-         filter.parse(configureInputSource(stream));
+-
+-         return (APIBusinessObjects) unmarshallerHandler.getResult();
++         return (APIBusinessObjects) UnmarshalHelper.unmarshal(CONTEXT, configureInputSource(stream), new NamespaceFilter(), false);
+       }
+ 
+       catch (ParserConfigurationException ex)

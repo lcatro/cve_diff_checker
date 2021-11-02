@@ -1,0 +1,73 @@
+From a77ff09c46560bc895dea11dc9fe643486b056ac Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Wed, 22 Mar 2017 11:21:00 -0700
+Subject: [PATCH] CVE-2017-13027/LLDP: Fix a bounds check.
+
+The total length of the OID is the OID length plus the length of the OID
+length itself.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-lldp.c                       |   2 +-
+ tests/TESTLIST                     |   1 +
+ tests/lldp_mgmt_addr_tlv_asan.out  |   8 ++++++++
+ tests/lldp_mgmt_addr_tlv_asan.pcap | Bin 0 -> 118 bytes
+ 4 files changed, 10 insertions(+), 1 deletion(-)
+ create mode 100644 tests/lldp_mgmt_addr_tlv_asan.out
+ create mode 100644 tests/lldp_mgmt_addr_tlv_asan.pcap
+
+diff --git a/print-lldp.c b/print-lldp.c
+index dfdf1b94a..3984a4f58 100644
+--- a/print-lldp.c
++++ b/print-lldp.c
+@@ -1401,7 +1401,7 @@ lldp_mgmt_addr_tlv_print(netdissect_options *ndo,
+     if (tlen) {
+         oid_len = *tptr;
+ 
+-        if (tlen < oid_len) {
++        if (tlen < 1U + oid_len) {
+             return 0;
+         }
+         if (oid_len) {
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 9181bdf0d..9ac274704 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -532,6 +532,7 @@ isis_stlv_asan		isis_stlv_asan.pcap		isis_stlv_asan.out	-v
+ isis_stlv_asan-2	isis_stlv_asan-2.pcap		isis_stlv_asan-2.out	-v
+ isis_stlv_asan-3	isis_stlv_asan-3.pcap		isis_stlv_asan-3.out	-v
+ isis_stlv_asan-4	isis_stlv_asan-4.pcap		isis_stlv_asan-4.out	-v
++lldp_mgmt_addr_tlv_asan	lldp_mgmt_addr_tlv_asan.pcap	lldp_mgmt_addr_tlv_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/lldp_mgmt_addr_tlv_asan.out b/tests/lldp_mgmt_addr_tlv_asan.out
+new file mode 100644
+index 000000000..10d759724
+--- /dev/null
++++ b/tests/lldp_mgmt_addr_tlv_asan.out
+@@ -0,0 +1,8 @@
++LLDP, length 1048572
++	Management Address TLV (8), length 15
++	  Management Address length 6, AFI Reserved (0), no AF printer !
++	  Unknown Interface Numbering (10): 666137427
++	[|LLDP]
++00:00:00:a0:d4:c3 > 06:04:e8:03:00:02, ethertype Unknown (0xb2a1), length 58785857: 
++	0x0000:  0200 efff e5ff 804f 006e 0026 0000 0000  .......O.n.&....
++	0x0010:  01                                       .
+diff --git a/tests/lldp_mgmt_addr_tlv_asan.pcap b/tests/lldp_mgmt_addr_tlv_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..a7aec5904a2999060807888c306adedd1043e2ac
+GIT binary patch
+literal 118
+zcmca|c+)~A1{Q{A{~7!lfIuFI8G%@ROK~tWgC>~I#UQ}&|Nn2#X^bof4=k8Hx8sZe
+zKN~}NdM@KBF0i_PnhXp;MehZ`${iURnb}xgFf%X#%~@~-Y{C2gPyaXgGvqO-0mT>?
+E0d&P6n*aa+
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,70 @@
+From 423750573d07f1a463f115ef37182c1825080da4 Mon Sep 17 00:00:00 2001
+From: mokaddem <sami.mokaddem@circl.lu>
+Date: Tue, 24 Nov 2020 12:15:42 +0100
+Subject: [PATCH] fix: [security] Make cluster's elements adhere to ACL
+
+---
+ app/Controller/GalaxyElementsController.php |  6 ++--
+ app/Model/GalaxyElement.php                 | 33 +++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/app/Controller/GalaxyElementsController.php b/app/Controller/GalaxyElementsController.php
+index dd3287f8b9..68c3759c67 100644
+--- a/app/Controller/GalaxyElementsController.php
++++ b/app/Controller/GalaxyElementsController.php
+@@ -14,9 +14,11 @@ class GalaxyElementsController extends AppController
+             )
+     );
+ 
+-    public function index($id)
++    public function index($clusterId)
+     {
+-        $this->paginate['conditions'] = array('GalaxyElement.galaxy_cluster_id' => $id);
++        $aclConditions = $this->GalaxyElement->buildClusterConditions($this->Auth->user(), $clusterId);
++        $this->paginate['conditions'] = [$aclConditions];
++        $this->paginate['contain'] = ['GalaxyCluster' => ['fields' => ['id', 'distribution', 'org_id']]];
+         $clusters = $this->paginate();
+         $this->set('list', $clusters);
+         if ($this->request->is('ajax')) {
+diff --git a/app/Model/GalaxyElement.php b/app/Model/GalaxyElement.php
+index ea6f967f81..5b0207b43d 100644
+--- a/app/Model/GalaxyElement.php
++++ b/app/Model/GalaxyElement.php
+@@ -95,4 +95,37 @@ public function captureElements($user, $elements, $clusterId)
+         }
+         $this->saveMany($tempElements);
+     }
++
++    public function buildACLConditions($user)
++    {
++        $conditions = [];
++        if (!$user['Role']['perm_site_admin']) {
++            $conditions = $this->GalaxyCluster->buildConditions($user);
++        }
++        return $conditions;
++    }
++
++    public function buildClusterConditions($user, $clusterId)
++    {
++        return [
++            $this->buildACLConditions($user),
++            'GalaxyCluster.id' => $clusterId
++        ];
++    }
++
++    public function fetchElements(array $user, $clusterId)
++    {
++        $params = array(
++            'conditions' => $this->buildClusterConditions($user, $clusterId),
++            'contain' => ['GalaxyCluster' => ['fields' => ['id', 'distribution', 'org_id']]],
++            'recursive' => -1
++        );
++        $elements = $this->find('all', $params);
++        foreach ($elements as $i => $element) {
++            $elements[$i] = $elements[$i]['GalaxyElement'];
++            unset($elements[$i]['GalaxyCluster']);
++            unset($elements[$i]['GalaxyElement']);
++        }
++        return $elements;
++    }
+ }

@@ -1,0 +1,43 @@
+From d56619a50cfd191bbffd0adb660638a5e438070d Mon Sep 17 00:00:00 2001
+From: Gabriel Jenik <gabriel.jenik@gmail.com>
+Date: Tue, 21 Sep 2021 04:43:39 -0300
+Subject: [PATCH] Fixed issue #17562: XSS injection in the 'File upload'
+ question type in LimeSurvey version 3.x-LTS (#2044)
+
+---
+ assets/scripts/modaldialog.js | 5 ++++-
+ assets/scripts/uploader.js    | 5 ++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/assets/scripts/modaldialog.js b/assets/scripts/modaldialog.js
+index 1043126779..f5552ef12e 100644
+--- a/assets/scripts/modaldialog.js
++++ b/assets/scripts/modaldialog.js
+@@ -103,7 +103,10 @@ function displayUploadedFiles(jsonstring, filecount, fieldname, show_title, show
+ 
+     if (jsonstring !== '')
+     {
+-        jsonobj = eval('(' + jsonstring + ')');
++        var jsonobj = '';
++        try{
++            jsonobj = JSON.parse(jsonstring);
++        } catch(e) {}
+         display = '<table width="100%" class="question uploadedfiles"><thead><tr><td width="20%">&nbsp;</td>';
+         if (show_title != 0)
+             display += '<th>'+uploadLang.headTitle+'</th>';
+diff --git a/assets/scripts/uploader.js b/assets/scripts/uploader.js
+index 94b0c6bc34..fa3253dc54 100644
+--- a/assets/scripts/uploader.js
++++ b/assets/scripts/uploader.js
+@@ -38,7 +38,10 @@ function doFileUpload()
+     if (filecount > 0)
+     {
+         var jsontext = window.parent.window.$('#' + fieldname).val();
+-        var json = eval('(' + jsontext + ')');
++        var json = '';
++        try{
++            json = JSON.parse(jsontext);
++        } catch(e) {}
+         if ($('#field' + fieldname + '_listfiles').length == 0)
+         {
+             $("<ul id='field" + fieldname + "_listfiles' class='files-list' />").insertAfter("#uploadstatus");

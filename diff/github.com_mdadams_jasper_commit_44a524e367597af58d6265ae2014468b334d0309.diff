@@ -1,0 +1,30 @@
+From 44a524e367597af58d6265ae2014468b334d0309 Mon Sep 17 00:00:00 2001
+From: Michael Adams <mdadams@ece.uvic.ca>
+Date: Thu, 20 Oct 2016 07:34:32 -0700
+Subject: [PATCH] The memory stream interface allows for a buffer size of zero.
+ The case of a zero-sized buffer was not handled correctly, as it could lead
+ to a double free. This problem has now been fixed (hopefully). One might ask
+ whether a zero-sized buffer should be allowed at all, but this is a question
+ for another day.
+
+---
+ src/libjasper/base/jas_stream.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/libjasper/base/jas_stream.c b/src/libjasper/base/jas_stream.c
+index f1829728..29e4291c 100644
+--- a/src/libjasper/base/jas_stream.c
++++ b/src/libjasper/base/jas_stream.c
+@@ -993,9 +993,10 @@ static int mem_resize(jas_stream_memobj_t *m, int bufsize)
+ {
+ 	unsigned char *buf;
+ 
+-	assert(m->buf_);
++	//assert(m->buf_);
+ 	assert(bufsize >= 0);
+-	if (!(buf = jas_realloc2(m->buf_, bufsize, sizeof(unsigned char)))) {
++	if (!(buf = jas_realloc2(m->buf_, bufsize, sizeof(unsigned char))) &&
++	  bufsize) {
+ 		return -1;
+ 	}
+ 	m->buf_ = buf;

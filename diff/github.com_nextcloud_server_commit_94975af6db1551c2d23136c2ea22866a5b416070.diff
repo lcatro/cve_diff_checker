@@ -1,0 +1,50 @@
+From 94975af6db1551c2d23136c2ea22866a5b416070 Mon Sep 17 00:00:00 2001
+From: Lukas Reschke <lukas@owncloud.com>
+Date: Thu, 30 Jun 2016 13:04:54 +0200
+Subject: [PATCH] [stable9] Set content-type to "application/octet-stream"
+
+Some browsers such as Firefox on Microsoft Windows otherwise do offer to open the file directly which is kinda silly.
+
+Backport of https://github.com/nextcloud/server/pull/258
+---
+ settings/controller/logsettingscontroller.php           | 3 ++-
+ tests/settings/controller/logsettingscontrollertest.php | 6 +++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/settings/controller/logsettingscontroller.php b/settings/controller/logsettingscontroller.php
+index c0c9ee04ca3c..8750cc6e1881 100644
+--- a/settings/controller/logsettingscontroller.php
++++ b/settings/controller/logsettingscontroller.php
+@@ -103,7 +103,8 @@ public function getEntries($count=50, $offset=0) {
+ 	 */
+ 	public function download() {
+ 		$resp = new StreamResponse(\OC_Log_Owncloud::getLogFilePath());
+-		$resp->addHeader('Content-Disposition', 'attachment; filename="owncloud.log"');
++		$resp->addHeader('Content-Type', 'application/octet-stream');
++		$resp->addHeader('Content-Disposition', 'attachment; filename="nextcloud.log"');
+ 		return $resp;
+ 	}
+ }
+diff --git a/tests/settings/controller/logsettingscontrollertest.php b/tests/settings/controller/logsettingscontrollertest.php
+index 60680ba46472..3c290767e07c 100644
+--- a/tests/settings/controller/logsettingscontrollertest.php
++++ b/tests/settings/controller/logsettingscontrollertest.php
+@@ -11,6 +11,7 @@
+ 
+ use \OC\Settings\Application;
+ use OC\Settings\Controller\LogSettingsController;
++use OCP\AppFramework\Http\StreamResponse;
+ 
+ /**
+  * @package OC\Settings\Controller
+@@ -69,6 +70,9 @@ public function logLevelData() {
+ 	public function testDownload() {
+ 		$response = $this->logSettingsController->download();
+ 
+-		$this->assertInstanceOf('\OCP\AppFramework\Http\StreamResponse', $response);
++		$expected = new StreamResponse(\OC_Log_Owncloud::getLogFilePath());
++		$expected->addHeader('Content-Type', 'application/octet-stream');
++		$expected->addHeader('Content-Disposition', 'attachment; filename="nextcloud.log"');
++		$this->assertEquals($expected, $response);
+ 	}
+ }

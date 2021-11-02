@@ -1,0 +1,67 @@
+From 779309744222a736eba0f1731e8162fce6288d4e Mon Sep 17 00:00:00 2001
+From: Werner Lemberg <wl@gnu.org>
+Date: Tue, 7 Mar 2017 17:27:58 +0100
+Subject: [sfnt] Improve handling for buggy variation fonts.
+
+Reported as
+
+  https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=738
+
+* src/sfnt/sfobjs.c (sfnt_init_face): While setting number of
+instances to zero for `CFF' fonts table, ensure that there is no `glyf'
+present also (which gets priority).
+---
+ ChangeLog         | 12 ++++++++++++
+ src/sfnt/sfobjs.c |  9 +++++----
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/ChangeLog b/ChangeLog
+index 3074bcb10..59dcfd569 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,15 @@
++2017-03-07  Werner Lemberg  <wl@gnu.org>
++
++	[sfnt] Improve handling for buggy variation fonts.
++
++	Reported as
++
++	  https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=738
++
++	* src/sfnt/sfobjs.c (sfnt_init_face): While setting number of
++	instances to zero for `CFF' fonts table, ensure that there is no `glyf'
++	present also (which gets priority).
++
+ 2017-03-06  Werner Lemberg  <wl@gnu.org>
+ 
+ 	[sfnt, truetype] Always provide default instance.
+diff --git a/src/sfnt/sfobjs.c b/src/sfnt/sfobjs.c
+index 51be1c20d..0d5161f7e 100644
+--- a/src/sfnt/sfobjs.c
++++ b/src/sfnt/sfobjs.c
+@@ -999,10 +999,6 @@
+       else
+         face->variation_support |= TT_FACE_FLAG_VAR_FVAR;
+ 
+-      /* we don't support Multiple Master CFFs yet */
+-      if ( !face->goto_table( face, TTAG_CFF, stream, 0 ) )
+-        num_instances = 0;
+-
+       /*
+        *  As documented in the OpenType specification, an entry for the
+        *  default instance may be omitted in the named instance table.  In
+@@ -1062,6 +1058,11 @@
+       FT_FREE( default_values );
+       FT_FREE( instance_values );
+ 
++      /* we don't support Multiple Master CFFs yet */
++      if ( face->goto_table( face, TTAG_glyf, stream, 0 ) &&
++           !face->goto_table( face, TTAG_CFF, stream, 0 ) )
++        num_instances = 0;
++
+       /* instance indices in `face_instance_index' start with index 1, */
+       /* thus `>' and not `>='                                         */
+       if ( instance_index > num_instances )
+-- 
+cgit v1.2.1
+

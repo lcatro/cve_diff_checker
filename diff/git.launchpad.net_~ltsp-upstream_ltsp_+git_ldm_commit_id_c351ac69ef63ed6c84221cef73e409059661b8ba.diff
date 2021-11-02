@@ -1,0 +1,47 @@
+From c351ac69ef63ed6c84221cef73e409059661b8ba Mon Sep 17 00:00:00 2001
+From: Vagrant Cascadian <vagrant@debian.org>
+Date: Sun, 29 Dec 2019 14:33:05 -0800
+Subject: Fix root access when LDM_USERNAME variable is unset.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch fixes an issue leading to root access on ltsp fat client
+systems when the user's shell is csh, tcsh, fish and probably any
+shell not supporting bourne shell syntax.
+
+When running in an unsupported shell, the LDM_USERNAME variable may
+end up being set to empty, resulting in a root login on ltsp fat
+clients.
+
+Mitigate this by skipping login when the LDM_USERNAME variable is
+unset.
+
+Thanks to Veeti Veteläinen for reporting the issue and Alkis
+Georgopoulos for further help in debugging.
+---
+ rc.d/X95-run-x-session | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/rc.d/X95-run-x-session b/rc.d/X95-run-x-session
+index b11bbf2..f74da46 100644
+--- a/rc.d/X95-run-x-session
++++ b/rc.d/X95-run-x-session
+@@ -40,8 +40,12 @@ if ! boolean_is_true "$LDM_NOMAD"; then
+             echo "CKCON_X11_DISPLAY_DEVICE DEFAULT=$CKCON_X11_DISPLAY_DEVICE" >> /etc/security/pam_env.conf
+         fi
+ 
+-        # The XDG_* variables are for logind support.
+-        XDG_SEAT=${XDG_SEAT:-seat0} XDG_VTNR=${SCREEN_NUM#0} su - ${LDM_USERNAME} -c "$CLIENT_ENV $MY_LANG DISPLAY=$DISPLAY ICEAUTHORITY=$ICEAUTHORITY XAUTHORITY=$XAUTHORITY $LDM_XSESSION $LDM_SESSION"
++        # Skip if LDM_USERNAME is unset, mitigating root access:
++        # https://bugs.launchpad.net/ubuntu/+source/ldm/+bug/1839431
++        if [ -n "${LDM_USERNAME}" ]; then
++            # The XDG_* variables are for logind support.
++            XDG_SEAT=${XDG_SEAT:-seat0} XDG_VTNR=${SCREEN_NUM#0} su - "${LDM_USERNAME}" -c "$CLIENT_ENV $MY_LANG DISPLAY=$DISPLAY ICEAUTHORITY=$ICEAUTHORITY XAUTHORITY=$XAUTHORITY $LDM_XSESSION $LDM_SESSION"
++        fi
+ 
+         # Unmount any removable devices mounted by the user
+         for d in $(mount | awk '/uhelper=udisks/ {print $1}; /uhelper=devkit/ {print $1}'); do
+-- 
+cgit v1.1
+

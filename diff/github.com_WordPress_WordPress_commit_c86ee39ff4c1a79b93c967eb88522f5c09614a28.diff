@@ -1,0 +1,47 @@
+From c86ee39ff4c1a79b93c967eb88522f5c09614a28 Mon Sep 17 00:00:00 2001
+From: Sergey Biryukov <sergeybiryukov.ru@gmail.com>
+Date: Wed, 4 Sep 2019 16:57:56 +0000
+Subject: [PATCH] Improve URL validation in `wp_validate_redirect()`.
+
+Props vortfu, whyisjake, peterwilsoncc.
+Built from https://develop.svn.wordpress.org/trunk@45971
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@45782 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+---
+ wp-includes/pluggable.php | 8 ++++++++
+ wp-includes/version.php   | 2 +-
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/wp-includes/pluggable.php b/wp-includes/pluggable.php
+index 82b55f199a47..9336e03c7e73 100644
+--- a/wp-includes/pluggable.php
++++ b/wp-includes/pluggable.php
+@@ -1407,6 +1407,14 @@ function wp_validate_redirect( $location, $default = '' ) {
+ 			return $default;
+ 		}
+ 
++		if ( ! isset( $lp['host'] ) && ! empty( $lp['path'] ) && '/' !== $lp['path'][0] ) {
++			$path = '';
++			if ( ! empty( $_SERVER['REQUEST_URI'] ) ) {
++				$path = dirname( parse_url( 'http://placeholder' . $_SERVER['REQUEST_URI'], PHP_URL_PATH ) . '?' );
++			}
++			$location = '/' . ltrim( $path . '/', '/' ) . $location;
++		}
++
+ 		// Reject if certain components are set but host is not. This catches urls like https:host.com for which parse_url does not set the host field.
+ 		if ( ! isset( $lp['host'] ) && ( isset( $lp['scheme'] ) || isset( $lp['user'] ) || isset( $lp['pass'] ) || isset( $lp['port'] ) ) ) {
+ 			return $default;
+diff --git a/wp-includes/version.php b/wp-includes/version.php
+index d31146053cc0..c281d10c035e 100644
+--- a/wp-includes/version.php
++++ b/wp-includes/version.php
+@@ -13,7 +13,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '5.3-alpha-45964';
++$wp_version = '5.3-alpha-45971';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.

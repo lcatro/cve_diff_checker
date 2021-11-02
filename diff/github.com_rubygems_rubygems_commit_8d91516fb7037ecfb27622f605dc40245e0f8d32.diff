@@ -1,0 +1,113 @@
+From 8d91516fb7037ecfb27622f605dc40245e0f8d32 Mon Sep 17 00:00:00 2001
+From: Samuel Giddins <segiddins@segiddins.me>
+Date: Mon, 1 May 2017 12:41:29 -0500
+Subject: [PATCH] [RemoteFetcher] Avoid DNS Hijacking Vulnerability
+
+Reported by @claudijd
+
+**Description:**
+
+The RubyGems client supports a gem server API discovery functionality,
+which is used when pushing or pulling gems to a gem distribution/hosting
+server, like RubyGems.org.  This functionality is provided via a SRV DNS
+request to the users gem source hostname prepended with "_rubygems._tcp.".
+The response to this request tells the RubyGems client (aka: the gem
+command) where the users gem server API is.  In the default RubyGems
+scenario, with a gem source of https://rubygems.org, the users SRV DNS
+request and reply will look like this:
+
+    ~ $ dig srv _rubygems._tcp.rubygems.org +short
+    0 1 80 api.rubygems.org.
+
+Due to a deficiency in DNS response verification, a MiTM positioned
+attacker can poison the DNS response to this record response and force
+the client to unknowingly download and install Ruby gems from an attacker
+controlled gem server in an alternate security domain.  An example of
+such a scenario would look like so:
+
+    ~ $ dig _rubygems._tcp.rubygems.org SRV +short
+    0 0 53 evil.com/api.rubygems.com.
+
+In such a scenario, the attacker is able to serve the client malicious gem
+content, resulting in trivial remote code execution scenarios.  For
+example, the attacker could simply modify the gem source code and trigger
+code execution via the extensions API at install time on the client machine
+(a gem trojaning technique described by Ben Smith in his "Hacking with
+Gems" presentation at Aloha Ruby Conference in 2012 -
+https://www.youtube.com/watch?v=z-5bO0Q1J9s)/
+
+This vulnerability has the same net effect/impact as [CVE-2015-3900](https://nvd.nist.gov/vuln/detail/CVE-2015-3900) and
+[CVE-2015-4020](https://nvd.nist.gov/vuln/detail/CVE-2015-4020).
+
+**Affected method in Gem::RemoteFetcher:**
+
+https://github.com/rubygems/rubygems/blob/5096fa35c1ca3e0a7d175aaf9d77cd93114fd977/lib/rubygems/remote_fetcher.rb#L101-L119
+
+**PoC DNS SRV Responder:**
+
+    #!/usr/bin/env ruby
+    require 'rubydns'
+    require 'rubydns/system'
+    INTERFACES = [
+    	[:udp, "0.0.0.0", 53],
+    	[:tcp, "0.0.0.0", 53]
+    ]
+    Name = Resolv::DNS::Name
+    IN = Resolv::DNS::Resource::IN
+    RubyDNS::run_server(:listen => INTERFACES) do
+      match(//, IN::SRV) do |transaction|
+        transaction.respond!(0,0,53,"evil.com/api.rubygems.com")
+      end
+    end
+
+**Fix:**
+
+By parsing the returned target as a URI and only matching against the
+`hostname`, we can ensure that only subdomains of the original host
+are redirected to. This way, adding URI-delimiting characters to the
+`target` cannot be used to front-pad the target, creating a
+false-positive match.
+---
+ lib/rubygems/remote_fetcher.rb           |  2 +-
+ test/rubygems/test_gem_remote_fetcher.rb | 15 +++++++++++++++
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/lib/rubygems/remote_fetcher.rb b/lib/rubygems/remote_fetcher.rb
+index e6a13d4b8c65..8f0cf0b4026b 100644
+--- a/lib/rubygems/remote_fetcher.rb
++++ b/lib/rubygems/remote_fetcher.rb
+@@ -110,7 +110,7 @@ def api_endpoint(uri)
+     else
+       target = res.target.to_s.strip
+ 
+-      if /\.#{Regexp.quote(host)}\z/ =~ target
++      if URI("http://" + target).host.end_with?(".#{host}")
+         return URI.parse "#{uri.scheme}://#{target}#{uri.path}"
+       end
+ 
+diff --git a/test/rubygems/test_gem_remote_fetcher.rb b/test/rubygems/test_gem_remote_fetcher.rb
+index cb994462cddc..fbb7d890198e 100644
+--- a/test/rubygems/test_gem_remote_fetcher.rb
++++ b/test/rubygems/test_gem_remote_fetcher.rb
+@@ -241,6 +241,21 @@ def test_api_endpoint_ignores_trans_domain_values_that_end_with_original
+     dns.verify
+   end
+ 
++  def test_api_endpoint_ignores_trans_domain_values_that_end_with_original_in_path
++    uri = URI.parse "http://example.com/foo"
++    target = MiniTest::Mock.new
++    target.expect :target, "evil.com/a.example.com"
++
++    dns = MiniTest::Mock.new
++    dns.expect :getresource, target, [String, Object]
++
++    fetch = Gem::RemoteFetcher.new nil, dns
++    assert_equal URI.parse("http://example.com/foo"), fetch.api_endpoint(uri)
++
++    target.verify
++    dns.verify
++  end
++
+   def test_api_endpoint_timeout_warning
+     uri = URI.parse "http://gems.example.com/foo"
+ 

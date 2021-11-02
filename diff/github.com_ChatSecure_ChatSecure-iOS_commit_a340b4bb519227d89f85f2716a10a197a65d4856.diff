@@ -1,0 +1,130 @@
+From a340b4bb519227d89f85f2716a10a197a65d4856 Mon Sep 17 00:00:00 2001
+From: David Chiles <david@davidchiles.org>
+Date: Mon, 23 Jan 2017 13:16:45 -0800
+Subject: [PATCH] Changed to using carbon module delegate methods
+
+---
+ .../Classes/Controllers/XMPP/OTRXMPPManager.m |  9 ++---
+ .../XMPP/OTRXMPPMessageYapStroage.h           |  1 +
+ .../XMPP/OTRXMPPMessageYapStroage.m           | 35 +++++++++----------
+ 3 files changed, 22 insertions(+), 23 deletions(-)
+
+diff --git a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPManager.m b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPManager.m
+index 8e266f2cd..c16770cce 100644
+--- a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPManager.m
++++ b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPManager.m
+@@ -219,14 +219,15 @@ - (void)setupStream
+     [self.xmppCapabilities addDelegate:self delegateQueue:self.workQueue];
+     [self.xmppvCardTempModule addDelegate:self delegateQueue:self.workQueue];
+     
+-    // Message Carbons
+-    _messageCarbons = [[XMPPMessageCarbons alloc] init];
+-    [self.messageCarbons activate:self.xmppStream];
+-    
+     // Message storage
+     _messageStorage = [[OTRXMPPMessageYapStroage alloc] initWithDatabaseConnection:self.databaseConnection];
+     [self.messageStorage activate:self.xmppStream];
+     
++    // Message Carbons
++    _messageCarbons = [[XMPPMessageCarbons alloc] init];
++    [self.messageCarbons addDelegate:self.messageStorage delegateQueue:self.messageStorage.moduleDelegateQueue];
++    [self.messageCarbons activate:self.xmppStream];
++    
+     //Stream Management
+     _streamManagementDelegate = [[OTRStreamManagementDelegate alloc] initWithDatabaseConnection:self.databaseConnection];
+     
+diff --git a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.h b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.h
+index 8c161edf8..b372fead1 100644
+--- a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.h
++++ b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.h
+@@ -14,6 +14,7 @@ NS_ASSUME_NONNULL_BEGIN
+ @interface OTRXMPPMessageYapStroage : XMPPModule
+ 
+ @property (nonatomic, strong, readonly) YapDatabaseConnection *databaseConnection;
++@property (nonatomic, readonly) dispatch_queue_t moduleDelegateQueue;
+ 
+ /** This connection is only used for readWrites */
+ - (instancetype)initWithDatabaseConnection:(YapDatabaseConnection *)databaseConnection;
+diff --git a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.m b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.m
+index 5c649250f..d00fa0d59 100644
+--- a/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.m
++++ b/ChatSecure/Classes/Controllers/XMPP/OTRXMPPMessageYapStroage.m
+@@ -25,23 +25,11 @@ - (instancetype)initWithDatabaseConnection:(YapDatabaseConnection *)connection
+ {
+     if (self = [self init]) {
+         _databaseConnection = connection;
++        _moduleDelegateQueue = dispatch_queue_create("OTRXMPPMessageYapStroage-delegateQueue", 0);
+     }
+     return self;
+ }
+ 
+-- (void)xmppStream:(XMPPStream *)sender didReceiveMessage:(XMPPMessage *)xmppMessage
+-{
+-    [self storeMessage:xmppMessage stream:sender incoming:YES];
+-}
+-
+-- (void)storeMessage:(XMPPMessage *)xmppMessage stream:(XMPPStream *)stream incoming:(BOOL)incoming
+-{
+-    if ([xmppMessage isMessageCarbon]) {
+-        [self handleCarbonMessage:xmppMessage stream:stream];
+-    } else {
+-        [self handleMessage:xmppMessage stream:stream incoming:incoming];
+-    }
+-}
+ 
+ - (OTRXMPPBuddy *)buddyForUsername:(NSString *)username stream:(XMPPStream *)stream transaction:(YapDatabaseReadTransaction *)transaction
+ {
+@@ -76,7 +64,7 @@ - (OTRIncomingMessage *)incomingMessageFromXMPPMessage:(XMPPMessage *)xmppMessag
+     return (OTRIncomingMessage *)[self baseMessageFromXMPPMessage:xmppMessage buddyId:buddyId class:[OTRIncomingMessage class]];
+ }
+ 
+-- (void)handleMessage:(XMPPMessage *)xmppMessage stream:(XMPPStream *)stream incoming:(BOOL)incoming;
++- (void)xmppStream:(XMPPStream *)stream didReceiveMessage:(XMPPMessage *)xmppMessage
+ {
+     // We don't handle incoming group chat messages here
+     // Check out OTRXMPPRoomYapStorage instead
+@@ -86,6 +74,10 @@ - (void)handleMessage:(XMPPMessage *)xmppMessage stream:(XMPPStream *)stream inc
+         return;
+     }
+     
++    if ([xmppMessage isMessageCarbon]) {
++        return;
++    }
++    
+     [self.databaseConnection asyncReadWriteWithBlock:^(YapDatabaseReadWriteTransaction *transaction) {
+         if ([stream.tag isKindOfClass:[NSString class]]) {
+             NSString *username = [[xmppMessage from] bare];
+@@ -184,18 +176,16 @@ - (BOOL)duplicateMessage:(XMPPMessage *)message buddyUniqueId:(NSString *)buddyU
+     return result;
+ }
+ 
+-- (void)handleCarbonMessage:(XMPPMessage *)xmppMessage stream:(XMPPStream *)stream
++- (void)handleCarbonMessage:(XMPPMessage *)forwardedMessage stream:(XMPPStream *)stream outgoing:(BOOL)isOutgoing
+ {
+     //Sent Message Carbons are sent by our account to another
+     //So from is our JID and to is buddy
+-    BOOL incoming = NO;
+-    XMPPMessage *forwardedMessage = [xmppMessage messageCarbonForwardedMessage];
++    BOOL incoming = !isOutgoing;
+     
+     
+     NSString *username = nil;
+-    if ([xmppMessage isReceivedMessageCarbon]) {
++    if (incoming) {
+         username = [[forwardedMessage from] bare];
+-        incoming = YES;
+     } else {
+         username = [[forwardedMessage to] bare];
+     }
+@@ -230,4 +220,11 @@ - (void)handleCarbonMessage:(XMPPMessage *)xmppMessage stream:(XMPPStream *)stre
+     }];
+ }
+ 
++#pragma - mark XMPPMessageCarbonsDelegate
++
++- (void)xmppMessageCarbons:(XMPPMessageCarbons *)xmppMessageCarbons didReceiveMessage:(XMPPMessage *)message outgoing:(BOOL)isOutgoing
++{
++    [self handleCarbonMessage:message stream:xmppMessageCarbons.xmppStream outgoing:isOutgoing];
++}
++
+ @end

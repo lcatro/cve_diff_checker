@@ -1,0 +1,106 @@
+From 056e39d327bb10c1b0958dfbea0c39752692a1b0 Mon Sep 17 00:00:00 2001
+From: Benny Neugebauer <bn@bennyn.de>
+Date: Fri, 7 May 2021 14:02:26 +0200
+Subject: [PATCH] refactor: Remove jpeg-large support
+
+---
+ .../template/content/conversation/input-bar.htm     |  2 +-
+ src/script/Config.ts                                |  3 ++-
+ src/script/components/asset/imageAsset.ts           | 13 +++++++++++--
+ src/script/view_model/content/InputBarViewModel.ts  |  5 +++--
+ src/worker/image-worker.js                          |  1 +
+ 5 files changed, 18 insertions(+), 6 deletions(-)
+
+diff --git a/src/page/template/content/conversation/input-bar.htm b/src/page/template/content/conversation/input-bar.htm
+index a1440d7cd86..f793372a3f2 100644
+--- a/src/page/template/content/conversation/input-bar.htm
++++ b/src/page/template/content/conversation/input-bar.htm
+@@ -101,7 +101,7 @@
+ 
+               <label id="conversation-input-bar-photo" class="controls-right-button button-icon-large">
+                 <image-icon></image-icon>
+-                <input data-bind="attr: {accept: allowedImageTypes}, file_select: uploadImages" type="file" multiple="multiple" data-uie-name="do-share-image"/>
++                <input data-bind="attr: {accept: acceptedImageTypes}, file_select: uploadImages" type="file" multiple="multiple" data-uie-name="do-share-image"/>
+               </label>
+ 
+               <label id="conversation-input-bar-files" class="controls-right-button button-icon-large" data-bind="attr: {title: t('tooltipConversationFile')}">
+diff --git a/src/script/Config.ts b/src/script/Config.ts
+index 08134318c9c..0936b739b00 100644
+--- a/src/script/Config.ts
++++ b/src/script/Config.ts
+@@ -105,7 +105,8 @@ export class Configuration {
+   /** measured in pixel */
+   readonly SCROLL_TO_LAST_MESSAGE_THRESHOLD = 100;
+ 
+-  readonly ALLOWED_IMAGE_TYPES = ['image/bmp', 'image/gif', 'image/jpeg', 'image/jpg', 'image/png', '.jpg-large'];
++  /** Image MIME types */
++  readonly ALLOWED_IMAGE_TYPES = ['image/bmp', 'image/gif', 'image/jpeg', 'image/jpg', 'image/png'];
+ }
+ 
+ let instance: Configuration;
+diff --git a/src/script/components/asset/imageAsset.ts b/src/script/components/asset/imageAsset.ts
+index ed4e8790584..989d0acc7d9 100644
+--- a/src/script/components/asset/imageAsset.ts
++++ b/src/script/components/asset/imageAsset.ts
+@@ -24,6 +24,7 @@ import type {MediumImage} from '../../entity/message/MediumImage';
+ import {viewportObserver} from '../../ui/viewportObserver';
+ import {AbstractAssetTransferStateTracker} from './AbstractAssetTransferStateTracker';
+ import './AssetLoader';
++import {Config} from '../../Config';
+ 
+ interface Params {
+   asset: MediumImage;
+@@ -60,8 +61,16 @@ class ImageAssetComponent extends AbstractAssetTransferStateTracker {
+         if (this.isVisible() && asset.resource()) {
+           this.assetRepository
+             .load(asset.resource())
+-            .then(blob => {
+-              this.imageUrl(window.URL.createObjectURL(blob));
++            .then((blob: Blob) => {
++              const allowedImageTypes = [
++                'application/octet-stream', // Octet-stream is required to paste images from clipboard
++                ...Config.getConfig().ALLOWED_IMAGE_TYPES,
++              ];
++              if (allowedImageTypes.includes(blob.type)) {
++                this.imageUrl(window.URL.createObjectURL(blob));
++              } else {
++                throw new Error(`Unsupported image type "${blob.type}".`);
++              }
+             })
+             .catch(error => console.error(error));
+         }
+diff --git a/src/script/view_model/content/InputBarViewModel.ts b/src/script/view_model/content/InputBarViewModel.ts
+index 8735135b427..473bffe57f1 100644
+--- a/src/script/view_model/content/InputBarViewModel.ts
++++ b/src/script/view_model/content/InputBarViewModel.ts
+@@ -104,7 +104,8 @@ export class InputBarViewModel {
+   readonly renderMessage: typeof renderMessage;
+   readonly input: ko.Observable<string>;
+   private readonly showAvailabilityTooltip: ko.PureComputed<boolean>;
+-  readonly allowedImageTypes: string;
++  /** MIME types and file extensions are accepted */
++  readonly acceptedImageTypes: string;
+   readonly allowedFileTypes: string;
+ 
+   static get CONFIG() {
+@@ -130,7 +131,7 @@ export class InputBarViewModel {
+   ) {
+     this.shadowInput = null;
+     this.textarea = null;
+-    this.allowedImageTypes = Config.getConfig().ALLOWED_IMAGE_TYPES.join(',');
++    this.acceptedImageTypes = Config.getConfig().ALLOWED_IMAGE_TYPES.join(',');
+     this.allowedFileTypes = Config.getConfig().FEATURE.ALLOWED_FILE_UPLOAD_EXTENSIONS.join(',');
+ 
+     this.selectionStart = ko.observable(0);
+diff --git a/src/worker/image-worker.js b/src/worker/image-worker.js
+index f7a228d3333..b24a0f3d70a 100644
+--- a/src/worker/image-worker.js
++++ b/src/worker/image-worker.js
+@@ -33,6 +33,7 @@ self.addEventListener('message', (/** @type {MessageEvent<Data>} */ event) => {
+     MAX_FILE_SIZE = 1024 * 1024;
+   }
+ 
++  // Unfortunately, Jimp doesn't support MIME type "image/webp": https://github.com/oliver-moran/jimp/issues/144
+   Jimp.read(event.data.buffer).then(image => {
+     if (event.data.useProfileImageSize) {
+       image.cover(MAX_SIZE, MAX_SIZE);

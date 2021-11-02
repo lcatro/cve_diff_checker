@@ -1,0 +1,32 @@
+From 1b71a6ba963d131375f5e489b3b25e36f19f3f24 Mon Sep 17 00:00:00 2001
+From: Fabian Greffrath <fabian@greffrath.com>
+Date: Mon, 31 Aug 2020 10:00:37 +0200
+Subject: [PATCH] fix heap-buffer-overflow in mp4read.c
+
+This originated from an integer overflow: If mp4config.frame.ents
+would be read-in with a value of (uint32t)(-1), it would overflow to 0
+in the size calculation for the allocation in the next line. The
+malloc() function would then successfully return a pointer to a memory
+region of size 0, which will cause a segfault when written to.
+
+Fixes #57.
+---
+ frontend/mp4read.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/frontend/mp4read.c b/frontend/mp4read.c
+index 1414684..6a618d3 100644
+--- a/frontend/mp4read.c
++++ b/frontend/mp4read.c
+@@ -344,7 +344,10 @@ static int stszin(int size)
+     u32in();
+     // Number of entries
+     mp4config.frame.ents = u32in();
+-    // fixme: check atom size
++
++    if (!(mp4config.frame.ents + 1))
++        return ERR_FAIL;
++
+     mp4config.frame.data = malloc(sizeof(*mp4config.frame.data)
+                                   * (mp4config.frame.ents + 1));
+ 

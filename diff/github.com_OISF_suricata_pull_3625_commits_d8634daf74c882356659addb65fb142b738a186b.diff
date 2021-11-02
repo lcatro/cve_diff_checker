@@ -1,0 +1,32 @@
+From d8634daf74c882356659addb65fb142b738a186b Mon Sep 17 00:00:00 2001
+From: Victor Julien <victor@inliniac.net>
+Date: Fri, 18 Jan 2019 15:03:39 +0100
+Subject: [PATCH] stream: fix false negative on bad RST
+
+If a bad RST was received the stream inspection would not happen
+for that packet, but it would still move the 'raw progress' tracker
+forward. Following good packets would then fail to detect anything
+before the 'raw progress' position.
+
+Bug #2770
+
+Reported-by: Alexey Vishnyakov
+---
+ src/detect.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/detect.c b/src/detect.c
+index a7b2124d2b0..5270b5649a4 100644
+--- a/src/detect.c
++++ b/src/detect.c
+@@ -1039,7 +1039,9 @@ static void DetectRunCleanup(DetectEngineThreadCtx *det_ctx,
+ 
+     if (pflow != NULL) {
+         /* update inspected tracker for raw reassembly */
+-        if (p->proto == IPPROTO_TCP && pflow->protoctx != NULL) {
++        if (p->proto == IPPROTO_TCP && pflow->protoctx != NULL &&
++            (p->flags & PKT_STREAM_EST))
++        {
+             StreamReassembleRawUpdateProgress(pflow->protoctx, p,
+                     det_ctx->raw_stream_progress);
+ 

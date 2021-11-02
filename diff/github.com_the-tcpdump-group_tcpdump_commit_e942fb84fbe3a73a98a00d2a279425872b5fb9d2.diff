@@ -1,0 +1,163 @@
+From e942fb84fbe3a73a98a00d2a279425872b5fb9d2 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 7 Feb 2017 03:03:34 -0800
+Subject: [PATCH] CVE-2017-12992/RIPng: Clean up bounds checking.
+
+Do bounds checking as we access items.
+
+Scan the list of netinfo6 entries based on the supplied packet length,
+without taking the captured length into account; let the aforementioned
+bounds checking handle that.
+
+This fixes a buffer over-read discovered by Kamil Frankowicz.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-ripng.c                |  71 ++++++++++++++++++++---------------
+ tests/TESTLIST               |   1 +
+ tests/hoobr_ripng_print.out  |   1 +
+ tests/hoobr_ripng_print.pcap | Bin 0 -> 88 bytes
+ 4 files changed, 42 insertions(+), 31 deletions(-)
+ create mode 100644 tests/hoobr_ripng_print.out
+ create mode 100644 tests/hoobr_ripng_print.pcap
+
+diff --git a/print-ripng.c b/print-ripng.c
+index 25e9bbca0..7113239ad 100644
+--- a/print-ripng.c
++++ b/print-ripng.c
+@@ -110,65 +110,74 @@ ripng_print(netdissect_options *ndo, const u_char *dat, unsigned int length)
+ {
+ 	register const struct rip6 *rp = (const struct rip6 *)dat;
+ 	register const struct netinfo6 *ni;
+-	register u_int amt;
+-	register u_int i;
+-	int j;
+-	int trunc;
+-
+-	if (ndo->ndo_snapend < dat)
+-		return;
+-	amt = ndo->ndo_snapend - dat;
+-	i = min(length, amt);
+-	if (i < (sizeof(struct rip6) - sizeof(struct netinfo6)))
+-		return;
+-	i -= (sizeof(struct rip6) - sizeof(struct netinfo6));
++	unsigned int length_left;
++	u_int j;
+ 
++	ND_TCHECK(rp->rip6_cmd);
+ 	switch (rp->rip6_cmd) {
+ 
+ 	case RIP6_REQUEST:
+-		j = length / sizeof(*ni);
+-		if (j == 1
+-		    &&  rp->rip6_nets->rip6_metric == HOPCNT_INFINITY6
+-		    &&  IN6_IS_ADDR_UNSPECIFIED(&rp->rip6_nets->rip6_dest)) {
+-			ND_PRINT((ndo, " ripng-req dump"));
+-			break;
++		length_left = length;
++		if (length_left < (sizeof(struct rip6) - sizeof(struct netinfo6)))
++			goto trunc;
++		length_left -= (sizeof(struct rip6) - sizeof(struct netinfo6));
++ 		j = length_left / sizeof(*ni);
++		if (j == 1) {
++			ND_TCHECK(rp->rip6_nets);
++			if (rp->rip6_nets->rip6_metric == HOPCNT_INFINITY6
++			    &&  IN6_IS_ADDR_UNSPECIFIED(&rp->rip6_nets->rip6_dest)) {
++				ND_PRINT((ndo, " ripng-req dump"));
++				break;
++			}
+ 		}
+-		if (j * sizeof(*ni) != length - 4)
+-			ND_PRINT((ndo, " ripng-req %d[%u]:", j, length));
++		if (j * sizeof(*ni) != length_left)
++			ND_PRINT((ndo, " ripng-req %u[%u]:", j, length));
+ 		else
+-			ND_PRINT((ndo, " ripng-req %d:", j));
+-		trunc = ((i / sizeof(*ni)) * sizeof(*ni) != i);
+-		for (ni = rp->rip6_nets; i >= sizeof(*ni);
+-		    i -= sizeof(*ni), ++ni) {
++			ND_PRINT((ndo, " ripng-req %u:", j));
++		for (ni = rp->rip6_nets; length_left >= sizeof(*ni);
++		    length_left -= sizeof(*ni), ++ni) {
++			ND_TCHECK(*ni);
+ 			if (ndo->ndo_vflag > 1)
+ 				ND_PRINT((ndo, "\n\t"));
+ 			else
+ 				ND_PRINT((ndo, " "));
+ 			rip6_entry_print(ndo, ni, 0);
+ 		}
++		if (length_left != 0)
++			goto trunc;
+ 		break;
+ 	case RIP6_RESPONSE:
+-		j = length / sizeof(*ni);
+-		if (j * sizeof(*ni) != length - 4)
++		length_left = length;
++		if (length_left < (sizeof(struct rip6) - sizeof(struct netinfo6)))
++			goto trunc;
++		length_left -= (sizeof(struct rip6) - sizeof(struct netinfo6));
++		j = length_left / sizeof(*ni);
++		if (j * sizeof(*ni) != length_left)
+ 			ND_PRINT((ndo, " ripng-resp %d[%u]:", j, length));
+ 		else
+ 			ND_PRINT((ndo, " ripng-resp %d:", j));
+-		trunc = ((i / sizeof(*ni)) * sizeof(*ni) != i);
+-		for (ni = rp->rip6_nets; i >= sizeof(*ni);
+-		    i -= sizeof(*ni), ++ni) {
++		for (ni = rp->rip6_nets; length_left >= sizeof(*ni);
++		    length_left -= sizeof(*ni), ++ni) {
++			ND_TCHECK(*ni);
+ 			if (ndo->ndo_vflag > 1)
+ 				ND_PRINT((ndo, "\n\t"));
+ 			else
+ 				ND_PRINT((ndo, " "));
+ 			rip6_entry_print(ndo, ni, ni->rip6_metric);
+ 		}
+-		if (trunc)
+-			ND_PRINT((ndo, "[|ripng]"));
++		if (length_left != 0)
++			goto trunc;
+ 		break;
+ 	default:
+ 		ND_PRINT((ndo, " ripng-%d ?? %u", rp->rip6_cmd, length));
+ 		break;
+ 	}
++	ND_TCHECK(rp->rip6_vers);
+ 	if (rp->rip6_vers != RIP6_VERSION)
+ 		ND_PRINT((ndo, " [vers %d]", rp->rip6_vers));
++	return;
++
++trunc:
++	ND_PRINT((ndo, "[|ripng]"));
++	return;
+ }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index ecf54f69b..142dd45a9 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -450,6 +450,7 @@ isoclns-oobr		isoclns-oobr.pcap		isoclns-oobr.out
+ nfs-attr-oobr		nfs-attr-oobr.pcap		nfs-attr-oobr.out
+ decnet-oobr		decnet-oobr.pcap		decnet-oobr.out
+ oobr_parse_elements	oobr_parse_elements.pcap	oobr_parse_elements.out
++hoobr_ripng_print	hoobr_ripng_print.pcap		hoobr_ripng_print.out
+ 
+ # bad packets from Wilfried Kirsch
+ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+diff --git a/tests/hoobr_ripng_print.out b/tests/hoobr_ripng_print.out
+new file mode 100644
+index 000000000..c2d66a066
+--- /dev/null
++++ b/tests/hoobr_ripng_print.out
+@@ -0,0 +1 @@
++IP 48.48.48.48.521 > 48.48.48.48.12336: [|ripng]
+diff --git a/tests/hoobr_ripng_print.pcap b/tests/hoobr_ripng_print.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..7eabe367362b98e261c143b863101b5723ddc6e3
+GIT binary patch
+literal 88
+zcmca|c+)~A1{MYbD6nT>U|?i`a}5lDe3%@J=3sCIGl4RKFfjuICQhJY1p@;{un+*)
+Ck`BuN
+
+literal 0
+HcmV?d00001
+

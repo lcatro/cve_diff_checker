@@ -1,0 +1,76 @@
+From ecd2fb4ab9e2a6851add554af03cebe337345c44 Mon Sep 17 00:00:00 2001
+From: Himal Ghimiray <himalg@codeaurora.org>
+Date: Thu, 5 Oct 2017 10:52:32 +0530
+Subject: Adding strict flags for partition mount in apq8053.
+
+Adding noexec and nodev flags for mounting of
+- /dev/block/bootdevice/by-name/persist on /persist
+- /dev/block/bootdevice/by-name/cache on /cache
+- /dev/block/bootdevice/by-name/systemrw on /systemrw
+
+Adding nodev flag for mounting of
+- /dev/block/bootdevice/by-name/userdata on /data
+
+Adding noexec, ro and nodev flags for mounting of
+- /dev/mmcblk0p1 on /firmware
+- /dev/block/bootdevice/by-name/dsp on /dsp
+
+Change-Id: Ie773b7c7bd3fb5bc9538e317d7dbed7c257c0b73
+---
+ .../startup-scripts/files/apq8053/find_partitions.sh        | 13 +++++++------
+ recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh |  7 ++++---
+ 2 files changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh b/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
+index 039070c..d6d2c5b 100755
+--- a/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
++++ b/recipes-bsp/startup-scripts/files/apq8053/find_partitions.sh
+@@ -32,16 +32,17 @@
+ FindAndMountEXT4 () {
+    partition=$1
+    dir=$2
++   flags=$3
+    mmc_block_device=/dev/block/bootdevice/by-name/$partition
+    mkdir -p $dir
+-   mount -t ext4 $mmc_block_device $dir -o relatime,data=ordered,noauto_da_alloc,discard
++   mount -t ext4 $mmc_block_device $dir -o $flags
+    /sbin/restorecon -R $2
+ }
+ 
+-FindAndMountEXT4 userdata /data
+-FindAndMountEXT4 dsp /dsp
+-FindAndMountEXT4 persist /persist
+-FindAndMountEXT4 cache  /cache
+-FindAndMountEXT4 systemrw  /systemrw
++FindAndMountEXT4 userdata /data relatime,data=ordered,noauto_da_alloc,discard,nodev
++FindAndMountEXT4 dsp /dsp relatime,data=ordered,noauto_da_alloc,discard,ro,noexec,nodev
++FindAndMountEXT4 persist /persist relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev
++FindAndMountEXT4 cache  /cache relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev
++FindAndMountEXT4 systemrw  /systemrw relatime,data=ordered,noauto_da_alloc,discard,noexec,nodev
+ 
+ exit 0
+diff --git a/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh b/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
+index 7490f8c..0cd78fe 100755
+--- a/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
++++ b/recipes-bsp/startup-scripts/files/apq8053/firmware-links.sh
+@@ -33,13 +33,14 @@
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ export PATH
+ 
+-mkdir -p /firmware
++
+ if [ -f /etc/selinux/config ];then
+-   mount -t vfat /dev/mmcblk0p1 /firmware -o context=system_u:object_r:firmware_t:s0
++   mount -t vfat /dev/mmcblk0p1 /firmware -o context=system_u:object_r:firmware_t:s0,noexec,nodev,ro
+ else
+-   mount -t vfat /dev/mmcblk0p1 /firmware
++   mount -t vfat /dev/mmcblk0p1 /firmware -o noexec,nodev,ro
+ fi
+ 
++
+ # Check for images and set up symlinks
+ cd /firmware/image
+ 
+-- 
+cgit v1.1
+

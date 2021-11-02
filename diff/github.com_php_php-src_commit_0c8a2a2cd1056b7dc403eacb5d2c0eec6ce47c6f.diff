@@ -1,0 +1,110 @@
+From 0c8a2a2cd1056b7dc403eacb5d2c0eec6ce47c6f Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Wed, 10 Aug 2016 23:43:56 -0700
+Subject: [PATCH] Fix for bug #72790 and bug #72799
+
+(cherry picked from commit a14fdb9746262549bbbb96abb87338bacd147e1b)
+
+Conflicts:
+	ext/wddx/wddx.c
+---
+ ext/wddx/tests/bug72790.phpt | 35 +++++++++++++++++++++++++++++++++++
+ ext/wddx/tests/bug72799.phpt | 28 ++++++++++++++++++++++++++++
+ ext/wddx/wddx.c              |  2 +-
+ 3 files changed, 64 insertions(+), 1 deletion(-)
+ create mode 100644 ext/wddx/tests/bug72790.phpt
+ create mode 100644 ext/wddx/tests/bug72799.phpt
+
+diff --git a/ext/wddx/tests/bug72790.phpt b/ext/wddx/tests/bug72790.phpt
+new file mode 100644
+index 000000000000..a60524bdaf19
+--- /dev/null
++++ b/ext/wddx/tests/bug72790.phpt
+@@ -0,0 +1,35 @@
++--TEST--
++Bug 72790: wddx_deserialize null dereference with invalid xml
++--SKIPIF--
++<?php
++if (!extension_loaded('wddx')) {
++    die('skip. wddx not available');
++}
++?>
++--FILE--
++<?php
++
++$xml = <<< XML
++<?xml version='1.0' ?>
++<!DOCTYPE wddxPacket SYSTEM 'wddx_0100.dtd'>
++<wddxPacket version='1.0'>
++        |array>
++                <var name="XXXX">
++                        <boolean value="this">
++                        </boolean>
++                </var>
++                <var name="YYYY">
++                        <var name="UUUU">
++                                <var name="EZEZ">
++                                </var>
++                        </var>
++                </var>
++        </array>
++</wddxPacket>
++XML;
++
++$array = wddx_deserialize($xml);
++var_dump($array);
++?>
++--EXPECT--
++NULL
+\ No newline at end of file
+diff --git a/ext/wddx/tests/bug72799.phpt b/ext/wddx/tests/bug72799.phpt
+new file mode 100644
+index 000000000000..5861d5538f49
+--- /dev/null
++++ b/ext/wddx/tests/bug72799.phpt
+@@ -0,0 +1,28 @@
++--TEST--
++Bug #72799: wddx_deserialize null dereference in php_wddx_pop_element
++--SKIPIF--
++<?php
++if (!extension_loaded('wddx')) {
++    die('skip. wddx not available');
++}
++?>
++--FILE--
++<?php
++
++$xml = <<<XML
++<?xml version='1.0'?>
++<!DOCTYPE wddxPacket SYSTEM 'wddx_0100.dtd'>
++<wddxPacket version="1.0">
++    <var name="XXXX">
++        <boolean value="1">
++            <dateTime>1998-06-12T04:32:12+00</dateTime>
++        </boolean>
++    </var>
++</wddxPacket>
++XML;
++
++$array = wddx_deserialize($xml);
++var_dump($array);
++?>
++--EXPECT--
++NULL
+\ No newline at end of file
+diff --git a/ext/wddx/wddx.c b/ext/wddx/wddx.c
+index d28cb7a0acbe..11cf0be62e30 100644
+--- a/ext/wddx/wddx.c
++++ b/ext/wddx/wddx.c
+@@ -886,10 +886,10 @@ static void php_wddx_pop_element(void *user_data, const XML_Char *name)
+ 		if (Z_TYPE(ent1->data) == IS_UNDEF) {
+ 			if (stack->top > 1) {
+ 				stack->top--;
++				efree(ent1);
+ 			} else {
+ 				stack->done = 1;
+ 			}
+-			efree(ent1);
+ 			return;
+ 		}
+ 

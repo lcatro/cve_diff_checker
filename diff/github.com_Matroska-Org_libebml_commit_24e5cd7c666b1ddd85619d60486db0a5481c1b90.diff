@@ -1,0 +1,43 @@
+From 24e5cd7c666b1ddd85619d60486db0a5481c1b90 Mon Sep 17 00:00:00 2001
+From: Moritz Bunkus <moritz@bunkus.org>
+Date: Tue, 20 Oct 2015 14:49:44 +0200
+Subject: [PATCH] EbmlElement: don't read beyond end of buffer when reading
+ variable length integers
+
+---
+ ChangeLog           | 6 ++++++
+ src/EbmlElement.cpp | 5 +++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/ChangeLog b/ChangeLog
+index a5139c4..3fb53d4 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,5 +1,11 @@
+ 2015-10-20  Moritz Bunkus  <moritz@bunkus.org>
+ 
++        * EbmlElement::ReadCodedSizeValue(): Fixed an invalid memory
++        access. When reading a EBML variable length integer value a read
++        access beyond the end of the available buffer was possible if
++        fewer bytes were available than indicated by the first byte
++        resulting in a heap information leak.
++
+         * EbmlUnicodeString::UpdateFromUTF8(): Fixed an invalid memory
+         access. When reading from a UTF-8 string in which the length
+         indicated by a UTF-8 character's first byte exceeds the string's
+diff --git a/src/EbmlElement.cpp b/src/EbmlElement.cpp
+index 39eb6f0..d25abe8 100644
+--- a/src/EbmlElement.cpp
++++ b/src/EbmlElement.cpp
+@@ -150,6 +150,11 @@ uint64 ReadCodedSizeValue(const binary * InBuffer, uint32 & BufferSize, uint64 &
+       // ID found
+       PossibleSizeLength = SizeIdx + 1;
+       SizeBitMask >>= SizeIdx;
++
++      // Guard against invalid memory accesses with incomplete IDs.
++      if (PossibleSizeLength > BufferSize)
++        break;
++
+       for (SizeIdx = 0; SizeIdx < PossibleSizeLength; SizeIdx++) {
+         PossibleSize[SizeIdx] = InBuffer[SizeIdx];
+       }

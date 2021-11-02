@@ -1,0 +1,203 @@
+From 29496f6838bfadfe5a2f85dff33ed0ba33873237 Mon Sep 17 00:00:00 2001
+From: James Coglan <jcoglan@gmail.com>
+Date: Mon, 1 Jun 2020 21:42:07 +0100
+Subject: [PATCH] Remove ReDoS vulnerability in the Sec-WebSocket-Extensions
+ header parser
+
+There is a regular expression denial of service (ReDoS) vulnerability in
+the parser we use to process the `Sec-WebSocket-Extensions` header. It
+can be exploited by sending an opening WebSocket handshake to a server
+containing a header of the form:
+
+    Sec-WebSocket-Extensions: a;b="\c\c\c\c\c\c\c\c\c\c ...
+
+i.e. a header containing an unclosed string parameter value whose
+content is a repeating two-byte sequence of a backslash and some other
+character. The parser takes exponential time to reject this header as
+invalid, and this can be used to exhaust the server's capacity to
+process requests.
+
+This vulnerability has been assigned the identifier CVE-2020-7662 and
+was reported by Robert McLaughlin.
+
+We believe this flaw stems from the grammar specified for this header.
+[RFC 6455][1] defines the grammar for the header as:
+
+    Sec-WebSocket-Extensions = extension-list
+
+    extension-list    = 1#extension
+    extension         = extension-token *( ";" extension-param )
+    extension-token   = registered-token
+    registered-token  = token
+    extension-param   = token [ "=" (token | quoted-string) ]
+
+It refers to [RFC 2616][2] for the definitions of `token` and
+`quoted-string`, which are:
+
+    token          = 1*<any CHAR except CTLs or separators>
+    separators     = "(" | ")" | "<" | ">" | "@"
+                   | "," | ";" | ":" | "\" | <">
+                   | "/" | "[" | "]" | "?" | "="
+                   | "{" | "}" | SP | HT
+
+    quoted-string  = ( <"> *(qdtext | quoted-pair ) <"> )
+    qdtext         = <any TEXT except <">>
+    quoted-pair    = "\" CHAR
+
+These rely on the `CHAR`, `CTL` and `TEXT` grammars, which are:
+
+    CHAR           = <any US-ASCII character (octets 0 - 127)>
+    CTL            = <any US-ASCII control character (octets 0 - 31) and DEL (127)>
+    TEXT           = <any OCTET except CTLs, but including LWS>
+
+Other relevant definitions to support these:
+
+    OCTET          = <any 8-bit sequence of data>
+    LWS            = [CRLF] 1*( SP | HT )
+    CRLF           = CR LF
+
+    HT             = <US-ASCII HT, horizontal-tab (9)>
+    LF             = <US-ASCII LF, linefeed (10)>
+    CR             = <US-ASCII CR, carriage return (13)>
+    SP             = <US-ASCII SP, space (32)>
+
+To expand some of these terms out and write them as regular expressions:
+
+    OCTET         = [\x00-\xFF]
+    CHAR          = [\x00-\x7F]
+    TEXT          = [\t \x21-\x7E\x80-\xFF]
+
+The allowable bytes for `token` are [\x00-\x7F], except [\x00-\x1F\x7F]
+(leaving [\x20-\x7E]) and `separators`, which leaves the following set
+of allowed chars:
+
+    ! # $ % & ' * + - . ^ _ ` | ~ [0-9] [A-Z] [a-z]
+
+`quoted-string` contains a repeated pattern of either `qdtext` or
+`quoted-pair`. `qdtext` is any `TEXT` byte except <">, and the <">
+character is ASCII 34, or 0x22. The <!> character is 0x21. So `qdtext`
+can be written either positively as:
+
+    qdtext        = [\t !\x23-\x7E\x80-\xFF]
+
+or negatively, as:
+
+    qdtext        = [^\x00-\x08\x0A-\x1F\x7F"]
+
+We use the negative definition here. The other alternative in the
+`quoted-string` pattern is:
+
+    quoted-pair   = \\[\x00-\x7F]
+
+The problem is that the set of bytes matched by `qdtext` includes <\>,
+and intersects with the second element of `quoted-pair`. That means the
+sequence \c can be matched as either two `qdtext` bytes, or as a single
+`quoted-pair`. When the regex engine fails to find a trailing <"> to
+close the string, it back-tracks and tries every alternate parse for the
+string, which doubles with each pair of bytes in the input.
+
+To fix the ReDoS flaw we need to rewrite the repeating pattern so that
+none of its alternate branches can match the same text. For example, we
+could try dividing the set of bytes [\x00-\xFF] into those that must not
+follow a <\>, those that may follow a <\>, and those that must be
+preceded by <\>, and thereby construct a pattern of the form:
+
+    (A|\?B|\C)*
+
+where A, B and C have no characters in common. In our case the three
+branch patterns would be:
+
+    A   =   qdtext - CHAR   =   [\x80-\xFF]
+    B   =   qdtext & CHAR   =   [\t !\x23-\x7E]
+    C   =   CHAR - qdtext   =   [\x00-\x08\x0A-\x1F\x7F"]
+
+These sets do not intersect, and notice <"> appears in set C so must be
+preceded by <\>. But we still have a problem: <\> (0x5C) and all the
+alphabetic characters are in set B, so the pattern \?B can match all
+these:
+
+    c
+    \
+    \c
+
+So the sequence \c\c\c... still produces exponential back-tracking. It
+also fails to parse input like this correctly:
+
+    Sec-WebSocket-Extensions: a; b="c\", d"
+
+Because the grammar allows a single backslash to appear by itself, this
+is arguably a syntax error where the parameter `b` has value `c\` and
+then a new extension `d` begins with a <"> appearing where it should
+not.
+
+So the core problem is with the grammar itself: `qdtext` matches a
+single backslash <\>, and `quoted-pair` matches a pair <\\>. So given a
+sequence of backslashes there's no canonical parse and the grammar is
+ambiguous.
+
+[RFC 7230][3] remedies this problem and makes the grammar clearer.
+First, it defines `token` explicitly rather than implicitly:
+
+    token          = 1*tchar
+
+    tchar          = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+                   / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+                   / DIGIT / ALPHA
+
+And second, it defines `quoted-string` so that backslashes cannot appear
+on their own:
+
+     quoted-string  = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+     qdtext         = HTAB / SP /%x21 / %x23-5B / %x5D-7E / obs-text
+     obs-text       = %x80-FF
+     quoted-pair    = "\" ( HTAB / SP / VCHAR / obs-text )
+
+where VCHAR is any printing ASCII character 0x21-0x7E. Notice `qdtext`
+is just our previous definition but with 5C excluded, so it cannot
+accept a single backslash.
+
+This commit makes this modification to our matching patterns, and
+thereby removes the ReDoS vector. Technically this means it does not
+match the grammar of RFC 6455, but we expect this to have little or no
+practical impact, especially since the one main protocol extension,
+`permessage-deflate` ([RFC 7692][4]), does not have any string-valued
+parameters.
+
+[1]: https://tools.ietf.org/html/rfc6455#section-9.1
+[2]: https://tools.ietf.org/html/rfc2616#section-2.2
+[3]: https://tools.ietf.org/html/rfc7230#section-3.2.6
+[4]: https://tools.ietf.org/html/rfc7692
+---
+ lib/parser.js       | 2 +-
+ spec/parser_spec.js | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/lib/parser.js b/lib/parser.js
+index b9e5e3e..533767e 100644
+--- a/lib/parser.js
++++ b/lib/parser.js
+@@ -2,7 +2,7 @@
+ 
+ var TOKEN    = /([!#\$%&'\*\+\-\.\^_`\|~0-9A-Za-z]+)/,
+     NOTOKEN  = /([^!#\$%&'\*\+\-\.\^_`\|~0-9A-Za-z])/g,
+-    QUOTED   = /"((?:\\[\x00-\x7f]|[^\x00-\x08\x0a-\x1f\x7f"])*)"/,
++    QUOTED   = /"((?:\\[\x00-\x7f]|[^\x00-\x08\x0a-\x1f\x7f"\\])*)"/,
+     PARAM    = new RegExp(TOKEN.source + '(?:=(?:' + TOKEN.source + '|' + QUOTED.source + '))?'),
+     EXT      = new RegExp(TOKEN.source + '(?: *; *' + PARAM.source + ')*', 'g'),
+     EXT_LIST = new RegExp('^' + EXT.source + '(?: *, *' + EXT.source + ')*$'),
+diff --git a/spec/parser_spec.js b/spec/parser_spec.js
+index 4f85aff..f424648 100644
+--- a/spec/parser_spec.js
++++ b/spec/parser_spec.js
+@@ -78,6 +78,11 @@ test.describe("Parser", function() { with(this) {
+       assertEqual( result.params.hasOwnProperty, true )
+     }})
+ 
++    it("rejects a string missing its closing quote", function() { with(this) {
++      assertThrows(SyntaxError, function() {
++        parse('foo; bar="fooa\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a\\a')
++      })
++    }})
+   }})
+ 
+   describe("serializeParams", function() { with(this) {

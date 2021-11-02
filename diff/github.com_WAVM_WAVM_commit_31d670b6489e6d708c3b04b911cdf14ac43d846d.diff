@@ -1,0 +1,47 @@
+From 31d670b6489e6d708c3b04b911cdf14ac43d846d Mon Sep 17 00:00:00 2001
+From: Andrew Scheidecker <andrew@scheidecker.net>
+Date: Sun, 16 Sep 2018 09:55:34 -0400
+Subject: [PATCH] Fix dereferencing null pointer when running wavm with
+ WebAssembly main function that takes command-line arguments but no Emscripten
+ memory to write them to
+
+---
+ Programs/wavm/wavm.cpp | 18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/Programs/wavm/wavm.cpp b/Programs/wavm/wavm.cpp
+index a8d46968b..b21e4103c 100644
+--- a/Programs/wavm/wavm.cpp
++++ b/Programs/wavm/wavm.cpp
+@@ -250,21 +250,23 @@ static int run(const CommandLineOptions& options)
+ 	{
+ 		if(functionType.params().size() == 2)
+ 		{
+-			MemoryInstance* defaultMemory = Runtime::getDefaultMemory(moduleInstance);
+-			if(!defaultMemory)
++			if(!emscriptenInstance)
+ 			{
+ 				Log::printf(
+ 					Log::error,
+ 					"Module does not declare a default memory object to put arguments in.\n");
+ 				return EXIT_FAILURE;
+ 			}
++			else
++			{
++				std::vector<const char*> argStrings;
++				argStrings.push_back(options.filename);
++				char** args = options.args;
++				while(*args) { argStrings.push_back(*args++); };
+ 
+-			std::vector<const char*> argStrings;
+-			argStrings.push_back(options.filename);
+-			char** args = options.args;
+-			while(*args) { argStrings.push_back(*args++); };
+-
+-			Emscripten::injectCommandArgs(emscriptenInstance, argStrings, invokeArgs);
++				wavmAssert(emscriptenInstance);
++				Emscripten::injectCommandArgs(emscriptenInstance, argStrings, invokeArgs);
++			}
+ 		}
+ 		else if(functionType.params().size() > 0)
+ 		{

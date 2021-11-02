@@ -1,0 +1,222 @@
+From b8ccf8a39800768a4933f2f6b3fcd1f4c3e9e0ae Mon Sep 17 00:00:00 2001
+From: gillesdubois <gilles.dubois@factorfx.com>
+Date: Thu, 2 Aug 2018 10:03:00 +0200
+Subject: [PATCH 1/3] Remove PHP warning by addeing check on custom template
+
+---
+ plugins/language/en_GB/en_GB.txt              |  1 +
+ plugins/language/fr_FR/fr_FR.txt              |  1 +
+ .../ms_config/ms_notification.php             |  5 ++-
+ require/mail/NotificationMail.php             | 41 ++++++++++++-------
+ 4 files changed, 32 insertions(+), 16 deletions(-)
+ mode change 100755 => 100644 plugins/language/en_GB/en_GB.txt
+
+diff --git a/plugins/language/en_GB/en_GB.txt b/plugins/language/en_GB/en_GB.txt
+old mode 100755
+new mode 100644
+index 33d2fe44f..d5f6e67b9
+--- a/plugins/language/en_GB/en_GB.txt
++++ b/plugins/language/en_GB/en_GB.txt
+@@ -1543,3 +1543,4 @@
+ 8017 This file is not an html file
+ 8018 Subject
+ 8019 Notification OCSInventory
++8020 WARNING : Mail template file not found
+\ No newline at end of file
+diff --git a/plugins/language/fr_FR/fr_FR.txt b/plugins/language/fr_FR/fr_FR.txt
+index 54b7004c2..c8b4736d4 100644
+--- a/plugins/language/fr_FR/fr_FR.txt
++++ b/plugins/language/fr_FR/fr_FR.txt
+@@ -1541,3 +1541,4 @@
+ 8016 Ici vous pouvez télécharger votre modèle de notification personnalisé:</br>• Le fichier doit être un fichier html.</br></br>Informations:</br>• Pour avoir les traduction mettez {{g.(numéro de la traduction)}} dans votre code html - Exemple: {{g.49}} = Nom</br>• Pour le moment vous disposez de deux choix de rapport d'inventaire: </br> {{Report.Software}} - Nombre de logiciels par catégorie de logiciel </br> {{Report.Asset}} - Nombre de machines par catégorie d'actifs
+ 8017 Ce fichier n'est pas un fichier html
+ 8018 Sujet
++8020 WARNING : Fichier de template personnalisé non trouvé
+diff --git a/plugins/main_sections/ms_config/ms_notification.php b/plugins/main_sections/ms_config/ms_notification.php
+index e23744c60..d16ee8923 100644
+--- a/plugins/main_sections/ms_config/ms_notification.php
++++ b/plugins/main_sections/ms_config/ms_notification.php
+@@ -192,10 +192,13 @@
+ 
+     //Perso
+     $info = $mail->get_all_information('PERSO');
++    $output = $mail->replace_value($mail->get_template_perso(), 'PERSO');
++    if(!$output){
++        $output = $l->g(8020);
++    }
+     echo "<div id=perso_mail ".$style_perso.">";
+     echo "<div class='form-group'><label class='control-label col-sm-2' for='subject'>".$l->g(8018)."</label><div class='col-sm-8'>
+           <input type='text' class='form-control' id='subject' name='subject' size='50' maxlength='255' value='".$info['PERSO']['SUBJECT']."'/></div></div>";
+-    $output = $mail->replace_value($mail->get_template_perso(), 'PERSO');
+     echo $output;
+     echo "</div>";
+ 
+diff --git a/require/mail/NotificationMail.php b/require/mail/NotificationMail.php
+index 09fd254cc..c20cb712b 100644
+--- a/require/mail/NotificationMail.php
++++ b/require/mail/NotificationMail.php
+@@ -180,20 +180,27 @@ public function config_mailer(){
+        * @return void
+        */
+      public function send_notification($subject, $body, $altBody = '', $selected, $isHtml = false ){
+-          $body = $this->replace_value($body, $selected);
+-          try{
+-             // Content
+-             $this->notif->isHTML(false);
+-             $this->notif->Subject = $subject;
+-             $this->notif->Body    = $body;
+-             $this->notif->AltBody = $altBody;
+-
+-             $this->notif->send();
+-             error_log('Message has been sent');
+-         } catch (Exception $e) {
+-             $msg = 'Message could not be sent. Mailer Error: '. $mail->ErrorInfo;
+-             error_log($msg);
+-         }
++            
++            $body = $this->replace_value($body, $selected);
++         
++            if(!$body){
++                error_log('Error reading custom template');
++                return false;
++            }
++            
++            try{
++               // Content
++               $this->notif->isHTML(false);
++               $this->notif->Subject = $subject;
++               $this->notif->Body    = $body;
++               $this->notif->AltBody = $altBody;
++
++               $this->notif->send();
++               error_log('Message has been sent');
++           } catch (Exception $e) {
++               $msg = 'Message could not be sent. Mailer Error: '. $mail->ErrorInfo;
++               error_log($msg);
++           }
+       }
+ 
+       /**
+@@ -214,7 +221,11 @@ public function replace_value($file, $selected){
+           if($selected == 'DEFAULT'){
+             $template = file_get_contents(TEMPLATE.'OCS_template.html', true);
+           }else{
+-            $template = file_get_contents($file, true);
++            if(file_exists($file)){
++                $template = file_get_contents($file, true); 
++            }else{
++                return false;
++            }
+           }
+ 
+           if(strpos($template, "{{") !== false){
+
+From fe473d11af5c91227c3b64292e8776ded8b3ee3a Mon Sep 17 00:00:00 2001
+From: gillesdubois <gilles.dubois@factorfx.com>
+Date: Thu, 2 Aug 2018 10:56:26 +0200
+Subject: [PATCH 2/3] Restrict file to .html extensions
+
+---
+ plugins/language/en_GB/en_GB.txt  |  3 ++-
+ plugins/language/fr_FR/fr_FR.txt  |  1 +
+ require/mail/NotificationMail.php | 23 +++++++++++++++++++++++
+ 3 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/language/en_GB/en_GB.txt b/plugins/language/en_GB/en_GB.txt
+index d5f6e67b9..4c272d409 100644
+--- a/plugins/language/en_GB/en_GB.txt
++++ b/plugins/language/en_GB/en_GB.txt
+@@ -1543,4 +1543,5 @@
+ 8017 This file is not an html file
+ 8018 Subject
+ 8019 Notification OCSInventory
+-8020 WARNING : Mail template file not found
+\ No newline at end of file
++8020 WARNING : Mail template file not found
++8021 The uploaded file need to have .html extension to be valid
+\ No newline at end of file
+diff --git a/plugins/language/fr_FR/fr_FR.txt b/plugins/language/fr_FR/fr_FR.txt
+index c8b4736d4..3f3002c5c 100644
+--- a/plugins/language/fr_FR/fr_FR.txt
++++ b/plugins/language/fr_FR/fr_FR.txt
+@@ -1542,3 +1542,4 @@
+ 8017 Ce fichier n'est pas un fichier html
+ 8018 Sujet
+ 8020 WARNING : Fichier de template personnalisé non trouvé
++8021 Le fichier upload doit avoir pour extension .html
+diff --git a/require/mail/NotificationMail.php b/require/mail/NotificationMail.php
+index c20cb712b..3d310e8ff 100644
+--- a/require/mail/NotificationMail.php
++++ b/require/mail/NotificationMail.php
+@@ -48,6 +48,8 @@ class NotificationMail
+                         );
+       private $week = array('MON' => 'MON', 'TUE' => 'TUE', 'WED' => 'WED', 'THURS' => 'THURS', 'FRI' => 'FRI', 'SAT' => 'SAT', 'SUN' => 'SUN');
+ 
++      const HTML_EXT = 'html';
++      
+       public function __construct($language){
+         global $l;
+         $l = new language($language);
+@@ -274,6 +276,11 @@ public function replace_value($file, $selected){
+       public function upload_file($file, $subject){
+           global $l;
+           $uploadFile = TEMPLATE . basename($file['template']['name']);
++          
++          if(!$this->is_html_extension($uploadFile)){
++              msg_error($l->g(8021));
++              return false;
++          }
+ 
+           if($file['template']['type'] == 'text/html'){
+             if (move_uploaded_file($_FILES['template']['tmp_name'], $uploadFile)) {
+@@ -291,6 +298,22 @@ public function upload_file($file, $subject){
+             return false;
+           }
+       }
++      
++      /**
++       * Check if file respect naming convention
++       * And have extension .html
++       * 
++       * @param array $uploaded_file
++       */
++      private function is_html_extension($uploaded_file_name){
++          $ext = end((explode(".", $uploaded_file_name)));
++          var_dump($ext);
++          if($ext == self::HTML_EXT){
++              return true;
++          }else{
++              return false;
++          }
++      }
+ 
+       /**
+        * Get directory template perso
+
+From ba03a8dc2a97696c0c7f90aadbdf0ae432ddaf22 Mon Sep 17 00:00:00 2001
+From: gillesdubois <gilles.dubois@factorfx.com>
+Date: Thu, 2 Aug 2018 10:56:41 +0200
+Subject: [PATCH 3/3] Add htaccess to prevent direct access to file
+
+---
+ templates/.htaccess | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+ create mode 100644 templates/.htaccess
+
+diff --git a/templates/.htaccess b/templates/.htaccess
+new file mode 100644
+index 000000000..01aa046c4
+--- /dev/null
++++ b/templates/.htaccess
+@@ -0,0 +1,11 @@
++# Prevent direct access to folder
++
++# Apache 2.2
++<IfModule !mod_authz_core.c>
++    Deny from all
++</IfModule>
++
++# Apache 2.4
++<IfModule mod_authz_core.c>
++    Require all denied
++</IfModule>

@@ -1,0 +1,61 @@
+From f6ffc702c6eecd963587273a429dcd608c648984 Mon Sep 17 00:00:00 2001
+From: Cristy <urban-warrior@imagemagick.org>
+Date: Sun, 16 Jun 2019 12:18:36 -0400
+Subject: [PATCH] https://github.com/ImageMagick/ImageMagick/issues/1588
+
+---
+ magick/annotate.c |  3 +++
+ magick/fourier.c  | 12 ++++++++----
+ 2 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/magick/annotate.c b/magick/annotate.c
+index 757d4f8a12..63570f89c1 100644
+--- a/magick/annotate.c
++++ b/magick/annotate.c
+@@ -266,6 +266,7 @@ MagickExport MagickBooleanType AnnotateImage(Image *image,
+     {
+       annotate_info=DestroyDrawInfo(annotate_info);
+       annotate=DestroyDrawInfo(annotate);
++      text=DestroyString(text);
+       return(MagickFalse);
+     }
+   p=text;
+@@ -300,6 +301,7 @@ MagickExport MagickBooleanType AnnotateImage(Image *image,
+       annotate_info=DestroyDrawInfo(annotate_info);
+       annotate=DestroyDrawInfo(annotate);
+       textlist=(char **) RelinquishMagickMemory(textlist);
++      text=DestroyString(text);
+       return(MagickFalse);
+     }
+   if (IsGrayColorspace(image->colorspace) != MagickFalse)
+@@ -517,6 +519,7 @@ MagickExport MagickBooleanType AnnotateImage(Image *image,
+   annotate_info=DestroyDrawInfo(annotate_info);
+   annotate=DestroyDrawInfo(annotate);
+   textlist=(char **) RelinquishMagickMemory(textlist);
++  text=DestroyString(text);
+   return(status);
+ }
+ 
+diff --git a/magick/fourier.c b/magick/fourier.c
+index d833a067c8..bff711d0f6 100644
+--- a/magick/fourier.c
++++ b/magick/fourier.c
+@@ -245,10 +245,14 @@ MagickExport Image *ComplexImages(const Image *images,const ComplexOperator op,
+ 
+     if (status == MagickFalse)
+       continue;
+-    Ar=GetCacheViewVirtualPixels(Ar_view,0,y,Ar_image->columns,1,exception);
+-    Ai=GetCacheViewVirtualPixels(Ai_view,0,y,Ai_image->columns,1,exception);
+-    Br=GetCacheViewVirtualPixels(Br_view,0,y,Br_image->columns,1,exception);
+-    Bi=GetCacheViewVirtualPixels(Bi_view,0,y,Bi_image->columns,1,exception);
++    Ar=GetCacheViewVirtualPixels(Ar_view,0,y,
++      MagickMax(Ar_image->columns,Cr_image->columns),1,exception);
++    Ai=GetCacheViewVirtualPixels(Ai_view,0,y,
++      MagickMax(Ai_image->columns,Ci_image->columns),1,exception);
++    Br=GetCacheViewVirtualPixels(Br_view,0,y,
++      MagickMax(Br_image->columns,Cr_image->columns),1,exception);
++    Bi=GetCacheViewVirtualPixels(Bi_view,0,y,
++      MagickMax(Bi_image->columns,Ci_image->columns),1,exception);
+     Cr=QueueCacheViewAuthenticPixels(Cr_view,0,y,Cr_image->columns,1,exception);
+     Ci=QueueCacheViewAuthenticPixels(Ci_view,0,y,Ci_image->columns,1,exception);
+     if ((Ar == (const PixelPacket *) NULL) ||

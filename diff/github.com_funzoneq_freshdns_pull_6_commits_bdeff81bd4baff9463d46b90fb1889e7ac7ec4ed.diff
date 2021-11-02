@@ -1,0 +1,92 @@
+From bdeff81bd4baff9463d46b90fb1889e7ac7ec4ed Mon Sep 17 00:00:00 2001
+From: Max <max@teamwiki.de>
+Date: Wed, 7 Nov 2018 19:02:08 +0100
+Subject: [PATCH] security: add protection against XSRF (Cross Site Request
+ Forgery) on all POST requests
+
+---
+ class/class.login.php    | 19 +++++++++++++++++--
+ index.php                |  9 +++++++++
+ js/freshdns.js           |  1 +
+ templates/header.tpl.php |  1 +
+ 4 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/class/class.login.php b/class/class.login.php
+index c51444e..7284740 100644
+--- a/class/class.login.php
++++ b/class/class.login.php
+@@ -2,13 +2,28 @@
+ class login
+ {
+ 	private $database;
+-	
++	public $token;
++
+ 	function __construct ($database)
+ 	{
+ 		if (session_id() == "") session_start();
+-		
++		if (empty($_SESSION['token'])) {
++			if (function_exists('mcrypt_create_iv')) {
++				$_SESSION['token'] = bin2hex(mcrypt_create_iv(32, MCRYPT_DEV_URANDOM));
++			} else {
++				$_SESSION['token'] = bin2hex(openssl_random_pseudo_bytes(32));
++			}
++		}
++
+ 		$this->database = $database;
+ 	}
++
++	function xsrfCheck() {
++		if ($_POST['xsrf_token'] !== $_SESSION['token']) {
++			http_response_code(403);
++			throw new Exception("XSRF Token missing or mismatch");
++		}
++	}
+ 	
+ 	function isLoggedIn ()
+ 	{
+diff --git a/index.php b/index.php
+index 46e6cd2..979b170 100644
+--- a/index.php
++++ b/index.php
+@@ -22,6 +22,15 @@
+ 	exit;
+ }
+ 
++if (count($_POST)) {
++	try {
++		$login->xsrfCheck();
++	} catch(Exception $ex) {
++		$json->print_exception($ex);
++		exit;
++	}
++}
++
+ if(!$login->isLoggedIn())
+ // THE USER IS NOT LOGGED IN
+ {
+diff --git a/js/freshdns.js b/js/freshdns.js
+index d4cb311..93209c7 100644
+--- a/js/freshdns.js
++++ b/js/freshdns.js
+@@ -36,6 +36,7 @@ function updateHash(hash) {
+ }
+ 
+ function apiPost(functionCall, postParameters, callbackFunction) {
++	postParameters['xsrf_token'] = window.xsrf_token;
+ 	new Ajax.Request(baseurl+"?p="+encodeURIComponent(functionCall),
+ 		{
+ 			method:"post",
+diff --git a/templates/header.tpl.php b/templates/header.tpl.php
+index 9b432dd..5a8d720 100644
+--- a/templates/header.tpl.php
++++ b/templates/header.tpl.php
+@@ -13,6 +13,7 @@
+ 	<?php
+ 	echo "var userlevel='".$_SESSION['level']."';\n";
+ 	echo "var myUserId='".$_SESSION['userId']."';\n";
++	echo "var xsrf_token='".$_SESSION['token']."';\n";
+ 	?>
+ 	</script>
+ 	<link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">

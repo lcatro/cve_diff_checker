@@ -1,0 +1,25 @@
+From b64ce17852b180dfeea81cf458660be41a78974d Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Wed, 30 May 2018 17:05:40 +0900
+Subject: [PATCH] Should not call `initialize_copy` for `TT_ICLASS`; fix #4027
+
+Since `TT_ICLASS` is a internal object that should never be revealed
+to Ruby world.
+---
+ src/kernel.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/kernel.c b/src/kernel.c
+index 8551b50eab..2a50d31263 100644
+--- a/src/kernel.c
++++ b/src/kernel.c
+@@ -279,6 +279,9 @@ static void
+ init_copy(mrb_state *mrb, mrb_value dest, mrb_value obj)
+ {
+   switch (mrb_type(obj)) {
++    case MRB_TT_ICLASS:
++      copy_class(mrb, dest, obj);
++      return;
+     case MRB_TT_CLASS:
+     case MRB_TT_MODULE:
+       copy_class(mrb, dest, obj);

@@ -1,0 +1,63 @@
+From 29e5470e6ab84badbc31f4532bb7554a796d9d52 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Wed, 22 Mar 2017 19:37:04 +0100
+Subject: [PATCH] CVE-2017-13028/BOOTP: Add a bounds check before fetching data
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't cause 'tcpdump: pcap_loop: truncated dump file'
+---
+ print-bootp.c         |   1 +
+ tests/TESTLIST        |   1 +
+ tests/bootp_asan.out  |   2 ++
+ tests/bootp_asan.pcap | Bin 0 -> 130 bytes
+ 4 files changed, 4 insertions(+)
+ create mode 100644 tests/bootp_asan.out
+ create mode 100644 tests/bootp_asan.pcap
+
+diff --git a/print-bootp.c b/print-bootp.c
+index ce2ecac4f..51e53844c 100644
+--- a/print-bootp.c
++++ b/print-bootp.c
+@@ -322,6 +322,7 @@ bootp_print(netdissect_options *ndo,
+ 	if (EXTRACT_16BITS(&bp->bp_secs))
+ 		ND_PRINT((ndo, ", secs %d", EXTRACT_16BITS(&bp->bp_secs)));
+ 
++	ND_TCHECK(bp->bp_flags);
+ 	ND_PRINT((ndo, ", Flags [%s]",
+ 		  bittok2str(bootp_flag_values, "none", EXTRACT_16BITS(&bp->bp_flags))));
+ 	if (ndo->ndo_vflag > 1)
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 9ac274704..8b90e1f5d 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -533,6 +533,7 @@ isis_stlv_asan-2	isis_stlv_asan-2.pcap		isis_stlv_asan-2.out	-v
+ isis_stlv_asan-3	isis_stlv_asan-3.pcap		isis_stlv_asan-3.out	-v
+ isis_stlv_asan-4	isis_stlv_asan-4.pcap		isis_stlv_asan-4.out	-v
+ lldp_mgmt_addr_tlv_asan	lldp_mgmt_addr_tlv_asan.pcap	lldp_mgmt_addr_tlv_asan.out	-v
++bootp_asan		bootp_asan.pcap			bootp_asan.out		-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/bootp_asan.out b/tests/bootp_asan.out
+new file mode 100644
+index 000000000..d3ae8d99a
+--- /dev/null
++++ b/tests/bootp_asan.out
+@@ -0,0 +1,2 @@
++IP (tos 0x0, ttl 252, id 40207, offset 0, flags [+, DF, rsvd], proto UDP (17), length 60951, bad cksum ff (->8336)!)
++    18.0.0.15.16896 > 107.95.83.32.68: BOOTP/DHCP, unknown (0x00), length 59384, htype 0, hlen 0, hops 13, xid 0x14000000, secs 3328 [|bootp]
+diff --git a/tests/bootp_asan.pcap b/tests/bootp_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..7c8a6ae120740265185e0373511f30684c53547f
+GIT binary patch
+literal 130
+zcmca|c+)~A1{MY&VEzA}mBAFqU}S&@fCQs}SP3M;^V@S;-GTrA8yMztFt{?j6Q9ff
+zfZ>lI!+#+L2L9~$U<D@z2A3BMtRg@SykLUif3m<^hX4QnzvFk9%D}rVqU#rf0MIa?
+NfwGJc1`7k5008X=9(Mo$
+
+literal 0
+HcmV?d00001
+

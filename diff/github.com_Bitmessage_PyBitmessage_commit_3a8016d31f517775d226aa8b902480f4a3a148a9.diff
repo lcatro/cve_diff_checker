@@ -1,0 +1,28 @@
+From 3a8016d31f517775d226aa8b902480f4a3a148a9 Mon Sep 17 00:00:00 2001
+From: Peter Surda <surda@economicsofbitcoin.com>
+Date: Tue, 13 Feb 2018 16:39:35 +0100
+Subject: [PATCH] Fix message encoding bug
+
+- prevent loading invalid message types
+---
+ src/messagetypes/__init__.py | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/messagetypes/__init__.py b/src/messagetypes/__init__.py
+index c3911dfde..d92910132 100644
+--- a/src/messagetypes/__init__.py
++++ b/src/messagetypes/__init__.py
+@@ -12,9 +12,10 @@ def encode(self):
+ 
+ def constructObject(data):
+     try:
+-        classBase = eval(data[""] + "." + data[""].title())
+-    except NameError:
+-        logger.error("Don't know how to handle message type: \"%s\"", data[""])
++        m = import_module("messagetypes." + data[""])
++        classBase = getattr(m, data[""].title())
++    except (NameError, ImportError):
++        logger.error("Don't know how to handle message type: \"%s\"", data[""], exc_info=True)
+         return None
+     try:
+         returnObj = classBase()

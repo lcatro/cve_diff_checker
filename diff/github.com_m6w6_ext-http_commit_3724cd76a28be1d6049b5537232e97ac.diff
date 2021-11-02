@@ -1,0 +1,107 @@
+From 3724cd76a28be1d6049b5537232e97ac567ae1f5 Mon Sep 17 00:00:00 2001
+From: Michael Wallner <mike@php.net>
+Date: Wed, 9 Mar 2016 09:21:28 +0100
+Subject: [PATCH] fix bug #71719 (Buffer overflow in HTTP url parsing
+ functions)
+
+The parser's offset was not reset when we softfail in scheme
+parsing and continue to parse a path.
+Thanks to hlt99 at blinkenshell dot org for the report.
+---
+ .gitattributes          |   1 +
+ src/php_http_url.c      |   9 +++++----
+ tests/bug71719.phpt     |  25 +++++++++++++++++++++++++
+ tests/data/bug71719.bin | Bin 0 -> 256 bytes
+ 4 files changed, 31 insertions(+), 4 deletions(-)
+ create mode 100644 tests/bug71719.phpt
+ create mode 100644 tests/data/bug71719.bin
+
+diff --git a/.gitattributes b/.gitattributes
+index b0aef47..7159932 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -1,3 +1,4 @@
+ package.xml		merge=touch
+ php_http.h		merge=touch
+ .travis.yml		merge=touch
++/tests/data/bug71719.bin	-diff -text
+diff --git a/src/php_http_url.c b/src/php_http_url.c
+index 81b2d95..1215942 100644
+--- a/src/php_http_url.c
++++ b/src/php_http_url.c
+@@ -1467,7 +1467,7 @@ static const char *parse_scheme(struct parse_state *state)
+ 		case '7': case '8': case '9':
+ 		case '+': case '-': case '.':
+ 			if (state->ptr == tmp) {
+-				return tmp;
++				goto softfail;
+ 			}
+ 			/* no break */
+ 		case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G':
+@@ -1484,19 +1484,20 @@ static const char *parse_scheme(struct parse_state *state)
+ 
+ 		default:
+ 			if (!(mb = parse_mb(state, PARSE_SCHEME, state->ptr, state->end, tmp, 1))) {
+-				/* soft fail; parse path next */
+-				return tmp;
++				goto softfail;
+ 			}
+ 			state->ptr += mb - 1;
+ 		}
+ 	} while (++state->ptr != state->end);
+ 
++softfail:
++	state->offset = 0;
+ 	return state->ptr = tmp;
+ }
+ 
+ php_http_url_t *php_http_url_parse(const char *str, size_t len, unsigned flags TSRMLS_DC)
+ {
+-	size_t maxlen = 3 * len;
++	size_t maxlen = 3 * len + 8 /* null bytes for all components */;
+ 	struct parse_state *state = ecalloc(1, sizeof(*state) + maxlen);
+ 
+ 	state->end = str + len;
+diff --git a/tests/bug71719.phpt b/tests/bug71719.phpt
+new file mode 100644
+index 0000000..f75bac9
+--- /dev/null
++++ b/tests/bug71719.phpt
+@@ -0,0 +1,25 @@
++--TEST--
++Buffer overflow in HTTP url parsing functions
++--SKIPIF--
++<?php
++include "skipif.inc";
++?>
++--FILE--
++<?php
++
++echo "Test\n";
++try {
++	echo new http\Message(file_get_contents(__DIR__."/data/bug71719.bin"), false);
++} catch (Exception $e) {
++	echo $e;
++}
++?>
++
++===DONE===
++--EXPECTF--
++Test
++%r(exception ')?%rhttp\Exception\BadMessageException%r(' with message '|: )%rhttp\Message::__construct(): Could not parse HTTP protocol version 'HTTP/%s.0'%r'?%r in %sbug71719.php:5
++Stack trace:
++#0 %sbug71719.php(5): http\Message->__construct('\x80\xACTd 5 HTTP/1.1...', false)
++#1 {main}
++===DONE===
+diff --git a/tests/data/bug71719.bin b/tests/data/bug71719.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..245db2801206e2c93107cccc89229cd4a02f0a08
+GIT binary patch
+literal 256
+zcmZoz6Oy7}s^Ae45}<FWXUOHaH9obV#8DwNeG?XN6-{iz21g97PR=f_ZtfnQXi5=W
+zkX8B-y3WN#X}Tf#*{OL}hI$4H5OaF<3>X*?O7XH7fwBt!>lqkQtrUFIxi)Ruf>$|2
+O609lJC9wpei3<Q}--Lt!
+
+literal 0
+HcmV?d00001
+

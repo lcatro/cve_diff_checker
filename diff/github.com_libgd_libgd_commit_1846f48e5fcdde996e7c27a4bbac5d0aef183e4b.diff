@@ -1,0 +1,128 @@
+From 1846f48e5fcdde996e7c27a4bbac5d0aef183e4b Mon Sep 17 00:00:00 2001
+From: "Christoph M. Becker" <cmbecker69@gmx.de>
+Date: Sat, 12 Nov 2016 15:00:31 +0100
+Subject: [PATCH] Fix #340: System frozen
+
+gdImageCreate() doesn't check for oversized images and as such is prone
+to DoS vulnerabilities. We fix that by applying the same overflow check
+that is already in place for gdImageCreateTrueColor().
+
+CVE-2016-9317
+---
+ src/gd.c                           |  1 +
+ tests/CMakeLists.txt               |  1 +
+ tests/Makefile.am                  |  1 +
+ tests/gdimagecreate/.gitignore     |  1 +
+ tests/gdimagecreate/CMakeLists.txt |  5 +++++
+ tests/gdimagecreate/Makemodule.am  |  5 +++++
+ tests/gdimagecreate/bug00340.c     | 33 ++++++++++++++++++++++++++++++
+ 7 files changed, 47 insertions(+)
+ create mode 100644 tests/gdimagecreate/.gitignore
+ create mode 100644 tests/gdimagecreate/CMakeLists.txt
+ create mode 100644 tests/gdimagecreate/Makemodule.am
+ create mode 100644 tests/gdimagecreate/bug00340.c
+
+diff --git a/src/gd.c b/src/gd.c
+index f0cfacdc2..d5d1a7ecb 100644
+--- a/src/gd.c
++++ b/src/gd.c
+@@ -188,6 +188,7 @@ BGD_DECLARE(gdImagePtr) gdImageCreate (int sx, int sy)
+ 	if (overflow2(sx, sy)) {
+ 		return NULL;
+ 	}
++
+ 	if (overflow2(sizeof (unsigned char *), sy)) {
+ 		return NULL;
+ 	}
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index c4fa9ca93..7eef4bf46 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -38,6 +38,7 @@ if (BUILD_TEST)
+ 		gdimagecopy
+ 		gdimagecopyresampled
+ 		gdimagecopyrotated
++		gdimagecreate
+ 		gdimagecrop
+ 		gdimagefile
+ 		gdimagefill
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index fc5ed2b04..5f8b624bc 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -33,6 +33,7 @@ include gdimageconvolution/Makemodule.am
+ include gdimagecopy/Makemodule.am
+ include gdimagecopyresampled/Makemodule.am
+ include gdimagecopyrotated/Makemodule.am
++include gdimagecreate/Makemodule.am
+ include gdimagecrop/Makemodule.am
+ include gdimagefile/Makemodule.am
+ include gdimagefill/Makemodule.am
+diff --git a/tests/gdimagecreate/.gitignore b/tests/gdimagecreate/.gitignore
+new file mode 100644
+index 000000000..6300aed1c
+--- /dev/null
++++ b/tests/gdimagecreate/.gitignore
+@@ -0,0 +1 @@
++/bug00340
+diff --git a/tests/gdimagecreate/CMakeLists.txt b/tests/gdimagecreate/CMakeLists.txt
+new file mode 100644
+index 000000000..905e79c52
+--- /dev/null
++++ b/tests/gdimagecreate/CMakeLists.txt
+@@ -0,0 +1,5 @@
++SET(TESTS_FILES
++	bug00340
++)
++
++ADD_GD_TESTS()
+diff --git a/tests/gdimagecreate/Makemodule.am b/tests/gdimagecreate/Makemodule.am
+new file mode 100644
+index 000000000..886608694
+--- /dev/null
++++ b/tests/gdimagecreate/Makemodule.am
+@@ -0,0 +1,5 @@
++libgd_test_programs += \
++	gdimagecreate/bug00340
++
++EXTRA_DIST += \
++	gdimagecreate/CMakeLists.txt
+diff --git a/tests/gdimagecreate/bug00340.c b/tests/gdimagecreate/bug00340.c
+new file mode 100644
+index 000000000..5babcaab2
+--- /dev/null
++++ b/tests/gdimagecreate/bug00340.c
+@@ -0,0 +1,33 @@
++/**
++ * Regression test for <https://github.com/libgd/libgd/issues/340>
++ *
++ * We're testing that trying to create an oversized image fails early,
++ * triggering an appropriate warning.
++ */
++
++
++#include <string.h>
++#include "gd.h"
++#include "gd_errors.h"
++#include "gdtest.h"
++
++
++#define MSG "product of memory allocation multiplication would exceed INT_MAX, failing operation gracefully\n"
++
++
++void error_handler(int priority, const char *format, ...)
++{
++    gdTestAssert(priority == GD_WARNING);
++    gdTestAssert(!strcmp(format, MSG));
++}
++
++
++int main()
++{
++    gdImagePtr im;
++
++    im = gdImageCreate(64970, 65111);
++    gdTestAssert(im == NULL);
++
++    return gdNumFailures();
++}

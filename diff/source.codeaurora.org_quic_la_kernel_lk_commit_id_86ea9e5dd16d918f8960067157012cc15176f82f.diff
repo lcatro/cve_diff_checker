@@ -1,0 +1,37 @@
+From 86ea9e5dd16d918f8960067157012cc15176f82f Mon Sep 17 00:00:00 2001
+From: mohamed sunfeer <msunfeer@codeaurora.org>
+Date: Tue, 5 Sep 2017 10:26:23 +0530
+Subject: platform: msm_shared: Avoid the integer overflow in bootloader
+
+Avoid the possible integer overflow in rounding up the
+partition size.
+
+Change-Id: If681c220d18033c7de2bdc98440754fa1793edb8
+---
+ target/apq8084/init.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/target/apq8084/init.c b/target/apq8084/init.c
+index de4ef9f..82aaf6d 100755
+--- a/target/apq8084/init.c
++++ b/target/apq8084/init.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2013-2015, 2017, The Linux Foundation. All rights reserved.
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are
+@@ -330,8 +330,8 @@ void target_load_ssd_keystore(void)
+ 	}
+ 
+ 	size = partition_get_size(index);
+-	if (size == 0) {
+-		dprintf(CRITICAL, "Error: invalid ssd partition size\n");
++	if ((size == 0) || ((ULLONG_MAX - CACHE_LINE + 1) < size)) {
++		dprintf(CRITICAL, "Error: invalid ssd partition size %d\n",size);
+ 		return;
+ 	}
+ 
+-- 
+cgit v1.1
+

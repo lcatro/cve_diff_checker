@@ -1,0 +1,66 @@
+From 59e63f5818531c9509f42e5d582624614275486d Mon Sep 17 00:00:00 2001
+From: Jamie Newbon <jamie@symless.com>
+Date: Fri, 10 Jul 2020 13:30:30 +0100
+Subject: [PATCH 1/2] #6716 Added try catch around memory allocation
+
+---
+ src/lib/synergy/ProtocolUtil.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/lib/synergy/ProtocolUtil.cpp b/src/lib/synergy/ProtocolUtil.cpp
+index d9f5dc3249..ae37ff576a 100644
+--- a/src/lib/synergy/ProtocolUtil.cpp
++++ b/src/lib/synergy/ProtocolUtil.cpp
+@@ -216,7 +216,15 @@ ProtocolUtil::vreadf(synergy::IStream* stream, const char* fmt, va_list args)
+                 // allocate a buffer to read the data
+                 UInt8* sBuffer = buffer;
+                 if (!useFixed) {
+-                    sBuffer = new UInt8[len];
++                    try{
++                        sBuffer = new UInt8[len];
++                    }
++                    catch (std::bad_alloc & exception) {
++                        // Added try catch due to GHSA-chfm-333q-gfpp
++                        LOG((CLOG_ERR "ALLOC: Unable to allocate memory %d bytes", len));
++                        LOG((CLOG_DEBUG "bad_alloc detected: %s", exception.what()));
++                        throw;
++                    }
+                 }
+ 
+                 // read the data
+
+From bdd36c389d3583cb43f691bd42ba295b7fda47f0 Mon Sep 17 00:00:00 2001
+From: Jamie Newbon <jamie@symless.com>
+Date: Tue, 14 Jul 2020 12:51:44 +0100
+Subject: [PATCH 2/2] #6716 Changed throw to pass exception to caller and
+ handle it there updated debug message
+
+---
+ src/lib/synergy/ProtocolUtil.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/lib/synergy/ProtocolUtil.cpp b/src/lib/synergy/ProtocolUtil.cpp
+index ae37ff576a..7d2c37ff87 100644
+--- a/src/lib/synergy/ProtocolUtil.cpp
++++ b/src/lib/synergy/ProtocolUtil.cpp
+@@ -61,6 +61,9 @@ ProtocolUtil::readf(synergy::IStream* stream, const char* fmt, ...)
+     catch (XIO&) {
+         result = false;
+     }
++    catch (std::bad_alloc & exception) {
++        result = false;
++    }
+     va_end(args);
+     return result;
+ }
+@@ -222,8 +225,8 @@ ProtocolUtil::vreadf(synergy::IStream* stream, const char* fmt, va_list args)
+                     catch (std::bad_alloc & exception) {
+                         // Added try catch due to GHSA-chfm-333q-gfpp
+                         LOG((CLOG_ERR "ALLOC: Unable to allocate memory %d bytes", len));
+-                        LOG((CLOG_DEBUG "bad_alloc detected: %s", exception.what()));
+-                        throw;
++                        LOG((CLOG_DEBUG "bad_alloc detected: Do you have enough free memory?"));
++                        throw exception;
+                     }
+                 }
+ 

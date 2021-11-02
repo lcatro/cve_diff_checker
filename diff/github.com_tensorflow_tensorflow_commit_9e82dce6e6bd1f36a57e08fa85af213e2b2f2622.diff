@@ -1,0 +1,35 @@
+From 9e82dce6e6bd1f36a57e08fa85af213e2b2f2622 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Mon, 2 Aug 2021 14:21:41 -0700
+Subject: [PATCH] Fix NPE in restoring code.
+
+PiperOrigin-RevId: 388303253
+Change-Id: Ia8c68568cb854bca538909a182b31a618d68ce55
+---
+ tensorflow/core/kernels/save_restore_tensor.cc | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/save_restore_tensor.cc b/tensorflow/core/kernels/save_restore_tensor.cc
+index 953c1dfb6290b..dcbed428a5a5a 100644
+--- a/tensorflow/core/kernels/save_restore_tensor.cc
++++ b/tensorflow/core/kernels/save_restore_tensor.cc
+@@ -151,11 +151,18 @@ void RestoreTensor(OpKernelContext* context,
+         context, size == 1,
+         errors::InvalidArgument(
+             "Input 0 (file_pattern) must be a string scalar; got a tensor of ",
+-            size, "elements"));
++            size, " elements"));
+   }
+   const string& file_pattern = file_pattern_t.flat<tstring>()(0);
+ 
+   const Tensor& tensor_name_t = context->input(1);
++  {
++    const int64_t size = tensor_name_t.NumElements();
++    OP_REQUIRES(context, size > restore_index,
++                errors::InvalidArgument(
++                    "Input 1 (file_pattern) must be a have at least ",
++                    restore_index + 1, " elements"));
++  }
+   const string& tensor_name = tensor_name_t.flat<tstring>()(restore_index);
+ 
+   // If we cannot find a cached reader we will allocate our own.

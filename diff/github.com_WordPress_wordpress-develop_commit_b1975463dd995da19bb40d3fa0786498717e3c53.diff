@@ -1,0 +1,68 @@
+From b1975463dd995da19bb40d3fa0786498717e3c53 Mon Sep 17 00:00:00 2001
+From: Jake Spurlock <whyisjake@git.wordpress.org>
+Date: Thu, 12 Dec 2019 18:10:23 +0000
+Subject: [PATCH] Update `wp_kses_bad_protocol()` to recognize `&colon;` on uri
+ attributes,
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`wp_kses_bad_protocol()` makes sure to validate that uri attributes don’t contain invalid/or not allowed protocols. While this works fine in most cases, there’s a risk that by using the colon html5 named entity, one is able to bypass this function.
+
+Brings r46895 to the 5.3 branch.
+
+Props: xknown, nickdaugherty, peterwilsoncc.
+
+
+git-svn-id: https://develop.svn.wordpress.org/branches/5.3@46899 602fd350-edb4-49c9-b593-d223f7449a82
+---
+ src/wp-includes/kses.php     |  2 +-
+ tests/phpunit/tests/kses.php | 22 ++++++++++++++++++++++
+ 2 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/wp-includes/kses.php b/src/wp-includes/kses.php
+index bdb7c5d986a..d2f3cbb82ef 100644
+--- a/src/wp-includes/kses.php
++++ b/src/wp-includes/kses.php
+@@ -1665,7 +1665,7 @@ function wp_kses_html_error( $string ) {
+  */
+ function wp_kses_bad_protocol_once( $string, $allowed_protocols, $count = 1 ) {
+ 	$string  = preg_replace( '/(&#0*58(?![;0-9])|&#x0*3a(?![;a-f0-9]))/i', '$1;', $string );
+-	$string2 = preg_split( '/:|&#0*58;|&#x0*3a;/i', $string, 2 );
++	$string2 = preg_split( '/:|&#0*58;|&#x0*3a;|&colon;/i', $string, 2 );
+ 	if ( isset( $string2[1] ) && ! preg_match( '%/\?%', $string2[0] ) ) {
+ 		$string   = trim( $string2[1] );
+ 		$protocol = wp_kses_bad_protocol_once2( $string2[0], $allowed_protocols );
+diff --git a/tests/phpunit/tests/kses.php b/tests/phpunit/tests/kses.php
+index fe82097f936..17a5b95c782 100644
+--- a/tests/phpunit/tests/kses.php
++++ b/tests/phpunit/tests/kses.php
+@@ -179,6 +179,28 @@ function test_wp_kses_bad_protocol() {
+ 			}
+ 		}
+ 
++		$bad_not_normalized = array(
++			'dummy&colon;alert(1)',
++			'javascript&colon;alert(1)',
++			'javascript&CoLon;alert(1)',
++			'javascript&COLON;alert(1);',
++			'javascript&#58;alert(1);',
++			'javascript&#0058;alert(1);',
++			'javascript&#0000058alert(1);',
++			'jav	ascript&COLON;alert(1);',
++			'javascript&#58;javascript&colon;alert(1);',
++			'javascript&#58;javascript&colon;alert(1);',
++			'javascript&#0000058javascript&colon;alert(1);',
++			'javascript&#58;javascript&#0000058alert(1);',
++			'javascript&#58alert(1)',
++		);
++		foreach ( $bad_not_normalized as $k => $x ) {
++			$result = wp_kses_bad_protocol( $x, wp_allowed_protocols() );
++			if ( ! empty( $result ) && 'alert(1);' !== $result && 'alert(1)' !== $result ) {
++				$this->fail( "wp_kses_bad_protocol failed on $k, $x. Result: $result" );
++			}
++		}
++
+ 		$safe = array(
+ 			'dummy:alert(1)',
+ 			'HTTP://example.org/',

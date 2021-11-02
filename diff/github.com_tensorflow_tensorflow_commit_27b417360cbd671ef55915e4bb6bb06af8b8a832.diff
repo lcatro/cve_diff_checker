@@ -1,0 +1,26 @@
+From 27b417360cbd671ef55915e4bb6bb06af8b8a832 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 18 Sep 2020 17:21:24 -0700
+Subject: [PATCH] Prevent `int64` to `int` truncation in `Shard` API usage.
+
+The function argument in `Shard` must be a function of two `int64` arguments. However, we are passing in a function with two `int` arguments. Thus, for large workloads, these arguments get truncated from positive `int64` values to negative `int` ones, resulting in a buffer out of bounds write.
+
+PiperOrigin-RevId: 332557334
+Change-Id: I236c9a2e7f53580e520571da8ba941a3aa9fa0b5
+---
+ tensorflow/core/kernels/random_op.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/random_op.cc b/tensorflow/core/kernels/random_op.cc
+index 7bc4d9bf4d024..bace2362e33df 100644
+--- a/tensorflow/core/kernels/random_op.cc
++++ b/tensorflow/core/kernels/random_op.cc
+@@ -202,7 +202,7 @@ class RandomGammaOp : public OpKernel {
+     // avoid a couple flops which can be done on a per-alpha basis.
+ 
+     auto DoWork = [samples_per_alpha, num_alphas, &rng, samples_flat,
+-                   alpha_flat](int start_output, int limit_output) {
++                   alpha_flat](int64 start_output, int64 limit_output) {
+       using Eigen::numext::exp;
+       using Eigen::numext::log;
+       using Eigen::numext::log1p;

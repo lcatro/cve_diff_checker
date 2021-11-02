@@ -1,0 +1,273 @@
+From 602b31b2c93b0c14d4b245f9b0857bdd1464c6fe Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Mon, 14 Dec 2020 10:16:59 +0100
+Subject: [PATCH 1/3] Do not RAW on data column, use specific column if you
+ want to render HTML
+
+(cherry picked from commit 16f6c0f42ffc938fbf5a0614f4f11c44af0f47ee)
+---
+ .../views/Admin/Common/Grid/Columns/Content/data.html.twig      | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
+index 5b5a02f272f8..d08acbb4f4b6 100644
+--- a/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
++++ b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
+@@ -23,4 +23,4 @@
+  * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
+  *#}
+ 
+-{{ record[column.options.field]|raw }}
++{{ record[column.options.field] }}
+
+From 3d8cf6175270b27ef5dbbd309475087de02dc771 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Mon, 14 Dec 2020 10:57:20 +0100
+Subject: [PATCH 2/3] Use custom column for currency name
+
+(cherry picked from commit b5db5de0decff9d3a1386aca78343c2d1e5c7048)
+---
+ src/Core/Currency/CurrencyGridDataFactory.php | 20 +-----
+ .../Grid/Column/Type/Currency/NameColumn.php  | 63 +++++++++++++++++++
+ .../Factory/CurrencyGridDefinitionFactory.php |  3 +-
+ .../Columns/Content/currency_name.html.twig   | 32 ++++++++++
+ .../Grid/Columns/Content/data.html.twig       | 46 +++++++-------
+ 5 files changed, 121 insertions(+), 43 deletions(-)
+ create mode 100644 src/Core/Grid/Column/Type/Currency/NameColumn.php
+ create mode 100644 src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/currency_name.html.twig
+
+diff --git a/src/Core/Currency/CurrencyGridDataFactory.php b/src/Core/Currency/CurrencyGridDataFactory.php
+index 998b7cb361d0..5d2329a8e926 100644
+--- a/src/Core/Currency/CurrencyGridDataFactory.php
++++ b/src/Core/Currency/CurrencyGridDataFactory.php
+@@ -103,24 +103,6 @@ private function getModifiedRecords(RecordCollectionInterface $records)
+      */
+     private function buildCurrencyName(array $currency)
+     {
+-        $currencyName = mb_ucfirst($currency['name']);
+-
+-        if (!empty($currency['unofficial'])) {
+-            return sprintf(
+-                '%s %s',
+-                $currencyName,
+-                '<i class="material-icons unofficial">person</i>'
+-            );
+-        }
+-
+-        if (!empty($currency['modified'])) {
+-            return sprintf(
+-                '%s (%s)',
+-                $currencyName,
+-                $this->translator->trans('Edited', [], 'Admin.International.Feature')
+-            );
+-        }
+-
+-        return $currencyName;
++        return mb_ucfirst($currency['name']);
+     }
+ }
+diff --git a/src/Core/Grid/Column/Type/Currency/NameColumn.php b/src/Core/Grid/Column/Type/Currency/NameColumn.php
+new file mode 100644
+index 000000000000..9864811a87d3
+--- /dev/null
++++ b/src/Core/Grid/Column/Type/Currency/NameColumn.php
+@@ -0,0 +1,63 @@
++<?php
++/**
++ * Copyright since 2007 PrestaShop SA and Contributors
++ * PrestaShop is an International Registered Trademark & Property of PrestaShop SA
++ *
++ * NOTICE OF LICENSE
++ *
++ * This source file is subject to the Open Software License (OSL 3.0)
++ * that is bundled with this package in the file LICENSE.md.
++ * It is also available through the world-wide-web at this URL:
++ * https://opensource.org/licenses/OSL-3.0
++ * If you did not receive a copy of the license and are unable to
++ * obtain it through the world-wide-web, please send an email
++ * to license@prestashop.com so we can send you a copy immediately.
++ *
++ * DISCLAIMER
++ *
++ * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++ * versions in the future. If you wish to customize PrestaShop for your
++ * needs please refer to https://devdocs.prestashop.com/ for more information.
++ *
++ * @author    PrestaShop SA and Contributors <contact@prestashop.com>
++ * @copyright Since 2007 PrestaShop SA and Contributors
++ * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++ */
++
++namespace PrestaShop\PrestaShop\Core\Grid\Column\Type\Currency;
++
++use PrestaShop\PrestaShop\Core\Grid\Column\AbstractColumn;
++use Symfony\Component\OptionsResolver\OptionsResolver;
++
++/**
++ * Class NameColumn displays currency name with unofficial icon if needed.
++ */
++final class NameColumn extends AbstractColumn
++{
++    /**
++     * {@inheritdoc}
++     */
++    public function getType()
++    {
++        return 'currency_name';
++    }
++
++    /**
++     * {@inheritdoc}
++     */
++    protected function configureOptions(OptionsResolver $resolver)
++    {
++        parent::configureOptions($resolver);
++
++        $resolver
++            ->setRequired([
++                'field',
++            ])
++            ->setDefaults([
++                'clickable' => true,
++            ])
++            ->setAllowedTypes('field', 'string')
++            ->setAllowedTypes('clickable', 'bool')
++        ;
++    }
++}
+diff --git a/src/Core/Grid/Definition/Factory/CurrencyGridDefinitionFactory.php b/src/Core/Grid/Definition/Factory/CurrencyGridDefinitionFactory.php
+index b499a1a870d2..979a63afdf8f 100644
+--- a/src/Core/Grid/Definition/Factory/CurrencyGridDefinitionFactory.php
++++ b/src/Core/Grid/Definition/Factory/CurrencyGridDefinitionFactory.php
+@@ -34,6 +34,7 @@
+ use PrestaShop\PrestaShop\Core\Grid\Column\ColumnCollection;
+ use PrestaShop\PrestaShop\Core\Grid\Column\Type\Common\ActionColumn;
+ use PrestaShop\PrestaShop\Core\Grid\Column\Type\Common\ToggleColumn;
++use PrestaShop\PrestaShop\Core\Grid\Column\Type\Currency\NameColumn;
+ use PrestaShop\PrestaShop\Core\Grid\Column\Type\DataColumn;
+ use PrestaShop\PrestaShop\Core\Grid\Filter\Filter;
+ use PrestaShop\PrestaShop\Core\Grid\Filter\FilterCollection;
+@@ -71,7 +72,7 @@ protected function getName()
+     protected function getColumns()
+     {
+         return (new ColumnCollection())
+-            ->add((new DataColumn('currency'))
++            ->add((new NameColumn('currency'))
+                 ->setName($this->trans('Currency', [], 'Admin.Global'))
+                 ->setOptions([
+                     'field' => 'currency',
+diff --git a/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/currency_name.html.twig b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/currency_name.html.twig
+new file mode 100644
+index 000000000000..06588e99830a
+--- /dev/null
++++ b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/currency_name.html.twig
+@@ -0,0 +1,32 @@
++{#**
++  * Copyright since 2007 PrestaShop SA and Contributors
++  * PrestaShop is an International Registered Trademark & Property of PrestaShop SA
++  *
++  * NOTICE OF LICENSE
++  *
++  * This source file is subject to the Open Software License (OSL 3.0)
++  * that is bundled with this package in the file LICENSE.md.
++  * It is also available through the world-wide-web at this URL:
++  * https://opensource.org/licenses/OSL-3.0
++  * If you did not receive a copy of the license and are unable to
++  * obtain it through the world-wide-web, please send an email
++  * to license@prestashop.com so we can send you a copy immediately.
++  *
++  * DISCLAIMER
++  *
++  * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++  * versions in the future. If you wish to customize PrestaShop for your
++  * needs please refer to https://devdocs.prestashop.com/ for more information.
++  *
++  * @author    PrestaShop SA and Contributors <contact@prestashop.com>
++  * @copyright Since 2007 PrestaShop SA and Contributors
++  * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++  *#}
++
++{{ record[column.options.field] }}
++
++{% if record.unofficial %}
++  <i class="material-icons unofficial">person</i>
++{% elseif record.modified %}
++  ({{ 'Edited' | trans({}, 'Admin.International.Feature') }})
++{% endif %}
+diff --git a/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
+index d08acbb4f4b6..54521a7f96fb 100644
+--- a/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
++++ b/src/PrestaShopBundle/Resources/views/Admin/Common/Grid/Columns/Content/data.html.twig
+@@ -1,26 +1,26 @@
+ {#**
+- * Copyright since 2007 PrestaShop SA and Contributors
+- * PrestaShop is an International Registered Trademark & Property of PrestaShop SA
+- *
+- * NOTICE OF LICENSE
+- *
+- * This source file is subject to the Open Software License (OSL 3.0)
+- * that is bundled with this package in the file LICENSE.md.
+- * It is also available through the world-wide-web at this URL:
+- * https://opensource.org/licenses/OSL-3.0
+- * If you did not receive a copy of the license and are unable to
+- * obtain it through the world-wide-web, please send an email
+- * to license@prestashop.com so we can send you a copy immediately.
+- *
+- * DISCLAIMER
+- *
+- * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
+- * versions in the future. If you wish to customize PrestaShop for your
+- * needs please refer to https://devdocs.prestashop.com/ for more information.
+- *
+- * @author    PrestaShop SA and Contributors <contact@prestashop.com>
+- * @copyright Since 2007 PrestaShop SA and Contributors
+- * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
+- *#}
++  * Copyright since 2007 PrestaShop SA and Contributors
++  * PrestaShop is an International Registered Trademark & Property of PrestaShop SA
++  *
++  * NOTICE OF LICENSE
++  *
++  * This source file is subject to the Open Software License (OSL 3.0)
++  * that is bundled with this package in the file LICENSE.md.
++  * It is also available through the world-wide-web at this URL:
++  * https://opensource.org/licenses/OSL-3.0
++  * If you did not receive a copy of the license and are unable to
++  * obtain it through the world-wide-web, please send an email
++  * to license@prestashop.com so we can send you a copy immediately.
++  *
++  * DISCLAIMER
++  *
++  * Do not edit or add to this file if you wish to upgrade PrestaShop to newer
++  * versions in the future. If you wish to customize PrestaShop for your
++  * needs please refer to https://devdocs.prestashop.com/ for more information.
++  *
++  * @author    PrestaShop SA and Contributors <contact@prestashop.com>
++  * @copyright Since 2007 PrestaShop SA and Contributors
++  * @license   https://opensource.org/licenses/OSL-3.0 Open Software License (OSL 3.0)
++  *#}
+ 
+ {{ record[column.options.field] }}
+
+From fa800518422f004d292cc2936ef2b4a4fe0b8457 Mon Sep 17 00:00:00 2001
+From: Thomas BACCELLI <tbaccelli@gmail.com>
+Date: Mon, 1 Mar 2021 17:18:16 +0100
+Subject: [PATCH 3/3] Escape ps_emailsubscription conditions
+
+---
+ .../views/templates/hook/ps_emailsubscription.tpl               | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/themes/classic/modules/ps_emailsubscription/views/templates/hook/ps_emailsubscription.tpl b/themes/classic/modules/ps_emailsubscription/views/templates/hook/ps_emailsubscription.tpl
+index 582bfb67a483..374e90ca826e 100644
+--- a/themes/classic/modules/ps_emailsubscription/views/templates/hook/ps_emailsubscription.tpl
++++ b/themes/classic/modules/ps_emailsubscription/views/templates/hook/ps_emailsubscription.tpl
+@@ -58,7 +58,7 @@
+           </div>
+           <div class="col-xs-12">
+               {if $conditions}
+-                <p>{$conditions nofilter}</p>
++                <p>{$conditions}</p>
+               {/if}
+               {if $msg}
+                 <p class="alert {if $nw_error}alert-danger{else}alert-success{/if}">

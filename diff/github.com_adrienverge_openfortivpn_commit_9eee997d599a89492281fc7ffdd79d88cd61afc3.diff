@@ -1,0 +1,46 @@
+From 9eee997d599a89492281fc7ffdd79d88cd61afc3 Mon Sep 17 00:00:00 2001
+From: Martin Hecht <mrbaseman@gmx.de>
+Date: Fri, 21 Feb 2020 20:58:11 +0100
+Subject: [PATCH] supply proper input buffer to X509_check_host
+
+CVE-2020-7042 use of uninitialized memory in X509_check_host is fixed with
+this commit
+
+the uninitialized buffer common_name was passed as argument to X509_check_host
+which prevented proper host name validation when openssl >= 1.0.2 was in use.
+This came in with #282 which went into openfortivpn 1.7.1.
+Unfortunately, this problem has stayed unnoticed because the return value
+was not properly checked either (which is a separate issue, with CVE-2020-7041,
+and which has been fixed by the previous commit)
+---
+ src/tunnel.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/tunnel.c b/src/tunnel.c
+index 84ca7f4d..f0466a6b 100644
+--- a/src/tunnel.c
++++ b/src/tunnel.c
+@@ -652,7 +652,6 @@ static int ssl_verify_cert(struct tunnel *tunnel)
+ 	char *line;
+ 	int i;
+ 	X509_NAME *subj;
+-	char common_name[FIELD_SIZE + 1];
+ 
+ 	SSL_set_verify(tunnel->ssl_handle, SSL_VERIFY_PEER, NULL);
+ 
+@@ -666,10 +665,13 @@ static int ssl_verify_cert(struct tunnel *tunnel)
+ 
+ #ifdef HAVE_X509_CHECK_HOST
+ 	// Use OpenSSL native host validation if v >= 1.0.2.
+-	// correctly check return value of X509_check_host
+-	if (X509_check_host(cert, common_name, FIELD_SIZE, 0, NULL) == 1)
++	// compare against gateway_host and correctly check return value
++	// to fix piror Incorrect use of X509_check_host
++	if (X509_check_host(cert, tunnel->config->gateway_host,
++	                    0, 0, NULL) == 1)
+ 		cert_valid = 1;
+ #else
++	char common_name[FIELD_SIZE + 1];
+ 	// Use explicit Common Name check if native validation not available.
+ 	// Note: this will ignore Subject Alternative Name fields.
+ 	if (subj

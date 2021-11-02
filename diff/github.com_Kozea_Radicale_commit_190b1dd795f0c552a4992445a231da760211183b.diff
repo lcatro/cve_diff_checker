@@ -1,0 +1,38 @@
+From 190b1dd795f0c552a4992445a231da760211183b Mon Sep 17 00:00:00 2001
+From: Guillaume Ayoub <guillaume.ayoub@kozea.fr>
+Date: Wed, 19 Apr 2017 14:02:51 +0200
+Subject: [PATCH] Random timer to avoid timing oracles and simple bruteforce
+ attacks
+
+Important note: this is a security fix.
+---
+ radicale/auth/htpasswd.py | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/radicale/auth/htpasswd.py b/radicale/auth/htpasswd.py
+index 2c73f23b..7cd73421 100644
+--- a/radicale/auth/htpasswd.py
++++ b/radicale/auth/htpasswd.py
+@@ -56,7 +56,8 @@
+ import base64
+ import hashlib
+ import os
+-
++import random
++import time
+ 
+ from .. import config
+ 
+@@ -161,7 +162,10 @@ def is_authenticated(user, password):
+             if strippedline:
+                 login, hash_value = strippedline.split(":")
+                 if login == user:
+-                    # Allow encryption method to be overridden at runtime.
+-                    return _verifuncs[ENCRYPTION](hash_value, password)
++                    if _verifuncs[ENCRYPTION](hash_value, password):
++                        # Allow encryption method to be overridden at runtime.
++                        return True
++    # Random timer to avoid timing oracles and simple bruteforce attacks
++    time.sleep(1 + random.random())
+     return False
+ 

@@ -1,0 +1,42 @@
+From c9244eaadd05b27637cde06021bac3fa1d920aa3 Mon Sep 17 00:00:00 2001
+From: Cyrill Gorcunov <gorcunov@gmail.com>
+Date: Sun, 22 Oct 2017 15:25:48 +0300
+Subject: [PATCH] prepoc: mmacro -- Don't left nparam_max less than nparam_min
+
+Otherwise we hit nil dereference in best case.
+
+https://bugzilla.nasm.us/show_bug.cgi?id=3392436
+
+Signed-off-by: Cyrill Gorcunov <gorcunov@gmail.com>
+---
+ asm/preproc.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/asm/preproc.c b/asm/preproc.c
+index 7b1e2bff..404d3ecb 100644
+--- a/asm/preproc.c
++++ b/asm/preproc.c
+@@ -1938,9 +1938,11 @@ static bool if_condition(Token * tline, enum preproc_token ct)
+                     nasm_error(ERR_NONFATAL,
+                           "unable to parse parameter count `%s'",
+                           tline->text);
+-                if (searching.nparam_min > searching.nparam_max)
++                if (searching.nparam_min > searching.nparam_max) {
+                     nasm_error(ERR_NONFATAL,
+                           "minimum parameter count exceeds maximum");
++                    searching.nparam_max = searching.nparam_min;
++                }
+             }
+         }
+         if (tline && tok_is_(tline->next, "+")) {
+@@ -2169,6 +2171,7 @@ static bool parse_mmacro_spec(Token *tline, MMacro *def, const char *directive)
+             }
+             if (def->nparam_min > def->nparam_max) {
+                 nasm_error(ERR_NONFATAL, "minimum parameter count exceeds maximum");
++                def->nparam_max = def->nparam_min;
+             }
+         }
+     }
+-- 
+2.11.4.GIT
+

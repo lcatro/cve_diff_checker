@@ -1,0 +1,43 @@
+From b49d0d4b5ca5c6f31f03e2caf97cef1088eeed81 Mon Sep 17 00:00:00 2001
+From: Colton Myers <colton.myers@gmail.com>
+Date: Wed, 25 Mar 2015 14:29:26 -0600
+Subject: [PATCH] Create randomized logfile name in windows for chef.py
+
+---
+ salt/modules/chef.py | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/salt/modules/chef.py b/salt/modules/chef.py
+index 36eb6ff72de5..9c6d928fc3b9 100644
+--- a/salt/modules/chef.py
++++ b/salt/modules/chef.py
+@@ -6,6 +6,7 @@
+ # Import Python libs
+ import logging
+ import os
++import tempfile
+ 
+ # Import Salt libs
+ import salt.utils
+@@ -24,12 +25,16 @@ def __virtual__():
+ 
+ 
+ def _default_logfile(exe_name):
+-
++    '''
++    Retrieve the logfile name
++    '''
+     if salt.utils.is_windows():
+-        logfile = salt.utils.path_join(
+-            os.environ['TMP'],
+-            '{0}.log'.format(exe_name)
+-        )
++        logfile_tmp = tempfile.NamedTemporaryFile(dir=os.environ['TMP'],
++                                                  prefix=exe_name,
++                                                  suffix='.log',
++                                                  delete=False)
++        logfile = logfile_tmp.name
++        logfile_tmp.close()
+     else:
+         logfile = salt.utils.path_join(
+             '/var/log',

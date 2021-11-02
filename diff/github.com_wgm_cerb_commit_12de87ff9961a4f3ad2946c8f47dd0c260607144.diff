@@ -1,0 +1,2800 @@
+From 12de87ff9961a4f3ad2946c8f47dd0c260607144 Mon Sep 17 00:00:00 2001
+From: Jeff Standen <jeff@webgroupmedia.com>
+Date: Thu, 13 Aug 2015 01:52:07 -0700
+Subject: [PATCH] * [Security/CSRF] Fixed a medium risk CSRF (cross-site
+ request forgery) vulnerability reported by High-Tech Bridge (HTB23269). We
+ don't have any evidence of this having taken place in the wild, but we were
+ able to reproduce the results with the proof-of-concept in the advisory. A
+ logged in worker could be tricked into visiting a URL that could perform
+ certain actions in their browser session. Cerb now uses the Synchronizer
+ pattern: a session-based token included with every HTML FORM and Ajax request
+ that is compared to the active session. This verifies that such requests are
+ coming from an existing Cerb page rather than an external source. When a
+ potential CSRF attack is detected, the event is now logged in the PHP log as
+ a warning.
+
+---
+ features/cerberusweb.core/api/uri/login.php   |  3 ++
+ .../configuration/section/acl/edit_role.tpl   |  1 +
+ .../configuration/section/branding/index.tpl  |  1 +
+ .../configuration/section/cache/peek.tpl      |  1 +
+ .../configuration/section/license/index.tpl   |  1 +
+ .../section/localization/index.tpl            |  1 +
+ .../section/mail_failed/peek.tpl              |  1 +
+ .../section/mail_failed/view.tpl              |  2 ++
+ .../section/mail_filtering/index.tpl          |  4 ++-
+ .../configuration/section/mail_from/index.tpl |  1 +
+ .../configuration/section/mail_from/peek.tpl  |  1 +
+ .../configuration/section/mail_html/peek.tpl  |  1 +
+ .../configuration/section/mail_html/view.tpl  |  2 ++
+ .../section/mail_import/index.tpl             |  1 +
+ .../section/mail_incoming/index.tpl           |  1 +
+ .../section/mail_relay/index.tpl              |  1 +
+ .../section/mail_routing/index.tpl            |  1 +
+ .../section/mail_routing/peek.tpl             |  1 +
+ .../section/plugin_library/download_popup.tpl |  9 +-----
+ .../section/plugin_library/view.tpl           |  2 ++
+ .../configuration/section/plugins/popup.tpl   |  1 +
+ .../configuration/section/plugins/view.tpl    |  2 ++
+ .../section/portal/tabs/settings/index.tpl    |  1 +
+ .../section/portal/tabs/templates/add.tpl     |  1 +
+ .../section/portal/tabs/templates/bulk.tpl    |  1 +
+ .../section/portal/tabs/templates/export.tpl  |  1 +
+ .../section/portal/tabs/templates/import.tpl  |  1 +
+ .../section/portal/tabs/templates/peek.tpl    |  1 +
+ .../section/portal/tabs/templates/view.tpl    |  2 ++
+ .../configuration/section/portals/add.tpl     |  1 +
+ .../configuration/section/portals/view.tpl    |  2 ++
+ .../section/scheduler/job_edit.tpl            |  1 +
+ .../configuration/section/search/peek.tpl     |  1 +
+ .../configuration/section/security/index.tpl  |  1 +
+ .../configuration/section/sessions/bulk.tpl   |  1 +
+ .../configuration/section/sessions/view.tpl   |  2 ++
+ .../section/storage_attachments/bulk.tpl      |  1 +
+ .../section/storage_attachments/view.tpl      |  2 ++
+ .../section/storage_content/index.tpl         |  1 +
+ .../section/storage_content/peek.tpl          |  1 +
+ .../section/storage_profiles/peek.tpl         |  1 +
+ .../section/storage_profiles/view.tpl         |  2 ++
+ .../configuration/section/workers/bulk.tpl    |  1 +
+ .../configuration/section/workers/peek.tpl    |  1 +
+ .../templates/contacts/addresses/bulk.tpl     |  1 +
+ .../templates/contacts/addresses/peek.tpl     |  1 +
+ .../templates/contacts/addresses/view.tpl     |  2 ++
+ .../templates/contacts/orgs/bulk.tpl          |  1 +
+ .../contacts/orgs/org_merge_continue_peek.tpl |  1 +
+ .../contacts/orgs/org_merge_peek.tpl          |  1 +
+ .../templates/contacts/orgs/peek.tpl          |  1 +
+ .../templates/contacts/orgs/view.tpl          |  2 ++
+ .../templates/contacts/people/bulk.tpl        |  1 +
+ .../templates/contacts/people/peek.tpl        |  1 +
+ .../templates/contacts/people/view.tpl        |  2 ++
+ .../context_links/choosers/__file.tpl         |  1 +
+ .../context_links/choosers/__generic.tpl      |  1 +
+ .../display/modules/conversation/message.tpl  |  1 +
+ .../display/modules/history/index.tpl         |  2 ++
+ .../templates/display/rpc/add_note.tpl        |  1 +
+ .../templates/display/rpc/merge_panel.tpl     |  1 +
+ .../templates/display/rpc/relay_message.tpl   |  1 +
+ .../templates/display/rpc/reply.tpl           |  2 ++
+ .../templates/display/rpc/requester_panel.tpl |  1 +
+ .../templates/groups/peek.tpl                 |  1 +
+ .../templates/groups/view.tpl                 |  2 ++
+ .../cerberusweb.core/templates/header.tpl     |  1 +
+ .../templates/internal/activity_log/view.tpl  |  2 ++
+ .../templates/internal/bucket/peek.tpl        |  1 +
+ .../templates/internal/bucket/view.tpl        |  2 ++
+ .../templates/internal/calendar/peek.tpl      |  1 +
+ .../internal/calendar/tab_availability.tpl    |  4 ++-
+ .../templates/internal/calendar/view.tpl      |  2 ++
+ .../internal/calendar_event/peek.tpl          |  1 +
+ .../internal/calendar_event/view.tpl          |  2 ++
+ .../calendar_recurring_profile/peek.tpl       |  1 +
+ .../calendar_recurring_profile/view.tpl       |  2 ++
+ .../templates/internal/comments/peek.tpl      |  1 +
+ .../templates/internal/comments/view.tpl      |  2 ++
+ .../internal/custom_fieldsets/peek.tpl        |  1 +
+ .../internal/custom_fieldsets/view.tpl        |  2 ++
+ .../internal/decisions/editors/_move.tpl      |  1 +
+ .../internal/decisions/editors/_reorder.tpl   |  1 +
+ .../internal/decisions/editors/action.tpl     |  3 ++
+ .../internal/decisions/editors/outcome.tpl    |  3 ++
+ .../internal/decisions/editors/simulate.tpl   |  1 +
+ .../internal/decisions/editors/switch.tpl     |  1 +
+ .../internal/decisions/editors/trigger.tpl    |  2 ++
+ .../templates/internal/file_bundle/peek.tpl   |  1 +
+ .../templates/internal/file_bundle/view.tpl   |  2 ++
+ .../internal/import/popup_mapping.tpl         |  1 +
+ .../internal/import/popup_upload.tpl          |  1 +
+ .../macros/display/scheduler_popup.tpl        |  1 +
+ .../internal/macros/reply/run_popup.tpl       |  1 +
+ .../internal/mail_transport/peek.tpl          |  1 +
+ .../internal/mail_transport/view.tpl          |  2 ++
+ .../templates/internal/mailbox/peek.tpl       |  1 +
+ .../templates/internal/mailbox/view.tpl       |  2 ++
+ .../templates/internal/messages/peek.tpl      |  1 +
+ .../context_recommend_peek.tpl                |  1 +
+ .../peek_by_group_editable.tpl                |  1 +
+ .../templates/internal/skills/peek.tpl        |  1 +
+ .../templates/internal/skills/view.tpl        |  2 ++
+ .../internal/skillsets/chooser_popup.tpl      |  1 +
+ .../templates/internal/skillsets/peek.tpl     |  1 +
+ .../internal/skillsets/tab_editable.tpl       |  1 +
+ .../templates/internal/skillsets/view.tpl     |  2 ++
+ .../templates/internal/snippets/bulk.tpl      |  1 +
+ .../internal/snippets/paste_placeholders.tpl  |  1 +
+ .../templates/internal/snippets/peek.tpl      |  1 +
+ .../internal/snippets/views/default.tpl       |  2 ++
+ .../templates/internal/tour/banner.tpl        |  1 +
+ .../templates/internal/va/peek.tpl            |  1 +
+ .../internal/va/scheduled_behavior/view.tpl   |  2 ++
+ .../templates/internal/va/view.tpl            |  2 ++
+ .../templates/internal/views/copy.tpl         |  1 +
+ .../internal/views/search_and_view.tpl        |  1 +
+ .../templates/internal/views/view_export.tpl  |  1 +
+ .../internal/watchers/context_follow_peek.tpl |  1 +
+ .../internal/workspaces/tabs/calendar/tab.tpl |  2 ++
+ .../workspaces/tabs/worklists/tab.tpl         |  1 +
+ .../internal/workspaces/widgets/add.tpl       |  2 ++
+ .../workspaces/widgets/calendar/calendar.tpl  |  2 ++
+ .../internal/workspaces/widgets/export.tpl    |  1 +
+ .../workspaces/widgets/export_data.tpl        |  1 +
+ .../internal/workspaces/widgets/peek.tpl      |  1 +
+ .../templates/mail/queue/bulk.tpl             |  1 +
+ .../templates/mail/queue/peek.tpl             |  1 +
+ .../templates/mail/queue/view.tpl             |  2 ++
+ .../templates/mail/section/compose/peek.tpl   |  1 +
+ .../templates/messages/view.tpl               |  2 ++
+ .../templates/pages/add_tabs.tpl              |  2 ++
+ .../templates/pages/edit_workspace_page.tpl   |  2 ++
+ .../templates/pages/edit_workspace_tab.tpl    |  1 +
+ .../cerberusweb.core/templates/pages/page.tpl |  1 +
+ .../cerberusweb.core/templates/pages/view.tpl |  2 ++
+ .../templates/pages/wizard_popup.tpl          |  1 +
+ .../templates/preferences/modules/general.tpl |  2 ++
+ .../preferences/modules/security.tpl          |  1 +
+ .../preferences/tabs/notifications/bulk.tpl   |  1 +
+ .../preferences/tabs/notifications/view.tpl   |  2 ++
+ .../preferences/tabs/watcher/index.tpl        |  1 +
+ .../templates/search/quick_search.tpl         |  1 +
+ .../templates/tasks/rpc/bulk.tpl              |  1 +
+ .../templates/tasks/rpc/peek.tpl              |  1 +
+ .../cerberusweb.core/templates/tasks/view.tpl |  2 ++
+ .../templates/tickets/ajax/merge_confirm.tpl  |  1 +
+ .../templates/tickets/peek.tpl                |  1 +
+ .../templates/tickets/rpc/bulk.tpl            |  1 +
+ .../tickets/rpc/ticket_view_assist.tpl        |  1 +
+ .../rpc/ticket_view_assist_headers.tpl        |  1 +
+ .../templates/tickets/view.tpl                |  2 ++
+ .../templates/workers/view.tpl                |  2 ++
+ .../templates/crm/opps/bulk.tpl               |  1 +
+ .../templates/crm/opps/peek.tpl               |  1 +
+ .../templates/crm/opps/view.tpl               |  2 ++
+ .../templates/feedback/ajax/peek.tpl          |  1 +
+ .../templates/feedback/bulk.tpl               |  1 +
+ .../templates/feedback/view.tpl               |  1 +
+ .../templates/kb/ajax/category_edit_panel.tpl |  1 +
+ features/cerberusweb.kb/templates/kb/bulk.tpl |  1 +
+ .../cerberusweb.kb/templates/kb/peek_edit.tpl |  1 +
+ .../templates/kb/peek_readonly.tpl            |  1 +
+ .../templates/kb/tabs/articles/index.tpl      |  1 +
+ features/cerberusweb.kb/templates/kb/view.tpl |  2 ++
+ .../reports/custom_fields/usage/index.tpl     |  1 +
+ .../reports/group/group_replies/index.tpl     |  1 +
+ .../snippets/snippet_popularity/index.tpl     |  1 +
+ .../reports/ticket/closed_tickets/index.tpl   |  1 +
+ .../reports/ticket/new_tickets/index.tpl      |  1 +
+ .../ticket/top_contacts_tickets/index.tpl     |  1 +
+ .../templates/reports/va/va_usage/index.tpl   |  1 +
+ .../worker/average_response_time/index.tpl    |  1 +
+ .../reports/worker/worker_history/index.tpl   |  1 +
+ .../cerberusweb.restapi/templates/peek.tpl    |  1 +
+ .../cerberusweb.restapi/templates/view.tpl    |  2 ++
+ .../templates/setup/section.tpl               |  3 ++
+ .../config/activities/edit_activity.tpl       |  1 +
+ .../templates/config/activities/index.tpl     |  1 +
+ .../reports/time_spent_activity/index.tpl     |  1 +
+ .../reports/time_spent_org/index.tpl          |  1 +
+ .../reports/time_spent_worker/index.tpl       |  1 +
+ .../config/ajax/add_language_panel.tpl        |  1 +
+ .../config/ajax/find_strings_panel.tpl        |  1 +
+ .../config/ajax/import_strings_panel.tpl      |  1 +
+ .../templates/config/section/view.tpl         |  1 +
+ install/extras/sdk/devblocks-dao.php          |  3 ++
+ .../templates/example_object/bulk.tpl         |  1 +
+ .../templates/example_object/peek.tpl         |  1 +
+ .../templates/example_object/view.tpl         |  2 ++
+ .../templates/reports/example.tpl             |  1 +
+ libs/devblocks/api/Engine.php                 | 28 ++++++++++++++++++-
+ libs/devblocks/api/Extension.php              |  6 +++-
+ libs/devblocks/api/services/template.php      |  5 ++++
+ libs/devblocks/framework.defaults.php         |  3 ++
+ libs/devblocks/resources/js/devblocks.js      | 20 +++++++++----
+ 196 files changed, 308 insertions(+), 17 deletions(-)
+
+diff --git a/features/cerberusweb.core/api/uri/login.php b/features/cerberusweb.core/api/uri/login.php
+index ef9a90dedb..9a91b3921d 100644
+--- a/features/cerberusweb.core/api/uri/login.php
++++ b/features/cerberusweb.core/api/uri/login.php
+@@ -304,6 +304,9 @@ private function _processAuthenticated($worker) { /* @var $worker Model_Worker *
+ 
+ 		$session->setVisit($visit);
+ 		
++		// Generate a CSRF token for the session
++		$_SESSION['csrf_token'] = CerberusApplication::generatePassword(256);
++		
+ 		if(isset($_SESSION['login_post_url'])) {
+ 			$redirect_path = explode('/', $_SESSION['login_post_url']);
+ 			
+diff --git a/features/cerberusweb.core/templates/configuration/section/acl/edit_role.tpl b/features/cerberusweb.core/templates/configuration/section/acl/edit_role.tpl
+index 13d84e0a23..2ba4e0b2d7 100644
+--- a/features/cerberusweb.core/templates/configuration/section/acl/edit_role.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/acl/edit_role.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="action" value="saveRole">
+ <input type="hidden" name="id" value="{if !empty($role->id)}{$role->id}{else}0{/if}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {if $saved}
+ <div class="ui-widget">
+diff --git a/features/cerberusweb.core/templates/configuration/section/branding/index.tpl b/features/cerberusweb.core/templates/configuration/section/branding/index.tpl
+index 0445d6a65a..1cf5a3e5bd 100644
+--- a/features/cerberusweb.core/templates/configuration/section/branding/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/branding/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="branding">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Settings</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/cache/peek.tpl b/features/cerberusweb.core/templates/configuration/section/cache/peek.tpl
+index 37e6632649..89b9aaed50 100644
+--- a/features/cerberusweb.core/templates/configuration/section/cache/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/cache/peek.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="cache">
+ <input type="hidden" name="action" value="saveCachePeek">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {foreach from=$engines item=engine key=engine_id}
+ <fieldset class="peek" style="margin-bottom:0;">
+diff --git a/features/cerberusweb.core/templates/configuration/section/license/index.tpl b/features/cerberusweb.core/templates/configuration/section/license/index.tpl
+index 7d17685a1f..f189270171 100644
+--- a/features/cerberusweb.core/templates/configuration/section/license/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/license/index.tpl
+@@ -28,6 +28,7 @@
+ <input type="hidden" name="section" value="license">
+ <input type="hidden" name="action" value="saveJson">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ <fieldset>
+ 	<legend>Update License</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/localization/index.tpl b/features/cerberusweb.core/templates/configuration/section/localization/index.tpl
+index 19b1b6101d..4e3e0f0355 100644
+--- a/features/cerberusweb.core/templates/configuration/section/localization/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/localization/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="localization">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Date &amp; Time</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_failed/peek.tpl b/features/cerberusweb.core/templates/configuration/section/mail_failed/peek.tpl
+index 0e8e0606ad..1a80a473e1 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_failed/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_failed/peek.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="savePeekPopup">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>storage/mail/fail/{$filename}:</b>
+ <div>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_failed/view.tpl b/features/cerberusweb.core/templates/configuration/section/mail_failed/view.tpl
+index 039f361251..bbfc177eee 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_failed/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_failed/view.tpl
+@@ -28,6 +28,8 @@
+ <input type="hidden" name="section" value="mail_failed">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_filtering/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_filtering/index.tpl
+index 0a6c4bce99..1558ce7d1e 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_filtering/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_filtering/index.tpl
+@@ -11,11 +11,13 @@
+ {/foreach}
+ 
+ {if !$has_atleast_one}
+-<form action="{devblocks_url}{/devblocks_url}">
++<form action="{devblocks_url}{/devblocks_url}" method="POST">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="mail_filtering">
+ <input type="hidden" name="action" value="createDefaultVa">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <div class="help-box" style="padding:5px;border:0;">
+ 	<h1 style="margin-bottom:5px;text-align:left;">Create a global Virtual Attendant</h1>
+ 	
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_from/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_from/index.tpl
+index de51e903bb..2d41b2b279 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_from/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_from/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="mail_from">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div style="margin-bottom:10px;">
+ 	<button type="button" onclick="genericAjaxPopup('peek','c=config&a=handleSectionAction&section=mail_from&action=peek&id=0',null,false,'550');"><span class="glyphicons glyphicons-circle-plus" style="color:rgb(0,180,0);"></span> {'common.add'|devblocks_translate|capitalize}</button>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_from/peek.tpl b/features/cerberusweb.core/templates/configuration/section/mail_from/peek.tpl
+index f96fd123b6..f47df6c9c6 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_from/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_from/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="section" value="mail_from">
+ <input type="hidden" name="action" value="savePeek">
+ <input type="hidden" name="id" value="{$address->address_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>Send worker replies as:</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_html/peek.tpl b/features/cerberusweb.core/templates/configuration/section/mail_html/peek.tpl
+index c5e03f404f..68952436f0 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_html/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_html/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div id="mailTemplateTabs">
+ 	<ul>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_html/view.tpl b/features/cerberusweb.core/templates/configuration/section/mail_html/view.tpl
+index 81ec39e3ca..2f96aedbd8 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_html/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_html/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="html_template">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_import/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_import/index.tpl
+index 2e0a5c8194..d18ee736a8 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_import/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_import/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="mail_import">
+ <input type="hidden" name="action" value="parseMessageJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Paste a message source:</b>
+ <div>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_incoming/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_incoming/index.tpl
+index 2a75b7bc2c..3a2b297b81 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_incoming/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_incoming/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="mail_incoming">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{'common.settings'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_relay/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_relay/index.tpl
+index 139e6aa97a..7e4f82d002 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_relay/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_relay/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="mail_relay">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <p>
+ The email relay enables workers to respond to messages from external mail applications (e.g. Gmail, mobile phones, Outlook, etc) instead of always requiring them to use Cerb in the web browser.  
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_routing/index.tpl b/features/cerberusweb.core/templates/configuration/section/mail_routing/index.tpl
+index 0cbd48c696..dd05e6fb1e 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_routing/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_routing/index.tpl
+@@ -12,6 +12,7 @@
+ 	<input type="hidden" name="a" value="handleSectionAction">
+ 	<input type="hidden" name="section" value="mail_routing">
+ 	<input type="hidden" name="action" value="saveRouting">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 	<b>Which group should receive any unrouted new mail?</b><br> 
+ 	<select name="default_group_id">
+diff --git a/features/cerberusweb.core/templates/configuration/section/mail_routing/peek.tpl b/features/cerberusweb.core/templates/configuration/section/mail_routing/peek.tpl
+index 29ca26eb01..d0cb9bcdb6 100644
+--- a/features/cerberusweb.core/templates/configuration/section/mail_routing/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/mail_routing/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="section" value="mail_routing">
+ <input type="hidden" name="action" value="saveMailRoutingRuleAdd">
+ <input type="hidden" name="id" value="{$rule->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Rule Name:</b> (e.g. ProductX Support)<br>
+ <input type="text" name="name" value="{$rule->name}" size="45" style="width:95%;"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/plugin_library/download_popup.tpl b/features/cerberusweb.core/templates/configuration/section/plugin_library/download_popup.tpl
+index 21bcecb237..8fd5a18125 100644
+--- a/features/cerberusweb.core/templates/configuration/section/plugin_library/download_popup.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/plugin_library/download_popup.tpl
+@@ -1,12 +1,5 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST" id="frmCerb6PluginDownload">
+-{*
+-<input type="hidden" name="c" value="config">
+-<input type="hidden" name="a" value="handleSectionAction">
+-<input type="hidden" name="section" value="plugin_library">
+-<input type="hidden" name="action" value="saveDownloadPopup">
+-<input type="hidden" name="plugin_id" value="{$plugin->id}">
+-<input type="hidden" name="view_id" value="{$view_id}">
+-*}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{$plugin->name}</b><br>
+ <br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/plugin_library/view.tpl b/features/cerberusweb.core/templates/configuration/section/plugin_library/view.tpl
+index 37757cc588..104e35ae44 100644
+--- a/features/cerberusweb.core/templates/configuration/section/plugin_library/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/plugin_library/view.tpl
+@@ -26,6 +26,8 @@
+ <input type="hidden" name="context_id" value="">
+ <input type="hidden" name="id" value="{$view->id}">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/plugins/popup.tpl b/features/cerberusweb.core/templates/configuration/section/plugins/popup.tpl
+index 2c3b8ea242..4dbb0b8db5 100644
+--- a/features/cerberusweb.core/templates/configuration/section/plugins/popup.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/plugins/popup.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="plugin_id" value="{$plugin->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if $is_uninstallable}<input type="hidden" name="uninstall" value="0">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div>
+ 	<b>{'common.status'|devblocks_translate|capitalize}:</b> 
+diff --git a/features/cerberusweb.core/templates/configuration/section/plugins/view.tpl b/features/cerberusweb.core/templates/configuration/section/plugins/view.tpl
+index eff8843531..eb82ac675f 100644
+--- a/features/cerberusweb.core/templates/configuration/section/plugins/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/plugins/view.tpl
+@@ -26,6 +26,8 @@
+ <input type="hidden" name="context_id" value="">
+ <input type="hidden" name="id" value="{$view->id}">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/settings/index.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/settings/index.tpl
+index 1ecf0c99f3..280cd40330 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/settings/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/settings/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveTabSettings">
+ <input type="hidden" name="portal" value="{$instance->code}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Portal Name:</b> ("Support Portal", "Contact Form", "ProductX FAQ")<br>
+ <input type="text" name="portal_name" value="{if !empty($instance->name)}{$instance->name}{else}{$instance->manifest->name}{/if}" size="65"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/add.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/add.tpl
+index 7354a0483e..a2290d9053 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/add.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/add.tpl
+@@ -7,6 +7,7 @@
+ 		<input type="hidden" name="action" value="saveAddTemplatePeek">
+ 		<input type="hidden" name="view_id" value="{$view_id}">
+ 		<input type="hidden" name="portal" value="{$portal}">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 		
+ 		<b>Template:</b><br>
+ 		<select name="template">
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/bulk.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/bulk.tpl
+index 2f2ea6967f..f85db132d0 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/bulk.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/bulk.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="doTemplatesBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/export.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/export.tpl
+index 8c12066bba..26019c93b8 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/export.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/export.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveExportTemplatesPeek">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="portal" value="{$portal}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Filename:</b> (.xml)<br>
+ <input type="text" name="filename" size="45" value="cerb_portal_templates_{$smarty.const.APP_BUILD}.xml"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/import.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/import.tpl
+index 7d873238d0..6bc87177f0 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/import.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/import.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveImportTemplatesPeek">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="portal" value="{$portal}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Import File:</b> (.xml)<br>
+ <input type="file" name="import_file" size="45"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/peek.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/peek.tpl
+index 9d7dc4891b..73fcfb228f 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="id" value="{$template->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{$template->path}:</b><br>
+ <textarea name="content" wrap="off" style="height:300px;width:98%;">{$template->content}</textarea><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/view.tpl b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/view.tpl
+index 0d4780e795..daf1266fa5 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portal/tabs/templates/view.tpl
+@@ -20,6 +20,8 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/portals/add.tpl b/features/cerberusweb.core/templates/configuration/section/portals/add.tpl
+index 450cf20daa..f1e399381c 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portals/add.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portals/add.tpl
+@@ -4,6 +4,7 @@
+ 	<input type="hidden" name="a" value="handleSectionAction">
+ 	<input type="hidden" name="section" value="portals">
+ 	<input type="hidden" name="action" value="saveAddPortalPeek">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<b>Portal Name:</b> ("Support Portal", "Contact Form", "ProductX FAQ")<br>
+ 	<input type="text" name="name" value="" style="width:98%;" autofocus="true"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/portals/view.tpl b/features/cerberusweb.core/templates/configuration/section/portals/view.tpl
+index c33161d71a..b1955c8859 100644
+--- a/features/cerberusweb.core/templates/configuration/section/portals/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/portals/view.tpl
+@@ -21,6 +21,8 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/scheduler/job_edit.tpl b/features/cerberusweb.core/templates/configuration/section/scheduler/job_edit.tpl
+index a76cd4d954..b908716542 100644
+--- a/features/cerberusweb.core/templates/configuration/section/scheduler/job_edit.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/scheduler/job_edit.tpl
+@@ -14,6 +14,7 @@
+ 	<input type="hidden" name="section" value="scheduler">
+ 	<input type="hidden" name="action" value="saveJobJson">
+ 	<input type="hidden" name="id" value="{$job->manifest->id}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<label><input type="checkbox" name="enabled" value="1" {if $enabled}checked{/if}> <b>Enabled</b></label>
+ 	
+diff --git a/features/cerberusweb.core/templates/configuration/section/search/peek.tpl b/features/cerberusweb.core/templates/configuration/section/search/peek.tpl
+index ada10bc6f0..c4d356c74b 100644
+--- a/features/cerberusweb.core/templates/configuration/section/search/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/search/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="section" value="search">
+ <input type="hidden" name="action" value="saveSearchSchemaPeek">
+ <input type="hidden" name="schema_extension_id" value="{$schema->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {foreach from=$search_engines item=engine key=engine_id}
+ <fieldset class="peek">
+diff --git a/features/cerberusweb.core/templates/configuration/section/security/index.tpl b/features/cerberusweb.core/templates/configuration/section/security/index.tpl
+index 15228ea155..296201c539 100644
+--- a/features/cerberusweb.core/templates/configuration/section/security/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/security/index.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="security">
+ <input type="hidden" name="action" value="saveJson">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Remote Administration</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/sessions/bulk.tpl b/features/cerberusweb.core/templates/configuration/section/sessions/bulk.tpl
+index 301cd298a2..7d3b9d1d0e 100644
+--- a/features/cerberusweb.core/templates/configuration/section/sessions/bulk.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/sessions/bulk.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="doSessionsBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/sessions/view.tpl b/features/cerberusweb.core/templates/configuration/section/sessions/view.tpl
+index a3b3868c8c..7dcedd57ad 100644
+--- a/features/cerberusweb.core/templates/configuration/section/sessions/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/sessions/view.tpl
+@@ -21,6 +21,8 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="3" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_attachments/bulk.tpl b/features/cerberusweb.core/templates/configuration/section/storage_attachments/bulk.tpl
+index 9477921feb..9d87c2dbd8 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_attachments/bulk.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_attachments/bulk.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="doAttachmentsBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_attachments/view.tpl b/features/cerberusweb.core/templates/configuration/section/storage_attachments/view.tpl
+index 9e603b91b8..92d50ab6a4 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_attachments/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_attachments/view.tpl
+@@ -21,6 +21,8 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_content/index.tpl b/features/cerberusweb.core/templates/configuration/section/storage_content/index.tpl
+index 08b196378b..269137e76a 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_content/index.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_content/index.tpl
+@@ -3,6 +3,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST" style="margin-bottom:5px;">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Database</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_content/peek.tpl b/features/cerberusweb.core/templates/configuration/section/storage_content/peek.tpl
+index 288a883b8d..1914ddc3e4 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_content/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_content/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="section" value="storage_content">
+ <input type="hidden" name="action" value="saveStorageSchemaPeek">
+ <input type="hidden" name="ext_id" value="{$schema->manifest->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {$schema->renderConfig()}
+ 
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_profiles/peek.tpl b/features/cerberusweb.core/templates/configuration/section/storage_profiles/peek.tpl
+index 140ed24c24..49d3e1ab3a 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_profiles/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_profiles/peek.tpl
+@@ -14,6 +14,7 @@
+ <input type="hidden" name="id" value="{$profile->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{'common.name'|devblocks_translate|capitalize}:</b><br>
+ <input type="text" name="name" value="{$profile->name}" style="width:98%;" autofocus="true"><br>
+diff --git a/features/cerberusweb.core/templates/configuration/section/storage_profiles/view.tpl b/features/cerberusweb.core/templates/configuration/section/storage_profiles/view.tpl
+index 4b5a211cbe..9a73b417e2 100644
+--- a/features/cerberusweb.core/templates/configuration/section/storage_profiles/view.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/storage_profiles/view.tpl
+@@ -19,6 +19,8 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/configuration/section/workers/bulk.tpl b/features/cerberusweb.core/templates/configuration/section/workers/bulk.tpl
+index 478e8cc30e..7f8d9f59cd 100644
+--- a/features/cerberusweb.core/templates/configuration/section/workers/bulk.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/workers/bulk.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="doWorkersBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/configuration/section/workers/peek.tpl b/features/cerberusweb.core/templates/configuration/section/workers/peek.tpl
+index a19d546e8c..fef9871eb9 100644
+--- a/features/cerberusweb.core/templates/configuration/section/workers/peek.tpl
++++ b/features/cerberusweb.core/templates/configuration/section/workers/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="id" value="{$worker->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/addresses/bulk.tpl b/features/cerberusweb.core/templates/contacts/addresses/bulk.tpl
+index 7decd72099..2d0e489470 100644
+--- a/features/cerberusweb.core/templates/contacts/addresses/bulk.tpl
++++ b/features/cerberusweb.core/templates/contacts/addresses/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doAddressBatchUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/addresses/peek.tpl b/features/cerberusweb.core/templates/contacts/addresses/peek.tpl
+index 71329de90a..12ca13ae3a 100644
+--- a/features/cerberusweb.core/templates/contacts/addresses/peek.tpl
++++ b/features/cerberusweb.core/templates/contacts/addresses/peek.tpl
+@@ -7,6 +7,7 @@
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/addresses/view.tpl b/features/cerberusweb.core/templates/contacts/addresses/view.tpl
+index 40f49fabe6..d80dd38f9f 100644
+--- a/features/cerberusweb.core/templates/contacts/addresses/view.tpl
++++ b/features/cerberusweb.core/templates/contacts/addresses/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="c" value="contacts">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/contacts/orgs/bulk.tpl b/features/cerberusweb.core/templates/contacts/orgs/bulk.tpl
+index 6393d631ac..57a4694aaf 100644
+--- a/features/cerberusweb.core/templates/contacts/orgs/bulk.tpl
++++ b/features/cerberusweb.core/templates/contacts/orgs/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doOrgBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="org_ids" value="{$org_ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/orgs/org_merge_continue_peek.tpl b/features/cerberusweb.core/templates/contacts/orgs/org_merge_continue_peek.tpl
+index d9e2e9d348..1ecfb75e6f 100644
+--- a/features/cerberusweb.core/templates/contacts/orgs/org_merge_continue_peek.tpl
++++ b/features/cerberusweb.core/templates/contacts/orgs/org_merge_continue_peek.tpl
+@@ -6,6 +6,7 @@
+ {foreach from=$orgs item=org key=org_id}
+ <input type="hidden" name="org_id[]" value="{$org->id}">
+ {/foreach}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="3" cellspacing="0" border="0">
+ 	{foreach from=$combinations item=combo key=property}
+diff --git a/features/cerberusweb.core/templates/contacts/orgs/org_merge_peek.tpl b/features/cerberusweb.core/templates/contacts/orgs/org_merge_peek.tpl
+index 282a2bb6d5..75c4e7353f 100644
+--- a/features/cerberusweb.core/templates/contacts/orgs/org_merge_peek.tpl
++++ b/features/cerberusweb.core/templates/contacts/orgs/org_merge_peek.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="c" value="contacts">
+ <input type="hidden" name="a" value="showOrgMergeContinuePeek">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Select organizations to merge:</b><br>
+ <button type="button" class="chooser_orgs"><span class="glyphicons glyphicons-search"></span></button>
+diff --git a/features/cerberusweb.core/templates/contacts/orgs/peek.tpl b/features/cerberusweb.core/templates/contacts/orgs/peek.tpl
+index 3c5152526c..bef5b5a887 100644
+--- a/features/cerberusweb.core/templates/contacts/orgs/peek.tpl
++++ b/features/cerberusweb.core/templates/contacts/orgs/peek.tpl
+@@ -19,6 +19,7 @@
+ 	<input type="hidden" name="link_context_id" value="{$link_context_id}">
+ 	{/if}
+ 	<input type="hidden" name="do_delete" value="0">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<fieldset class="peek">
+ 		<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/orgs/view.tpl b/features/cerberusweb.core/templates/contacts/orgs/view.tpl
+index 6c0d1f3d8d..1ab80f3423 100644
+--- a/features/cerberusweb.core/templates/contacts/orgs/view.tpl
++++ b/features/cerberusweb.core/templates/contacts/orgs/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="c" value="contacts">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/contacts/people/bulk.tpl b/features/cerberusweb.core/templates/contacts/people/bulk.tpl
+index df713820b4..198641f508 100644
+--- a/features/cerberusweb.core/templates/contacts/people/bulk.tpl
++++ b/features/cerberusweb.core/templates/contacts/people/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doPeopleBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/people/peek.tpl b/features/cerberusweb.core/templates/contacts/people/peek.tpl
+index 2bfe164e4c..48392bed49 100644
+--- a/features/cerberusweb.core/templates/contacts/people/peek.tpl
++++ b/features/cerberusweb.core/templates/contacts/people/peek.tpl
+@@ -8,6 +8,7 @@
+ <input type="hidden" name="context_id" value="{$context_id}">
+ {/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/contacts/people/view.tpl b/features/cerberusweb.core/templates/contacts/people/view.tpl
+index 8780ec1a17..4c3b5c8f25 100644
+--- a/features/cerberusweb.core/templates/contacts/people/view.tpl
++++ b/features/cerberusweb.core/templates/contacts/people/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="c" value="contacts">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/context_links/choosers/__file.tpl b/features/cerberusweb.core/templates/context_links/choosers/__file.tpl
+index 1fc16e3640..c0117b4302 100644
+--- a/features/cerberusweb.core/templates/context_links/choosers/__file.tpl
++++ b/features/cerberusweb.core/templates/context_links/choosers/__file.tpl
+@@ -1,6 +1,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST" enctype="multipart/form-data" target="iframe_file_post" id="chooserFileUploadForm">
+ <input type="hidden" name="c" value="internal">
+ <input type="hidden" name="a" value="chooserOpenFileUpload">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{if $single}{'common.upload.file'|devblocks_translate|capitalize}{else}{'common.upload.files'|devblocks_translate|capitalize}{/if}</legend>
+diff --git a/features/cerberusweb.core/templates/context_links/choosers/__generic.tpl b/features/cerberusweb.core/templates/context_links/choosers/__generic.tpl
+index 200ecca413..fc36c47911 100644
+--- a/features/cerberusweb.core/templates/context_links/choosers/__generic.tpl
++++ b/features/cerberusweb.core/templates/context_links/choosers/__generic.tpl
+@@ -7,6 +7,7 @@
+ {include file="devblocks:cerberusweb.core::internal/views/search_and_view.tpl" view=$view}
+ 
+ <form action="#" method="POST" id="chooser{$view->id}" style="{if $single}display:none;{/if}}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	<b>Selected:</b>
+ 	<ul class="buffer bubbles"></ul>
+ 	<br>
+diff --git a/features/cerberusweb.core/templates/display/modules/conversation/message.tpl b/features/cerberusweb.core/templates/display/modules/conversation/message.tpl
+index 03d42705da..480cfc70e9 100644
+--- a/features/cerberusweb.core/templates/display/modules/conversation/message.tpl
++++ b/features/cerberusweb.core/templates/display/modules/conversation/message.tpl
+@@ -148,6 +148,7 @@
+ 		  		<input type="hidden" name="c" value="display">
+ 		  		<input type="hidden" name="a" value="">
+ 		  		<input type="hidden" name="id" value="{$message->id}">
++		  		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 		  		
+ 		  		<button type="button" onclick="document.frmPrint.action='{devblocks_url}c=print&a=message&id={$message->id}{/devblocks_url}';document.frmPrint.submit();"><span class="glyphicons glyphicons-print"></span> {'common.print'|devblocks_translate|capitalize}</button>
+ 		  		
+diff --git a/features/cerberusweb.core/templates/display/modules/history/index.tpl b/features/cerberusweb.core/templates/display/modules/history/index.tpl
+index 1cf374650a..b29b7356dc 100644
+--- a/features/cerberusweb.core/templates/display/modules/history/index.tpl
++++ b/features/cerberusweb.core/templates/display/modules/history/index.tpl
+@@ -3,6 +3,8 @@
+ 	<input type="hidden" name="c" value="display">
+ 	<input type="hidden" name="a" value="">
+ 	<input type="hidden" name="id" value="{$ticket->id}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++	
+ 		<b>History for:</b> 
+ 		<label><input type="radio" name="scope" value="email" onclick="this.form.a.value='doTicketHistoryScope';this.form.submit();" {if empty($scope) || 'email'==$scope}checked="checked"{/if}> {'ticket.requesters'|devblocks_translate|capitalize}</label>
+ 		{if !empty($ticket->org_id)}<label><input type="radio" name="scope" value="org" onclick="this.form.a.value='doTicketHistoryScope';this.form.submit();" {if 'org'==$scope}checked="checked"{/if}> {'contact_org.name'|devblocks_translate|capitalize}</label>{/if}
+diff --git a/features/cerberusweb.core/templates/display/rpc/add_note.tpl b/features/cerberusweb.core/templates/display/rpc/add_note.tpl
+index 2fbeacda0d..9cdc7e40c5 100644
+--- a/features/cerberusweb.core/templates/display/rpc/add_note.tpl
++++ b/features/cerberusweb.core/templates/display/rpc/add_note.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doAddNote">
+ <input type="hidden" name="id" value="{$message->id}">
+ <input type="hidden" name="ticket_id" value="{$message->ticket_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div class="block" style="width:98%;margin:10px;">
+ <table cellpadding="2" cellspacing="0" border="0" width="100%">
+diff --git a/features/cerberusweb.core/templates/display/rpc/merge_panel.tpl b/features/cerberusweb.core/templates/display/rpc/merge_panel.tpl
+index a7348465b2..2ac9f9bdec 100644
+--- a/features/cerberusweb.core/templates/display/rpc/merge_panel.tpl
++++ b/features/cerberusweb.core/templates/display/rpc/merge_panel.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="display">
+ <input type="hidden" name="a" value="saveMergePanel">
+ <input type="hidden" name="src_ticket_id" value="{$ticket_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Merge with tickets:</b><br>
+ <button type="button" class="chooser_ticket"><span class="glyphicons glyphicons-search"></span></button>
+diff --git a/features/cerberusweb.core/templates/display/rpc/relay_message.tpl b/features/cerberusweb.core/templates/display/rpc/relay_message.tpl
+index df6efb8d53..b290142e1c 100644
+--- a/features/cerberusweb.core/templates/display/rpc/relay_message.tpl
++++ b/features/cerberusweb.core/templates/display/rpc/relay_message.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="c" value="display">
+ <input type="hidden" name="a" value="saveRelayMessagePopup">
+ <input type="hidden" name="id" value="{$message->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>Message contents</legend>
+diff --git a/features/cerberusweb.core/templates/display/rpc/reply.tpl b/features/cerberusweb.core/templates/display/rpc/reply.tpl
+index 48c2cc75a3..0a0556ec82 100644
+--- a/features/cerberusweb.core/templates/display/rpc/reply.tpl
++++ b/features/cerberusweb.core/templates/display/rpc/reply.tpl
+@@ -1,6 +1,7 @@
+ <div class="block reply_frame" style="width:98%;margin:10px;">
+ 
+ <form id="reply{$message->id}_part1" onsubmit="return false;">
++
+ <table cellpadding="2" cellspacing="0" border="0" width="100%">
+ 	<tr>
+ 		<td><h2 style="color:rgb(50,50,50);">{if $is_forward}{'display.ui.forward'|devblocks_translate|capitalize}{else}{'display.ui.reply'|devblocks_translate|capitalize}{/if}</h2></td>
+@@ -171,6 +172,7 @@
+ <input type="hidden" name="cc" value="{$cc}">
+ <input type="hidden" name="bcc" value="{$bcc}">
+ <input type="hidden" name="subject" value="{$subject}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {if $is_forward}
+ <textarea name="content" id="reply_{$message->id}" class="reply" style="width:98%;height:{$mail_reply_textbox_size_px|default:300}px;border:1px solid rgb(180,180,180);padding:5px;">
+diff --git a/features/cerberusweb.core/templates/display/rpc/requester_panel.tpl b/features/cerberusweb.core/templates/display/rpc/requester_panel.tpl
+index 1cb30cd93b..b7997b3b98 100644
+--- a/features/cerberusweb.core/templates/display/rpc/requester_panel.tpl
++++ b/features/cerberusweb.core/templates/display/rpc/requester_panel.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="display">
+ <input type="hidden" name="a" value="saveRequestersPanel">
+ <input type="hidden" name="ticket_id" value="{$ticket_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{'display.ui.add_to_recipients'|devblocks_translate}:</b><br>
+ <button type="button" class="chooser_address"><span class="glyphicons glyphicons-circle-plus" style="color:rgb(0,180,0);"></span></button>
+diff --git a/features/cerberusweb.core/templates/groups/peek.tpl b/features/cerberusweb.core/templates/groups/peek.tpl
+index d9f69cd07c..1811569964 100644
+--- a/features/cerberusweb.core/templates/groups/peek.tpl
++++ b/features/cerberusweb.core/templates/groups/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($group) && !empty($group->id)}<input type="hidden" name="id" value="{$group->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="2" cellspacing="0" border="0" width="98%">
+ 
+diff --git a/features/cerberusweb.core/templates/groups/view.tpl b/features/cerberusweb.core/templates/groups/view.tpl
+index a6be29169b..0ec3259dc8 100644
+--- a/features/cerberusweb.core/templates/groups/view.tpl
++++ b/features/cerberusweb.core/templates/groups/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="section" value="group">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/header.tpl b/features/cerberusweb.core/templates/header.tpl
+index b7e76ecafb..a1ee9cf84e 100644
+--- a/features/cerberusweb.core/templates/header.tpl
++++ b/features/cerberusweb.core/templates/header.tpl
+@@ -5,6 +5,7 @@
+ 	<meta http-equiv="Cache-Control" content="no-cache">
+ 	<meta name="robots" content="noindex">
+ 	<meta name="googlebot" content="noindex">
++	<meta name="_csrf_token" content="{$session.csrf_token}">
+ 	<!--[if gte IE 9]>
+ 	<meta http-equiv="X-UA-Compatible" content="IE=Edge"/>
+ 	<![endif]-->
+diff --git a/features/cerberusweb.core/templates/internal/activity_log/view.tpl b/features/cerberusweb.core/templates/internal/activity_log/view.tpl
+index cabe5c6814..a04a010fec 100644
+--- a/features/cerberusweb.core/templates/internal/activity_log/view.tpl
++++ b/features/cerberusweb.core/templates/internal/activity_log/view.tpl
+@@ -27,6 +27,8 @@
+ <input type="hidden" name="context_id" value="{$view_context}">
+ <input type="hidden" name="c" value="internal">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/bucket/peek.tpl b/features/cerberusweb.core/templates/internal/bucket/peek.tpl
+index 54864f1f08..a04a7cd479 100644
+--- a/features/cerberusweb.core/templates/internal/bucket/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/bucket/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($bucket) && !empty($bucket->id)}<input type="hidden" name="id" value="{$bucket->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="2" cellspacing="0" border="0" width="98%">
+ 	<tr>
+diff --git a/features/cerberusweb.core/templates/internal/bucket/view.tpl b/features/cerberusweb.core/templates/internal/bucket/view.tpl
+index 9f71c03de5..8ffd571ced 100644
+--- a/features/cerberusweb.core/templates/internal/bucket/view.tpl
++++ b/features/cerberusweb.core/templates/internal/bucket/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="bucket">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/calendar/peek.tpl b/features/cerberusweb.core/templates/internal/calendar/peek.tpl
+index 8be3ef2619..09b546cb6b 100644
+--- a/features/cerberusweb.core/templates/internal/calendar/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellspacing="0" cellpadding="2" border="0" width="98%" style="margin-bottom:10px;">
+ 	<tr>
+diff --git a/features/cerberusweb.core/templates/internal/calendar/tab_availability.tpl b/features/cerberusweb.core/templates/internal/calendar/tab_availability.tpl
+index ae7ec4819d..de26d0998b 100644
+--- a/features/cerberusweb.core/templates/internal/calendar/tab_availability.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar/tab_availability.tpl
+@@ -1,11 +1,13 @@
+ {$guid = uniqid()}
+ 
+ {if empty($calendar) && $context == CerberusContexts::CONTEXT_WORKER && $context_id == $active_worker->id}
+-<form action="{devblocks_url}{/devblocks_url}">
++<form action="{devblocks_url}{/devblocks_url}" method="post">
+ <input type="hidden" name="c" value="profiles">
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="worker">
+ <input type="hidden" name="action" value="setAvailabilityCalendar">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <div class="help-box" style="padding:5px;border:0;">
+ 	<h1 style="margin-bottom:5px;text-align:left;">Configure your availability calendar</h1>
+ 	
+diff --git a/features/cerberusweb.core/templates/internal/calendar/view.tpl b/features/cerberusweb.core/templates/internal/calendar/view.tpl
+index 4d4a6dcf6d..663f8f6fc4 100644
+--- a/features/cerberusweb.core/templates/internal/calendar/view.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="calendar">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/calendar_event/peek.tpl b/features/cerberusweb.core/templates/internal/calendar_event/peek.tpl
+index f5a6331259..ef5f5bcad1 100644
+--- a/features/cerberusweb.core/templates/internal/calendar_event/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar_event/peek.tpl
+@@ -15,6 +15,7 @@
+ <input type="hidden" name="link_context" value="{$link_context}">
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="0" cellspacing="2" border="0" width="98%">
+ 	<tr>
+diff --git a/features/cerberusweb.core/templates/internal/calendar_event/view.tpl b/features/cerberusweb.core/templates/internal/calendar_event/view.tpl
+index f5cb362ed5..3666c312e9 100644
+--- a/features/cerberusweb.core/templates/internal/calendar_event/view.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar_event/view.tpl
+@@ -30,6 +30,8 @@
+ <input type="hidden" name="c" value="internal">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/calendar_recurring_profile/peek.tpl b/features/cerberusweb.core/templates/internal/calendar_recurring_profile/peek.tpl
+index 8b965e2235..19cf21e947 100644
+--- a/features/cerberusweb.core/templates/internal/calendar_recurring_profile/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar_recurring_profile/peek.tpl
+@@ -9,6 +9,7 @@
+ {/if}
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="0" cellspacing="2" border="0" width="98%">
+ 	<tr>
+diff --git a/features/cerberusweb.core/templates/internal/calendar_recurring_profile/view.tpl b/features/cerberusweb.core/templates/internal/calendar_recurring_profile/view.tpl
+index 2818fb42c2..ac8d9618bc 100644
+--- a/features/cerberusweb.core/templates/internal/calendar_recurring_profile/view.tpl
++++ b/features/cerberusweb.core/templates/internal/calendar_recurring_profile/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="calendar_recurring_profile">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/comments/peek.tpl b/features/cerberusweb.core/templates/internal/comments/peek.tpl
+index f011aaf559..27514425a6 100644
+--- a/features/cerberusweb.core/templates/internal/comments/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/comments/peek.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="commentSavePopup">
+ <input type="hidden" name="context" value="{$context}">
+ <input type="hidden" name="context_id" value="{$context_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Author:</b> {$active_worker->getName()}
+ <div>
+diff --git a/features/cerberusweb.core/templates/internal/comments/view.tpl b/features/cerberusweb.core/templates/internal/comments/view.tpl
+index f75d6061c8..0fc7ed8c25 100644
+--- a/features/cerberusweb.core/templates/internal/comments/view.tpl
++++ b/features/cerberusweb.core/templates/internal/comments/view.tpl
+@@ -31,6 +31,8 @@
+ <input type="hidden" name="section" value="comment">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/custom_fieldsets/peek.tpl b/features/cerberusweb.core/templates/internal/custom_fieldsets/peek.tpl
+index 293b28332c..0bdb0683af 100644
+--- a/features/cerberusweb.core/templates/internal/custom_fieldsets/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/custom_fieldsets/peek.tpl
+@@ -14,6 +14,7 @@
+ <input type="hidden" name="id" value="{$custom_fieldset->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek cfield-props">
+ 	<legend>{'common.properties'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/custom_fieldsets/view.tpl b/features/cerberusweb.core/templates/internal/custom_fieldsets/view.tpl
+index 4d3f7e92de..a079f20825 100644
+--- a/features/cerberusweb.core/templates/internal/custom_fieldsets/view.tpl
++++ b/features/cerberusweb.core/templates/internal/custom_fieldsets/view.tpl
+@@ -28,6 +28,8 @@
+ <input type="hidden" name="context_id" value="cerberusweb.contexts.custom_fieldset">
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/_move.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/_move.tpl
+index c76eb426dd..f1051c31f3 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/_move.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/_move.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="saveDecisionMovePopup">
+ {if isset($node)}<input type="hidden" name="id" value="{$node->id}">{/if}
+ {if isset($trigger)}<input type="hidden" name="trigger_id" value="{$trigger->id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Move</legend>
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/_reorder.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/_reorder.tpl
+index 9f3f55376b..e6dc7c2058 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/_reorder.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/_reorder.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="saveDecisionReorderPopup">
+ {if isset($node)}<input type="hidden" name="id" value="{$node->id}">{/if}
+ {if isset($trigger)}<input type="hidden" name="trigger_id" value="{$trigger->id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{if !empty($node)}{$node->title}{elseif !empty($trigger)}{$trigger->event_point}{/if}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/action.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/action.tpl
+index bfc896acc1..aeb89a0543 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/action.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/action.tpl
+@@ -5,6 +5,7 @@
+ {if isset($parent_id)}<input type="hidden" name="parent_id" value="{$parent_id}">{/if}
+ {if isset($type)}<input type="hidden" name="type" value="{$type}">{/if}
+ {if isset($trigger_id)}<input type="hidden" name="trigger_id" value="{$trigger_id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{'common.title'|devblocks_translate|capitalize}:</b><br>
+ <input type="text" name="title" value="{$model->title}" style="width:100%;"><br>
+@@ -69,6 +70,8 @@
+ <input type="hidden" name="seq" value="{if !is_null($seq)}{$seq+1}{else}0{/if}">
+ <input type="hidden" name="action" value="">
+ {if isset($trigger_id)}<input type="hidden" name="trigger_id" value="{$trigger_id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <fieldset>
+ 	<legend>Add Action</legend>
+ 
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/outcome.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/outcome.tpl
+index 6127f5d202..89538575eb 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/outcome.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/outcome.tpl
+@@ -5,6 +5,7 @@
+ {if isset($parent_id)}<input type="hidden" name="parent_id" value="{$parent_id}">{/if}
+ {if isset($type)}<input type="hidden" name="type" value="{$type}">{/if}
+ {if isset($trigger_id)}<input type="hidden" name="trigger_id" value="{$trigger_id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{'common.title'|devblocks_translate|capitalize}:</b><br>
+ <input type="text" name="title" value="{$model->title}" style="width:100%;"><br>
+@@ -80,6 +81,8 @@
+ <input type="hidden" name="seq" value="{$seq}">
+ <input type="hidden" name="condition" value="">
+ {if isset($trigger_id)}<input type="hidden" name="trigger_id" value="{$trigger_id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <fieldset>
+ 	<legend>Add Condition</legend>
+ 
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/simulate.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/simulate.tpl
+index 008b49c568..59dd164ca9 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/simulate.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/simulate.tpl
+@@ -4,6 +4,7 @@
+ {if isset($node)}<input type="hidden" name="id" value="{$node->id}">{/if}
+ {if isset($trigger)}<input type="hidden" name="trigger_id" value="{$trigger->id}">{/if}
+ <input type="hidden" name="event_params_json" value="{$event_params_json}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {* Target *}
+ 
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/switch.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/switch.tpl
+index d7303a5aa4..c9bfe7f1d0 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/switch.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/switch.tpl
+@@ -5,6 +5,7 @@
+ {if isset($parent_id)}<input type="hidden" name="parent_id" value="{$parent_id}">{/if}
+ {if isset($type)}<input type="hidden" name="type" value="{$type}">{/if}
+ {if isset($trigger_id)}<input type="hidden" name="trigger_id" value="{$trigger_id}">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>{'common.title'|devblocks_translate|capitalize}:</b><br>
+ <input type="text" name="title" value="{$model->title}" style="width:100%;"><br>
+diff --git a/features/cerberusweb.core/templates/internal/decisions/editors/trigger.tpl b/features/cerberusweb.core/templates/internal/decisions/editors/trigger.tpl
+index e11e247664..de5e5efc93 100644
+--- a/features/cerberusweb.core/templates/internal/decisions/editors/trigger.tpl
++++ b/features/cerberusweb.core/templates/internal/decisions/editors/trigger.tpl
+@@ -7,6 +7,7 @@
+ {if empty($trigger->id)}
+ <input type="hidden" name="va_id" value="{$va->id}">
+ {/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div>
+ 	<b>{'common.title'|devblocks_translate|capitalize}:</b><br>
+@@ -116,6 +117,7 @@
+ 		<input type="hidden" name="c" value="internal">
+ 		<input type="hidden" name="a" value="">
+ 		<input type="hidden" name="va_id" value="{$va->id}">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 		<div class="import">
+ 			<b>Import:</b> (.json format)
+diff --git a/features/cerberusweb.core/templates/internal/file_bundle/peek.tpl b/features/cerberusweb.core/templates/internal/file_bundle/peek.tpl
+index ff1f4aeab0..80c73e030c 100644
+--- a/features/cerberusweb.core/templates/internal/file_bundle/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/file_bundle/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/file_bundle/view.tpl b/features/cerberusweb.core/templates/internal/file_bundle/view.tpl
+index d38a35cbc4..e50d09ad5c 100644
+--- a/features/cerberusweb.core/templates/internal/file_bundle/view.tpl
++++ b/features/cerberusweb.core/templates/internal/file_bundle/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="file_bundle">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/import/popup_mapping.tpl b/features/cerberusweb.core/templates/internal/import/popup_mapping.tpl
+index 6328705f19..d0babed1d9 100644
+--- a/features/cerberusweb.core/templates/internal/import/popup_mapping.tpl
++++ b/features/cerberusweb.core/templates/internal/import/popup_mapping.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="a" value="doImport">
+ <input type="hidden" name="context" value="{$context}">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Associate Fields with Import Columns</legend>
+diff --git a/features/cerberusweb.core/templates/internal/import/popup_upload.tpl b/features/cerberusweb.core/templates/internal/import/popup_upload.tpl
+index fee5a873b6..1d7fe29879 100644
+--- a/features/cerberusweb.core/templates/internal/import/popup_upload.tpl
++++ b/features/cerberusweb.core/templates/internal/import/popup_upload.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="parseImportFile">
+ <input type="hidden" name="context" value="{$context}">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Upload File</legend>
+diff --git a/features/cerberusweb.core/templates/internal/macros/display/scheduler_popup.tpl b/features/cerberusweb.core/templates/internal/macros/display/scheduler_popup.tpl
+index 26ae217170..457c19594c 100644
+--- a/features/cerberusweb.core/templates/internal/macros/display/scheduler_popup.tpl
++++ b/features/cerberusweb.core/templates/internal/macros/display/scheduler_popup.tpl
+@@ -12,6 +12,7 @@
+ <input type="hidden" name="a" value="saveMacroSchedulerPopup">
+ <input type="hidden" name="job_id" value="{$job->id}">
+ {/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Behavior:</b><br>
+ {if !empty($macro->title)}
+diff --git a/features/cerberusweb.core/templates/internal/macros/reply/run_popup.tpl b/features/cerberusweb.core/templates/internal/macros/reply/run_popup.tpl
+index e88a690637..a5facdc193 100644
+--- a/features/cerberusweb.core/templates/internal/macros/reply/run_popup.tpl
++++ b/features/cerberusweb.core/templates/internal/macros/reply/run_popup.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="macro" value="{$macro->id}">
+ <input type="hidden" name="ticket_id" value="{$ticket_id}">
+ <input type="hidden" name="message_id" value="{$message_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Behavior:</b><br>
+ {if !empty($macro->title)}
+diff --git a/features/cerberusweb.core/templates/internal/mail_transport/peek.tpl b/features/cerberusweb.core/templates/internal/mail_transport/peek.tpl
+index 2f1f0d9f85..9958d770c5 100644
+--- a/features/cerberusweb.core/templates/internal/mail_transport/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/mail_transport/peek.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek" style="margin-bottom:0px;">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/mail_transport/view.tpl b/features/cerberusweb.core/templates/internal/mail_transport/view.tpl
+index 612172fb82..3d75ba81eb 100644
+--- a/features/cerberusweb.core/templates/internal/mail_transport/view.tpl
++++ b/features/cerberusweb.core/templates/internal/mail_transport/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="section" value="mail_transport">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/mailbox/peek.tpl b/features/cerberusweb.core/templates/internal/mailbox/peek.tpl
+index 9e08845d75..70a154eaa9 100644
+--- a/features/cerberusweb.core/templates/internal/mailbox/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/mailbox/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/mailbox/view.tpl b/features/cerberusweb.core/templates/internal/mailbox/view.tpl
+index a8512eadf2..aaaec1910c 100644
+--- a/features/cerberusweb.core/templates/internal/mailbox/view.tpl
++++ b/features/cerberusweb.core/templates/internal/mailbox/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="mailbox">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/messages/peek.tpl b/features/cerberusweb.core/templates/internal/messages/peek.tpl
+index 22bb6aa75f..ee2a915f00 100644
+--- a/features/cerberusweb.core/templates/internal/messages/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/messages/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {$ticket = $model->getTicket()}
+ {$headers = $model->getHeaders()}
+diff --git a/features/cerberusweb.core/templates/internal/recommendations/context_recommend_peek.tpl b/features/cerberusweb.core/templates/internal/recommendations/context_recommend_peek.tpl
+index a033340e8c..ac97799d8b 100644
+--- a/features/cerberusweb.core/templates/internal/recommendations/context_recommend_peek.tpl
++++ b/features/cerberusweb.core/templates/internal/recommendations/context_recommend_peek.tpl
+@@ -13,6 +13,7 @@
+ 	<input type="hidden" name="context_id" value="{$context_id}">
+ 	<input type="hidden" name="group_id" value="{$group_id}">
+ 	<input type="hidden" name="bucket_id" value="{$bucket_id}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<div style="margin-bottom:10px;">
+ 	{include file="devblocks:cerberusweb.core::internal/workers/worker_picker_container.tpl" context=$context context_id=$context_id}
+diff --git a/features/cerberusweb.core/templates/internal/responsibilities/peek_by_group_editable.tpl b/features/cerberusweb.core/templates/internal/responsibilities/peek_by_group_editable.tpl
+index a558c5ac6e..eedb889e27 100644
+--- a/features/cerberusweb.core/templates/internal/responsibilities/peek_by_group_editable.tpl
++++ b/features/cerberusweb.core/templates/internal/responsibilities/peek_by_group_editable.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveResponsibilitiesPopup">
+ <input type="hidden" name="context" value="{CerberusContexts::CONTEXT_GROUP}">
+ <input type="hidden" name="context_id" value="{$group->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {foreach from=$buckets item=bucket}
+ 	<fieldset class="peek cerb-delta-slider-container" style="display:inline-block;">
+diff --git a/features/cerberusweb.core/templates/internal/skills/peek.tpl b/features/cerberusweb.core/templates/internal/skills/peek.tpl
+index f1d7df6387..4000afad60 100644
+--- a/features/cerberusweb.core/templates/internal/skills/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/skills/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/skills/view.tpl b/features/cerberusweb.core/templates/internal/skills/view.tpl
+index 7bc38b59a5..f35327d5d2 100644
+--- a/features/cerberusweb.core/templates/internal/skills/view.tpl
++++ b/features/cerberusweb.core/templates/internal/skills/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="skill">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/skillsets/chooser_popup.tpl b/features/cerberusweb.core/templates/internal/skillsets/chooser_popup.tpl
+index 583f0e7aa3..de41bb4c59 100644
+--- a/features/cerberusweb.core/templates/internal/skillsets/chooser_popup.tpl
++++ b/features/cerberusweb.core/templates/internal/skillsets/chooser_popup.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveSkillsForContext">
+ <input type="hidden" name="context" value="{$context}">
+ <input type="hidden" name="context_id" value="{$context_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {include file="devblocks:cerberusweb.core::internal/skillsets/fieldsets_and_menu.tpl" skill_labels=$skill_labels skillsets_linked=$skillsets}
+ 
+diff --git a/features/cerberusweb.core/templates/internal/skillsets/peek.tpl b/features/cerberusweb.core/templates/internal/skillsets/peek.tpl
+index 1b1663c300..a251a0dd73 100644
+--- a/features/cerberusweb.core/templates/internal/skillsets/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/skillsets/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/skillsets/tab_editable.tpl b/features/cerberusweb.core/templates/internal/skillsets/tab_editable.tpl
+index 7b57b80832..18f7b9144e 100644
+--- a/features/cerberusweb.core/templates/internal/skillsets/tab_editable.tpl
++++ b/features/cerberusweb.core/templates/internal/skillsets/tab_editable.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="action" value="saveSkillsForContext">
+ <input type="hidden" name="context" value="{$context}">
+ <input type="hidden" name="context_id" value="{$context_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {include file="devblocks:cerberusweb.core::internal/skillsets/fieldsets_and_menu.tpl" skill_labels=$skill_labels skillsets_linked=$skillsets}
+ 
+diff --git a/features/cerberusweb.core/templates/internal/skillsets/view.tpl b/features/cerberusweb.core/templates/internal/skillsets/view.tpl
+index 138c0fc02f..b8a4bedaf8 100644
+--- a/features/cerberusweb.core/templates/internal/skillsets/view.tpl
++++ b/features/cerberusweb.core/templates/internal/skillsets/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="skillset">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/snippets/bulk.tpl b/features/cerberusweb.core/templates/internal/snippets/bulk.tpl
+index 26e61d9dd8..92cdc7a2ae 100644
+--- a/features/cerberusweb.core/templates/internal/snippets/bulk.tpl
++++ b/features/cerberusweb.core/templates/internal/snippets/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doSnippetBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/snippets/paste_placeholders.tpl b/features/cerberusweb.core/templates/internal/snippets/paste_placeholders.tpl
+index 64bf96bd73..3470384eb7 100644
+--- a/features/cerberusweb.core/templates/internal/snippets/paste_placeholders.tpl
++++ b/features/cerberusweb.core/templates/internal/snippets/paste_placeholders.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="snippetPlaceholdersPreview">
+ <input type="hidden" name="id" value="{$snippet->id}">
+ <input type="hidden" name="context_id" value="{$context_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek" style="margin-bottom:5px;">
+ 	<legend>Fill in the blanks:</legend>
+diff --git a/features/cerberusweb.core/templates/internal/snippets/peek.tpl b/features/cerberusweb.core/templates/internal/snippets/peek.tpl
+index 8cb92fa49c..f3b253a5ee 100644
+--- a/features/cerberusweb.core/templates/internal/snippets/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/snippets/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="id" value="{$snippet->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/snippets/views/default.tpl b/features/cerberusweb.core/templates/internal/snippets/views/default.tpl
+index a1931b9fa1..bf92caec3c 100644
+--- a/features/cerberusweb.core/templates/internal/snippets/views/default.tpl
++++ b/features/cerberusweb.core/templates/internal/snippets/views/default.tpl
+@@ -29,6 +29,8 @@
+ <input type="hidden" name="context_id" value="cerberusweb.contexts.snippet">
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/tour/banner.tpl b/features/cerberusweb.core/templates/internal/tour/banner.tpl
+index 1c2057618e..998d0cad71 100644
+--- a/features/cerberusweb.core/templates/internal/tour/banner.tpl
++++ b/features/cerberusweb.core/templates/internal/tour/banner.tpl
+@@ -11,6 +11,7 @@
+ 			<form action="{devblocks_url}{/devblocks_url}" method="post" name="tourForm">
+ 				<input type="hidden" name="c" value="internal">
+ 				<input type="hidden" name="a" value="doStopTour">
++				<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 				<a href="javascript:;" onclick="$('#tourDiv').fadeOut();genericAjaxGet('','c=internal&a=doStopTour');">hide this</a>
+ 				&nbsp;
+ 			</form>
+diff --git a/features/cerberusweb.core/templates/internal/va/peek.tpl b/features/cerberusweb.core/templates/internal/va/peek.tpl
+index ec49bedc90..3e736fc362 100644
+--- a/features/cerberusweb.core/templates/internal/va/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/va/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/internal/va/scheduled_behavior/view.tpl b/features/cerberusweb.core/templates/internal/va/scheduled_behavior/view.tpl
+index 4f5c2e4b8a..a432422ff8 100644
+--- a/features/cerberusweb.core/templates/internal/va/scheduled_behavior/view.tpl
++++ b/features/cerberusweb.core/templates/internal/va/scheduled_behavior/view.tpl
+@@ -20,6 +20,8 @@
+ <input type="hidden" name="context_id" value="cerberusweb.contexts.group">
+ <input type="hidden" name="c" value="config">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/va/view.tpl b/features/cerberusweb.core/templates/internal/va/view.tpl
+index ce5d332706..28d0ecf4e3 100644
+--- a/features/cerberusweb.core/templates/internal/va/view.tpl
++++ b/features/cerberusweb.core/templates/internal/va/view.tpl
+@@ -33,6 +33,8 @@
+ <input type="hidden" name="section" value="virtual_attendant">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/internal/views/copy.tpl b/features/cerberusweb.core/templates/internal/views/copy.tpl
+index a284663127..c0cb590e03 100644
+--- a/features/cerberusweb.core/templates/internal/views/copy.tpl
++++ b/features/cerberusweb.core/templates/internal/views/copy.tpl
+@@ -1,5 +1,6 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="post" id="frmCopy{$view->id}" onsubmit="return false;">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <H2>Copy Worklist</H2>
+ 
+diff --git a/features/cerberusweb.core/templates/internal/views/search_and_view.tpl b/features/cerberusweb.core/templates/internal/views/search_and_view.tpl
+index 790f19a25b..3a96066fea 100644
+--- a/features/cerberusweb.core/templates/internal/views/search_and_view.tpl
++++ b/features/cerberusweb.core/templates/internal/views/search_and_view.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="c" value="internal">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="id" value="{$view->id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div id="viewCustomFilters{$view->id}">
+ {include file="devblocks:cerberusweb.core::internal/views/customize_view_criteria.tpl"}
+diff --git a/features/cerberusweb.core/templates/internal/views/view_export.tpl b/features/cerberusweb.core/templates/internal/views/view_export.tpl
+index addb56358d..8cadedbe07 100644
+--- a/features/cerberusweb.core/templates/internal/views/view_export.tpl
++++ b/features/cerberusweb.core/templates/internal/views/view_export.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="viewDoExport">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="cursor_key" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div class="export-settings">
+ 
+diff --git a/features/cerberusweb.core/templates/internal/watchers/context_follow_peek.tpl b/features/cerberusweb.core/templates/internal/watchers/context_follow_peek.tpl
+index b2fdb49e9f..b36118dc76 100644
+--- a/features/cerberusweb.core/templates/internal/watchers/context_follow_peek.tpl
++++ b/features/cerberusweb.core/templates/internal/watchers/context_follow_peek.tpl
+@@ -13,6 +13,7 @@
+ 	<input type="hidden" name="context_id" value="{$context_id}">
+ 	<input type="hidden" name="group_id" value="{$group_id}">
+ 	<input type="hidden" name="bucket_id" value="{$bucket_id}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<div style="margin-bottom:10px;">
+ 	{include file="devblocks:cerberusweb.core::internal/workers/worker_picker_container.tpl" context=$context context_id=$context_id}
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/tabs/calendar/tab.tpl b/features/cerberusweb.core/templates/internal/workspaces/tabs/calendar/tab.tpl
+index 64ed58c4e5..7ae55c7fb4 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/tabs/calendar/tab.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/tabs/calendar/tab.tpl
+@@ -13,6 +13,8 @@
+ {$guid = uniqid()}
+ 
+ <form id="frm{$guid}" action="#" style="margin-bottom:5px;width:98%;">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++	
+ 	<div style="float:left;">
+ 		<span style="font-weight:bold;font-size:150%;">{$calendar_properties.calendar_date|devblocks_date:'F Y'}</span>
+ 		<span style="margin-left:10px;">
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/tabs/worklists/tab.tpl b/features/cerberusweb.core/templates/internal/workspaces/tabs/worklists/tab.tpl
+index c9c80f226b..b0bed01178 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/tabs/worklists/tab.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/tabs/worklists/tab.tpl
+@@ -1,5 +1,6 @@
+ {if empty($worklists)}
+ <form action="#" onsubmit="return false;">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <div class="help-box" style="padding:5px;border:0;">
+ 	<h1 style="margin-bottom:5px;text-align:left;">Let's put this workspace to good use</h1>
+ 	
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/widgets/add.tpl b/features/cerberusweb.core/templates/internal/workspaces/widgets/add.tpl
+index 9df260e76d..bc56104a0a 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/widgets/add.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/widgets/add.tpl
+@@ -11,6 +11,7 @@
+ 		<input type="hidden" name="section" value="dashboards">
+ 		<input type="hidden" name="action" value="addWidgetPopupJson">
+ 		<input type="hidden" name="workspace_tab_id" value="{$workspace_tab_id}">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 		
+ 		<b>Type:</b>
+ 		<select name="extension_id">
+@@ -32,6 +33,7 @@
+ 		<input type="hidden" name="section" value="dashboards">
+ 		<input type="hidden" name="action" value="addWidgetImportJson">
+ 		<input type="hidden" name="workspace_tab_id" value="{$workspace_tab_id}">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 		<div class="import">
+ 			<b>Import:</b> (.json format)
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/widgets/calendar/calendar.tpl b/features/cerberusweb.core/templates/internal/workspaces/widgets/calendar/calendar.tpl
+index 199cbe1170..e4fe015b67 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/widgets/calendar/calendar.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/widgets/calendar/calendar.tpl
+@@ -1,6 +1,8 @@
+ {$guid = uniqid()}
+ 
+ <form id="frm{$guid}" action="#" style="margin-bottom:5px;width:98%;">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++	
+ 	<div style="float:left;">
+ 		<span style="font-weight:bold;font-size:150%;">{$calendar_properties.calendar_date|devblocks_date:'F Y'}</span>
+ 	</div>
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/widgets/export.tpl b/features/cerberusweb.core/templates/internal/workspaces/widgets/export.tpl
+index ee40013aed..ee9232e81f 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/widgets/export.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/widgets/export.tpl
+@@ -1,4 +1,5 @@
+ <form action="javascript:;" method="post" id="frmWidgetExport" onsubmit="return false;">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Widget:</b>
+ 
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/widgets/export_data.tpl b/features/cerberusweb.core/templates/internal/workspaces/widgets/export_data.tpl
+index bb7853d569..6eaec155b3 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/widgets/export_data.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/widgets/export_data.tpl
+@@ -1,4 +1,5 @@
+ <form action="javascript:;" method="post" id="frmWidgetExportData" onsubmit="return false;">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Widget:</b>
+ 
+diff --git a/features/cerberusweb.core/templates/internal/workspaces/widgets/peek.tpl b/features/cerberusweb.core/templates/internal/workspaces/widgets/peek.tpl
+index a405407f20..bb92f0c26d 100644
+--- a/features/cerberusweb.core/templates/internal/workspaces/widgets/peek.tpl
++++ b/features/cerberusweb.core/templates/internal/workspaces/widgets/peek.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="saveWidgetPopup">
+ {if !empty($widget) && !empty($widget->id)}<input type="hidden" name="id" value="{$widget->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table width="100%" cellpadding="0" cellspacing="2">
+ 	{if $extension instanceof Extension_WorkspaceWidget}
+diff --git a/features/cerberusweb.core/templates/mail/queue/bulk.tpl b/features/cerberusweb.core/templates/mail/queue/bulk.tpl
+index 6ecd0e6943..91c8245b25 100644
+--- a/features/cerberusweb.core/templates/mail/queue/bulk.tpl
++++ b/features/cerberusweb.core/templates/mail/queue/bulk.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="doDraftsBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/mail/queue/peek.tpl b/features/cerberusweb.core/templates/mail/queue/peek.tpl
+index cde1cbfc2b..f24986f7cf 100644
+--- a/features/cerberusweb.core/templates/mail/queue/peek.tpl
++++ b/features/cerberusweb.core/templates/mail/queue/peek.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="id" value="{$draft->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="0" cellspacing="2" border="0" width="98%">
+ 	{if is_null($workers)}{$workers = DAO_Worker::getAll()}{/if}
+diff --git a/features/cerberusweb.core/templates/mail/queue/view.tpl b/features/cerberusweb.core/templates/mail/queue/view.tpl
+index a5d3b6892b..a9cd5e6879 100644
+--- a/features/cerberusweb.core/templates/mail/queue/view.tpl
++++ b/features/cerberusweb.core/templates/mail/queue/view.tpl
+@@ -25,6 +25,8 @@
+ <input type="hidden" name="section" value="drafts">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/mail/section/compose/peek.tpl b/features/cerberusweb.core/templates/mail/section/compose/peek.tpl
+index 889466ca1f..af0cd6376c 100644
+--- a/features/cerberusweb.core/templates/mail/section/compose/peek.tpl
++++ b/features/cerberusweb.core/templates/mail/section/compose/peek.tpl
+@@ -14,6 +14,7 @@
+ <input type="hidden" name="link_context_id" value="{$draft->params.link_context_id}">
+ {/if}
+ <input type="hidden" name="format" value="{if ($draft && $draft->params.format == 'parsedown') || $mail_reply_html}parsedown{/if}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.message'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/messages/view.tpl b/features/cerberusweb.core/templates/messages/view.tpl
+index c0d79d755e..a1c2d6d569 100644
+--- a/features/cerberusweb.core/templates/messages/view.tpl
++++ b/features/cerberusweb.core/templates/messages/view.tpl
+@@ -26,6 +26,8 @@
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/pages/add_tabs.tpl b/features/cerberusweb.core/templates/pages/add_tabs.tpl
+index ef675465b3..d0ca20c10e 100644
+--- a/features/cerberusweb.core/templates/pages/add_tabs.tpl
++++ b/features/cerberusweb.core/templates/pages/add_tabs.tpl
+@@ -28,6 +28,8 @@
+ <input type="hidden" name="a" value="doAddCustomTabJson">
+ <input type="hidden" name="page_id" value="{$page->id}">
+ <input type="hidden" name="len" value="99">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <fieldset class="peek">
+ 	<legend>Add a new tab:</legend>
+ 
+diff --git a/features/cerberusweb.core/templates/pages/edit_workspace_page.tpl b/features/cerberusweb.core/templates/pages/edit_workspace_page.tpl
+index 385c8109b1..c57860aa19 100644
+--- a/features/cerberusweb.core/templates/pages/edit_workspace_page.tpl
++++ b/features/cerberusweb.core/templates/pages/edit_workspace_page.tpl
+@@ -6,6 +6,7 @@
+ <input type="hidden" name="id" value="{$workspace_page->id|default:0}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($workspace_page)}<input type="hidden" name="do_delete" value="0">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="2" cellspacing="0" border="0" width="100%" style="margin-bottom:5px;">
+ 	<tr>
+@@ -118,6 +119,7 @@
+ 		<input type="hidden" name="c" value="pages">
+ 		<input type="hidden" name="a" value="importWorkspacePageJson">
+ 		<input type="hidden" name="view_id" value="{$view_id}">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 		<div class="import">
+ 			<b>Import:</b> (.json format)
+diff --git a/features/cerberusweb.core/templates/pages/edit_workspace_tab.tpl b/features/cerberusweb.core/templates/pages/edit_workspace_tab.tpl
+index dbd6e3623f..67430740fa 100644
+--- a/features/cerberusweb.core/templates/pages/edit_workspace_tab.tpl
++++ b/features/cerberusweb.core/templates/pages/edit_workspace_tab.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="id" value="{$workspace_tab->id}">
+ <input type="hidden" name="workspace_page_id" value="{$workspace_tab->workspace_page_id}">
+ {if !empty($workspace_tab)}<input type="hidden" name="do_delete" value="0">{/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="2" cellspacing="0" border="0" width="100%" style="margin-bottom:5px;">
+ 	<tr>
+diff --git a/features/cerberusweb.core/templates/pages/page.tpl b/features/cerberusweb.core/templates/pages/page.tpl
+index 1a68a29b4a..d464afa028 100644
+--- a/features/cerberusweb.core/templates/pages/page.tpl
++++ b/features/cerberusweb.core/templates/pages/page.tpl
+@@ -1,6 +1,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" id="frmWorkspacePage{$page->id}" method="POST" style="margin-top:5px;">
+ 	<input type="hidden" name="c" value="internal">
+ 	<input type="hidden" name="a" value="">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 	{$menu_json = DAO_WorkerPref::get($active_worker->id, 'menu_json', json_encode(array()))}
+ 	{$menu = json_decode($menu_json, true)}
+diff --git a/features/cerberusweb.core/templates/pages/view.tpl b/features/cerberusweb.core/templates/pages/view.tpl
+index 86575afbc2..d23df8dd40 100644
+--- a/features/cerberusweb.core/templates/pages/view.tpl
++++ b/features/cerberusweb.core/templates/pages/view.tpl
+@@ -26,6 +26,8 @@
+ <input type="hidden" name="context_id" value="">
+ <input type="hidden" name="c" value="pages">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/pages/wizard_popup.tpl b/features/cerberusweb.core/templates/pages/wizard_popup.tpl
+index 54d58a4315..da079a8a65 100644
+--- a/features/cerberusweb.core/templates/pages/wizard_popup.tpl
++++ b/features/cerberusweb.core/templates/pages/wizard_popup.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="pages">
+ <input type="hidden" name="a" value="savePageWizardPopup">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend style="color:rgb(80,80,80);">What kind of page would you like to create?</legend>
+diff --git a/features/cerberusweb.core/templates/preferences/modules/general.tpl b/features/cerberusweb.core/templates/preferences/modules/general.tpl
+index 92c177c20b..0c3642394f 100644
+--- a/features/cerberusweb.core/templates/preferences/modules/general.tpl
++++ b/features/cerberusweb.core/templates/preferences/modules/general.tpl
+@@ -1,6 +1,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="post">
+ <input type="hidden" name="c" value="preferences">
+ <input type="hidden" name="a" value="saveDefaults">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'preferences.account.settings'|devblocks_translate|capitalize}</legend>
+@@ -148,4 +149,5 @@
+ <input type="hidden" name="c" value="preferences">
+ <input type="hidden" name="a" value="resendConfirmation">
+ <input type="hidden" name="email" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ </form>
+diff --git a/features/cerberusweb.core/templates/preferences/modules/security.tpl b/features/cerberusweb.core/templates/preferences/modules/security.tpl
+index 0f404280c2..e83a122cb5 100644
+--- a/features/cerberusweb.core/templates/preferences/modules/security.tpl
++++ b/features/cerberusweb.core/templates/preferences/modules/security.tpl
+@@ -1,6 +1,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST" autocomplete="off">
+ <input type="hidden" name="c" value="preferences">
+ <input type="hidden" name="a" value="saveSecurityTab">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div class="help-box">
+ 	<h1>Set up your secret questions</h1>
+diff --git a/features/cerberusweb.core/templates/preferences/tabs/notifications/bulk.tpl b/features/cerberusweb.core/templates/preferences/tabs/notifications/bulk.tpl
+index 3cf4ad3ccf..4e9e4fb70c 100644
+--- a/features/cerberusweb.core/templates/preferences/tabs/notifications/bulk.tpl
++++ b/features/cerberusweb.core/templates/preferences/tabs/notifications/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doNotificationsBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/preferences/tabs/notifications/view.tpl b/features/cerberusweb.core/templates/preferences/tabs/notifications/view.tpl
+index d95d24d609..2ce6f23359 100644
+--- a/features/cerberusweb.core/templates/preferences/tabs/notifications/view.tpl
++++ b/features/cerberusweb.core/templates/preferences/tabs/notifications/view.tpl
+@@ -25,6 +25,8 @@
+ <input type="hidden" name="c" value="preferences">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/preferences/tabs/watcher/index.tpl b/features/cerberusweb.core/templates/preferences/tabs/watcher/index.tpl
+index 064d257cc2..e069595f87 100644
+--- a/features/cerberusweb.core/templates/preferences/tabs/watcher/index.tpl
++++ b/features/cerberusweb.core/templates/preferences/tabs/watcher/index.tpl
+@@ -1,6 +1,7 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST" id="frmWatcherPrefs">
+ <input type="hidden" name="c" value="preferences">
+ <input type="hidden" name="a" value="saveWatcherTab">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ <legend>If I'm watching something, send me a notification when these events happen:</legend>
+diff --git a/features/cerberusweb.core/templates/search/quick_search.tpl b/features/cerberusweb.core/templates/search/quick_search.tpl
+index e9b3961451..d2f80f8b33 100644
+--- a/features/cerberusweb.core/templates/search/quick_search.tpl
++++ b/features/cerberusweb.core/templates/search/quick_search.tpl
+@@ -6,6 +6,7 @@
+ 	<input type="hidden" name="c" value="search">
+ 	<input type="hidden" name="a" value="ajaxQuickSearch">
+ 	<input type="hidden" name="view_id" value="{$view->id}">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 	<div style="border:1px solid rgb(200,200,200);border-radius:10px;display:inline-block;">
+ 		<input type="text" name="query" class="input_search cerb-input-quicksearch" style="border:0;" size="50" value="{$quick_search_query}" autocomplete="off" spellcheck="false">
+diff --git a/features/cerberusweb.core/templates/tasks/rpc/bulk.tpl b/features/cerberusweb.core/templates/tasks/rpc/bulk.tpl
+index 5f9c94297f..6049660602 100644
+--- a/features/cerberusweb.core/templates/tasks/rpc/bulk.tpl
++++ b/features/cerberusweb.core/templates/tasks/rpc/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doTaskBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/tasks/rpc/peek.tpl b/features/cerberusweb.core/templates/tasks/rpc/peek.tpl
+index 5693b3004a..96e1b642fe 100644
+--- a/features/cerberusweb.core/templates/tasks/rpc/peek.tpl
++++ b/features/cerberusweb.core/templates/tasks/rpc/peek.tpl
+@@ -8,6 +8,7 @@
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.core/templates/tasks/view.tpl b/features/cerberusweb.core/templates/tasks/view.tpl
+index a52981e23a..374ee2dee5 100644
+--- a/features/cerberusweb.core/templates/tasks/view.tpl
++++ b/features/cerberusweb.core/templates/tasks/view.tpl
+@@ -31,6 +31,8 @@
+ <input type="hidden" name="c" value="tasks">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.core/templates/tickets/ajax/merge_confirm.tpl b/features/cerberusweb.core/templates/tickets/ajax/merge_confirm.tpl
+index a75d58e1c8..8966beae80 100644
+--- a/features/cerberusweb.core/templates/tickets/ajax/merge_confirm.tpl
++++ b/features/cerberusweb.core/templates/tickets/ajax/merge_confirm.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="viewMergeTickets">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>Are you sure you want to merge these tickets?</legend>
+diff --git a/features/cerberusweb.core/templates/tickets/peek.tpl b/features/cerberusweb.core/templates/tickets/peek.tpl
+index 96b67ea9c0..fa8e53cabe 100644
+--- a/features/cerberusweb.core/templates/tickets/peek.tpl
++++ b/features/cerberusweb.core/templates/tickets/peek.tpl
+@@ -9,6 +9,7 @@
+ <input type="hidden" name="link_context" value="{$link_context}">
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {if !$edit_mode && !empty($message)}
+ <div id="ticketPeekMessage" style="margin-bottom:10px;">
+diff --git a/features/cerberusweb.core/templates/tickets/rpc/bulk.tpl b/features/cerberusweb.core/templates/tickets/rpc/bulk.tpl
+index 9249f5dc47..110bba2a40 100644
+--- a/features/cerberusweb.core/templates/tickets/rpc/bulk.tpl
++++ b/features/cerberusweb.core/templates/tickets/rpc/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist.tpl b/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist.tpl
+index 8d446edba0..8eb47e18a9 100644
+--- a/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist.tpl
++++ b/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="viewAutoAssist">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ Sort biggest piles by: 
+ <label><input type="radio" name="mode" value="subjects" {if $mode!="subjects"}onclick="genericAjaxGet('{$view_id}_tips','c=tickets&a=showViewAutoAssist&view_id={$view_id}&mode=subjects');"{/if} {if $mode=="subjects"}checked{/if}>Subject Similarity</label>
+diff --git a/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist_headers.tpl b/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist_headers.tpl
+index 673abf7a93..fc228a4385 100644
+--- a/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist_headers.tpl
++++ b/features/cerberusweb.core/templates/tickets/rpc/ticket_view_assist_headers.tpl
+@@ -2,6 +2,7 @@
+ <input type="hidden" name="c" value="tickets">
+ <input type="hidden" name="a" value="viewAutoAssist">
+ <input type="hidden" name="view_id" value="{$view_id}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ Sort biggest piles by: 
+ <label><input type="radio" name="mode" value="subjects" {if $mode!="subjects"}onclick="genericAjaxGet('{$view_id}_tips','c=tickets&a=showViewAutoAssist&view_id={$view_id}&mode=subjects');"{/if} {if $mode=="subjects"}checked{/if}>Subject Similarity</label>
+diff --git a/features/cerberusweb.core/templates/tickets/view.tpl b/features/cerberusweb.core/templates/tickets/view.tpl
+index 118899b881..b3f0562bf6 100644
+--- a/features/cerberusweb.core/templates/tickets/view.tpl
++++ b/features/cerberusweb.core/templates/tickets/view.tpl
+@@ -35,6 +35,8 @@
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="id" value="{$view->id}">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 	{* Column Headers *}
+ 	<thead>
+diff --git a/features/cerberusweb.core/templates/workers/view.tpl b/features/cerberusweb.core/templates/workers/view.tpl
+index 586d5305bb..b4b03e14fc 100644
+--- a/features/cerberusweb.core/templates/workers/view.tpl
++++ b/features/cerberusweb.core/templates/workers/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="section" value="worker">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="2" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.crm/templates/crm/opps/bulk.tpl b/features/cerberusweb.crm/templates/crm/opps/bulk.tpl
+index 24485981e2..3c2cccf26c 100644
+--- a/features/cerberusweb.crm/templates/crm/opps/bulk.tpl
++++ b/features/cerberusweb.crm/templates/crm/opps/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doOppBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="opp_ids" value="{$opp_ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.crm/templates/crm/opps/peek.tpl b/features/cerberusweb.crm/templates/crm/opps/peek.tpl
+index d2c704ee38..e399e5f1f8 100644
+--- a/features/cerberusweb.crm/templates/crm/opps/peek.tpl
++++ b/features/cerberusweb.crm/templates/crm/opps/peek.tpl
+@@ -8,6 +8,7 @@
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.crm/templates/crm/opps/view.tpl b/features/cerberusweb.crm/templates/crm/opps/view.tpl
+index f4bc9837a5..92afd26db8 100644
+--- a/features/cerberusweb.crm/templates/crm/opps/view.tpl
++++ b/features/cerberusweb.crm/templates/crm/opps/view.tpl
+@@ -32,6 +32,8 @@
+ <input type="hidden" name="c" value="crm">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.feedback/templates/feedback/ajax/peek.tpl b/features/cerberusweb.feedback/templates/feedback/ajax/peek.tpl
+index aea7f43f74..c35ab61760 100644
+--- a/features/cerberusweb.feedback/templates/feedback/ajax/peek.tpl
++++ b/features/cerberusweb.feedback/templates/feedback/ajax/peek.tpl
+@@ -7,6 +7,7 @@
+ <input type="hidden" name="link_context_id" value="{$link_context_id}">
+ {/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>Properties</legend>
+diff --git a/features/cerberusweb.feedback/templates/feedback/bulk.tpl b/features/cerberusweb.feedback/templates/feedback/bulk.tpl
+index 3110405c38..68a0366968 100644
+--- a/features/cerberusweb.feedback/templates/feedback/bulk.tpl
++++ b/features/cerberusweb.feedback/templates/feedback/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.feedback/templates/feedback/view.tpl b/features/cerberusweb.feedback/templates/feedback/view.tpl
+index e08c1bf02a..cff69c7bf9 100644
+--- a/features/cerberusweb.feedback/templates/feedback/view.tpl
++++ b/features/cerberusweb.feedback/templates/feedback/view.tpl
+@@ -25,6 +25,7 @@
+ <input type="hidden" name="view_id" value="{$view->id}">
+ <input type="hidden" name="c" value="feedback">
+ <input type="hidden" name="a" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+diff --git a/features/cerberusweb.kb/templates/kb/ajax/category_edit_panel.tpl b/features/cerberusweb.kb/templates/kb/ajax/category_edit_panel.tpl
+index 86a3e20e5e..f0ad2dd795 100644
+--- a/features/cerberusweb.kb/templates/kb/ajax/category_edit_panel.tpl
++++ b/features/cerberusweb.kb/templates/kb/ajax/category_edit_panel.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="saveKbCategoryEditPanelJson">
+ <input type="hidden" name="id" value="{$category->id}">
+ <input type="hidden" name="delete_box" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Name:</b><br>
+ <input type="text" name="name" value="{$category->name}" style="width:99%;border:solid 1px rgb(180,180,180);"><br>
+diff --git a/features/cerberusweb.kb/templates/kb/bulk.tpl b/features/cerberusweb.kb/templates/kb/bulk.tpl
+index a178903497..d9f21b6f9a 100644
+--- a/features/cerberusweb.kb/templates/kb/bulk.tpl
++++ b/features/cerberusweb.kb/templates/kb/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="doArticlesBulkUpdate">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/features/cerberusweb.kb/templates/kb/peek_edit.tpl b/features/cerberusweb.kb/templates/kb/peek_edit.tpl
+index 3b9b40567d..6fca13fecb 100644
+--- a/features/cerberusweb.kb/templates/kb/peek_edit.tpl
++++ b/features/cerberusweb.kb/templates/kb/peek_edit.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="id" value="{$article->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <div id="kbArticleTabs">
+ 	<ul>
+diff --git a/features/cerberusweb.kb/templates/kb/peek_readonly.tpl b/features/cerberusweb.kb/templates/kb/peek_readonly.tpl
+index 24bd6bdbd1..efaadb93a2 100644
+--- a/features/cerberusweb.kb/templates/kb/peek_readonly.tpl
++++ b/features/cerberusweb.kb/templates/kb/peek_readonly.tpl
+@@ -1,4 +1,5 @@
+ <form action="{devblocks_url}{/devblocks_url}" method="POST">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <iframe src="{$smarty.const.DEVBLOCKS_WEBPATH}ajax.php?c=kb.ajax&a=getArticleContent&id={$article->id}" style="margin:5px 0px 5px 5px;height:400px;width:98%;border:1px solid rgb(200,200,200);" frameborder="0"></iframe>
+ <br>
+diff --git a/features/cerberusweb.kb/templates/kb/tabs/articles/index.tpl b/features/cerberusweb.kb/templates/kb/tabs/articles/index.tpl
+index a71a0ed85c..2577906eef 100644
+--- a/features/cerberusweb.kb/templates/kb/tabs/articles/index.tpl
++++ b/features/cerberusweb.kb/templates/kb/tabs/articles/index.tpl
+@@ -3,6 +3,7 @@
+ <form id="frmKbBrowseTab{$tab->id}" enctype="multipart/form-data" method="post" action="{devblocks_url}{/devblocks_url}">
+ 	<input type="hidden" name="c" value="kb.ajax">
+ 	<input type="hidden" name="a" value="">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ 	{if $active_worker->hasPriv('core.kb.categories.modify')}
+ 		{$parent_id = 0}
+diff --git a/features/cerberusweb.kb/templates/kb/view.tpl b/features/cerberusweb.kb/templates/kb/view.tpl
+index 3364dc06df..8423a57372 100644
+--- a/features/cerberusweb.kb/templates/kb/view.tpl
++++ b/features/cerberusweb.kb/templates/kb/view.tpl
+@@ -31,6 +31,8 @@
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="return" value="{$response_uri}">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.reports/templates/reports/custom_fields/usage/index.tpl b/features/cerberusweb.reports/templates/reports/custom_fields/usage/index.tpl
+index 1d19623a9d..85266d1835 100644
+--- a/features/cerberusweb.reports/templates/reports/custom_fields/usage/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/custom_fields/usage/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'reports.ui.custom_fields.usage'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.custom_fields.usage{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Custom Field:</b>
+ 
+diff --git a/features/cerberusweb.reports/templates/reports/group/group_replies/index.tpl b/features/cerberusweb.reports/templates/reports/group/group_replies/index.tpl
+index 1c76d3a1c5..755ee4e0a4 100644
+--- a/features/cerberusweb.reports/templates/reports/group/group_replies/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/group/group_replies/index.tpl
+@@ -3,6 +3,7 @@
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.groups.group_replies{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
+ <input type="hidden" name="c" value="reports">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.reports/templates/reports/snippets/snippet_popularity/index.tpl b/features/cerberusweb.reports/templates/reports/snippets/snippet_popularity/index.tpl
+index 4e760502cf..718b5c0f46 100644
+--- a/features/cerberusweb.reports/templates/reports/snippets/snippet_popularity/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/snippets/snippet_popularity/index.tpl
+@@ -3,6 +3,7 @@
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.snippets.popularity{/devblocks_url}" method="POST" id="frmRange">
+ <input type="hidden" name="c" value="reports">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ 
+diff --git a/features/cerberusweb.reports/templates/reports/ticket/closed_tickets/index.tpl b/features/cerberusweb.reports/templates/reports/ticket/closed_tickets/index.tpl
+index 4f4eb73da7..c4875c3055 100644
+--- a/features/cerberusweb.reports/templates/reports/ticket/closed_tickets/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/ticket/closed_tickets/index.tpl
+@@ -3,6 +3,7 @@
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.tickets.closed_tickets{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
+ <input type="hidden" name="c" value="reports">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.reports/templates/reports/ticket/new_tickets/index.tpl b/features/cerberusweb.reports/templates/reports/ticket/new_tickets/index.tpl
+index b10104d974..31b3bd3ccc 100644
+--- a/features/cerberusweb.reports/templates/reports/ticket/new_tickets/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/ticket/new_tickets/index.tpl
+@@ -3,6 +3,7 @@
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.tickets.new_tickets{/devblocks_url}" method="POST" id="frmRange">
+ <input type="hidden" name="c" value="reports">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.reports/templates/reports/ticket/top_contacts_tickets/index.tpl b/features/cerberusweb.reports/templates/reports/ticket/top_contacts_tickets/index.tpl
+index e29e602738..05af9d4791 100644
+--- a/features/cerberusweb.reports/templates/reports/ticket/top_contacts_tickets/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/ticket/top_contacts_tickets/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'reports.ui.ticket.top_contacts'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.tickets.top_contacts{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ {'reports.ui.date_from'|devblocks_translate} <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ {'reports.ui.date_to'|devblocks_translate} <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <div id="divCal"></div>
+diff --git a/features/cerberusweb.reports/templates/reports/va/va_usage/index.tpl b/features/cerberusweb.reports/templates/reports/va/va_usage/index.tpl
+index d93d3f4f33..1ab09f1836 100644
+--- a/features/cerberusweb.reports/templates/reports/va/va_usage/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/va/va_usage/index.tpl
+@@ -3,6 +3,7 @@
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.virtual_attendants.usage{/devblocks_url}" method="POST" id="frmRange">
+ <input type="hidden" name="c" value="reports">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ 
+diff --git a/features/cerberusweb.reports/templates/reports/worker/average_response_time/index.tpl b/features/cerberusweb.reports/templates/reports/worker/average_response_time/index.tpl
+index c8c64a68d9..604a5a9a6d 100644
+--- a/features/cerberusweb.reports/templates/reports/worker/average_response_time/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/worker/average_response_time/index.tpl
+@@ -5,6 +5,7 @@
+ {if $invalidDate}<font color="red"><b>{'reports.ui.invalid_date'|devblocks_translate}</b></font>{/if}
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.workers.averageresponsetime{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ 
+diff --git a/features/cerberusweb.reports/templates/reports/worker/worker_history/index.tpl b/features/cerberusweb.reports/templates/reports/worker/worker_history/index.tpl
+index b3b2bb0765..edeb2c33f3 100644
+--- a/features/cerberusweb.reports/templates/reports/worker/worker_history/index.tpl
++++ b/features/cerberusweb.reports/templates/reports/worker/worker_history/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'reports.ui.worker.worker_history'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.workers.worker_history{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'reports.ui.date_from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'reports.ui.date_to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.restapi/templates/peek.tpl b/features/cerberusweb.restapi/templates/peek.tpl
+index aa8e57a9c3..039953ed35 100644
+--- a/features/cerberusweb.restapi/templates/peek.tpl
++++ b/features/cerberusweb.restapi/templates/peek.tpl
+@@ -5,6 +5,7 @@
+ <input type="hidden" name="action" value="savePeekPopup">
+ <input type="hidden" name="id" value="{$model->id|default:'0'}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+diff --git a/features/cerberusweb.restapi/templates/view.tpl b/features/cerberusweb.restapi/templates/view.tpl
+index 657f21872d..8e87ec24bf 100644
+--- a/features/cerberusweb.restapi/templates/view.tpl
++++ b/features/cerberusweb.restapi/templates/view.tpl
+@@ -26,6 +26,8 @@
+ <input type="hidden" name="c" value="rest">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="5" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/features/cerberusweb.simulator/templates/setup/section.tpl b/features/cerberusweb.simulator/templates/setup/section.tpl
+index d5c5ee0d6c..75c9ee180d 100644
+--- a/features/cerberusweb.simulator/templates/setup/section.tpl
++++ b/features/cerberusweb.simulator/templates/setup/section.tpl
+@@ -8,6 +8,7 @@
+ 	<input type="hidden" name="a" value="handleSectionAction">
+ 	<input type="hidden" name="section" value="simulator">
+ 	<input type="hidden" name="action" value="generateTicketsJson">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<table cellpadding="5" cellspacing="0" border="0">
+ 		<tr>
+@@ -61,6 +62,7 @@
+ 	<input type="hidden" name="a" value="handleSectionAction">
+ 	<input type="hidden" name="section" value="simulator">
+ 	<input type="hidden" name="action" value="generateTasksJson">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<table cellpadding="5" cellspacing="0" border="0">
+ 		<tr>
+@@ -116,6 +118,7 @@
+ 	<input type="hidden" name="a" value="handleSectionAction">
+ 	<input type="hidden" name="section" value="simulator">
+ 	<input type="hidden" name="action" value="generateOrgsJson">
++	<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 	
+ 	<table cellpadding="5" cellspacing="0" border="0">
+ 		<tr>
+diff --git a/features/cerberusweb.timetracking/templates/config/activities/edit_activity.tpl b/features/cerberusweb.timetracking/templates/config/activities/edit_activity.tpl
+index e916ee5461..a493ecc569 100644
+--- a/features/cerberusweb.timetracking/templates/config/activities/edit_activity.tpl
++++ b/features/cerberusweb.timetracking/templates/config/activities/edit_activity.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="action" value="save">
+ <input type="hidden" name="id" value="{if !empty($activity->id)}{$activity->id}{else}0{/if}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>
+diff --git a/features/cerberusweb.timetracking/templates/config/activities/index.tpl b/features/cerberusweb.timetracking/templates/config/activities/index.tpl
+index b8ffe953f2..e8bcbd3e5f 100644
+--- a/features/cerberusweb.timetracking/templates/config/activities/index.tpl
++++ b/features/cerberusweb.timetracking/templates/config/activities/index.tpl
+@@ -26,6 +26,7 @@
+ 		
+ 		<td width="100%" valign="top">
+ 			<form action="{devblocks_url}{/devblocks_url}" method="post" id="configActivity">
++				<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 				{include file="devblocks:cerberusweb.timetracking::config/activities/edit_activity.tpl" activity=null}
+ 			</form>
+ 		</td>
+diff --git a/features/cerberusweb.timetracking/templates/reports/time_spent_activity/index.tpl b/features/cerberusweb.timetracking/templates/reports/time_spent_activity/index.tpl
+index 52369b5c53..92bf6551f2 100644
+--- a/features/cerberusweb.timetracking/templates/reports/time_spent_activity/index.tpl
++++ b/features/cerberusweb.timetracking/templates/reports/time_spent_activity/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'timetracking.ui.reports.time_spent_activity'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.timetracking.timespentactivity{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'timetracking.ui.reports.from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'timetracking.ui.reports.to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.timetracking/templates/reports/time_spent_org/index.tpl b/features/cerberusweb.timetracking/templates/reports/time_spent_org/index.tpl
+index 181b0ebba7..792be1e9bc 100644
+--- a/features/cerberusweb.timetracking/templates/reports/time_spent_org/index.tpl
++++ b/features/cerberusweb.timetracking/templates/reports/time_spent_org/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'timetracking.ui.reports.time_spent_org'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.timetracking.timespentorg{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'timetracking.ui.reports.from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'timetracking.ui.reports.to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.timetracking/templates/reports/time_spent_worker/index.tpl b/features/cerberusweb.timetracking/templates/reports/time_spent_worker/index.tpl
+index a6edaf07a5..0feb97314b 100644
+--- a/features/cerberusweb.timetracking/templates/reports/time_spent_worker/index.tpl
++++ b/features/cerberusweb.timetracking/templates/reports/time_spent_worker/index.tpl
+@@ -2,6 +2,7 @@
+ <legend>{'timetracking.ui.reports.time_spent_worker'|devblocks_translate}</legend>
+ 
+ <form action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=report.timetracking.timespentworker{/devblocks_url}" method="POST" id="frmRange" name="frmRange">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ <b>{'timetracking.ui.reports.from'|devblocks_translate}</b> <input type="text" name="start" id="start" size="24" value="{$start}"><button type="button" onclick="devblocksAjaxDateChooser('#start','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>{'timetracking.ui.reports.to'|devblocks_translate}</b> <input type="text" name="end" id="end" size="24" value="{$end}"><button type="button" onclick="devblocksAjaxDateChooser('#end','#divCal');"><span class="glyphicons glyphicons-calendar"></span></button>
+ <b>Grouping:</b> <select name="report_date_grouping">
+diff --git a/features/cerberusweb.translators/templates/config/ajax/add_language_panel.tpl b/features/cerberusweb.translators/templates/config/ajax/add_language_panel.tpl
+index 3c35449b51..4170fdfd56 100644
+--- a/features/cerberusweb.translators/templates/config/ajax/add_language_panel.tpl
++++ b/features/cerberusweb.translators/templates/config/ajax/add_language_panel.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="translations">
+ <input type="hidden" name="action" value="saveAddLanguagePanel">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ {if is_array($codes) && count($codes) > 1}
+ <table cellspacing="0" cellpadding="2" border="0">
+diff --git a/features/cerberusweb.translators/templates/config/ajax/find_strings_panel.tpl b/features/cerberusweb.translators/templates/config/ajax/find_strings_panel.tpl
+index 86d66c661e..45766f3cc9 100644
+--- a/features/cerberusweb.translators/templates/config/ajax/find_strings_panel.tpl
++++ b/features/cerberusweb.translators/templates/config/ajax/find_strings_panel.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="translations">
+ <input type="hidden" name="action" value="saveFindStringsPanel">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ This will find text defined in U.S. English and not yet translated to other languages.  
+ Leaving new text blank allows you to easily find translation work with a search.
+diff --git a/features/cerberusweb.translators/templates/config/ajax/import_strings_panel.tpl b/features/cerberusweb.translators/templates/config/ajax/import_strings_panel.tpl
+index 322a12f7d3..cdd0304a88 100644
+--- a/features/cerberusweb.translators/templates/config/ajax/import_strings_panel.tpl
++++ b/features/cerberusweb.translators/templates/config/ajax/import_strings_panel.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="translations">
+ <input type="hidden" name="action" value="saveImportStringsPanel">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <b>Language File:</b> (.xml; TMX)<br>
+ <input type="file" name="import_file" size="45"><br>
+diff --git a/features/cerberusweb.translators/templates/config/section/view.tpl b/features/cerberusweb.translators/templates/config/section/view.tpl
+index 1af5ec759f..4a668f1aff 100644
+--- a/features/cerberusweb.translators/templates/config/section/view.tpl
++++ b/features/cerberusweb.translators/templates/config/section/view.tpl
+@@ -23,6 +23,7 @@
+ <input type="hidden" name="a" value="handleSectionAction">
+ <input type="hidden" name="section" value="translations">
+ <input type="hidden" name="action" value="">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+diff --git a/install/extras/sdk/devblocks-dao.php b/install/extras/sdk/devblocks-dao.php
+index ae1059868d..6478c4f797 100644
+--- a/install/extras/sdk/devblocks-dao.php
++++ b/install/extras/sdk/devblocks-dao.php
+@@ -1275,6 +1275,7 @@ function importSaveObject(array $fields, array $custom_fields, array $meta) {
+ <input type="hidden" name="view_id" value="{$view_id}">
+ {if !empty($model) && !empty($model->id)}<input type="hidden" name="id" value="{$model->id}">{/if}
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate}</legend>
+@@ -1428,6 +1429,8 @@ function importSaveObject(array $fields, array $custom_fields, array $meta) {
+ <input type="hidden" name="section" value="<?php echo $table_name; ?>">
+ <input type="hidden" name="action" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/install/extras/sdk/examples/example.object/templates/example_object/bulk.tpl b/install/extras/sdk/examples/example.object/templates/example_object/bulk.tpl
+index 8781a14740..e4abebac32 100644
+--- a/install/extras/sdk/examples/example.object/templates/example_object/bulk.tpl
++++ b/install/extras/sdk/examples/example.object/templates/example_object/bulk.tpl
+@@ -3,6 +3,7 @@
+ <input type="hidden" name="a" value="saveBulkUpdatePopup">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="ids" value="{$ids}">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset>
+ 	<legend>{'common.bulk_update.with'|devblocks_translate|capitalize}</legend>
+diff --git a/install/extras/sdk/examples/example.object/templates/example_object/peek.tpl b/install/extras/sdk/examples/example.object/templates/example_object/peek.tpl
+index 37d66d7e00..57ca383a0a 100644
+--- a/install/extras/sdk/examples/example.object/templates/example_object/peek.tpl
++++ b/install/extras/sdk/examples/example.object/templates/example_object/peek.tpl
+@@ -4,6 +4,7 @@
+ <input type="hidden" name="id" value="{$model->id}">
+ <input type="hidden" name="view_id" value="{$view_id}">
+ <input type="hidden" name="do_delete" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 
+ <fieldset class="peek">
+ 	<legend>{'common.properties'|devblocks_translate|capitalize}</legend>
+diff --git a/install/extras/sdk/examples/example.object/templates/example_object/view.tpl b/install/extras/sdk/examples/example.object/templates/example_object/view.tpl
+index 5676c91d8d..fc50eab476 100644
+--- a/install/extras/sdk/examples/example.object/templates/example_object/view.tpl
++++ b/install/extras/sdk/examples/example.object/templates/example_object/view.tpl
+@@ -28,6 +28,8 @@
+ <input type="hidden" name="c" value="example.objects">
+ <input type="hidden" name="a" value="">
+ <input type="hidden" name="explore_from" value="0">
++<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
++
+ <table cellpadding="1" cellspacing="0" border="0" width="100%" class="worklistBody">
+ 
+ 	{* Column Headers *}
+diff --git a/install/extras/sdk/examples/example.report/templates/reports/example.tpl b/install/extras/sdk/examples/example.report/templates/reports/example.tpl
+index 605d3413cd..7de2bc4f7b 100644
+--- a/install/extras/sdk/examples/example.report/templates/reports/example.tpl
++++ b/install/extras/sdk/examples/example.report/templates/reports/example.tpl
+@@ -2,6 +2,7 @@
+ 	<legend>{'example.report'|devblocks_translate|capitalize}</legend>
+ 
+ 	<form id="frmExampleReport" action="{devblocks_url}c=pages&page={$page->id}-{$page->name|devblocks_permalink}&report=example.report{/devblocks_url}" method="POST">
++		<input type="hidden" name="_csrf_token" value="{$session.csrf_token}">
+ 		&nbsp; 
+ 		Tickets created between: 
+ 		<input type="text" name="date_from" size="24" value="{$date_from}">
+diff --git a/libs/devblocks/api/Engine.php b/libs/devblocks/api/Engine.php
+index 6eb095b6b9..9dd8bcf579 100644
+--- a/libs/devblocks/api/Engine.php
++++ b/libs/devblocks/api/Engine.php
+@@ -574,7 +574,11 @@ static function readRequest() {
+ 				break;
+ 		}
+ 
+-		$request = new DevblocksHttpRequest($parts,$queryArgs);
++		$method = strtoupper(@$_SERVER['REQUEST_METHOD']);
++		
++		$request = new DevblocksHttpRequest($parts,$queryArgs,$method);
++		$request->csrf_token = isset($_SERVER['HTTP_X_CSRF_TOKEN']) ? $_SERVER['HTTP_X_CSRF_TOKEN'] : @$_REQUEST['_csrf_token'];
++		
+ 		DevblocksPlatform::setHttpRequest($request);
+ 
+ 		return $request;
+@@ -588,6 +592,28 @@ static function readRequest() {
+ 	 */
+ 	static function processRequest(DevblocksHttpRequest $request, $is_ajax=false) {
+ 		$path = $request->path;
++		
++		// Security: CSRF
++		
++		// If we are running a controller action...
++		if(isset($_REQUEST['c']) || isset($_REQUEST['a'])) {
++			
++			// ...and we're not in DEVELOPMENT_MODE
++			if(!DEVELOPMENT_MODE_ALLOW_CSRF) {
++			
++				// ...and the CSRF token is invalid for this session, freak out
++				if(!isset($_SESSION['csrf_token']) || $_SESSION['csrf_token'] != $request->csrf_token) {
++					header("Status: 403");
++					@$referer = $_SERVER['HTTP_REFERER'];
++					@$remote_addr = $_SERVER['REMOTE_ADDR'];
++					
++					error_log(sprintf("[Cerb/Security] Possible CSRF attack from IP %s using referrer %s", $remote_addr, $referer), E_USER_WARNING);
++					die("Access denied");
++				}
++			}
++		}
++
++		// Controllers
+ 
+ 		$controller_uri = array_shift($path);
+ 
+diff --git a/libs/devblocks/api/Extension.php b/libs/devblocks/api/Extension.php
+index c91fdef58c..0cde817289 100644
+--- a/libs/devblocks/api/Extension.php
++++ b/libs/devblocks/api/Extension.php
+@@ -2034,11 +2034,15 @@ public function writeResponse(DevblocksHttpResponse $response);
+ };
+ 
+ class DevblocksHttpRequest extends DevblocksHttpIO {
++	public $method = null;
++	public $csrf_token = null;
++	
+ 	/**
+ 	 * @param array $path
+ 	 */
+-	function __construct($path, $query=array()) {
++	function __construct($path, $query=array(), $method=null) {
+ 		parent::__construct($path, $query);
++		$this->method = $method;
+ 	}
+ };
+ 
+diff --git a/libs/devblocks/api/services/template.php b/libs/devblocks/api/services/template.php
+index 155efff966..dc34c2956c 100644
+--- a/libs/devblocks/api/services/template.php
++++ b/libs/devblocks/api/services/template.php
+@@ -87,6 +87,11 @@ static function block_devblocks_url($params, $content, $smarty, &$repeat, $templ
+ 		
+ 		$contents = $url->write($content, !empty($params['full']) ? true : false);
+ 		
++		$is_ajax = substr($content, 0, 9) == 'ajax.php?';
++		
++		if($is_ajax)
++			$contents .= '&_csrf_token=' . $_SESSION['csrf_token'];
++		
+ 		if (!empty($params['assign'])) {
+ 			$smarty->assign($params['assign'], $contents);
+ 		} else {
+diff --git a/libs/devblocks/framework.defaults.php b/libs/devblocks/framework.defaults.php
+index 5a90543146..ee09ae1f18 100644
+--- a/libs/devblocks/framework.defaults.php
++++ b/libs/devblocks/framework.defaults.php
+@@ -68,6 +68,9 @@
+ if(!defined('DEVELOPMENT_MODE_QUERIES'))
+ 	define('DEVELOPMENT_MODE_QUERIES', false);
+ 
++if(!defined('DEVELOPMENT_MODE_ALLOW_CSRF'))
++	define('DEVELOPMENT_MODE_ALLOW_CSRF', false);
++
+ // ----
+ 
+ @ini_set('session.gc_maxlifetime','86400');
+diff --git a/libs/devblocks/resources/js/devblocks.js b/libs/devblocks/resources/js/devblocks.js
+index d99ba55c3a..abffd3a68a 100644
+--- a/libs/devblocks/resources/js/devblocks.js
++++ b/libs/devblocks/resources/js/devblocks.js
+@@ -240,9 +240,9 @@ function hideLoadingPanel() {
+ }
+ 
+ function genericAjaxPopupFind($sel) {
+-	$devblocksPopups = $('#devblocksPopups');
+-	$data = $devblocksPopups.data();
+-	$element = $($sel).closest('DIV.devblocks-popup');
++	var $devblocksPopups = $('#devblocksPopups');
++	var $data = $devblocksPopups.data();
++	var $element = $($sel).closest('DIV.devblocks-popup');
+ 	for($key in $data) {
+ 		if($element.attr('id') == $data[$key].attr('id'))
+ 			return $data[$key];
+@@ -256,7 +256,7 @@ function genericAjaxPopupFetch($layer) {
+ }
+ 
+ function genericAjaxPopupClose($layer, $event) {
+-	$popup = genericAjaxPopupFetch($layer);
++	var $popup = genericAjaxPopupFetch($layer);
+ 	if(null != $popup) {
+ 		try {
+ 			if(null != $event)
+@@ -273,7 +273,7 @@ function genericAjaxPopupClose($layer, $event) {
+ }
+ 
+ function genericAjaxPopupDestroy($layer) {
+-	$popup = genericAjaxPopupFetch($layer);
++	var $popup = genericAjaxPopupFetch($layer);
+ 	if(null != $popup) {
+ 		genericAjaxPopupClose($layer);
+ 		try {
+@@ -476,6 +476,11 @@ function genericAjaxGet(divRef,args,cb,options) {
+ 	options.cache = false;
+ 	options.success = cb;
+ 	
++	if(null == options.headers)
++		options.headers = {};
++		
++	options.headers['X-CSRF-Token'] = $('meta[name="_csrf_token"]').attr('content');
++	
+ 	$.ajax(options);
+ }
+ 
+@@ -523,6 +528,11 @@ function genericAjaxPost(formRef,divRef,args,cb,options) {
+ 	options.cache = false;
+ 	options.success = cb;
+ 	
++	if(null == options.headers)
++		options.headers = {};
++		
++	options.headers['X-CSRF-Token'] = $('meta[name="_csrf_token"]').attr('content');
++	
+ 	$.ajax(options);
+ }
+ 

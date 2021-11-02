@@ -1,0 +1,68 @@
+From 7335163a6ef82d46ff18f3e6099a157747241629 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sun, 11 Jun 2017 18:27:27 -0700
+Subject: [PATCH] CVE-2017-13038/PPP: Do bounds checking.
+
+This fixes a buffer over-read discovered by Brian 'geeknik' Carpenter.
+
+Add a test using the capture file supplied by Katie Holly.
+---
+ print-ppp.c           |   9 +++++++++
+ tests/TESTLIST        |   3 +++
+ tests/mlppp-oobr.out  |   1 +
+ tests/mlppp-oobr.pcap | Bin 0 -> 88 bytes
+ 4 files changed, 13 insertions(+)
+ create mode 100644 tests/mlppp-oobr.out
+ create mode 100644 tests/mlppp-oobr.pcap
+
+diff --git a/print-ppp.c b/print-ppp.c
+index d07763cb1..891761728 100644
+--- a/print-ppp.c
++++ b/print-ppp.c
+@@ -811,6 +811,15 @@ handle_mlppp(netdissect_options *ndo,
+     if (!ndo->ndo_eflag)
+         ND_PRINT((ndo, "MLPPP, "));
+ 
++    if (length < 2) {
++        ND_PRINT((ndo, "[|mlppp]"));
++        return;
++    }
++    if (!ND_TTEST_16BITS(p)) {
++        ND_PRINT((ndo, "[|mlppp]"));
++        return;
++    }
++
+     ND_PRINT((ndo, "seq 0x%03x, Flags [%s], length %u",
+            (EXTRACT_16BITS(p))&0x0fff, /* only support 12-Bit sequence space for now */
+            bittok2str(ppp_ml_flag_values, "none", *p & 0xc0),
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5732f8ff5..bdc7ff40c 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -554,6 +554,9 @@ radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
+ ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
+ ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ 
++# bad packets from Katie Holly
++mlppp-oobr		mlppp-oobr.pcap			mlppp-oobr.out
++
+ # RTP tests
+ # fuzzed pcap
+ rtp-seg-fault-1  rtp-seg-fault-1.pcap  rtp-seg-fault-1.out  -v -T rtp
+diff --git a/tests/mlppp-oobr.out b/tests/mlppp-oobr.out
+new file mode 100644
+index 000000000..9230189c7
+--- /dev/null
++++ b/tests/mlppp-oobr.out
+@@ -0,0 +1 @@
++MLPPP, [|mlppp]
+diff --git a/tests/mlppp-oobr.pcap b/tests/mlppp-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..95b1bbe3645018f845f0b6586455541e3a9e4883
+GIT binary patch
+literal 88
+mcmca|c+)~A1{MYbC}3e=VBlnca}5lDe2~<CW?PsNqG$jK(h$u6
+
+literal 0
+HcmV?d00001
+

@@ -1,0 +1,68 @@
+From 6b830a1640ca20528032c89a4fdd8291a4d2d8b2 Mon Sep 17 00:00:00 2001
+From: Fred Klassen <fklassen@appneta.com>
+Date: Thu, 27 Dec 2018 10:31:51 -0800
+Subject: [PATCH] Bug #520 Fix heap overflow on zero or 0xFFFF packet length
+
+Add check for packets that report zero packet length. Example
+of fix:
+
+    src/tcpprep --auto=bridge --pcap=poc16-get_l2len-heapoverflow --cachefile=/dev/null
+    Warning: poc16-get_l2len-heapoverflow was captured using a snaplen of 17 bytes.  This may mean you have truncated packets.
+    safe_pcap_next ERROR: Invalid packet length in tcpprep.c:process_raw_packets() line 334: packet length=0 capture length=0
+---
+ configure.ac       | 2 +-
+ docs/CHANGELOG     | 4 ++++
+ src/common/utils.c | 8 ++++----
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 293ac247..11809f41 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -4,7 +4,7 @@ dnl $Id$
+ AC_PREREQ([2.69])
+ 
+ dnl Set version info here!
+-AC_INIT([tcpreplay],[4.3.0],
++AC_INIT([tcpreplay],[4.3.1],
+     [https://github.com/appneta/tcpreplay/issues],
+     [tcpreplay],
+     [http://tcpreplay.sourceforge.net/])
+diff --git a/docs/CHANGELOG b/docs/CHANGELOG
+index fd22eacc..6fdbeeb1 100644
+--- a/docs/CHANGELOG
++++ b/docs/CHANGELOG
+@@ -1,3 +1,7 @@
++12/27/2018 Version 4.3.1
++    - Fix checkspell detected typos (#531)
++    - Heap overflow packet2tree and get_l2len (#530)
++
+ 11/10/2018 Version 4.3.0
+     - Fix maxOS TOS checksum failure (#524)
+     - TCP sequence edits seeding (#514)
+diff --git a/src/common/utils.c b/src/common/utils.c
+index 0dbc0891..4017cfa4 100644
+--- a/src/common/utils.c
++++ b/src/common/utils.c
+@@ -134,8 +134,8 @@ u_char *_our_safe_pcap_next(pcap_t *pcap,  struct pcap_pkthdr *pkthdr,
+             exit(-1);
+         }
+ 
+-        if (pkthdr->len < pkthdr->caplen) {
+-            fprintf(stderr, "safe_pcap_next ERROR: Invalid packet length in %s:%s() line %d: packet length %u is less than capture length %u\n",
++        if (!pkthdr->len || pkthdr->len < pkthdr->caplen) {
++            fprintf(stderr, "safe_pcap_next ERROR: Invalid packet length in %s:%s() line %d: packet length=%u capture length=%u\n",
+                     file, funcname, line, pkthdr->len, pkthdr->caplen);
+             exit(-1);
+         }
+@@ -160,8 +160,8 @@ int _our_safe_pcap_next_ex(pcap_t *pcap, struct pcap_pkthdr **pkthdr,
+             exit(-1);
+         }
+ 
+-        if ((*pkthdr)->len < (*pkthdr)->caplen) {
+-            fprintf(stderr, "safe_pcap_next_ex ERROR: Invalid packet length in %s:%s() line %d: packet length %u is less than capture length %u\n",
++        if (!(*pkthdr)->len || (*pkthdr)->len < (*pkthdr)->caplen) {
++            fprintf(stderr, "safe_pcap_next_ex ERROR: Invalid packet length in %s:%s() line %d: packet length=%u capture length=%u\n",
+                     file, funcname, line, (*pkthdr)->len, (*pkthdr)->caplen);
+             exit(-1);
+         }

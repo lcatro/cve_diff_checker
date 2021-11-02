@@ -1,0 +1,25 @@
+From b1b323042264740c398140da32e93fb9c2c9f33e Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 6 May 2021 14:51:41 -0700
+Subject: [PATCH] Fix SEGV in CTC ops
+
+PiperOrigin-RevId: 372430279
+Change-Id: I7ec2ad9d6f4d0980c33de45d27c6b17df5c6e26f
+---
+ tensorflow/core/kernels/ctc_decoder_ops.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ctc_decoder_ops.cc b/tensorflow/core/kernels/ctc_decoder_ops.cc
+index 22681f97437f0..9efdac60e369c 100644
+--- a/tensorflow/core/kernels/ctc_decoder_ops.cc
++++ b/tensorflow/core/kernels/ctc_decoder_ops.cc
+@@ -70,6 +70,9 @@ class CTCDecodeHelper {
+     if (inputs_shape.dims() != 3) {
+       return errors::InvalidArgument("inputs is not a 3-Tensor");
+     }
++    if (inputs_shape.num_elements() == 0) {
++      return errors::InvalidArgument("inputs must not be empty");
++    }
+ 
+     const int64 max_time = inputs_shape.dim_size(0);
+     const int64 batch_size = inputs_shape.dim_size(1);

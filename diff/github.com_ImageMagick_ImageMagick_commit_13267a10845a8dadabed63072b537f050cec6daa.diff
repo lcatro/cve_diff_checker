@@ -1,0 +1,67 @@
+From 13267a10845a8dadabed63072b537f050cec6daa Mon Sep 17 00:00:00 2001
+From: dirk <dirk@git.imagemagick.org>
+Date: Sat, 13 Aug 2016 09:06:34 +0200
+Subject: [PATCH] Changed the JPEG writer to raise a warning when the exif
+ profile exceeds 65533 bytes and truncate it.
+
+---
+ coders/jpeg.c      | 16 +++++++++++-----
+ config/english.xml |  3 +++
+ 2 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/coders/jpeg.c b/coders/jpeg.c
+index 73f6e49d8a..74a180c97f 100644
+--- a/coders/jpeg.c
++++ b/coders/jpeg.c
+@@ -1908,7 +1908,8 @@ static void TerminateDestination(j_compress_ptr cinfo)
+     }
+ }
+ 
+-static void WriteProfile(j_compress_ptr jpeg_info,Image *image)
++static void WriteProfile(j_compress_ptr jpeg_info,Image *image,
++  ExceptionInfo *exception)
+ {
+   const char
+     *name;
+@@ -1939,10 +1940,15 @@ static void WriteProfile(j_compress_ptr jpeg_info,Image *image)
+   {
+     profile=GetImageProfile(image,name);
+     if (LocaleCompare(name,"EXIF") == 0)
+-      for (i=0; i < (ssize_t) GetStringInfoLength(profile); i+=65533L)
+       {
+-        length=MagickMin(GetStringInfoLength(profile)-i,65533L);
+-        jpeg_write_marker(jpeg_info,XML_MARKER,GetStringInfoDatum(profile)+i,
++        length=GetStringInfoLength(profile);
++        if (length > 65533L)
++          {
++            (void) ThrowMagickException(exception,GetMagickModule(),
++              CoderWarning,"ExifProfileSizeExceedsLimit",image->filename);
++            length=65533L;
++          }
++        jpeg_write_marker(jpeg_info,XML_MARKER,GetStringInfoDatum(profile),
+           (unsigned int) length);
+       }
+     if (LocaleCompare(name,"ICC") == 0)
+@@ -2670,7 +2676,7 @@ static MagickBooleanType WriteJPEGImage(const ImageInfo *image_info,
+       jpeg_write_marker(&jpeg_info,JPEG_COM,(unsigned char *) value+i,
+         (unsigned int) MagickMin((size_t) strlen(value+i),65533L));
+   if (image->profiles != (void *) NULL)
+-    WriteProfile(&jpeg_info,image);
++    WriteProfile(&jpeg_info,image,exception);
+   /*
+     Convert MIFF to JPEG raster pixels.
+   */
+diff --git a/config/english.xml b/config/english.xml
+index 1837fe31b2..dbaa11d800 100644
+--- a/config/english.xml
++++ b/config/english.xml
+@@ -205,6 +205,9 @@
+         </message>
+       </error>
+       <warning>
++        <message name="ExifProfileSizeExceedsLimit">
++          exif profile size exceeds limit and will be truncated
++        </message>
+         <message name="LosslessToLossyJPEGConversion">
+           lossless to lossy JPEG conversion
+         </message>

@@ -1,0 +1,53 @@
+From 66fd44209d5ffcb9b3d1bc1b9fd8e35b485040c0 Mon Sep 17 00:00:00 2001
+From: Stanislav Malyshev <stas@php.net>
+Date: Mon, 5 Dec 2016 21:40:55 -0800
+Subject: [PATCH] Fix bug #73631 - Invalid read when wddx decodes empty boolean
+ element
+
+---
+ ext/wddx/tests/bug73631.phpt | 19 +++++++++++++++++++
+ ext/wddx/wddx.c              |  5 +++++
+ 2 files changed, 24 insertions(+)
+ create mode 100644 ext/wddx/tests/bug73631.phpt
+
+diff --git a/ext/wddx/tests/bug73631.phpt b/ext/wddx/tests/bug73631.phpt
+new file mode 100644
+index 000000000000..5e37ae826921
+--- /dev/null
++++ b/ext/wddx/tests/bug73631.phpt
+@@ -0,0 +1,19 @@
++--TEST--
++Bug #73631 (Memory leak due to invalid wddx stack processing)
++--SKIPIF--
++<?php if (!extension_loaded("wddx")) print "skip"; ?>
++--FILE--
++<?php
++$xml = <<<EOF
++<?xml version="1.0" ?>
++<wddxPacket version="1.0">
++<number>1234</number>
++<binary><boolean/></binary>
++</wddxPacket>
++EOF;
++$wddx = wddx_deserialize($xml);
++var_dump($wddx);
++?>
++--EXPECTF--
++int(1234)
++
+diff --git a/ext/wddx/wddx.c b/ext/wddx/wddx.c
+index 069ea122ce3b..0cee16b9ad07 100644
+--- a/ext/wddx/wddx.c
++++ b/ext/wddx/wddx.c
+@@ -811,6 +811,11 @@ static void php_wddx_push_element(void *user_data, const XML_Char *name, const X
+ 				php_wddx_process_data(user_data, atts[i+1], strlen(atts[i+1]));
+ 				break;
+ 			}
++		} else {
++			ent.type = ST_BOOLEAN;
++			SET_STACK_VARNAME;
++			ZVAL_FALSE(&ent.data);
++			wddx_stack_push((wddx_stack *)stack, &ent, sizeof(st_entry));
+ 		}
+ 	} else if (!strcmp(name, EL_NULL)) {
+ 		ent.type = ST_NULL;

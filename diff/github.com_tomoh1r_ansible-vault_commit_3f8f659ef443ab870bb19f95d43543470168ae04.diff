@@ -1,0 +1,217 @@
+From 3f8f659ef443ab870bb19f95d43543470168ae04 Mon Sep 17 00:00:00 2001
+From: Tomohiro Nakamura <quickness.net@gmail.com>
+Date: Wed, 13 Sep 2017 20:49:38 +0900
+Subject: [PATCH] Fix security issue refs #4
+
+* Update version to 1.0.5
+* Update to use yaml.safe_load()
+* Update to tomoh1r
+---
+ .travis.yml                       | 20 +++++++++++++-------
+ CHANGES.txt                       | 10 ++++++++++
+ README.rst                        |  4 ++--
+ README_test.rst                   |  1 +
+ ansible_vault/api.py              |  2 +-
+ ansible_vault/test/file/pwned.txt |  7 +++++++
+ ansible_vault/test/test_api.py    | 10 ++++++++--
+ setup.cfg                         |  8 ++++++++
+ setup.py                          |  8 +++++---
+ tox.ini                           | 14 --------------
+ 10 files changed, 55 insertions(+), 29 deletions(-)
+ create mode 100644 ansible_vault/test/file/pwned.txt
+ delete mode 100644 tox.ini
+
+diff --git a/.travis.yml b/.travis.yml
+index 70055d9..7b6b1ed 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -1,14 +1,20 @@
+ ---
+ language: python
+ sudo: false
++cache:
++  directories:
++    - $HOME/.cache/pip
+ python:
+-- 2.7
+-env:
+-  matrix:
+-    - TOXENV=py27
+-    - TOXENV=py27-ansible2
++  - "2.7"
++  - "3.3"
++  - "3.4"
++  - "3.5"
++  - "3.6"
+ install:
+-  - pip install tox
+-script: tox
++  - python -m pip install -U setuptools pip
++  - python setup.py setup_test
++script:
++  - python -m pytest
++  - if [ "$TRAVIS_PYTHON_VERSION" == '2.7' ] ; then python -m pip install -U 'ansible<2.0.0' && python -m pytest ; fi
+ 
+ # vim:st=2 sts=2 sw=2:
+diff --git a/CHANGES.txt b/CHANGES.txt
+index 1e8aa4e..a51a244 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,3 +1,13 @@
++1.0.5 (2017/09/13)
++
++* Update to use yaml.safe_load()$
++* Update to tomoh1r$
++
++1.0.4 (2015/11/29)
++
++* Apply to Ansible 2
++* Add unit tests
++
+ 1.0.3 (2015/05/18)
+ 
+ * fix README.rst typo
+diff --git a/README.rst b/README.rst
+index 0663322..63a8dd3 100644
+--- a/README.rst
++++ b/README.rst
+@@ -2,8 +2,8 @@
+ ansible-vault
+ =============
+ 
+-.. image:: https://travis-ci.org/jptomo/ansible-vault.svg?branch=master
+-   :target: https://travis-ci.org/jptomo/ansible-vault
++.. image:: https://travis-ci.org/tomoh1r/ansible-vault.svg?branch=master
++   :target: https://travis-ci.org/tomoh1r/ansible-vault
+ 
+ This project aim to R/W an ansible-vault yaml file
+ 
+diff --git a/README_test.rst b/README_test.rst
+index be5691d..57ce749 100644
+--- a/README_test.rst
++++ b/README_test.rst
+@@ -12,4 +12,5 @@ how to test
+ 
+    .. code-block:: console
+ 
++      $ ./venvtest/bin/python setup.py setup_test
+       $ ./venvtest/bin/python setup.py test
+diff --git a/ansible_vault/api.py b/ansible_vault/api.py
+index 3fcc0ad..2f209c1 100644
+--- a/ansible_vault/api.py
++++ b/ansible_vault/api.py
+@@ -15,7 +15,7 @@ def __init__(self, password):
+ 
+     def load(self, stream):
+         '''read vault steam and return python object'''
+-        return yaml.load(self.vault.decrypt(stream))
++        return yaml.safe_load(self.vault.decrypt(stream))
+ 
+     def dump(self, data, stream=None):
+         '''encrypt data and print stdout or write to stream'''
+diff --git a/ansible_vault/test/file/pwned.txt b/ansible_vault/test/file/pwned.txt
+new file mode 100644
+index 0000000..7e21b6e
+--- /dev/null
++++ b/ansible_vault/test/file/pwned.txt
+@@ -0,0 +1,7 @@
++$ANSIBLE_VAULT;1.1;AES256
++31616433623434626463363932323936663066353063393731346536636437633463633137643032
++3663656431663830396662646132343735623538346330640a363532326262353732636161633431
++61353936346235396464333333653831356638393264343662363362653433353762396663653465
++6439366430336336660a363931663030323665633136363362353162333864653933653763656462
++31656431653333343834623731393263393865353831333963616165613237376630646665306363
++6238373037663462343565643737303136333032386136356438
+diff --git a/ansible_vault/test/test_api.py b/ansible_vault/test/test_api.py
+index 2535d5c..5a123d3 100644
+--- a/ansible_vault/test/test_api.py
++++ b/ansible_vault/test/test_api.py
+@@ -1,9 +1,9 @@
+ import os
+ from tempfile import mkstemp
+ 
+-from testfixtures import ShouldRaise
+-
+ from ansible.errors import AnsibleError
++from testfixtures import ShouldRaise
++from yaml.constructor import ConstructorError
+ 
+ 
+ here = os.path.dirname(os.path.abspath(__file__))
+@@ -28,6 +28,12 @@ def test_cannot(self):
+         with ShouldRaise(AnsibleError('Decryption failed')):
+             vault.load(open(fpath).read())
+ 
++    def test_not_pwned(self):
++        fpath = os.path.join(here, 'file', 'pwned.txt')
++        vault = self._makeOne('password')
++        with ShouldRaise(ConstructorError):
++            vault.load(open(fpath).read())
++
+ 
+ class TestVaultDump(object):
+     def _getTargetClass(self):
+diff --git a/setup.cfg b/setup.cfg
+index 5aef279..fc590f8 100644
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -1,2 +1,10 @@
+ [metadata]
+ description-file = README.rst
++
++[aliases]
++setup_test = develop easy_install ansible-vault[test]
++release = register clean --all sdist
++
++[tools:pytest]
++norecursedirs = venv
++testpaths = ansible_vault/test
+diff --git a/setup.py b/setup.py
+index c42a8c4..6c4b2f2 100644
+--- a/setup.py
++++ b/setup.py
+@@ -32,19 +32,21 @@ def run_tests(self):
+ 
+ setup(
+     name='ansible-vault',
+-    version='1.0.4',
++    version='1.0.5',
+     author='Tomohiro NAKAMURA',
+     author_email='quickness.net@gmail.com',
+-    url='https://github.com/jptomo/ansible-vault',
++    url='https://github.com/tomoh1r/ansible-vault',
+     description='R/W an ansible-vault yaml file',
+     long_description=_read('README.rst'),
+     packages=find_packages(),
+     install_requires=['ansible'],
+-    tests_require=['pytest', 'testfixtures'],
+     cmdclass={'test': PyTest},
+     classifiers=[
+         'Development Status :: 5 - Production/Stable',
+         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+     ],
+     license='GPLv3',
++    extras_require = {
++        'test': ['pytest', 'testfixtures'],
++    }
+ )
+diff --git a/tox.ini b/tox.ini
+deleted file mode 100644
+index cb350f9..0000000
+--- a/tox.ini
++++ /dev/null
+@@ -1,14 +0,0 @@
+-[tox]
+-envlist = py27, py27-ansible2
+-setupdir = .
+-
+-[testenv]
+-basepython = python2.7
+-
+-[testenv:py27]
+-commands = python2.7 setup.py test
+-
+-[testenv:py27-ansible2]
+-commands =
+-    pip install -U git+https://github.com/ansible/ansible.git@stable-2.0#egg=ansible
+-    python2.7 setup.py test

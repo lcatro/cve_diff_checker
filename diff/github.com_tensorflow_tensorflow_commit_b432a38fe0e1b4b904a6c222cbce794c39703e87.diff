@@ -1,0 +1,74 @@
+From b432a38fe0e1b4b904a6c222cbce794c39703e87 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Wed, 21 Apr 2021 15:57:36 -0700
+Subject: [PATCH] Fix overflow CHECK issue with `tf.raw_ops.DrawBoundingBoxes`.
+
+PiperOrigin-RevId: 369753591
+Change-Id: I3b45fc98ee0d28a3c20b7e9c995aa647c976ec40
+---
+ .../kernels/image/draw_bounding_box_op.cc     | 48 ++++++++++++++-----
+ 1 file changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/tensorflow/core/kernels/image/draw_bounding_box_op.cc b/tensorflow/core/kernels/image/draw_bounding_box_op.cc
+index 30de99b7d560a..73db76333f086 100644
+--- a/tensorflow/core/kernels/image/draw_bounding_box_op.cc
++++ b/tensorflow/core/kernels/image/draw_bounding_box_op.cc
+@@ -147,22 +147,46 @@ class DrawBoundingBoxesOp : public OpKernel {
+ 
+         // At this point, {min,max}_box_{row,col}_clamp are inside the
+         // image.
+-        CHECK_GE(min_box_row_clamp, 0);
+-        CHECK_GE(max_box_row_clamp, 0);
+-        CHECK_LT(min_box_row_clamp, height);
+-        CHECK_LT(max_box_row_clamp, height);
+-        CHECK_GE(min_box_col_clamp, 0);
+-        CHECK_GE(max_box_col_clamp, 0);
+-        CHECK_LT(min_box_col_clamp, width);
+-        CHECK_LT(max_box_col_clamp, width);
++        OP_REQUIRES(
++            context, min_box_row_clamp >= 0,
++            errors::InvalidArgument("Min box row clamp is less than 0."));
++        OP_REQUIRES(
++            context, max_box_row_clamp >= 0,
++            errors::InvalidArgument("Max box row clamp is less than 0."));
++        OP_REQUIRES(context, min_box_row_clamp <= height,
++                    errors::InvalidArgument(
++                        "Min box row clamp is greater than height."));
++        OP_REQUIRES(context, max_box_row_clamp <= height,
++                    errors::InvalidArgument(
++                        "Max box row clamp is greater than height."));
++
++        OP_REQUIRES(
++            context, min_box_col_clamp >= 0,
++            errors::InvalidArgument("Min box col clamp is less than 0."));
++        OP_REQUIRES(
++            context, max_box_col_clamp >= 0,
++            errors::InvalidArgument("Max box col clamp is less than 0."));
++        OP_REQUIRES(context, min_box_col_clamp <= width,
++                    errors::InvalidArgument(
++                        "Min box col clamp is greater than width."));
++        OP_REQUIRES(context, max_box_col_clamp <= width,
++                    errors::InvalidArgument(
++                        "Max box col clamp is greater than width."));
+ 
+         // At this point, the min_box_row and min_box_col are either
+         // in the image or above/left of it, and max_box_row and
+         // max_box_col are either in the image or below/right or it.
+-        CHECK_LT(min_box_row, height);
+-        CHECK_GE(max_box_row, 0);
+-        CHECK_LT(min_box_col, width);
+-        CHECK_GE(max_box_col, 0);
++
++        OP_REQUIRES(
++            context, min_box_row <= height,
++            errors::InvalidArgument("Min box row is greater than height."));
++        OP_REQUIRES(context, max_box_row >= 0,
++                    errors::InvalidArgument("Max box row is less than 0."));
++        OP_REQUIRES(
++            context, min_box_col <= width,
++            errors::InvalidArgument("Min box col is greater than width."));
++        OP_REQUIRES(context, max_box_col >= 0,
++                    errors::InvalidArgument("Max box col is less than 0."));
+ 
+         // Draw top line.
+         if (min_box_row >= 0) {

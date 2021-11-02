@@ -1,0 +1,37 @@
+From f7a547b7ef8fc8ebdeaa4c28515c9d72e592fb6d Mon Sep 17 00:00:00 2001
+From: Tobias Stoeckmann <tobias@stoeckmann.org>
+Date: Thu, 23 Mar 2017 16:45:20 +0100
+Subject: [PATCH] Fix double-free/OOB-write while receiving IPC data
+
+If a malicious client pretends to be the E17 window manager, it is
+possible to trigger an out of boundary heap write while receiving an
+IPC message.
+
+The length of the already received message is stored in an unsigned
+short, which overflows after receiving 64 KB of data. It's comparably
+small amount of data and therefore achievable for an attacker.
+
+When len overflows, realloc() will either be called with a small value
+and therefore chars will be appended out of bounds, or len + 1 will be
+exactly 0, in which case realloc() behaves like free(). This could be
+abused for a later double-free attack as it's even possible to overwrite
+the free information -- but this depends on the malloc implementation.
+
+Signed-off-by: Tobias Stoeckmann <tobias@stoeckmann.org>
+---
+ src/wallpaper.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/wallpaper.c b/src/wallpaper.c
+index a11a50de..93994b3d 100644
+--- a/src/wallpaper.c
++++ b/src/wallpaper.c
+@@ -795,7 +795,7 @@ char *enl_ipc_get(const char *msg_data)
+ {
+ 
+ 	static char *message = NULL;
+-	static unsigned short len = 0;
++	static size_t len = 0;
+ 	char buff[13], *ret_msg = NULL;
+ 	register unsigned char i;
+ 	unsigned char blen;

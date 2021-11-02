@@ -1,0 +1,27 @@
+From 53f126082a8b3d094e48b159f0f0bc8a5db4b2f4 Mon Sep 17 00:00:00 2001
+From: John McLear <john@mclear.co.uk>
+Date: Sun, 29 Mar 2020 09:35:20 +0000
+Subject: [PATCH] SessionStore: replace password with PASSWORD_HIDDEN when
+ storing in db
+
+Fixes #3421.
+---
+ src/node/db/SessionStore.js | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/node/db/SessionStore.js b/src/node/db/SessionStore.js
+index 647cbbc8d9f..263c7d6eefe 100644
+--- a/src/node/db/SessionStore.js
++++ b/src/node/db/SessionStore.js
+@@ -38,6 +38,11 @@ SessionStore.prototype.get = function(sid, fn) {
+ SessionStore.prototype.set = function(sid, sess, fn) {
+   messageLogger.debug('SET ' + sid);
+ 
++  // don't store passwords in DB
++  if (sess.user && sess.user.password) {
++    sess.user.password = "PASSWORD_HIDDEN";
++  }
++
+   db.set("sessionstorage:" + sid, sess);
+   if (fn) {
+     process.nextTick(fn);

@@ -1,0 +1,26 @@
+From c9f25bca048443e317f1994ba9b106f2386688c3 Mon Sep 17 00:00:00 2001
+From: Idan Horowitz <idan.horowitz@gmail.com>
+Date: Mon, 15 Mar 2021 16:26:56 +0200
+Subject: [PATCH] LibTextCodec: Make UTF16BEDecoder read only up to an even
+ offset
+
+Reading up to the end of the input string of odd length results in
+an out-of-bounds read
+---
+ Userland/Libraries/LibTextCodec/Decoder.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Userland/Libraries/LibTextCodec/Decoder.cpp b/Userland/Libraries/LibTextCodec/Decoder.cpp
+index 26fced65244c..b075a8187047 100644
+--- a/Userland/Libraries/LibTextCodec/Decoder.cpp
++++ b/Userland/Libraries/LibTextCodec/Decoder.cpp
+@@ -183,7 +183,8 @@ String UTF8Decoder::to_utf8(const StringView& input)
+ String UTF16BEDecoder::to_utf8(const StringView& input)
+ {
+     StringBuilder builder(input.length() / 2);
+-    for (size_t i = 0; i < input.length(); i += 2) {
++    size_t utf16_length = input.length() - (input.length() % 2);
++    for (size_t i = 0; i < utf16_length; i += 2) {
+         u16 code_point = (input[i] << 8) | input[i + 1];
+         builder.append_code_point(code_point);
+     }

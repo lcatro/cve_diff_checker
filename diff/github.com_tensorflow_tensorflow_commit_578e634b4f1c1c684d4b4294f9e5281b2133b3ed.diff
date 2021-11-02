@@ -1,0 +1,32 @@
+From 578e634b4f1c1c684d4b4294f9e5281b2133b3ed Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 22:24:08 -0700
+Subject: [PATCH] Prevent a segfault in shape inference due to bad inputs.
+
+PiperOrigin-RevId: 387737970
+Change-Id: Ibd1cf3dbdce1dd2ab47fd633d5c5a57f7d8fb6e9
+---
+ tensorflow/core/ops/sparse_ops.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/ops/sparse_ops.cc b/tensorflow/core/ops/sparse_ops.cc
+index 906cef1f5ecaf..b1e40e66af892 100644
+--- a/tensorflow/core/ops/sparse_ops.cc
++++ b/tensorflow/core/ops/sparse_ops.cc
+@@ -16,6 +16,7 @@ limitations under the License.
+ #include "tensorflow/core/framework/common_shape_fns.h"
+ #include "tensorflow/core/framework/op.h"
+ #include "tensorflow/core/framework/shape_inference.h"
++#include "tensorflow/core/platform/errors.h"
+ 
+ namespace tensorflow {
+ 
+@@ -619,6 +620,8 @@ REGISTER_OP("SparseFillEmptyRows")
+       DimensionHandle unused_dim;
+       TF_RETURN_IF_ERROR(c->Merge(c->Dim(input_indices, 1),
+                                   c->Dim(input_shape, 0), &unused_dim));
++      if (c->Value(c->NumElements(input_shape)) == 0)
++        return errors::InvalidArgument("dense_shape must not be empty");
+       ShapeHandle output_indices =
+           c->Matrix(InferenceContext::kUnknownDim, c->NumElements(input_shape));
+       ShapeHandle output_values = c->Vector(InferenceContext::kUnknownDim);

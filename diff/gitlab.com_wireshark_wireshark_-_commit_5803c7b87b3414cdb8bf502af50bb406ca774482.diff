@@ -1,0 +1,39 @@
+From 5803c7b87b3414cdb8bf502af50bb406ca774482 Mon Sep 17 00:00:00 2001
+From: George Hopkins <george-hopkins@null.net>
+Date: Wed, 2 Sep 2020 10:05:25 +0000
+Subject: [PATCH] multipart: fix deallocation of invalid parts
+
+Fixes #16741
+
+
+(cherry picked from commit 2411eae9edb562e80c45962c74945238a94e5d3b)
+---
+ epan/dissectors/packet-multipart.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/epan/dissectors/packet-multipart.c b/epan/dissectors/packet-multipart.c
+index 0e8d9103f1..b972969940 100644
+--- a/epan/dissectors/packet-multipart.c
++++ b/epan/dissectors/packet-multipart.c
+@@ -339,14 +339,13 @@ get_multipart_info(packet_info *pinfo, http_message_info_t *message_info)
+     parameters = unfold_and_compact_mime_header(message_info->media_str, &dummy);
+ 
+     start_boundary = ws_find_media_type_parameter(wmem_packet_scope(), parameters, "boundary");
+-
+-    if(!start_boundary) {
++    if (!start_boundary) {
+         return NULL;
+     }
+-    if(strncmp(type, "multipart/encrypted", sizeof("multipart/encrypted")-1) == 0) {
++
++    if (strncmp(type, "multipart/encrypted", sizeof("multipart/encrypted") - 1) == 0) {
+         start_protocol = ws_find_media_type_parameter(wmem_packet_scope(), parameters, "protocol");
+-        if(!start_protocol) {
+-            g_free(start_boundary);
++        if (!start_protocol) {
+             return NULL;
+         }
+     }
+-- 
+GitLab
+

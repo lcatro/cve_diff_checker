@@ -1,0 +1,92 @@
+From ca6f4a783a6ba65532dc8767446bda44773ec627 Mon Sep 17 00:00:00 2001
+From: iglocska <andras.iklody@gmail.com>
+Date: Mon, 9 Oct 2017 15:40:40 +0200
+Subject: [PATCH] fix: Fix to a potential reflected XSS on the quickDelete
+
+- low impact, XSS required user confirmation of malicious payload
+
+- as reported by Or Hanuka (PALANTIR)
+---
+ .../ajax/quickDeleteConfirmationForm.ctp      |  2 +-
+ app/webroot/js/misp.js                        | 35 +++++--------------
+ 2 files changed, 9 insertions(+), 28 deletions(-)
+
+diff --git a/app/View/Sightings/ajax/quickDeleteConfirmationForm.ctp b/app/View/Sightings/ajax/quickDeleteConfirmationForm.ctp
+index fffcf7cea4..db7acc8190 100644
+--- a/app/View/Sightings/ajax/quickDeleteConfirmationForm.ctp
++++ b/app/View/Sightings/ajax/quickDeleteConfirmationForm.ctp
+@@ -8,7 +8,7 @@
+ 		<table>
+ 			<tr>
+ 				<td style="vertical-align:top">
+-					<span id="PromptYesButton" role="button" tabindex="0" aria-label="Remove sighting" title="Remove sighting" class="btn btn-primary" onClick="removeSighting('<?php echo h($id); ?>', '<?php echo h($rawId); ?>', '<?php echo h($context); ?>');">Yes</span>
++					<span id="PromptYesButton" role="button" tabindex="0" aria-label="Remove sighting" title="Remove sighting" class="btn btn-primary" data-id="<?php echo h($id); ?>" data-rawid="<?php echo h($rawId); ?>" data-context="<?php echo h($context); ?>" onClick="removeSighting(this);">Yes</span>
+ 				</td>
+ 				<td style="width:540px;">
+ 				</td>
+diff --git a/app/webroot/js/misp.js b/app/webroot/js/misp.js
+index 153adb4a11..ae6a70227f 100644
+--- a/app/webroot/js/misp.js
++++ b/app/webroot/js/misp.js
+@@ -72,28 +72,6 @@ function cancelPrompt(isolated) {
+ 	$("#confirmation_box").empty();
+ }
+ 
+-function submitEventDeletion() {
+-	var formData = $('#PromptForm').serialize();
+-	$.ajax({
+-		beforeSend: function (XMLHttpRequest) {
+-			$(".loading").show();
+-		},
+-		data: formData,
+-		success:function (data, textStatus) {
+-			updateIndex(context_id, context);
+-			handleGenericAjaxResponse(data);
+-		},
+-		complete:function() {
+-			$(".loading").hide();
+-			$("#confirmation_box").fadeOut();
+-			$("#gray_out").fadeOut();
+-		},
+-		type:"post",
+-		cache: false,
+-		url:"/" + type + "/" + action + "/" + id,
+-	});
+-}
+-
+ function submitDeletion(context_id, action, type, id) {
+ 	var context = 'event';
+ 	if (type == 'template_elements') context = 'template';
+@@ -118,7 +96,10 @@ function submitDeletion(context_id, action, type, id) {
+ 	});
+ }
+ 
+-function removeSighting(id, rawid, context) {
++function removeSighting(caller) {
++	var id = $(caller).data('id');
++	var rawid = $(caller).data('rawid');
++	var context = $(caller).data('context');
+ 	if (context != 'attribute') {
+ 		context = 'event';
+ 	}
+@@ -130,16 +111,16 @@ function removeSighting(id, rawid, context) {
+ 		data: formData,
+ 		success:function (data, textStatus) {
+ 			handleGenericAjaxResponse(data);
+-		},
+-		complete:function() {
+-			$(".loading").hide();
+-			$("#confirmation_box").fadeOut();
+ 			var org = "/" + $('#org_id').text();
+ 			updateIndex(id, 'event');
+ 			$.get( "/sightings/listSightings/" + rawid + "/" + context + org, function(data) {
+ 				$("#sightingsData").html(data);
+ 			});
+ 		},
++		complete:function() {
++			$(".loading").hide();
++			$("#confirmation_box").fadeOut();
++		},
+ 		type:"post",
+ 		cache: false,
+ 		url:"/sightings/quickDelete/" + id + "/" + rawid + "/" + context,

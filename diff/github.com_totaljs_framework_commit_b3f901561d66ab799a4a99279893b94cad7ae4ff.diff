@@ -1,0 +1,24 @@
+From b3f901561d66ab799a4a99279893b94cad7ae4ff Mon Sep 17 00:00:00 2001
+From: Peter Sirka <petersirka@gmail.com>
+Date: Thu, 31 Dec 2020 11:41:21 +0100
+Subject: [PATCH] Fixed `U.set()` by adding check for `Prototype pollution`.
+
+---
+ utils.js | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/utils.js b/utils.js
+index 2b2959dd..91695434 100755
+--- a/utils.js
++++ b/utils.js
+@@ -6621,6 +6621,10 @@ exports.set = function(obj, path, value) {
+ 	var v = arr[arr.length - 1];
+ 	var ispush = v.lastIndexOf('[]') !== -1;
+ 	var a = builder.join(';') + ';var v=typeof(a)===\'function\'?a(U.get(b)):a;w' + (v[0] === '[' ? '' : '.') + (ispush ? v.replace(REGREPLACEARR, '.push(v)') : (v + '=v')) + ';return v';
++
++	if ((/__proto__|constructor|prototype/).test(a))
++		throw new Error('Prototype pollution');
++
+ 	var fn = new Function('w', 'a', 'b', a);
+ 	F.temporary.other[cachekey] = fn;
+ 	fn(obj, value, path);

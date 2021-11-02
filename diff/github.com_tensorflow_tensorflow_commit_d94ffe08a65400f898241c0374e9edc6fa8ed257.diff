@@ -1,0 +1,25 @@
+From d94ffe08a65400f898241c0374e9edc6fa8ed257 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 27 Jul 2021 14:42:54 -0700
+Subject: [PATCH] Prevent an OOB read in `expand_dims.cc`
+
+The for loop that follows this check assumes that `axis` is between `0` and `input_dims.size`. If user supplied `axis` is negative, the if code before this check is supposed to bring it back to positive (similar to how in Python one can do `l[-3]` to mean `l[-3 + len(l)]`).
+
+PiperOrigin-RevId: 387200206
+Change-Id: I162f4feba12d547c3a4340833ae682016a2ebfab
+---
+ tensorflow/lite/kernels/expand_dims.cc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tensorflow/lite/kernels/expand_dims.cc b/tensorflow/lite/kernels/expand_dims.cc
+index 231ba6df8ba73..c8d0270551c19 100644
+--- a/tensorflow/lite/kernels/expand_dims.cc
++++ b/tensorflow/lite/kernels/expand_dims.cc
+@@ -37,6 +37,7 @@ TfLiteStatus ExpandTensorDim(TfLiteContext* context, const TfLiteTensor& input,
+     axis = input_dims.size + 1 + axis;
+   }
+   TF_LITE_ENSURE(context, axis <= input_dims.size);
++  TF_LITE_ENSURE(context, axis >= 0);
+ 
+   TfLiteIntArray* output_dims = TfLiteIntArrayCreate(input_dims.size + 1);
+   for (int i = 0; i < output_dims->size; ++i) {

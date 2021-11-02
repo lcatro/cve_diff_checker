@@ -1,0 +1,36 @@
+From d7759d3ddae5fe99a340c88a1d370d65cfa73fd6 Mon Sep 17 00:00:00 2001
+From: "Bryn M. Reeves" <bmr@redhat.com>
+Date: Thu, 30 Oct 2014 16:46:01 +0000
+Subject: [PATCH] [sosreport] fix archive permissions regression
+
+Restore the umask save/restore around archive creation and ensure
+the effective umask is 077 at the time of archive creation.
+
+Fixes #425.
+
+Signed-off-by: Bryn M. Reeves <bmr@redhat.com>
+---
+ sos/sosreport.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sos/sosreport.py b/sos/sosreport.py
+index 664414f557..99b5f47085 100644
+--- a/sos/sosreport.py
++++ b/sos/sosreport.py
+@@ -1327,6 +1327,7 @@ def final_work(self):
+         self._finish_logging()
+         # package up the results for the support organization
+         if not self.opts.build:
++            old_umask = os.umask(0o077)
+             if not self.opts.quiet:
+                 print(_("Creating compressed archive..."))
+             # compression could fail for a number of reasons
+@@ -1345,6 +1346,8 @@ def final_work(self):
+                     raise
+                 else:
+                     return False
++            finally:
++                os.umask(old_umask)
+         else:
+             final_filename = self.archive.get_archive_path()
+         self.policy.display_results(final_filename, build=self.opts.build)

@@ -1,0 +1,145 @@
+From 52215f708395a329c9e17ea33bfc6762d4efccbb Mon Sep 17 00:00:00 2001
+From: labby <office@cms-lab.com>
+Date: Thu, 26 Mar 2020 13:59:34 +0100
+Subject: [PATCH] add cases to lepton_request for security and use new cases in
+ wysiwyg
+
+---
+ upload/framework/classes/lepton_request.php | 44 +++++++++++++++
+ upload/modules/wysiwyg/save.php             | 61 +++++++--------------
+ 2 files changed, 64 insertions(+), 41 deletions(-)
+
+diff --git a/upload/framework/classes/lepton_request.php b/upload/framework/classes/lepton_request.php
+index cdcff5c7..c83de79b 100644
+--- a/upload/framework/classes/lepton_request.php
++++ b/upload/framework/classes/lepton_request.php
+@@ -255,6 +255,50 @@ class LEPTON_request extends LEPTON_abstract
+ 					}
+ 					break;
+ 					
++				case 'string_clean':
++					//	string without any html tags
++					if (!is_string($return_value))
++					{
++					    $return_value = $aDefault;
++					}
++					else
++					{
++						$return_value = strip_tags($return_value);
++					}				
++					break;	
++
++				case 'string_chars':
++					//	string with all html-tags converted to htmlspecialchars
++					if (!is_string($return_value))
++					{
++					    $return_value = $aDefault;
++					}
++					else
++					{
++						$return_value = htmlspecialchars($return_value);
++					}				
++					break;
++
++				case 'string_allowed':
++					//	string without tags but allowed html-tags
++					if (!is_string($return_value))
++					{
++					    $return_value = $aDefault;
++					}
++					else
++					{
++						if ( true === is_array($range) )
++						{
++							// range contains all allowed html-tags
++							$return_value = strip_tags($return_value,$range);
++						}
++						else
++						{
++							$return_value = strip_tags($return_value);
++						}						
++					}				
++					break;						
++					
+ 				case 'ean':
+ 					if (false === $this->validate_ean13($return_value))
+ 					{
+diff --git a/upload/modules/wysiwyg/save.php b/upload/modules/wysiwyg/save.php
+index 485cb8ff..24ba729c 100644
+--- a/upload/modules/wysiwyg/save.php
++++ b/upload/modules/wysiwyg/save.php
+@@ -45,51 +45,30 @@ require(LEPTON_PATH.'/modules/admin.php');
+  */
+ if(isset($_POST['content'.$section_id]))
+ {
+-	$content = $_POST['content'.$section_id];
+-    
+-    /**
+-     *  Handle possible js tags
+-     */
+-    $aFindReplace = [
+-        "<script"   => "<p class='illegal' ",
+-        "</script"  => "</p"
+-    ];
+-    
+-    $content = str_ireplace(
+-        array_keys( $aFindReplace ),
+-        array_values( $aFindReplace ),
+-        $content
+-    );
+-    
+-	/**
+-	 *	searching in $text will be much easier this way
+-	 *
+-	 */
+-	$text = strip_tags($content);
++	$_POST['content'] = str_replace("\\\$", "\$", $_POST['content'.$section_id]);
+ 
+-    $fields = array(
+-        'content'   => $content,
+-        'text'      => $text
+-    );
+-    $database->build_and_execute(
+-        'update',
+-        TABLE_PREFIX."mod_wysiwyg",
+-        $fields,
+-        "`section_id` = ".$section_id
+-    );
++	// Searching in $text will be much easier this way
++	//		$_POST['text'] = strip_tags($_POST['content']);
+ 
+-	// if ($database->is_error()) trigger_error(sprintf('[%s - %s] %s', __FILE__, __LINE__, $database->get_error()), E_USER_ERROR);	
+-}
++	$oREQUEST = LEPTON_request::getInstance();	
+ 
+-$edit_page = ADMIN_URL.'/pages/modify.php?page_id='.$page_id.'#'.SEC_ANCHOR.$section_id;
++	$all_names = array (
++		'content'	=> array ('type' => 'string_chars', 'default' => ""),
++		'text'		=> array ('type' => 'string_clean', 'default' => "")
++	);		
+ 
+-// Check if there is a database error, otherwise say successful
+-if($database->is_error()) {
+-	$admin->print_error($database->get_error(), $js_back);
+-} else {
+-	$admin->print_success($MESSAGE['PAGES_SAVED'], $edit_page );
++	$all_values = $oREQUEST->testPostValues($all_names);	
++
++	$table = TABLE_PREFIX."mod_wysiwyg";
++	$database->build_and_execute(
++		'UPDATE', 
++		$table, 
++		$all_values,
++		"section_id = ".$section_id
++	);	
+ }
+ 
+-// Print admin footer
+-$admin->print_footer();
++//  Keep in mind that the "print_success" (class-)method also echos the footer!
++$redirect = ADMIN_URL.'/pages/modify.php?page_id='.$page_id.'#'.SEC_ANCHOR.$section_id;
++$admin->print_success($MESSAGE['PAGES_SAVED'], $redirect );
+ 
+-- 
+GitLab
+

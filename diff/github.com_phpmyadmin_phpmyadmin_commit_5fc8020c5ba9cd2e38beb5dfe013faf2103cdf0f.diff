@@ -1,0 +1,56 @@
+From 5fc8020c5ba9cd2e38beb5dfe013faf2103cdf0f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 23 May 2016 09:40:17 +0200
+Subject: [PATCH] Ensure links from setup go through url.php
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ libraries/core.lib.php     | 9 +++++++--
+ setup/frames/index.inc.php | 4 ++--
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/libraries/core.lib.php b/libraries/core.lib.php
+index 09f16227a7d..1daa176d4a6 100644
+--- a/libraries/core.lib.php
++++ b/libraries/core.lib.php
+@@ -724,7 +724,7 @@ function PMA_arrayRemove($path, &$array)
+  */
+ function PMA_linkURL($url)
+ {
+-    if (!preg_match('#^https?://#', $url) || defined('PMA_SETUP')) {
++    if (!preg_match('#^https?://#', $url)) {
+         return $url;
+     }
+ 
+@@ -739,7 +739,12 @@ function PMA_linkURL($url)
+     $arr = parse_url($url);
+     parse_str($arr["query"], $vars);
+     $query = http_build_query(array("url" => $vars["url"]));
+-    $url = './url.php?' . $query;
++
++    if (defined('PMA_SETUP')) {
++        $url = '../url.php?' . $query;
++    } else {
++        $url = './url.php?' . $query;
++    }
+ 
+     return $url;
+ }
+diff --git a/setup/frames/index.inc.php b/setup/frames/index.inc.php
+index 50b59ff2baf..89de301b9c0 100644
+--- a/setup/frames/index.inc.php
++++ b/setup/frames/index.inc.php
+@@ -307,8 +307,8 @@
+ 
+ echo '</fieldset>';
+ echo '<div id="footer">';
+-echo '<a href="https://www.phpmyadmin.net/">' , __('phpMyAdmin homepage') , '</a>';
+-echo '<a href="https://www.phpmyadmin.net/donate/">'
++echo '<a href="../url.php?url=https://www.phpmyadmin.net/">' , __('phpMyAdmin homepage') , '</a>';
++echo '<a href="../url.php?url=https://www.phpmyadmin.net/donate/">'
+     ,  __('Donate') , '</a>';
+ echo '<a href="' ,  PMA_URL_getCommon() , $separator , 'version_check=1">'
+     , __('Check for latest version') , '</a>';

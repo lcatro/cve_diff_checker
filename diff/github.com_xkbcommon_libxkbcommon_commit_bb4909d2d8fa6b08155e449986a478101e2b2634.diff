@@ -1,0 +1,34 @@
+From bb4909d2d8fa6b08155e449986a478101e2b2634 Mon Sep 17 00:00:00 2001
+From: Daniel Stone <daniels@collabora.com>
+Date: Mon, 30 Oct 2017 11:21:55 +0000
+Subject: [PATCH] Fail expression lookup on invalid atoms
+
+If we fail atom lookup, then we should not claim that we successfully
+looked up the expression.
+
+Signed-off-by: Daniel Stone <daniels@collabora.com>
+---
+ src/xkbcomp/expr.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/xkbcomp/expr.c b/src/xkbcomp/expr.c
+index b5ab7170..b2567de3 100644
+--- a/src/xkbcomp/expr.c
++++ b/src/xkbcomp/expr.c
+@@ -47,11 +47,15 @@ ExprResolveLhs(struct xkb_context *ctx, const ExprDef *expr,
+         *elem_rtrn = xkb_atom_text(ctx, expr->field_ref.element);
+         *field_rtrn = xkb_atom_text(ctx, expr->field_ref.field);
+         *index_rtrn = NULL;
+-        return true;
++        return (*elem_rtrn != NULL && *field_rtrn != NULL);
+     case EXPR_ARRAY_REF:
+         *elem_rtrn = xkb_atom_text(ctx, expr->array_ref.element);
+         *field_rtrn = xkb_atom_text(ctx, expr->array_ref.field);
+         *index_rtrn = expr->array_ref.entry;
++	if (expr->array_ref.element != XKB_ATOM_NONE && *elem_rtrn == NULL)
++		return false;
++	if (*field_rtrn == NULL)
++		return false;
+         return true;
+     default:
+         break;

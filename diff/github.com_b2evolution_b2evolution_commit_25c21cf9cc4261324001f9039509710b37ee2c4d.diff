@@ -1,0 +1,39 @@
+From 25c21cf9cc4261324001f9039509710b37ee2c4d Mon Sep 17 00:00:00 2001
+From: yurabakhtin <yurybakh@gmail.com>
+Date: Wed, 28 Sep 2016 07:23:33 +0300
+Subject: [PATCH] Fix object injection vulnerability
+
+---
+ htsrv/call_plugin.php | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/htsrv/call_plugin.php b/htsrv/call_plugin.php
+index 1b18e47f84..044d48c703 100644
+--- a/htsrv/call_plugin.php
++++ b/htsrv/call_plugin.php
+@@ -30,13 +30,21 @@
+ param( 'method', 'string', '' );
+ param( 'params', 'string', null ); // serialized
+ 
+-if( is_null($params) )
+-{ // Default:
++if( is_null( $params ) )
++{	// Use empty array by default if params are not sent by request:
+ 	$params = array();
+ }
+ else
+-{ // params given. This may result in "false", but this means that unserializing failed.
+-	$params = @unserialize($params);
++{	// Params given:
++	if( substr( $params, 0, 2 ) == 'a:' )
++	{	// Allow to unserialize only arrays, to avoid object injection vulnerability:
++		// (This may result in "false", but this means that unserializing failed)
++		$params = @unserialize( $params );
++	}
++	else
++	{	// Restrict all non array params to empty array:
++		$params = array();
++	}
+ }
+ 
+ 

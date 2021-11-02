@@ -1,0 +1,26 @@
+From a74768f8e4efbda4def9f16ee7e13cf3922ac5f7 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 6 May 2021 14:24:09 -0700
+Subject: [PATCH] Prevent heap OOB error in `MaxPoolGrad`
+
+PiperOrigin-RevId: 372424854
+Change-Id: Idac0f23867ad8b0601cafbaaa52d5e64269e63a7
+---
+ tensorflow/core/kernels/maxpooling_op.cc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/maxpooling_op.cc b/tensorflow/core/kernels/maxpooling_op.cc
+index ceb6694ed665d..01f303eb26980 100644
+--- a/tensorflow/core/kernels/maxpooling_op.cc
++++ b/tensorflow/core/kernels/maxpooling_op.cc
+@@ -199,7 +199,9 @@ static void SpatialMaxPoolWithArgMaxHelper(
+         // CHECK(input_backprop_index >= in_start && input_backprop_index <
+         // in_end)
+         FastBoundsCheck(input_backprop_index - in_start, in_end - in_start);
+-        input_backprop_flat(input_backprop_index) += out_backprop_flat(index);
++        if (index < out_backprop.NumElements()) {
++          input_backprop_flat(input_backprop_index) += out_backprop_flat(index);
++        }
+       }
+     }
+   };

@@ -1,0 +1,36 @@
+From 7c164a0c86cec6ee95df1d141e67b0e85dfdefd2 Mon Sep 17 00:00:00 2001
+From: Pali <pali@cpan.org>
+Date: Sun, 2 Oct 2016 22:09:26 +0200
+Subject: [PATCH] Do not use unsafe sprintf w/variable length input
+
+This can cause a  buffer overflow to occur when reporting error
+message about validation of (untrusted) user input parameters.
+---
+ dbdimp.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/dbdimp.c b/dbdimp.c
+index 77524ec..d0b46c3 100644
+--- a/dbdimp.c
++++ b/dbdimp.c
+@@ -4783,7 +4783,7 @@ int dbd_bind_ph(SV *sth, imp_sth_t *imp_sth, SV *param, SV *value,
+   int rc;
+   int param_num= SvIV(param);
+   int idx= param_num - 1;
+-  char err_msg[64];
++  char *err_msg;
+   D_imp_xxh(sth);
+ 
+ #if MYSQL_VERSION_ID >= SERVER_PREPARE_VERSION
+@@ -4826,9 +4826,9 @@ int dbd_bind_ph(SV *sth, imp_sth_t *imp_sth, SV *param, SV *value,
+   {
+     if (! looks_like_number(value))
+     {
+-      sprintf(err_msg,
++      err_msg = SvPVX(sv_2mortal(newSVpvf(
+               "Binding non-numeric field %d, value %s as a numeric!",
+-              param_num, neatsvpv(value,0));
++              param_num, neatsvpv(value,0))));
+       do_error(sth, JW_ERR_ILLEGAL_PARAM_NUM, err_msg, NULL);
+     }
+   }

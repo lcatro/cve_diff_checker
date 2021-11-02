@@ -1,0 +1,144 @@
+From 571a6f33f47e7a2394fa08f925e534135c29cf1e Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Thu, 23 Mar 2017 14:37:56 -0700
+Subject: [PATCH] CVE-2017-13035/Properly handle IS-IS IDs shorter than a
+ system ID (MAC address).
+
+Some of them are variable-length, with a field giving the total length,
+and therefore they can be shorter than 6 octets.  If one is, don't run
+past the end.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-isoclns.c            |   6 +++-
+ tests/TESTLIST             |   1 +
+ tests/isis_sysid_asan.out  |  71 +++++++++++++++++++++++++++++++++++++
+ tests/isis_sysid_asan.pcap | Bin 0 -> 323 bytes
+ 4 files changed, 77 insertions(+), 1 deletion(-)
+ create mode 100644 tests/isis_sysid_asan.out
+ create mode 100644 tests/isis_sysid_asan.pcap
+
+diff --git a/print-isoclns.c b/print-isoclns.c
+index eb22759be..628550284 100644
+--- a/print-isoclns.c
++++ b/print-isoclns.c
+@@ -1646,8 +1646,12 @@ isis_print_id(const uint8_t *cp, int id_len)
+     int i;
+     static char id[sizeof("xxxx.xxxx.xxxx.yy-zz")];
+     char *pos = id;
++    int sysid_len;
+ 
+-    for (i = 1; i <= SYSTEM_ID_LEN; i++) {
++    sysid_len = SYSTEM_ID_LEN;
++    if (sysid_len > id_len)
++        sysid_len = id_len;
++    for (i = 1; i <= sysid_len; i++) {
+         snprintf(pos, sizeof(id) - (pos - id), "%02x", *cp++);
+ 	pos += strlen(pos);
+ 	if (i == 2 || i == 4)
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 1c94dcca1..3adc5c7f3 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -539,6 +539,7 @@ isis_stlv_asan		isis_stlv_asan.pcap		isis_stlv_asan.out	-v
+ isis_stlv_asan-2	isis_stlv_asan-2.pcap		isis_stlv_asan-2.out	-v
+ isis_stlv_asan-3	isis_stlv_asan-3.pcap		isis_stlv_asan-3.out	-v
+ isis_stlv_asan-4	isis_stlv_asan-4.pcap		isis_stlv_asan-4.out	-v
++isis_sysid_asan		isis_sysid_asan.pcap		isis_sysid_asan.out	-v
+ lldp_mgmt_addr_tlv_asan	lldp_mgmt_addr_tlv_asan.pcap	lldp_mgmt_addr_tlv_asan.out	-v
+ bootp_asan		bootp_asan.pcap			bootp_asan.out		-v
+ bootp_asan-2		bootp_asan-2.pcap		bootp_asan-2.out	-v
+diff --git a/tests/isis_sysid_asan.out b/tests/isis_sysid_asan.out
+new file mode 100644
+index 000000000..0e5a70333
+--- /dev/null
++++ b/tests/isis_sysid_asan.out
+@@ -0,0 +1,71 @@
++UI 22! IS-IS, length 469869187
++	L2 Lan IIH, hlen: 27, v: 1, pdu-v: 1, sys-id-len: 6 (0), max-area: 224 (224)
++	  source-id: fed0.f90f.58af,  holding time: 34047s, Flags: [unknown circuit type 0x00]
++	  lan-id:    0105.0088.a204.00, Priority: 65, PDU length: 4096
++	    unknown TLV #64, length: 128
++		0x0000:  ff10 8e12 0001 1b01 0000 6b00 fbcf f90f
++		0x0010:  58af 84ff 1000 4901 0000 88a2 011c 000c
++		0x0020:  0281 0083 1b01 0010 019d e000 fed0 f90f
++		0x0030:  58af 84ff 1000 4101 0500 88a2 011c 0272
++		0x0040:  0c2a 2205 831b 011c 0010 0000 0583 1b01
++		0x0050:  0010 01ab e000 fe08 0808 0808 08cb 0808
++		0x0060:  0808 0808 0808 0880 0008 7f08 0808 0808
++		0x0070:  08fd 0808 080c 0608 0807 0808 0808 0408
++	    Padding TLV #8, length: 8
++	    Padding TLV #8, length: 8
++	    Padding TLV #8, length: 7
++	    Padding TLV #8, length: 8
++	    Padding TLV #8, length: 0
++	    Padding TLV #8, length: 8
++	    unknown TLV #100, length: 0
++	    unknown TLV #32, length: 16
++		0x0000:  2020 2020 3c20 2020 2020 2020 205a 1a31
++	    IS Neighbor(s) (variable length) TLV #7, length: 238
++	      LAN address length 1 bytes 
++		IS Neighbor: 5a
++		IS Neighbor: 45
++		IS Neighbor: 50
++		IS Neighbor: 48
++		IS Neighbor: 59
++		IS Neighbor: 52
++		IS Neighbor: 5f
++		IS Neighbor: 43
++		IS Neighbor: 54
++		IS Neighbor: 4c
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 08
++		IS Neighbor: 00
++		IS Neighbor: 00
++		IS Neighbor: 08
++		IS Neighbor: 00
++		IS Neighbor: 20
++		IS Neighbor: 64
++		IS Neighbor: 00
++		IS Neighbor: 20
++		IS Neighbor: 10
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20
++		IS Neighbor: 20 [|isis]
+diff --git a/tests/isis_sysid_asan.pcap b/tests/isis_sysid_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..8190b4e6550292613131d3eaed9f2aa2538c1bcb
+GIT binary patch
+literal 323
+zcmca|c+)~A1{MZ}hW`!>Kp@S?z>p23fAWW}Z}~3(=65V&lwsguS7K-e$_g;feZcVV
+z!cYDPu)HH9D?`U376ylg{{nqN42%%{zt6+uJ%Q#y^fNW$*3T%zRK%mD#0s=PhCzUV
+z0mJ~>v>Ip=2N;}&P(ZSQfukP6`3t0Y*f==YL0lGy7$<~+lkA`1Ob+&UU^W9pgpY$k
+qA%#IfKmiDBKm-UxNg1-gV~lbQ@Q4hGcMkDEXhyIY7?5;=GywqfP&~{4
+
+literal 0
+HcmV?d00001
+

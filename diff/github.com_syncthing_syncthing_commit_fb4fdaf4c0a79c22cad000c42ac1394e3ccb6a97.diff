@@ -1,0 +1,31 @@
+From fb4fdaf4c0a79c22cad000c42ac1394e3ccb6a97 Mon Sep 17 00:00:00 2001
+From: Jakob Borg <jakob@kastelo.net>
+Date: Tue, 6 Apr 2021 08:00:00 +0200
+Subject: [PATCH] Merge pull request from GHSA-x462-89pf-6r5h
+
+---
+ lib/relay/protocol/protocol.go | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/lib/relay/protocol/protocol.go b/lib/relay/protocol/protocol.go
+index 97dee8d41e..0bc079ab65 100644
+--- a/lib/relay/protocol/protocol.go
++++ b/lib/relay/protocol/protocol.go
+@@ -4,6 +4,7 @@ package protocol
+ 
+ import (
+ 	"errors"
++	"fmt"
+ 	"io"
+ )
+ 
+@@ -86,6 +87,9 @@ func ReadMessage(r io.Reader) (interface{}, error) {
+ 	if header.magic != magic {
+ 		return nil, errors.New("magic mismatch")
+ 	}
++	if header.messageLength < 0 || header.messageLength > 1024 {
++		return nil, fmt.Errorf("bad length (%d)", header.messageLength)
++	}
+ 
+ 	buf = make([]byte, int(header.messageLength))
+ 	if _, err := io.ReadFull(r, buf); err != nil {

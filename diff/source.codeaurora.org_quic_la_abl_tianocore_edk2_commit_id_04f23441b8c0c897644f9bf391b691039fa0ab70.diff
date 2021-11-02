@@ -1,0 +1,61 @@
+From 04f23441b8c0c897644f9bf391b691039fa0ab70 Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Fri, 29 Sep 2017 10:01:44 +0800
+Subject: QcomModulePkg: Fix the array index out of bounds error
+
+Add '\0' to the end of array FfbmData without the Sz with BlockSize,
+the index maybe out of bounds
+
+Change-Id: I2db51be6d0f0e2f32e2e825857b8eb24a410f2cd
+---
+ QcomModulePkg/Library/BootLib/Recovery.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/QcomModulePkg/Library/BootLib/Recovery.c b/QcomModulePkg/Library/BootLib/Recovery.c
+index e5a2a01..a0c9b64 100644
+--- a/QcomModulePkg/Library/BootLib/Recovery.c
++++ b/QcomModulePkg/Library/BootLib/Recovery.c
+@@ -29,7 +29,8 @@
+ #include <Library/LinuxLoaderLib.h>
+ #include "Recovery.h"
+ 
+-STATIC EFI_STATUS ReadFromPartition(EFI_GUID *Ptype, VOID **Msg)
++STATIC EFI_STATUS ReadFromPartition (EFI_GUID *Ptype,
++                                    VOID **Msg, UINT32 Size)
+ {
+ 	EFI_STATUS Status;
+ 	EFI_BLOCK_IO_PROTOCOL *BlkIo = NULL;
+@@ -65,6 +66,10 @@ STATIC EFI_STATUS ReadFromPartition(EFI_GUID *Ptype, VOID **Msg)
+ 
+ 	BlkIo = HandleInfoList[0].BlkIo;
+ 
++    if (Size >= BlkIo->Media->BlockSize) {
++        return EFI_OUT_OF_RESOURCES;
++    }
++
+ 	*Msg = AllocatePool(BlkIo->Media->BlockSize);
+ 	if (!(*Msg))
+ 	{
+@@ -89,7 +94,8 @@ EFI_STATUS RecoveryInit(BOOLEAN *BootIntoRecovery)
+ 	EFI_STATUS Status;
+ 	struct RecoveryMessage *Msg = NULL;
+ 
+-	Status = ReadFromPartition(&gEfiMiscPartitionGuid, (VOID**)&Msg);
++    Status = ReadFromPartition (&gEfiMiscPartitionGuid,
++                            (VOID**)&Msg, sizeof (struct RecoveryMessage));
+ 	if (Status != EFI_SUCCESS)
+ 	{
+ 		DEBUG((EFI_D_ERROR, "Error Reading from misc partition: %r\n", Status));
+@@ -119,7 +125,8 @@ EFI_STATUS GetFfbmCommand(CHAR8 *FfbmString, UINT32 Sz)
+ 	CHAR8 *FfbmData = NULL;
+ 	EFI_STATUS Status;
+ 
+-	Status = ReadFromPartition(&gEfiMiscPartitionGuid, (VOID**)&FfbmData);
++    Status = ReadFromPartition (&gEfiMiscPartitionGuid,
++                            (VOID**)&FfbmData, Sz);
+ 	if (Status != EFI_SUCCESS)
+ 	{
+ 		DEBUG((EFI_D_ERROR, "Error Reading FFBM info from misc: %r\n", Status));
+-- 
+cgit v1.1
+

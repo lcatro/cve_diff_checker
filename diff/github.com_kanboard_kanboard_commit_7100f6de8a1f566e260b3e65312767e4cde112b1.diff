@@ -1,0 +1,43 @@
+From 7100f6de8a1f566e260b3e65312767e4cde112b1 Mon Sep 17 00:00:00 2001
+From: Frederic Guillot <fred@kanboard.net>
+Date: Wed, 27 Sep 2017 21:58:16 -0700
+Subject: [PATCH] Make sure people do not access to files of other projects
+
+---
+ app/Controller/BaseController.php | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/app/Controller/BaseController.php b/app/Controller/BaseController.php
+index 41fcef1c37..43ecfaab5f 100644
+--- a/app/Controller/BaseController.php
++++ b/app/Controller/BaseController.php
+@@ -74,13 +74,14 @@ protected function getFile()
+     {
+         $task_id = $this->request->getIntegerParam('task_id');
+         $file_id = $this->request->getIntegerParam('file_id');
++        $project_id = $this->request->getIntegerParam('project_id');
+         $model = 'projectFileModel';
+ 
+         if ($task_id > 0) {
+             $model = 'taskFileModel';
+-            $project_id = $this->taskFinderModel->getProjectId($task_id);
++            $task_project_id = $this->taskFinderModel->getProjectId($task_id);
+ 
+-            if ($project_id !== $this->request->getIntegerParam('project_id')) {
++            if ($project_id != $task_project_id) {
+                 throw new AccessForbiddenException();
+             }
+         }
+@@ -91,6 +92,12 @@ protected function getFile()
+             throw new PageNotFoundException();
+         }
+ 
++        if (isset($file['task_id']) && $file['task_id'] != $task_id) {
++            throw new AccessForbiddenException();
++        } else if (isset($file['project_id']) && $file['project_id'] != $project_id) {
++            throw new AccessForbiddenException();
++        }
++
+         $file['model'] = $model;
+         return $file;
+     }

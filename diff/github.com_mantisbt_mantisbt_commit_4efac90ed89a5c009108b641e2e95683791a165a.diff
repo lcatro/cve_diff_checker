@@ -1,0 +1,33 @@
+From 4efac90ed89a5c009108b641e2e95683791a165a Mon Sep 17 00:00:00 2001
+From: Damien Regad <dregad@mantisbt.org>
+Date: Wed, 4 Jul 2018 15:29:54 +0200
+Subject: [PATCH] Fix XSS in filter_form_draw_inputs() (CVE-2018-13055)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ömer Çıtak, Security Researcher at Netsparker, reported this
+vulnerability, allowing remote attackers to inject arbitrary code
+(if CSP settings permit it) through a crafted PATH_INFO on
+view_filters_page.php.
+
+Prevent the attack by sanitizing the output of $_SERVER['PHP_SELF']
+before display.
+
+Fixes #24580
+---
+ core/filter_form_api.php | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/core/filter_form_api.php b/core/filter_form_api.php
+index 8baa008a58..05d5c39e1e 100644
+--- a/core/filter_form_api.php
++++ b/core/filter_form_api.php
+@@ -2394,6 +2394,7 @@ function filter_form_draw_inputs( $p_filter, $p_for_screen = true, $p_static = f
+ 
+ 	if( null === $p_static_fallback_page ) {
+ 		$p_static_fallback_page = $_SERVER['PHP_SELF'];
++		$p_static_fallback_page = string_sanitize_url( $_SERVER['PHP_SELF'] );
+ 	}
+ 	$t_filters_url = $p_static_fallback_page;
+ 	$t_get_params = $_GET;

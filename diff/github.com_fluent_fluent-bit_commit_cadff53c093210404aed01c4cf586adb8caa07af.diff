@@ -1,0 +1,41 @@
+From cadff53c093210404aed01c4cf586adb8caa07af Mon Sep 17 00:00:00 2001
+From: davkor <david@adalogics.com>
+Date: Sat, 7 Nov 2020 13:59:02 +0000
+Subject: [PATCH] gzip: fix compression size calculation (oss-fuzz 27261)
+
+Signed-off-by: davkor <david@adalogics.com>
+---
+ src/flb_gzip.c | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/flb_gzip.c b/src/flb_gzip.c
+index 116c92bfbb..54f868ea4a 100644
+--- a/src/flb_gzip.c
++++ b/src/flb_gzip.c
+@@ -77,8 +77,25 @@ int flb_gzip_compress(void *in_data, size_t in_len,
+     z_stream strm;
+     mz_ulong crc;
+ 
+-    out_size = in_len + 32;
++
++    /*
++     * GZIP relies on an algorithm with worst-case expansion
++     * of 5 bytes per 32KB data. This means we need to create a variable
++     * length output, that depends on the input length.
++     * See RFC 1951 for details.
++     */
++    int max_input_expansion = ((int)(in_len / 32000) + 1) * 5;
++
++    /*
++     * Max compressed size is equal to sum of:
++     *   10 byte header
++     *   8 byte foot
++     *   max input expansion
++     *   size of input
++     */
++    out_size = 10 + 8 + max_input_expansion + in_len;
+     out_buf = flb_malloc(out_size);
++
+     if (!out_buf) {
+         flb_errno();
+         flb_error("[gzip] could not allocate outgoing buffer");

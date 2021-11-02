@@ -1,0 +1,54 @@
+From c08d376072f093b650c49dcb44124f43ea0177b1 Mon Sep 17 00:00:00 2001
+From: Ian Dunn <ian@iandunn.name>
+Date: Mon, 20 Jun 2016 16:25:37 +0000
+Subject: [PATCH] Admin: Escape ticket title on Discussion screen to avoid XSS.
+
+If `run_wptexturize` is disabled, the following subject title would allow an attacker to perform cross-site scripting:
+
+`"><script>alert('hi');</script>`
+
+That attack has a CVSS score of 4.7 - https://www.first.org/cvss/calculator/3.0#CVSS:3.0/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N
+
+The rest of the output was reformatted to improve readability and make it easier to spot missing escaping functions or other problems.
+
+Props https://hackerone.com/whitehatter for discovering and disclosing responsibly.
+
+Fixes https://hackerone.com/reports/145086
+---
+ classes/class-supportflow-admin.php | 21 +++++++++++++++++----
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/classes/class-supportflow-admin.php b/classes/class-supportflow-admin.php
+index 9387cdd..e4ff6b4 100644
+--- a/classes/class-supportflow-admin.php
++++ b/classes/class-supportflow-admin.php
+@@ -899,12 +899,25 @@ public function render_meta_box_details_actions() {
+ 	 * A box that appears at the top
+ 	 */
+ 	public function meta_box_subject() {
++		?>
++
++		<h4><?php _e( 'Subject', 'supportflow' ); ?></h4>
+ 
+-		$placeholder = __( 'What is your conversation about?', 'supportflow' );
+-		echo '<h4>' . __( 'Subject', 'supportflow' ) . '</h4>';
+-		echo '<input type="text" id="subject" name="post_title" class="sf_autosave" placeholder="' . $placeholder . '" value="' . get_the_title() . '" autocomplete="off" />';
+-		echo '<p class="description">' . __( 'Please describe what this ticket is about in several words', 'supportflow' ) . '</p>';
++		<input
++			type="text"
++			id="subject"
++			name="post_title"
++			class="sf_autosave"
++			placeholder="<?php _e( 'What is your conversation about?', 'supportflow' ); ?>"
++			value="<?php echo esc_attr( get_the_title() ); ?>"
++			autocomplete="off"
++		/>
+ 
++		<p class="description">
++			<?php _e( 'Please describe what this ticket is about in several words', 'supportflow' ) ?>
++		</p>
++
++		<?php
+ 	}
+ 
+ 	/**

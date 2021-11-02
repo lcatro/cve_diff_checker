@@ -1,0 +1,221 @@
+From a679b131697e7371f0441f4799940779efa2f27e Mon Sep 17 00:00:00 2001
+From: commenthol <commenthol@gmail.com>
+Date: Thu, 13 Feb 2020 21:58:36 +0100
+Subject: [PATCH 1/4] fix: redos SmartWatch
+
+---
+ regexes.yaml     |  2 +-
+ tests/regexes.js | 25 +++++++++++++++++++++----
+ 2 files changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/regexes.yaml b/regexes.yaml
+index f1260db..4083711 100644
+--- a/regexes.yaml
++++ b/regexes.yaml
+@@ -1572,7 +1572,7 @@ device_parsers:
+   # WebBrowser for SmartWatch
+   # @ref: https://play.google.com/store/apps/details?id=se.vaggan.webbrowser&hl=en
+   #########
+-  - regex: '\bSmartWatch *\( *([^;]+) *; *([^;]+) *;'
++  - regex: '\bSmartWatch {0,2}\( {0,2}([^;]+) {0,2}; {0,2}([^;]+) {0,2};'
+     device_replacement: '$1 $2'
+     brand_replacement: '$1'
+     model_replacement: '$2'
+diff --git a/tests/regexes.js b/tests/regexes.js
+index dcedaf6..b43451d 100644
+--- a/tests/regexes.js
++++ b/tests/regexes.js
+@@ -40,12 +40,29 @@ suite('regexes', function () {
+     })
+   })
+ 
++})
++
++suite('redos', function () {
++  var parse = refImpl(regexes).parse
++
++  function timer () {
++    var start = Date.now()
++    return function () {
++      return Date.now() - start
++    }
++  }
++
+   test('should not backtrack', function () {
+-    var parse = refImpl(regexes).parse
+     var ua = Array(3200).fill('a').join('')
+-    var start = Date.now()
++    var time = timer()
++    parse(ua)
++    assert.ok(time() < 300, time())
++  })
++
++  test('should not backtrack Smartwatch', function () {
++    var ua = 'SmartWatch(' + Array(3500).fill(' ').join('') + 'z'
++    var time = timer()
+     parse(ua)
+-    var diff = Date.now() - start
+-    assert.ok(diff < 500, diff)
++    assert.ok(time() < 300, time())
+   })
+ })
+
+From dd279cff09546dbd4174bd05d29c0e90c2cffa7c Mon Sep 17 00:00:00 2001
+From: commenthol <commenthol@gmail.com>
+Date: Thu, 13 Feb 2020 21:58:36 +0100
+Subject: [PATCH 2/4] fix: redos HuaweiA
+
+---
+ regexes.yaml     | 2 +-
+ tests/regexes.js | 9 ++++++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/regexes.yaml b/regexes.yaml
+index 4083711..f8bb3b8 100644
+--- a/regexes.yaml
++++ b/regexes.yaml
+@@ -2584,7 +2584,7 @@ device_parsers:
+     device_replacement: '$1$2'
+     brand_replacement: 'Huawei'
+     model_replacement: '$2'
+-  - regex: '; *([^;/]+) Build[/ ]Huawei(MT1-U06|[A-Z]+\d+[^\);]+)[^\);]*\)'
++  - regex: '; *([^;/]+) Build[/ ]Huawei(MT1-U06|[A-Z]+\d+[^\);]+)\)'
+     device_replacement: '$1'
+     brand_replacement: 'Huawei'
+     model_replacement: '$2'
+diff --git a/tests/regexes.js b/tests/regexes.js
+index b43451d..41ee127 100644
+--- a/tests/regexes.js
++++ b/tests/regexes.js
+@@ -52,7 +52,7 @@ suite('redos', function () {
+     }
+   }
+ 
+-  test('should not backtrack', function () {
++  test('should not backtrack aaaa..', function () {
+     var ua = Array(3200).fill('a').join('')
+     var time = timer()
+     parse(ua)
+@@ -65,4 +65,11 @@ suite('redos', function () {
+     parse(ua)
+     assert.ok(time() < 300, time())
+   })
++
++  test('should not backtrack HuaweiA', function () {
++    var ua = ';A Build HuaweiA' + Array(3500).fill('4').join('') + 'z'
++    var time = timer()
++    parse(ua)
++    assert.ok(time() < 300, time())
++  })
+ })
+
+From 7d92a383440c9742ec878273c90a4dcf8446f9af Mon Sep 17 00:00:00 2001
+From: commenthol <commenthol@gmail.com>
+Date: Thu, 13 Feb 2020 21:58:36 +0100
+Subject: [PATCH 3/4] fix: redos HbbTV LGE
+
+---
+ regexes.yaml     |  2 +-
+ tests/regexes.js | 24 +++++++++++++-----------
+ 2 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/regexes.yaml b/regexes.yaml
+index f8bb3b8..88e6b7f 100644
+--- a/regexes.yaml
++++ b/regexes.yaml
+@@ -5126,7 +5126,7 @@ device_parsers:
+   # HbbTV (European and Australian standard)
+   # written before the LG regexes, as LG is making HbbTV too
+   ##########
+-  - regex: '(HbbTV)/[0-9]+\.[0-9]+\.[0-9]+ \([^;]*; *(LG)E *; *([^;]*) *;[^;]*;[^;]*;\)'
++  - regex: '(HbbTV)/[0-9]+\.[0-9]+\.[0-9]+ \( {0,1};(LG)E {0,1};([^;]{0,30})'
+     device_replacement: '$1'
+     brand_replacement: '$2'
+     model_replacement: '$3'
+diff --git a/tests/regexes.js b/tests/regexes.js
+index 41ee127..096054c 100644
+--- a/tests/regexes.js
++++ b/tests/regexes.js
+@@ -52,24 +52,26 @@ suite('redos', function () {
+     }
+   }
+ 
+-  test('should not backtrack aaaa..', function () {
+-    var ua = Array(3200).fill('a').join('')
++  function testRedos (ua) {
+     var time = timer()
+     parse(ua)
+-    assert.ok(time() < 300, time())
++    var diff = time()
++    assert.ok(diff < 300, diff)
++  }
++
++  test('should not backtrack aaaa..', function () {
++    testRedos(Array(3200).fill('a').join(''))
+   })
+ 
+   test('should not backtrack Smartwatch', function () {
+-    var ua = 'SmartWatch(' + Array(3500).fill(' ').join('') + 'z'
+-    var time = timer()
+-    parse(ua)
+-    assert.ok(time() < 300, time())
++    testRedos('SmartWatch(' + Array(3500).fill(' ').join('') + 'z')
+   })
+ 
+   test('should not backtrack HuaweiA', function () {
+-    var ua = ';A Build HuaweiA' + Array(3500).fill('4').join('') + 'z'
+-    var time = timer()
+-    parse(ua)
+-    assert.ok(time() < 300, time())
++    testRedos(';A Build HuaweiA' + Array(3500).fill('4').join('') + 'z')
++  })
++
++  test('should not backtrack HbbTV LGE', function () {
++    testRedos('HbbTV/0.0.0 (;LGE;' + Array(3500).fill(' ').join('') + 'z')
+   })
+ })
+
+From e9a1c74dae9ecd4aa6385bd34ef6c7243f89b537 Mon Sep 17 00:00:00 2001
+From: commenthol <commenthol@gmail.com>
+Date: Thu, 13 Feb 2020 21:58:36 +0100
+Subject: [PATCH 4/4] fix: redos #4
+
+---
+ regexes.yaml     |  2 +-
+ tests/regexes.js | 12 ++++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/regexes.yaml b/regexes.yaml
+index 88e6b7f..c455a52 100644
+--- a/regexes.yaml
++++ b/regexes.yaml
+@@ -5141,7 +5141,7 @@ device_parsers:
+   - regex: '(HbbTV)/1\.1\.1 \(;;;;;\) Maple_2011'
+     device_replacement: '$1'
+     brand_replacement: 'Samsung'
+-  - regex: '(HbbTV)/[0-9]+\.[0-9]+\.[0-9]+ \([^;]*; *(?:CUS:([^;]*)|([^;]+)) *; *([^;]*) *;.*;'
++  - regex: '(HbbTV)/[0-9]+\.[0-9]+\.[0-9]+ \([^;]{0,30}; {0,1}(?:CUS:([^;]*)|([^;]+)) {0,1}; {0,1}([^;]{0,30})'
+     device_replacement: '$1'
+     brand_replacement: '$2$3'
+     model_replacement: '$4'
+diff --git a/tests/regexes.js b/tests/regexes.js
+index 096054c..d7f1660 100644
+--- a/tests/regexes.js
++++ b/tests/regexes.js
+@@ -74,4 +74,16 @@ suite('redos', function () {
+   test('should not backtrack HbbTV LGE', function () {
+     testRedos('HbbTV/0.0.0 (;LGE;' + Array(3500).fill(' ').join('') + 'z')
+   })
++
++  test('should not backtrack HbbTV CUS', function () {
++    testRedos('HbbTV/0.0.0 (;CUS:;' + Array(3500).fill(' ').join('') + 'z')
++  })
++
++  test('should not backtrack HbbTV', function () {
++    testRedos('HbbTV/0.0.0 (;' + Array(3500).fill(' ').join('') + 'z')
++  })
++
++  test('should not backtrack HbbTV z', function () {
++    testRedos('HbbTV/0.0.0 (;z;' + Array(3500).fill(' ').join('') + 'z')
++  })
+ })

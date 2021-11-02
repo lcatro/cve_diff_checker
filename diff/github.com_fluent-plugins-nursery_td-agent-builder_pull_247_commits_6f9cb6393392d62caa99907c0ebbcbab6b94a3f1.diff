@@ -1,0 +1,51 @@
+From 6f9cb6393392d62caa99907c0ebbcbab6b94a3f1 Mon Sep 17 00:00:00 2001
+From: Kentaro Hayashi <hayashi@clear-code.com>
+Date: Fri, 18 Dec 2020 14:48:20 +0900
+Subject: [PATCH] windows: mitigate possible escalation of privileges
+
+Closes: #3201
+
+Reported by @zubrahzz
+
+ref. https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2020-28169
+
+In the previous version, NT AUTHORITY\Authenticated Users:(I)(M) is
+granted. It means that logged in users can replace any files under
+opt/td-agent/bin. It also allows for attacker to gain administrative
+privileges by replacing these files because these files are executed
+as a local services with SYSTEM privilege.
+---
+ td-agent/msi/source.wxs | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/td-agent/msi/source.wxs b/td-agent/msi/source.wxs
+index d08bbc24..5d015604 100644
+--- a/td-agent/msi/source.wxs
++++ b/td-agent/msi/source.wxs
+@@ -27,6 +27,18 @@
+       <Directory Id="WINDOWSVOLUME">
+         <Directory Id="OPTLOCATION" Name="opt">
+           <Directory Id="PROJECTLOCATION" Name="td-agent">
++            <Component Id="TDAgentAcl" Guid="b0504030-258a-0139-ba33-7085c2f4281d">
++              <CreateFolder>
++                <!--
++                  Read/Execute: Builtin Users
++                  All:: Builtin Administrators, Service, System account(by default)
++                -->
++                <Permission User="Users" GenericExecute="yes" GenericRead="yes" Traverse="yes"/>
++                <Permission User="Administrators" GenericAll="yes" Traverse="yes"/>
++                <Permission User="NT SERVICE\TrustedInstaller" GenericAll="yes" Traverse="yes"/>
++                <Permission User="CREATOR OWNER" GenericAll="yes" Traverse="yes"/>
++              </CreateFolder>
++            </Component>
+           </Directory>
+         </Directory>
+       </Directory>
+@@ -87,6 +99,7 @@
+       <ComponentRef Id="ApplicationShortcut" />
+       <ComponentRef Id="TDAgentConf" />
+       <ComponentRef Id="TDAgentBat" />
++      <ComponentRef Id="TDAgentAcl" />
+     </Feature>
+ 
+     <!-- UI Stuff -->

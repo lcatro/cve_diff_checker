@@ -1,0 +1,71 @@
+From 8e7266fef1f329b805b37f32c9ad0090215ab269 Mon Sep 17 00:00:00 2001
+From: Max Wang <mwang@fb.com>
+Date: Fri, 1 Jul 2016 09:09:30 -0700
+Subject: [PATCH] Type safety in simplexml import routines
+
+Reviewed By: Orvid
+
+Differential Revision: D3447275
+
+fbshipit-source-id: d859c97f9d85c520b0e371cef6dcb19bb2ef7dbf
+---
+ hphp/runtime/ext/simplexml/ext_simplexml.cpp         | 12 +++++++++---
+ hphp/test/slow/ext_domdocument/simplexml_null.php    |  5 +++++
+ .../slow/ext_domdocument/simplexml_null.php.expectf  |  5 +++++
+ 3 files changed, 19 insertions(+), 3 deletions(-)
+ create mode 100644 hphp/test/slow/ext_domdocument/simplexml_null.php
+ create mode 100644 hphp/test/slow/ext_domdocument/simplexml_null.php.expectf
+
+diff --git a/hphp/runtime/ext/simplexml/ext_simplexml.cpp b/hphp/runtime/ext/simplexml/ext_simplexml.cpp
+index 6795c3924110..3e825cc06fcb 100644
+--- a/hphp/runtime/ext/simplexml/ext_simplexml.cpp
++++ b/hphp/runtime/ext/simplexml/ext_simplexml.cpp
+@@ -374,7 +374,7 @@ static xmlNodePtr php_sxe_get_first_node(SimpleXMLElement* sxe,
+ }
+ 
+ xmlNodePtr SimpleXMLElement_exportNode(const Object& sxe) {
+-  assert(sxe->instanceof(SimpleXMLElement_classof()));
++  if (!sxe->instanceof(SimpleXMLElement_classof())) return nullptr;
+   auto data = Native::data<SimpleXMLElement>(sxe.get());
+   return php_sxe_get_first_node(data, data->nodep());
+ }
+@@ -1166,9 +1166,15 @@ static const Class* class_from_name(const String& class_name,
+   return cls;
+ }
+ 
++const StaticString s_DOMNode("DOMNode");
++
+ static Variant HHVM_FUNCTION(simplexml_import_dom,
+-  const Object& node,
+-  const String& class_name /* = "SimpleXMLElement" */) {
++                             const Object& node,
++                             const String& class_name) {
++  if (!node->instanceof(s_DOMNode)) {
++    raise_warning("Invalid Nodetype to import");
++    return init_null();
++  }
+   auto domnode = Native::data<DOMNode>(node);
+   xmlNodePtr nodep = domnode->nodep();
+ 
+diff --git a/hphp/test/slow/ext_domdocument/simplexml_null.php b/hphp/test/slow/ext_domdocument/simplexml_null.php
+new file mode 100644
+index 000000000000..35d08226fc99
+--- /dev/null
++++ b/hphp/test/slow/ext_domdocument/simplexml_null.php
+@@ -0,0 +1,5 @@
++<?php
++
++$date = date_create_immutable();
++var_dump(dom_import_simplexml($date));
++var_dump(simplexml_import_dom($date));
+diff --git a/hphp/test/slow/ext_domdocument/simplexml_null.php.expectf b/hphp/test/slow/ext_domdocument/simplexml_null.php.expectf
+new file mode 100644
+index 000000000000..b3c55c5ae6e2
+--- /dev/null
++++ b/hphp/test/slow/ext_domdocument/simplexml_null.php.expectf
+@@ -0,0 +1,5 @@
++Warning: Invalid Nodetype to import in %s/test/slow/ext_domdocument/simplexml_null.php on line 4
++NULL
++
++Warning: Invalid Nodetype to import in %s/test/slow/ext_domdocument/simplexml_null.php on line 5
++NULL

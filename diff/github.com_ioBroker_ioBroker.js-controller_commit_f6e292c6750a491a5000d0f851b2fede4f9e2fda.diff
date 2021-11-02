@@ -1,0 +1,79 @@
+From f6e292c6750a491a5000d0f851b2fede4f9e2fda Mon Sep 17 00:00:00 2001
+From: Ingo Fischer <github@fischer-ka.de>
+Date: Fri, 4 Oct 2019 11:09:30 +0200
+Subject: [PATCH] some security enhancements to better prevent path traversing
+
+---
+ lib/objects/objectsUtils.js | 12 +++++++++---
+ test/lib/testObjects.js     | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/lib/objects/objectsUtils.js b/lib/objects/objectsUtils.js
+index e23c481fc..d6df77266 100644
+--- a/lib/objects/objectsUtils.js
++++ b/lib/objects/objectsUtils.js
+@@ -472,11 +472,17 @@ function sanitizePath(id, name, callback) {
+     }
+ 
+     if (id) {
+-        id = id.replace(/\.\./g, ''); // do not allow to write in parent directories
++        id = id.replace(/[\]\[*,;'"`<>\\?\/]/g, ''); // remove all invalid characters from states plus slashes
+     }
+ 
+-    if (name.indexOf('..') !== -1) {
+-        name = path.normalize(name);
++    if (name.includes('..')) {
++        name = path.normalize('/' + name);
++        name = name.replace(/\\/g, '/');
++    }
++    if (name.includes('..')) {
++        // Also after normalization we still have .. in it - should not happen if normalize worked correctly
++        name = name.replace(/\.\./g, '');
++        name = path.normalize('/' + name);
+         name = name.replace(/\\/g, '/');
+     }
+     if (name[0] === '/') name = name.substring(1); // do not allow absolute paths
+diff --git a/test/lib/testObjects.js b/test/lib/testObjects.js
+index add4c60a8..06d49b22e 100644
+--- a/test/lib/testObjects.js
++++ b/test/lib/testObjects.js
+@@ -341,6 +341,39 @@ function register(it, expect, context) {
+         });
+     });
+ 
++    it(textName + 'should read file and prevent path traversing', done => {
++        const objects = context.objects;
++        objects.readFile(testId, '../../myFile/abc1.txt', err => {
++            expect(err).to.be.not.ok;
++            expect(data).to.be.equal('dataInFile');
++            objects.readFile(testId, '/myFile/abc1.txt', err => {
++                expect(err).to.be.not.ok;
++                expect(data).to.be.equal('dataInFile');
++                objects.readFile(testId, '/../../myFile/abc1.txt', err => {
++                    expect(err).to.be.not.ok;
++                    expect(data).to.be.equal('dataInFile');
++                    objects.readFile(testId, 'myFile/../blubb/../myFile/abc1.txt', err => {
++                        expect(err).to.be.not.ok;
++                        expect(data).to.be.equal('dataInFile');
++                        objects.readFile(testId, '/myFile/../blubb/../myFile/abc1.txt', err => {
++                            expect(err).to.be.not.ok;
++                            expect(data).to.be.equal('dataInFile');
++                            objects.readFile(testId, '../blubb/../myFile/abc1.txt', err => {
++                                expect(err).to.be.not.ok;
++                                expect(data).to.be.equal('dataInFile');
++                                objects.readFile(testId, '/../blubb/../myFile/abc1.txt', err => {
++                                    expect(err).to.be.not.ok;
++                                    expect(data).to.be.equal('dataInFile');
++                                    done();
++                                });
++                            });
++                        });
++                    });
++                });
++            });
++        });
++    });
++
+     it(textName + 'should unlink file', done => {
+         const objects = context.objects;
+         objects.unlink(testId, 'myFile/abc1.txt', err => {

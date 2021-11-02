@@ -1,0 +1,248 @@
+From 9e569b71967d439265d7c5b0e72d97b678641ed4 Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Tue, 18 May 2021 17:35:12 +0530
+Subject: [PATCH 1/7] Reset prototype of XML after parsing
+
+---
+ index.js | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/index.js b/index.js
+index 619ad7a..5c8a70a 100644
+--- a/index.js
++++ b/index.js
+@@ -43,6 +43,8 @@ module.exports = function (bodyParser) {
+             return next(err);
+           }
+ 
++          // Set the prototype of parsed xml object to null, so that prototype pollution is prevented.
++          xml.__proto__ = undefined;
+           req.body = xml || req.body;
+           next();
+         });
+
+From 278906925f237625db8618df856eb63ff1f99238 Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Tue, 18 May 2021 18:34:38 +0530
+Subject: [PATCH 2/7] Updated prototype pollution fix
+
+---
+ index.js | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/index.js b/index.js
+index 5c8a70a..d7731bb 100644
+--- a/index.js
++++ b/index.js
+@@ -43,9 +43,18 @@ module.exports = function (bodyParser) {
+             return next(err);
+           }
+ 
+-          // Set the prototype of parsed xml object to null, so that prototype pollution is prevented.
+-          xml.__proto__ = undefined;
+-          req.body = xml || req.body;
++          // Prevent setting __proto__ and constructor.prototype
++          const safe = {};
++          for (const key in xml) {
++            if (
++              key !== '__proto__' &&
++              key !== 'constructor' &&
++              key !== 'prototype'
++            ) {
++              safe[key] = xml[key];
++            }
++          }
++          req.body = safe || req.body;
+           next();
+         });
+       });
+
+From 2da4cc5df1af7492b32d3422a72f9b78573d96f3 Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Tue, 18 May 2021 19:21:50 +0530
+Subject: [PATCH 3/7] Added test for prototype pollution
+
+---
+ test.js | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/test.js b/test.js
+index 5533830..4f6a50e 100644
+--- a/test.js
++++ b/test.js
+@@ -130,4 +130,13 @@ describe('XML Body Parser', function () {
+       .send('x<foo>test</foo><bar>test</bar></data>')
+       .expect(400, done);
+   });
++
++  it('should not set/change prototype', function (done) {
++    createServer();
++    request(app)
++      .post('/')
++      .set('Content-Type', 'application/xml')
++      .send('<__proto__><name>Bob</name></__proto__>')
++      .expect(200, { parsed: { name: ['Bob'] } }, done);
++  });
+ });
+
+From 13371088c2c3d713ac3b11ad04210533aedda747 Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Tue, 18 May 2021 21:13:52 +0530
+Subject: [PATCH 4/7] Update index.js
+
+Co-authored-by: Tom Spencer <tom.spencer@studiozeffa.com>
+---
+ index.js | 17 +++++++----------
+ 1 file changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/index.js b/index.js
+index d7731bb..b1181a7 100644
+--- a/index.js
++++ b/index.js
+@@ -44,17 +44,14 @@ module.exports = function (bodyParser) {
+           }
+ 
+           // Prevent setting __proto__ and constructor.prototype
+-          const safe = {};
+-          for (const key in xml) {
+-            if (
+-              key !== '__proto__' &&
+-              key !== 'constructor' &&
+-              key !== 'prototype'
+-            ) {
+-              safe[key] = xml[key];
+-            }
++          if(xml) {
++            // Guard against prototype pollution
++            delete xml.__proto__;
++            delete xml.constructor;
++            delete xml.prototype;
++  
++            req.body = xml;
+           }
+-          req.body = safe || req.body;
+           next();
+         });
+       });
+
+From 162c6c058dc920487596a53e70b00848176d5c8b Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Tue, 18 May 2021 21:39:40 +0530
+Subject: [PATCH 5/7] Updated tests
+
+---
+ test.js | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/test.js b/test.js
+index 4f6a50e..fa1f609 100644
+--- a/test.js
++++ b/test.js
+@@ -131,12 +131,30 @@ describe('XML Body Parser', function () {
+       .expect(400, done);
+   });
+ 
+-  it('should not set/change prototype', function (done) {
++  it('should not set/change prototype using __proto__', function (done) {
+     createServer();
+     request(app)
+       .post('/')
+       .set('Content-Type', 'application/xml')
+       .send('<__proto__><name>Bob</name></__proto__>')
+-      .expect(200, { parsed: { name: ['Bob'] } }, done);
++      .expect(200, { parsed: {} }, done);
++  });
++
++  it('should not set/change using __proto__', function (done) {
++    createServer();
++    request(app)
++      .post('/')
++      .set('Content-Type', 'application/xml')
++      .send('<prototype><name>Bob</name></prototype>')
++      .expect(200, { parsed: {} }, done);
++  });
++
++  it('should not set/change using constructor', function (done) {
++    createServer();
++    request(app)
++      .post('/')
++      .set('Content-Type', 'application/xml')
++      .send('<constructor><name>Bob</name></constructor>')
++      .expect(200, { parsed: {} }, done);
+   });
+ });
+
+From 18581a751c14d624d4764e023ee0789a10f2bcfe Mon Sep 17 00:00:00 2001
+From: Yadhu Krishna M <yadhukrishna.mpm@gmail.com>
+Date: Wed, 19 May 2021 00:13:52 +0530
+Subject: [PATCH 6/7] Run prettier
+
+---
+ index.js | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/index.js b/index.js
+index b1181a7..f5db2c8 100644
+--- a/index.js
++++ b/index.js
+@@ -44,12 +44,12 @@ module.exports = function (bodyParser) {
+           }
+ 
+           // Prevent setting __proto__ and constructor.prototype
+-          if(xml) {
++          if (xml) {
+             // Guard against prototype pollution
+             delete xml.__proto__;
+             delete xml.constructor;
+             delete xml.prototype;
+-  
++
+             req.body = xml;
+           }
+           next();
+
+From cb1609a0d2dafadec3e55b5b2b66df669daea63b Mon Sep 17 00:00:00 2001
+From: Tom Spencer <tom.spencer@studiozeffa.com>
+Date: Wed, 19 May 2021 11:06:01 +0100
+Subject: [PATCH 7/7] Tidy up
+
+---
+ index.js | 3 ++-
+ test.js  | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/index.js b/index.js
+index f5db2c8..0dec27b 100644
+--- a/index.js
++++ b/index.js
+@@ -43,15 +43,16 @@ module.exports = function (bodyParser) {
+             return next(err);
+           }
+ 
+-          // Prevent setting __proto__ and constructor.prototype
+           if (xml) {
+             // Guard against prototype pollution
+             delete xml.__proto__;
+             delete xml.constructor;
+             delete xml.prototype;
+ 
++            // Set result on the request body
+             req.body = xml;
+           }
++
+           next();
+         });
+       });
+diff --git a/test.js b/test.js
+index fa1f609..3bcca83 100644
+--- a/test.js
++++ b/test.js
+@@ -140,7 +140,7 @@ describe('XML Body Parser', function () {
+       .expect(200, { parsed: {} }, done);
+   });
+ 
+-  it('should not set/change using __proto__', function (done) {
++  it('should not set/change using prototype', function (done) {
+     createServer();
+     request(app)
+       .post('/')

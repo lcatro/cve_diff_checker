@@ -1,0 +1,51 @@
+From 6ccd4c54bcc4cb77365defabe8bbe7d10b2620d4 Mon Sep 17 00:00:00 2001
+From: Aleksander Machniak <alec@alec.pl>
+Date: Thu, 7 May 2015 09:02:29 +0200
+Subject: [PATCH] Fix security issue in contact photo handling (#1490379)
+
+---
+ CHANGELOG                           | 1 +
+ program/steps/addressbook/photo.inc | 5 -----
+ program/steps/mail/show.inc         | 1 -
+ 3 files changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 71ec2d30f2..ab8b3c7840 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -9,6 +9,7 @@ CHANGELOG Roundcube Webmail
+ - Fix duplicate entry on timezones list in rcube_config::timezone_name_from_abbr() (#1490293)
+ - Fix handling of %-encoded entities in mailto: URLs (#1490346)
+ - Fix bug where messages count was not updated after message move/delete with skip_deleted=false (#1490372)
++- Fix security issue in contact photo handling (#1490379)
+ 
+ RELEASE 1.0.5
+ -------------
+diff --git a/program/steps/addressbook/photo.inc b/program/steps/addressbook/photo.inc
+index 30d09ffccf..cd0ddd783e 100644
+--- a/program/steps/addressbook/photo.inc
++++ b/program/steps/addressbook/photo.inc
+@@ -80,11 +80,6 @@ if (strlen($data) < 1024 && filter_var($data, FILTER_VALIDATE_URL)) {
+     $RCMAIL->output->redirect($data);
+ }
+ 
+-// deliver alt image
+-if (!$data && ($alt_img = rcube_utils::get_input_value('_alt', rcube_utils::INPUT_GPC)) && is_file($alt_img)) {
+-    $data = file_get_contents($alt_img);
+-}
+-
+ // cache for one day if requested by email
+ if (!$cid && $email) {
+     $RCMAIL->output->future_expire_header(86400);
+diff --git a/program/steps/mail/show.inc b/program/steps/mail/show.inc
+index ea148d5d61..5d9aff41f2 100644
+--- a/program/steps/mail/show.inc
++++ b/program/steps/mail/show.inc
+@@ -343,7 +343,6 @@ function rcmail_message_contactphoto($attrib)
+             '_task'   => 'addressbook',
+             '_action' => 'photo',
+             '_email'  => $MESSAGE->sender['mailto'],
+-            '_alt'    => $placeholder,
+         ));
+ 
+         $attrib['onerror'] = "this.src = '" . ($placeholder ? $placeholder : 'program/resources/blank.gif') . "'";

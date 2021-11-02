@@ -1,0 +1,35 @@
+From 4253f96a58486ffe84b61c0415bb234a4632ee73 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Wed, 28 Apr 2021 16:50:55 -0700
+Subject: [PATCH] Fix integer overflow in TFLite concat
+
+PiperOrigin-RevId: 371013841
+Change-Id: I6a4782ce7ca753e23ff31e7fb6aeb7f9d412cd29
+---
+ tensorflow/lite/kernels/concatenation.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tensorflow/lite/kernels/concatenation.cc b/tensorflow/lite/kernels/concatenation.cc
+index 61596a4ff0661..75bcd9403c0ae 100644
+--- a/tensorflow/lite/kernels/concatenation.cc
++++ b/tensorflow/lite/kernels/concatenation.cc
+@@ -16,6 +16,8 @@ limitations under the License.
+ 
+ #include <stdint.h>
+ 
++#include <limits>
++
+ #include "tensorflow/lite/c/builtin_op_data.h"
+ #include "tensorflow/lite/c/common.h"
+ #include "tensorflow/lite/kernels/internal/compatibility.h"
+@@ -69,6 +71,10 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
+     TF_LITE_ENSURE_EQ(context, t->type, input_type);
+     for (int d = 0; d < t0->dims->size; ++d) {
+       if (d == axis) {
++        // Avoid integer overflow in sum_axis below
++        TF_LITE_ENSURE(context, t->dims->data[axis] >= 0);
++        TF_LITE_ENSURE(context, t->dims->data[axis] <=
++                                    std::numeric_limits<int>::max() - sum_axis);
+         sum_axis += t->dims->data[axis];
+       } else {
+         TF_LITE_ENSURE_EQ(context, t->dims->data[d], t0->dims->data[d]);

@@ -1,0 +1,303 @@
+From 349addc3be4fcdad9bd4ec01ad1ccd916c898ed8 Mon Sep 17 00:00:00 2001
+From: TJ Saunders <tj@castaglia.org>
+Date: Sun, 5 Mar 2017 16:20:57 -0800
+Subject: [PATCH] Walk the entire DefaultRoot path, checking for symlinks of
+ any component, when AllowChrootSymlinks is disabled.
+
+---
+ modules/mod_auth.c                            | 73 ++++++++++++++----
+ tests/t/lib/ProFTPD/TestSuite/Utils.pm        | 23 +++---
+ .../t/lib/ProFTPD/Tests/Config/DefaultRoot.pm | 76 +++++--------------
+ 3 files changed, 93 insertions(+), 79 deletions(-)
+
+diff --git a/modules/mod_auth.c b/modules/mod_auth.c
+index 7e9f8da80a..6e535bbb7a 100644
+--- a/modules/mod_auth.c
++++ b/modules/mod_auth.c
+@@ -804,6 +804,59 @@ static const char *get_default_chdir(pool *p, xaset_t *conf) {
+   return dir;
+ }
+ 
++static int is_symlink_path(pool *p, const char *path, size_t pathlen) {
++  int res, xerrno = 0;
++  struct stat st;
++  char *ptr;
++
++  if (pathlen == 0) {
++    return 0;
++  }
++
++  pr_fs_clear_cache2(path);
++  res = pr_fsio_lstat(path, &st);
++  if (res < 0) {
++    xerrno = errno;
++
++    pr_log_pri(PR_LOG_WARNING, "error: unable to check %s: %s", path,
++      strerror(xerrno));
++
++    errno = xerrno;
++    return -1;
++  }
++
++  if (S_ISLNK(st.st_mode)) {
++    errno = EPERM;
++    return -1;
++  }
++
++  /* To handle the case where a component further up the path might be a
++   * symlink (which lstat(2) will NOT handle), we walk the path backwards,
++   * calling ourselves recursively.
++   */
++
++  ptr = strrchr(path, '/');
++  if (ptr != NULL) {
++    char *new_path;
++    size_t new_pathlen;
++
++    pr_signals_handle();
++
++    new_pathlen = ptr - path;
++    new_path = pstrndup(p, path, new_pathlen);
++
++    pr_log_debug(DEBUG10,
++      "AllowChrootSymlink: path '%s' not a symlink, checking '%s'", path,
++      new_path);
++    res = is_symlink_path(p, new_path, new_pathlen);
++    if (res < 0) {
++      return -1;
++    }
++  }
++
++  return 0;
++}
++
+ /* Determine if the user (non-anon) needs a default root dir other than /. */
+ static int get_default_root(pool *p, int allow_symlinks, const char **root) {
+   config_rec *c = NULL;
+@@ -847,7 +900,6 @@ static int get_default_root(pool *p, int allow_symlinks, const char **root) {
+ 
+       if (allow_symlinks == FALSE) {
+         char *path, target_path[PR_TUNABLE_PATH_MAX + 1];
+-        struct stat st;
+         size_t pathlen;
+ 
+         /* First, deal with any possible interpolation.  dir_realpath() will
+@@ -878,22 +930,13 @@ static int get_default_root(pool *p, int allow_symlinks, const char **root) {
+           path[pathlen-1] = '\0';
+         }
+ 
+-        pr_fs_clear_cache2(path);
+-        res = pr_fsio_lstat(path, &st);
++        res = is_symlink_path(p, path, pathlen);
+         if (res < 0) {
+-          xerrno = errno;
+-
+-          pr_log_pri(PR_LOG_WARNING, "error: unable to check %s: %s", path,
+-            strerror(xerrno));
+-
+-          errno = xerrno;
+-          return -1;
+-        }
++          if (errno == EPERM) {
++            pr_log_pri(PR_LOG_WARNING, "error: DefaultRoot %s is a symlink "
++              "(denied by AllowChrootSymlinks config)", path);
++          }
+ 
+-        if (S_ISLNK(st.st_mode)) {
+-          pr_log_pri(PR_LOG_WARNING,
+-            "error: DefaultRoot %s is a symlink (denied by AllowChrootSymlinks "
+-            "config)", path);
+           errno = EPERM;
+           return -1;
+         }
+diff --git a/tests/t/lib/ProFTPD/TestSuite/Utils.pm b/tests/t/lib/ProFTPD/TestSuite/Utils.pm
+index 0d8b76fab1..8872231db1 100644
+--- a/tests/t/lib/ProFTPD/TestSuite/Utils.pm
++++ b/tests/t/lib/ProFTPD/TestSuite/Utils.pm
+@@ -1198,6 +1198,7 @@ sub test_setup {
+   $uid = 500 unless defined($uid);
+   my $gid = shift;
+   $gid = 500 unless defined($gid);
++  my $home_dir = shift;
+ 
+   my $config_file = "$tmpdir/$name.conf";
+   my $pid_file = File::Spec->rel2abs("$tmpdir/$name.pid");
+@@ -1206,17 +1207,21 @@ sub test_setup {
+   my $auth_user_file = File::Spec->rel2abs("$tmpdir/$name.passwd");
+   my $auth_group_file = File::Spec->rel2abs("$tmpdir/$name.group");
+ 
+-  my $home_dir = File::Spec->rel2abs($tmpdir);
++  # If the caller provides the home directory, it is ASSUMED that they will
++  # have created it.
++  unless (defined($home_dir)) {
++    $home_dir = File::Spec->rel2abs($tmpdir);
+ 
+-  # Make sure that, if we're running as root, that the home directory has
+-  # permissions/privs set for the account we create
+-  if ($< == 0) {
+-    unless (chmod(0755, $home_dir)) {
+-      croak("Can't set perms on $home_dir to 0755: $!");
+-    }
++    # Make sure that, if we're running as root, that the home directory has
++    # permissions/privs set for the account we create
++    if ($< == 0) {
++      unless (chmod(0755, $home_dir)) {
++        croak("Can't set perms on $home_dir to 0755: $!");
++      }
+ 
+-    unless (chown($uid, $gid, $home_dir)) {
+-      croak("Can't set owner of $home_dir to $uid/$gid: $!");
++      unless (chown($uid, $gid, $home_dir)) {
++        croak("Can't set owner of $home_dir to $uid/$gid: $!");
++      }
+     }
+   }
+ 
+diff --git a/tests/t/lib/ProFTPD/Tests/Config/DefaultRoot.pm b/tests/t/lib/ProFTPD/Tests/Config/DefaultRoot.pm
+index 3863c1441d..88486c3a77 100644
+--- a/tests/t/lib/ProFTPD/Tests/Config/DefaultRoot.pm
++++ b/tests/t/lib/ProFTPD/Tests/Config/DefaultRoot.pm
+@@ -621,65 +621,39 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+   my $self = shift;
+   my $tmpdir = $self->{tmpdir};
+ 
+-  my $config_file = "$tmpdir/config.conf";
+-  my $pid_file = File::Spec->rel2abs("$tmpdir/config.pid");
+-  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/config.scoreboard");
+-
+-  my $log_file = test_get_logfile();
+-
+-  my $auth_user_file = File::Spec->rel2abs("$tmpdir/config.passwd");
+-  my $auth_group_file = File::Spec->rel2abs("$tmpdir/config.group");
+-
+   my $user = 'proftpd';
+-  my $passwd = 'test';
+-  my $group = 'ftpd';
+   my $home_dir = File::Spec->rel2abs("$tmpdir/home.d/symlinks/$user");
+   my $uid = 500;
+   my $gid = 500;
+ 
+-  my $intermed_dir = File::Spec->rel2abs("$tmpdir/home.d/symlinks");
+-  mkpath($intermed_dir);
+-
+-  my $symlink_dst = File::Spec->rel2abs("$tmpdir/real/$user");
+-  mkpath($symlink_dst);
++  my $symlink_dst = File::Spec->rel2abs("$tmpdir/real");
+ 
+   my $cwd = getcwd();
+ 
+-  unless (chdir($intermed_dir)) {
+-    die("Can't chdir to $intermed_dir: $!");
++  unless (chdir($tmpdir)) {
++    die("Can't chdir to $tmpdir: $!");
+   }
+ 
+-  unless (symlink("../../real/$user", "./$user")) {
+-    die("Can't symlink '../../real/$user' to './$user': $!");
++  unless (symlink("./real", "./home.d")) {
++    die("Can't symlink './real' to './home.d': $!");
+   }
+ 
+   unless (chdir($cwd)) {
+     die("Can't chdir to $cwd: $!");
+   }
+ 
+-  # Make sure that, if we're running as root, that the home directory has
+-  # permissions/privs set for the account we create
+-  if ($< == 0) {
+-    unless (chmod(0755, $symlink_dst)) {
+-      die("Can't set perms on $symlink_dst to 0755: $!");
+-    }
++  mkpath(File::Spec->rel2abs("$tmpdir/real/symlinks/$user"));
+ 
+-    unless (chown($uid, $gid, $symlink_dst)) {
+-      die("Can't set owner of $symlink_dst to $uid/$gid: $!");
+-    }
+-  }
+-
+-  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+-    '/bin/bash');
+-  auth_group_write($auth_group_file, $group, $gid, $user);
++  my $setup = test_setup($tmpdir, 'config', $user, undef, undef, $uid, $gid,
++    $home_dir);
+ 
+   my $config = {
+-    PidFile => $pid_file,
+-    ScoreboardFile => $scoreboard_file,
+-    SystemLog => $log_file,
++    PidFile => $setup->{pid_file},
++    ScoreboardFile => $setup->{scoreboard_file},
++    SystemLog => $setup->{log_file},
+ 
+-    AuthUserFile => $auth_user_file,
+-    AuthGroupFile => $auth_group_file,
++    AuthUserFile => $setup->{auth_user_file},
++    AuthGroupFile => $setup->{auth_group_file},
+ 
+     AllowChrootSymlinks => 'off',
+     DefaultRoot => '~',
+@@ -691,7 +665,8 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+     },
+   };
+ 
+-  my ($port, $config_user, $config_group) = config_write($config_file, $config);
++  my ($port, $config_user, $config_group) = config_write($setup->{config_file},
++    $config);
+ 
+   # Open pipes, for use between the parent and child processes.  Specifically,
+   # the child will indicate when it's done with its test by writing a message
+@@ -709,7 +684,7 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+   if ($pid) {
+     eval {
+       my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+-      eval { $client->login($user, $passwd) };
++      eval { $client->login($user, $setup->{passwd}) };
+       unless ($@) {
+         die("Login succeeded unexpectedly");
+       }
+@@ -721,13 +696,12 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+ 
+       $expected = 530;
+       $self->assert($expected == $resp_code,
+-        test_msg("Expected response code $expected, got $resp_code"));
++        "Expected response code $expected, got $resp_code");
+ 
+       $expected = "Login incorrect.";
+       $self->assert($expected eq $resp_msg,
+-        test_msg("Expected response message '$expected', got '$resp_msg'"));
++        "Expected response message '$expected', got '$resp_msg'");
+     };
+-
+     if ($@) {
+       $ex = $@;
+     }
+@@ -736,7 +710,7 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+     $wfh->flush();
+ 
+   } else {
+-    eval { server_wait($config_file, $rfh) };
++    eval { server_wait($setup->{config_file}, $rfh) };
+     if ($@) {
+       warn($@);
+       exit 1;
+@@ -746,18 +720,10 @@ sub defaultroot_allowchrootsymlinks_bug3852 {
+   }
+ 
+   # Stop server
+-  server_stop($pid_file);
+-
++  server_stop($setup->{pid_file});
+   $self->assert_child_ok($pid);
+ 
+-  if ($ex) {
+-    test_append_logfile($log_file, $ex);
+-    unlink($log_file);
+-
+-    die($ex);
+-  }
+-
+-  unlink($log_file);
++  test_cleanup($setup->{log_file}, $ex);
+ }
+ 
+ 1;

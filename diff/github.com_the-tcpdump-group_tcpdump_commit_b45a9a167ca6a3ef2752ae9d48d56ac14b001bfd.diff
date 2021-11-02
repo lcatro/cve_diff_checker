@@ -1,0 +1,104 @@
+From b45a9a167ca6a3ef2752ae9d48d56ac14b001bfd Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Thu, 23 Feb 2017 16:50:18 +0100
+Subject: [PATCH] CVE-2017-13005/NFS: Add two bounds checks before fetching
+ data
+
+This fixes a buffer over-read discovered by Kamil Frankowicz.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-nfs.c                        |   4 +++
+ tests/TESTLIST                     |   1 +
+ tests/hoobr_nfs_xid_map_enter.out  |  41 +++++++++++++++++++++++++++++
+ tests/hoobr_nfs_xid_map_enter.pcap | Bin 0 -> 1046 bytes
+ 4 files changed, 46 insertions(+)
+ create mode 100644 tests/hoobr_nfs_xid_map_enter.out
+ create mode 100644 tests/hoobr_nfs_xid_map_enter.pcap
+
+diff --git a/print-nfs.c b/print-nfs.c
+index f3e8666e7..4fd9c3f7d 100644
+--- a/print-nfs.c
++++ b/print-nfs.c
+@@ -899,7 +899,11 @@ xid_map_enter(netdissect_options *ndo,
+ 		UNALIGNED_MEMCPY(&xmep->client, &ip6->ip6_src, sizeof(ip6->ip6_src));
+ 		UNALIGNED_MEMCPY(&xmep->server, &ip6->ip6_dst, sizeof(ip6->ip6_dst));
+ 	}
++	if (!ND_TTEST(rp->rm_call.cb_proc))
++		return (0);
+ 	xmep->proc = EXTRACT_32BITS(&rp->rm_call.cb_proc);
++	if (!ND_TTEST(rp->rm_call.cb_vers))
++		return (0);
+ 	xmep->vers = EXTRACT_32BITS(&rp->rm_call.cb_vers);
+ 	return (1);
+ }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 9ea944d48..cf6d2a683 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -461,6 +461,7 @@ hoobr_lookup_nsap	hoobr_lookup_nsap.pcap		hoobr_lookup_nsap.out
+ hoobr_rt6_print		hoobr_rt6_print.pcap		hoobr_rt6_print.out
+ hoobr_nfs_printfh	hoobr_nfs_printfh.pcap		hoobr_nfs_printfh.out
+ hoobr_aodv_extension	hoobr_aodv_extension.pcap	hoobr_aodv_extension.out
++hoobr_nfs_xid_map_enter hoobr_nfs_xid_map_enter.pcap    hoobr_nfs_xid_map_enter.out
+ 
+ # bad packets from Wilfried Kirsch
+ slip-bad-direction	slip-bad-direction.pcap		slip-bad-direction.out	-ve
+diff --git a/tests/hoobr_nfs_xid_map_enter.out b/tests/hoobr_nfs_xid_map_enter.out
+new file mode 100644
+index 000000000..0629063b2
+--- /dev/null
++++ b/tests/hoobr_nfs_xid_map_enter.out
+@@ -0,0 +1,41 @@
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++30:30:30:30:30:30 > 30:30:30:30:30:30, ethertype Unknown (0x3030), length 808464432: 
++	0x0000:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0010:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0020:  3030 3030 3030 3030 3030 3030 3030 3030  0000000000000000
++	0x0030:  30                                       0
++IP 48.48.48.48.12336 > 48.48.48.48.2049: NFS request xid 808464432 12308 [|nfs]
+diff --git a/tests/hoobr_nfs_xid_map_enter.pcap b/tests/hoobr_nfs_xid_map_enter.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..7f94730b1f17be256baf7540373074897b98c80b
+GIT binary patch
+literal 1046
+zcmca|c+)~A1{MYbD6nT>U|?i`a}Bb9e3%@4={UOD97J>5oTzR?7u8LqRty&nxXT7E
+g-A2*P@7U5T2ZJj(5`no^5IHtE7-2l1^9bf>07qTFRsaA1
+
+literal 0
+HcmV?d00001
+

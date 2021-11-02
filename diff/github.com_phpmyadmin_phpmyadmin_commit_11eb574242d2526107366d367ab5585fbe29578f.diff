@@ -1,0 +1,550 @@
+From 11eb574242d2526107366d367ab5585fbe29578f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20=C4=8Ciha=C5=99?= <michal@cihar.com>
+Date: Mon, 23 May 2016 13:02:21 +0200
+Subject: [PATCH] Improve handling of logout
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- add separate script for handling logout
+- no longer require old_usr for all authentication methods
+  (this avoids potential information leak)
+- require valid token for logout
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+---
+ ChangeLog                                     |  1 +
+ libraries/navigation/NavigationHeader.php     |  3 +-
+ libraries/plugins/AuthenticationPlugin.php    | 40 +++++++++++
+ .../plugins/auth/AuthenticationCookie.php     | 66 ++++++++-----------
+ libraries/plugins/auth/AuthenticationHttp.php | 22 +++----
+ .../plugins/auth/AuthenticationSignon.php     | 20 +-----
+ logout.php                                    | 15 +++++
+ .../plugin/auth/AuthenticationCookieTest.php  | 60 +++++++++++++----
+ .../plugin/auth/AuthenticationHttpTest.php    | 10 ++-
+ .../plugin/auth/AuthenticationSignonTest.php  | 42 +++++++-----
+ 10 files changed, 175 insertions(+), 104 deletions(-)
+ create mode 100644 logout.php
+
+diff --git a/ChangeLog b/ChangeLog
+index 521ef6873c4..501172770d5 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -12,6 +12,7 @@ phpMyAdmin - ChangeLog
+ - issue #11705 Fix occassional 200 errors on Windows
+ - issue #12219 Fix locking issues when importing SQL
+ - issue #12231 Avoid confusing warning when mysql extension is missing
++- issue        Improve handling of logout
+ 
+ 4.6.1 (2016-05-02)
+ - issue #12120 PMA_Util not found in insert_edit.lib.php
+diff --git a/libraries/navigation/NavigationHeader.php b/libraries/navigation/NavigationHeader.php
+index c0b24bc600e..61c8cd20a6c 100644
+--- a/libraries/navigation/NavigationHeader.php
++++ b/libraries/navigation/NavigationHeader.php
+@@ -167,8 +167,7 @@ private function _links()
+         if ($GLOBALS['server'] != 0) {
+             // Logout for advanced authentication
+             if ($GLOBALS['cfg']['Server']['auth_type'] != 'config') {
+-                $link = 'index.php' . $GLOBALS['url_query'];
+-                $link .= '&amp;old_usr=' . urlencode($GLOBALS['PHP_AUTH_USER']);
++                $link = 'logout.php' . $GLOBALS['url_query'];
+                 $retval .= PMA\libraries\Util::getNavigationLink(
+                     $link,
+                     $showText,
+diff --git a/libraries/plugins/AuthenticationPlugin.php b/libraries/plugins/AuthenticationPlugin.php
+index 7d5a794015d..d6753dd637a 100644
+--- a/libraries/plugins/AuthenticationPlugin.php
++++ b/libraries/plugins/AuthenticationPlugin.php
+@@ -52,6 +52,46 @@ public function storeUserCredentials()
+      */
+     abstract public function authFails();
+ 
++    /**
++     * Perform logout
++     *
++     * @return void
++     */
++    public function logOut()
++    {
++        global $PHP_AUTH_USER, $PHP_AUTH_PW;
++
++        /* Obtain redirect URL (before doing logout) */
++        if (! empty($GLOBALS['cfg']['Server']['LogoutURL'])) {
++            $redirect_url = $GLOBALS['cfg']['Server']['LogoutURL'];
++        } else {
++            $redirect_url = $this->getLoginFormURL();
++        }
++
++        /* Clear credentials */
++        $PHP_AUTH_USER = '';
++        $PHP_AUTH_PW = '';
++
++        /* delete user's choices that were stored in session */
++        $_SESSION = array();
++        if (!defined('TESTSUITE')) {
++            session_destroy();
++        }
++
++        /* Redirect to login form (or configured URL) */
++        PMA_sendHeaderLocation($redirect_url);
++    }
++
++    /**
++     * Returns URL for login form.
++     *
++     * @return string
++     */
++    public function getLoginFormURL()
++    {
++        return './index.php';
++    }
++
+     /**
+      * Returns error message for failed authentication.
+      *
+diff --git a/libraries/plugins/auth/AuthenticationCookie.php b/libraries/plugins/auth/AuthenticationCookie.php
+index c4d5db6a0c3..a4dec4aa2c6 100644
+--- a/libraries/plugins/auth/AuthenticationCookie.php
++++ b/libraries/plugins/auth/AuthenticationCookie.php
+@@ -67,18 +67,6 @@ public function auth()
+             }
+         }
+ 
+-        /* Perform logout to custom URL */
+-        if (! empty($_REQUEST['old_usr'])
+-            && ! empty($GLOBALS['cfg']['Server']['LogoutURL'])
+-        ) {
+-            PMA_sendHeaderLocation($GLOBALS['cfg']['Server']['LogoutURL']);
+-            if (defined('TESTSUITE')) {
+-                return true;
+-            } else {
+-                exit;
+-            }
+-        }
+-
+         // No recall if blowfish secret is not configured as it would produce
+         // garbage
+         if ($GLOBALS['cfg']['LoginCookieRecall']
+@@ -295,34 +283,6 @@ public function authCheck()
+         }
+         // END Swekey Integration
+ 
+-        if (! empty($_REQUEST['old_usr'])) {
+-            // The user wants to be logged out
+-            // -> delete his choices that were stored in session
+-
+-            // according to the PHP manual we should do this before the destroy:
+-            //$_SESSION = array();
+-
+-            if (! defined('TESTSUITE')) {
+-                session_destroy();
+-            }
+-            // -> delete password cookie(s)
+-            if ($GLOBALS['cfg']['LoginCookieDeleteAll']) {
+-                foreach ($GLOBALS['cfg']['Servers'] as $key => $val) {
+-                    $GLOBALS['PMA_Config']->removeCookie('pmaPass-' . $key);
+-                    if (isset($_COOKIE['pmaPass-' . $key])) {
+-                        unset($_COOKIE['pmaPass-' . $key]);
+-                    }
+-                }
+-            } else {
+-                $GLOBALS['PMA_Config']->removeCookie(
+-                    'pmaPass-' . $GLOBALS['server']
+-                );
+-                if (isset($_COOKIE['pmaPass-' . $GLOBALS['server']])) {
+-                    unset($_COOKIE['pmaPass-' . $GLOBALS['server']]);
+-                }
+-            }
+-        }
+-
+         if (! empty($_REQUEST['pma_username'])) {
+ 
+             // Verify Captcha if it is required.
+@@ -831,4 +791,30 @@ public function handlePasswordChange($password)
+     {
+         $this->storePasswordCookie($password);
+     }
++
++    /**
++     * Perform logout
++     *
++     * @return void
++     */
++    public function logOut()
++    {
++        // -> delete password cookie(s)
++        if ($GLOBALS['cfg']['LoginCookieDeleteAll']) {
++            foreach ($GLOBALS['cfg']['Servers'] as $key => $val) {
++                $GLOBALS['PMA_Config']->removeCookie('pmaPass-' . $key);
++                if (isset($_COOKIE['pmaPass-' . $key])) {
++                    unset($_COOKIE['pmaPass-' . $key]);
++                }
++            }
++        } else {
++            $GLOBALS['PMA_Config']->removeCookie(
++                'pmaPass-' . $GLOBALS['server']
++            );
++            if (isset($_COOKIE['pmaPass-' . $GLOBALS['server']])) {
++                unset($_COOKIE['pmaPass-' . $GLOBALS['server']]);
++            }
++        }
++        parent::logOut();
++    }
+ }
+diff --git a/libraries/plugins/auth/AuthenticationHttp.php b/libraries/plugins/auth/AuthenticationHttp.php
+index 6c668d25261..62dcc016905 100644
+--- a/libraries/plugins/auth/AuthenticationHttp.php
++++ b/libraries/plugins/auth/AuthenticationHttp.php
+@@ -49,18 +49,6 @@ public function auth()
+      */
+     public function authForm()
+     {
+-        /* Perform logout to custom URL */
+-        if (!empty($_REQUEST['old_usr'])
+-            && !empty($GLOBALS['cfg']['Server']['LogoutURL'])
+-        ) {
+-            PMA_sendHeaderLocation($GLOBALS['cfg']['Server']['LogoutURL']);
+-            if (!defined('TESTSUITE')) {
+-                exit;
+-            } else {
+-                return false;
+-            }
+-        }
+-
+         if (empty($GLOBALS['cfg']['Server']['auth_http_realm'])) {
+             if (empty($GLOBALS['cfg']['Server']['verbose'])) {
+                 $server_message = $GLOBALS['cfg']['Server']['host'];
+@@ -262,4 +250,14 @@ public function authFails()
+ 
+         return true;
+     }
++
++    /**
++     * Returns URL for login form.
++     *
++     * @return string
++     */
++    public function getLoginFormURL()
++    {
++        return './index.php?old_usr=' . $GLOBALS['PHP_AUTH_USER'];
++    }
+ }
+diff --git a/libraries/plugins/auth/AuthenticationSignon.php b/libraries/plugins/auth/AuthenticationSignon.php
+index 9b30c8ecfad..fa60ed78941 100644
+--- a/libraries/plugins/auth/AuthenticationSignon.php
++++ b/libraries/plugins/auth/AuthenticationSignon.php
+@@ -28,11 +28,6 @@ public function auth()
+         unset($_SESSION['LAST_SIGNON_URL']);
+         if (empty($GLOBALS['cfg']['Server']['SignonURL'])) {
+             PMA_fatalError('You must set SignonURL!');
+-        } elseif (!empty($_REQUEST['old_usr'])
+-            && !empty($GLOBALS['cfg']['Server']['LogoutURL'])
+-        ) {
+-            /* Perform logout to custom URL */
+-            PMA_sendHeaderLocation($GLOBALS['cfg']['Server']['LogoutURL']);
+         } else {
+             PMA_sendHeaderLocation($GLOBALS['cfg']['Server']['SignonURL']);
+         }
+@@ -82,9 +77,6 @@ public function authCheck()
+         /* No configuration updates */
+         $single_signon_cfgupdate = array();
+ 
+-        /* Are we requested to do logout? */
+-        $do_logout = !empty($_REQUEST['old_usr']);
+-
+         /* Handle script based auth */
+         if (!empty($script_name)) {
+             if (!file_exists($script_name)) {
+@@ -117,18 +109,10 @@ public function authCheck()
+ 
+             /* Grab credentials if they exist */
+             if (isset($_SESSION['PMA_single_signon_user'])) {
+-                if ($do_logout) {
+-                    $PHP_AUTH_USER = '';
+-                } else {
+-                    $PHP_AUTH_USER = $_SESSION['PMA_single_signon_user'];
+-                }
++                $PHP_AUTH_USER = $_SESSION['PMA_single_signon_user'];
+             }
+             if (isset($_SESSION['PMA_single_signon_password'])) {
+-                if ($do_logout) {
+-                    $PHP_AUTH_PW = '';
+-                } else {
+-                    $PHP_AUTH_PW = $_SESSION['PMA_single_signon_password'];
+-                }
++                $PHP_AUTH_PW = $_SESSION['PMA_single_signon_password'];
+             }
+             if (isset($_SESSION['PMA_single_signon_host'])) {
+                 $single_signon_host = $_SESSION['PMA_single_signon_host'];
+diff --git a/logout.php b/logout.php
+new file mode 100644
+index 00000000000..3bfa8f72b32
+--- /dev/null
++++ b/logout.php
+@@ -0,0 +1,15 @@
++<?php
++/* vim: set expandtab sw=4 ts=4 sts=4: */
++/**
++ * Logout script
++ *
++ * @package PhpMyAdmin
++ */
++require_once 'libraries/common.inc.php';
++
++if ($token_mismatch) {
++    PMA_sendHeaderLocation('./index.php');
++} else {
++    $auth_plugin->logOut();
++}
++
+diff --git a/test/classes/plugin/auth/AuthenticationCookieTest.php b/test/classes/plugin/auth/AuthenticationCookieTest.php
+index ec8693215e4..62769dca330 100644
+--- a/test/classes/plugin/auth/AuthenticationCookieTest.php
++++ b/test/classes/plugin/auth/AuthenticationCookieTest.php
+@@ -373,6 +373,9 @@ public function testAuthCaptcha()
+      */
+     public function testAuthHeader()
+     {
++        $GLOBALS['cfg']['LoginCookieDeleteAll'] = false;
++        $GLOBALS['cfg']['Servers'] = array(1);
++
+         $restoreInstance = PMA\libraries\Response::getInstance();
+ 
+         $mockResponse = $this->getMockBuilder('PMA\libraries\Response')
+@@ -380,11 +383,6 @@ public function testAuthHeader()
+             ->setMethods(array('isAjax', 'headersSent', 'header'))
+             ->getMock();
+ 
+-        $mockResponse->expects($this->once())
+-            ->method('isAjax')
+-            ->with()
+-            ->will($this->returnValue(false));
+-
+         $mockResponse->expects($this->any())
+             ->method('headersSent')
+             ->with()
+@@ -398,12 +396,9 @@ public function testAuthHeader()
+         $attrInstance->setAccessible(true);
+         $attrInstance->setValue($mockResponse);
+ 
+-        $_REQUEST['old_usr'] = 'user1';
+         $GLOBALS['cfg']['Server']['LogoutURL'] = 'http://www.phpmyadmin.net/logout';
+ 
+-        $this->assertTrue(
+-            $this->object->auth()
+-        );
++        $this->object->logOut();
+ 
+         $attrInstance->setValue($restoreInstance);
+     }
+@@ -454,20 +449,40 @@ public function testAuthCheckCaptcha()
+      */
+     public function testLogoutDelete()
+     {
++        $restoreInstance = PMA\libraries\Response::getInstance();
++
++        $mockResponse = $this->getMockBuilder('PMA\libraries\Response')
++            ->disableOriginalConstructor()
++            ->setMethods(array('isAjax', 'headersSent', 'header'))
++            ->getMock();
++
++        $mockResponse->expects($this->any())
++            ->method('headersSent')
++            ->with()
++            ->will($this->returnValue(false));
++
++        $mockResponse->expects($this->once())
++            ->method('header')
++            ->with('Location: ./index.php' . ((SID) ? '?' . SID : ''));
++
++        $attrInstance = new ReflectionProperty('PMA\libraries\Response', '_instance');
++        $attrInstance->setAccessible(true);
++        $attrInstance->setValue($mockResponse);
++
+         $GLOBALS['cfg']['Server']['auth_swekey_config'] = '';
+         $GLOBALS['cfg']['CaptchaLoginPrivateKey'] = '';
+         $GLOBALS['cfg']['CaptchaLoginPublicKey'] = '';
+-        $_REQUEST['old_usr'] = 'pmaolduser';
+         $GLOBALS['cfg']['LoginCookieDeleteAll'] = true;
+         $GLOBALS['cfg']['Servers'] = array(1);
+ 
+         $_COOKIE['pmaPass-0'] = 'test';
+ 
+-        $this->object->authCheck();
++        $this->object->logOut();
+ 
+         $this->assertFalse(
+             isset($_COOKIE['pmaPass-0'])
+         );
++        $attrInstance->setValue($restoreInstance);
+     }
+ 
+     /**
+@@ -477,21 +492,40 @@ public function testLogoutDelete()
+      */
+     public function testLogout()
+     {
++        $restoreInstance = PMA\libraries\Response::getInstance();
++
++        $mockResponse = $this->getMockBuilder('PMA\libraries\Response')
++            ->disableOriginalConstructor()
++            ->setMethods(array('isAjax', 'headersSent', 'header'))
++            ->getMock();
++
++        $mockResponse->expects($this->any())
++            ->method('headersSent')
++            ->with()
++            ->will($this->returnValue(false));
++
++        $mockResponse->expects($this->once())
++            ->method('header')
++            ->with('Location: ./index.php' . ((SID) ? '?' . SID : ''));
++
++        $attrInstance = new ReflectionProperty('PMA\libraries\Response', '_instance');
++        $attrInstance->setAccessible(true);
++        $attrInstance->setValue($mockResponse);
+         $GLOBALS['cfg']['Server']['auth_swekey_config'] = '';
+         $GLOBALS['cfg']['CaptchaLoginPrivateKey'] = '';
+         $GLOBALS['cfg']['CaptchaLoginPublicKey'] = '';
+-        $_REQUEST['old_usr'] = 'pmaolduser';
+         $GLOBALS['cfg']['LoginCookieDeleteAll'] = false;
+         $GLOBALS['cfg']['Servers'] = array(1);
+         $GLOBALS['server'] = 1;
+ 
+         $_COOKIE['pmaPass-1'] = 'test';
+ 
+-        $this->object->authCheck();
++        $this->object->logOut();
+ 
+         $this->assertFalse(
+             isset($_COOKIE['pmaPass-1'])
+         );
++        $attrInstance->setValue($restoreInstance);
+     }
+ 
+     /**
+diff --git a/test/classes/plugin/auth/AuthenticationHttpTest.php b/test/classes/plugin/auth/AuthenticationHttpTest.php
+index 3d0dcd2f746..dd63588034d 100644
+--- a/test/classes/plugin/auth/AuthenticationHttpTest.php
++++ b/test/classes/plugin/auth/AuthenticationHttpTest.php
+@@ -123,9 +123,13 @@ public function doMockResponse($set_minimal, $body_id, $set_title)
+         call_user_func_array(array($header_method, 'withConsecutive'), $headers);
+ 
+         try {
+-            $this->assertFalse(
+-                $this->object->auth()
+-            );
++            if (!empty($_REQUEST['old_usr'])) {
++                $this->object->logOut();
++            } else {
++                $this->assertFalse(
++                    $this->object->auth()
++                );
++            }
+         } finally {
+             $attrInstance->setValue($restoreInstance);
+         }
+diff --git a/test/classes/plugin/auth/AuthenticationSignonTest.php b/test/classes/plugin/auth/AuthenticationSignonTest.php
+index 79d0f0f9f6c..bab74373659 100644
+--- a/test/classes/plugin/auth/AuthenticationSignonTest.php
++++ b/test/classes/plugin/auth/AuthenticationSignonTest.php
+@@ -73,10 +73,9 @@ public function testAuth()
+         // case 2
+ 
+         $GLOBALS['cfg']['Server']['SignonURL'] = 'http://phpmyadmin.net/SignonURL';
+-        $_REQUEST['old_usr'] = 'oldUser';
+         $GLOBALS['cfg']['Server']['LogoutURL'] = 'http://phpmyadmin.net/logoutURL';
+ 
+-        $this->object->auth();
++        $this->object->logOut();
+ 
+         $this->assertContains(
+             'Location: http://phpmyadmin.net/logoutURL?PHPSESSID=',
+@@ -87,10 +86,9 @@ public function testAuth()
+ 
+         $GLOBALS['header'] = array();
+         $GLOBALS['cfg']['Server']['SignonURL'] = 'http://phpmyadmin.net/SignonURL';
+-        $_REQUEST['old_usr'] = '';
+         $GLOBALS['cfg']['Server']['LogoutURL'] = '';
+ 
+-        $this->object->auth();
++        $this->object->logOut();
+ 
+         $this->assertContains(
+             'Location: http://phpmyadmin.net/SignonURL?PHPSESSID=',
+@@ -155,6 +153,26 @@ public function testAuthCheckSession()
+      */
+     public function testAuthCheckToken()
+     {
++        $restoreInstance = PMA\libraries\Response::getInstance();
++
++        $mockResponse = $this->getMockBuilder('PMA\libraries\Response')
++            ->disableOriginalConstructor()
++            ->setMethods(array('isAjax', 'headersSent', 'header'))
++            ->getMock();
++
++        $mockResponse->expects($this->any())
++            ->method('headersSent')
++            ->with()
++            ->will($this->returnValue(false));
++
++        $mockResponse->expects($this->once())
++            ->method('header')
++            ->with('Location: ./index.php' . ((SID) ? '?' . SID : ''));
++
++        $attrInstance = new ReflectionProperty('PMA\libraries\Response', '_instance');
++        $attrInstance->setAccessible(true);
++        $attrInstance->setValue($mockResponse);
++
+         $GLOBALS['cfg']['Server']['SignonURL'] = 'http://phpmyadmin.net/SignonURL';
+         $GLOBALS['cfg']['Server']['SignonSession'] = 'session123';
+         $GLOBALS['cfg']['Server']['host'] = 'localhost';
+@@ -162,7 +180,6 @@ public function testAuthCheckToken()
+         $GLOBALS['cfg']['Server']['user'] = 'user';
+         $GLOBALS['cfg']['Server']['SignonScript'] = '';
+         $_COOKIE['session123'] = true;
+-        $_REQUEST['old_usr'] = 'oldUser';
+         $_SESSION['PMA_single_signon_user'] = 'user123';
+         $_SESSION['PMA_single_signon_password'] = 'pass123';
+         $_SESSION['PMA_single_signon_host'] = 'local';
+@@ -172,28 +189,20 @@ public function testAuthCheckToken()
+         $sessionName = session_name();
+         $sessionID = session_id();
+ 
+-        $this->assertFalse(
+-            $this->object->authCheck()
+-        );
++        $this->object->logOut();
+ 
+         $this->assertEquals(
+             array(
+                 'SignonURL' => 'http://phpmyadmin.net/SignonURL',
+                 'SignonScript' => '',
+                 'SignonSession' => 'session123',
+-                'host' => 'local',
+-                'port' => '12',
++                'host' => 'localhost',
++                'port' => '80',
+                 'user' => 'user',
+-                'foo' => 'bar'
+             ),
+             $GLOBALS['cfg']['Server']
+         );
+ 
+-        $this->assertEquals(
+-            'pmaToken',
+-            $_SESSION[' PMA_token ']
+-        );
+-
+         $this->assertEquals(
+             $sessionName,
+             session_name()
+@@ -207,6 +216,7 @@ public function testAuthCheckToken()
+         $this->assertFalse(
+             isset($_SESSION['LAST_SIGNON_URL'])
+         );
++        $attrInstance->setValue($restoreInstance);
+     }
+ 
+     /**

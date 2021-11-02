@@ -1,0 +1,64 @@
+From 11edc83b98a61e890d7bb01855389d40e984ea82 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Sun, 1 May 2016 16:13:31 -0700
+Subject: [PATCH] Don't treat the packet length as unsigned.
+
+The scanf family of functions are as annoyingly bad at handling unsigned
+numbers as strtoul() is - both of them are perfectly willing to accept a
+value beginning with a negative sign as an unsigned value.  When using
+strtoul(), you can compensate for this by explicitly checking for a '-'
+as the first character of the string, but you can't do that with
+sscanf().
+
+So revert to having pkt_len be signed, and scanning it with %d, but
+check for a negative value and fail if we see a negative value.
+
+Bug: 12396
+Change-Id: I54fe8f61f42c32b5ef33da633ece51bbcda8c95f
+Reviewed-on: https://code.wireshark.org/review/15220
+Reviewed-by: Guy Harris <guy@alum.mit.edu>
+---
+ wiretap/netscreen.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/wiretap/netscreen.c b/wiretap/netscreen.c
+index e10b1d9fe3a..d0ed5c732be 100644
+--- a/wiretap/netscreen.c
++++ b/wiretap/netscreen.c
+@@ -263,28 +263,33 @@ static gboolean
+ parse_netscreen_packet(FILE_T fh, struct wtap_pkthdr *phdr, Buffer* buf,
+     char *line, int *err, gchar **err_info)
+ {
++	int		pkt_len;
+ 	int		sec;
+ 	int		dsec;
+ 	char		cap_int[NETSCREEN_MAX_INT_NAME_LENGTH];
+ 	char		direction[2];
+-	guint		pkt_len;
+ 	char		cap_src[13];
+ 	char		cap_dst[13];
+ 	guint8		*pd;
+ 	gchar		*p;
+ 	int		n, i = 0;
+-	guint		offset = 0;
++	int		offset = 0;
+ 	gchar		dststr[13];
+ 
+ 	phdr->rec_type = REC_TYPE_PACKET;
+ 	phdr->presence_flags = WTAP_HAS_TS|WTAP_HAS_CAP_LEN;
+ 
+-	if (sscanf(line, "%9d.%9d: %15[a-z0-9/:.-](%1[io]) len=%9u:%12s->%12s/",
++	if (sscanf(line, "%9d.%9d: %15[a-z0-9/:.-](%1[io]) len=%9d:%12s->%12s/",
+ 		   &sec, &dsec, cap_int, direction, &pkt_len, cap_src, cap_dst) < 5) {
+ 		*err = WTAP_ERR_BAD_FILE;
+ 		*err_info = g_strdup("netscreen: Can't parse packet-header");
+ 		return -1;
+ 	}
++	if (pkt_len < 0) {
++		*err = WTAP_ERR_BAD_FILE;
++		*err_info = g_strdup("netscreen: packet header has a negative packet length");
++		return FALSE;
++	}
+ 	if (pkt_len > WTAP_MAX_PACKET_SIZE) {
+ 		/*
+ 		 * Probably a corrupt capture file; don't blow up trying

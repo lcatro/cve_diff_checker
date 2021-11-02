@@ -1,0 +1,29 @@
+From a84358aa12f0b1518e606095ab9cfddbf597c121 Mon Sep 17 00:00:00 2001
+From: Amit Patankar <amitpatankar@google.com>
+Date: Tue, 4 May 2021 13:45:57 -0700
+Subject: [PATCH] Fix heap-buffer-overflow issue with
+ `tf.raw_ops.RaggedTensorToTensor`.
+
+PiperOrigin-RevId: 371986929
+Change-Id: I79ab962a22c5867f36f7f45b780a1ac881b1dbdd
+---
+ tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc b/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
+index 434c853b63daa..376d55945d2ce 100644
+--- a/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
++++ b/tensorflow/core/kernels/ragged_tensor_to_tensor_op.cc
+@@ -313,6 +313,12 @@ class RaggedTensorToTensorBaseOp : public OpKernel {
+             output_index_multiplier, output_size, result);
+         return tensorflow::Status::OK();
+       case RowPartitionType::ROW_SPLITS:
++        if (row_partition_tensor.size() - 1 > parent_output_index.size()) {
++          return errors::InvalidArgument(
++              "Row partition size is greater than output size: ",
++              row_partition_tensor.size() - 1, " > ",
++              parent_output_index.size());
++        }
+         CalculateOutputIndexRowSplit(
+             context, row_partition_tensor, parent_output_index,
+             output_index_multiplier, output_size, result);

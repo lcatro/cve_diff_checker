@@ -1,0 +1,27 @@
+From fa6485c5d16a7355eab047d4a44345a73bc9131e Mon Sep 17 00:00:00 2001
+From: Chong Cai <chongc@google.com>
+Date: Wed, 23 Sep 2020 17:57:04 -0700
+Subject: [PATCH] Check return result in recvmsg
+
+PiperOrigin-RevId: 333411798
+Change-Id: I61986b5a1bffd79c0e1950013aa9de09cf4a5d61
+---
+ asylo/platform/host_call/trusted/host_calls.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/asylo/platform/host_call/trusted/host_calls.cc b/asylo/platform/host_call/trusted/host_calls.cc
+index adf4c48a6..3e6bf1034 100644
+--- a/asylo/platform/host_call/trusted/host_calls.cc
++++ b/asylo/platform/host_call/trusted/host_calls.cc
+@@ -822,6 +822,11 @@ ssize_t enc_untrusted_recvmsg(int sockfd, struct msghdr *msg, int flags) {
+     return result;
+   }
+ 
++  if (result > total_buffer_size) {
++    ::asylo::primitives::TrustedPrimitives::BestEffortAbort(
++        "enc_untrusted_recvmsg: result exceeds requested");
++  }
++
+   auto msg_name_extent = output.next();
+   // The returned |msg_namelen| should not exceed the buffer size.
+   if (msg_name_extent.size() <= msg->msg_namelen) {

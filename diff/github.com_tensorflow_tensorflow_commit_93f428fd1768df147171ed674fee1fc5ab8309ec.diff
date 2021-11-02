@@ -1,0 +1,27 @@
+From 93f428fd1768df147171ed674fee1fc5ab8309ec Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Fri, 30 Jul 2021 21:42:36 -0700
+Subject: [PATCH] Fix nullptr deref and heap OOB access in binary cwise ops.
+
+PiperOrigin-RevId: 387936777
+Change-Id: I608b8074cec36a982cca622b7144cb2c43e6e19f
+---
+ tensorflow/core/kernels/cwise_ops_common.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/cwise_ops_common.h b/tensorflow/core/kernels/cwise_ops_common.h
+index 9adc628421d04..4f2c83322ba00 100644
+--- a/tensorflow/core/kernels/cwise_ops_common.h
++++ b/tensorflow/core/kernels/cwise_ops_common.h
+@@ -265,6 +265,11 @@ class SimpleBinaryOp : public OpKernel {
+   void Compute(OpKernelContext* ctx) override {
+     const Tensor& in0 = ctx->input(0);
+     const Tensor& in1 = ctx->input(1);
++    OP_REQUIRES(
++        ctx, in0.NumElements() == in1.NumElements(),
++        errors::InvalidArgument("The two arguments to a cwise op must have "
++                                "same number of elements, got ",
++                                in0.NumElements(), " and ", in1.NumElements()));
+     auto in0_flat = in0.flat<Tin>();
+     auto in1_flat = in1.flat<Tin>();
+     const Device& eigen_device = ctx->eigen_device<Device>();

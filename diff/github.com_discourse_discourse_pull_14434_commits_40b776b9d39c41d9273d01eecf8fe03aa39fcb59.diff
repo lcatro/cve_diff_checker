@@ -1,0 +1,64 @@
+From 40b776b9d39c41d9273d01eecf8fe03aa39fcb59 Mon Sep 17 00:00:00 2001
+From: Bianca Nenciu <nenciu.bianca@gmail.com>
+Date: Thu, 23 Sep 2021 14:46:11 +0300
+Subject: [PATCH] SECURITY: Escape watched word in error message
+
+---
+ lib/new_post_manager.rb                   | 4 ++--
+ lib/validators/watched_words_validator.rb | 4 ++--
+ spec/integration/watched_words_spec.rb    | 8 ++++++++
+ 3 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/lib/new_post_manager.rb b/lib/new_post_manager.rb
+index 1dc38fcc7f7a..777d93bdb0da 100644
+--- a/lib/new_post_manager.rb
++++ b/lib/new_post_manager.rb
+@@ -201,10 +201,10 @@ def perform
+       result = NewPostResult.new(:created_post, false)
+       if matches.size == 1
+         key = 'contains_blocked_word'
+-        translation_args = { word: matches[0] }
++        translation_args = { word: CGI.escapeHTML(matches[0]) }
+       else
+         key = 'contains_blocked_words'
+-        translation_args = { words: matches.join(', ') }
++        translation_args = { words: CGI.escapeHTML(matches.join(', ')) }
+       end
+       result.errors.add(:base, I18n.t(key, translation_args))
+       return result
+diff --git a/lib/validators/watched_words_validator.rb b/lib/validators/watched_words_validator.rb
+index cfa7e5a6b666..4174e514af10 100644
+--- a/lib/validators/watched_words_validator.rb
++++ b/lib/validators/watched_words_validator.rb
+@@ -5,10 +5,10 @@ def validate_each(record, attribute, value)
+     if matches = WordWatcher.new(value).should_block?.presence
+       if matches.size == 1
+         key = 'contains_blocked_word'
+-        translation_args = { word: matches[0] }
++        translation_args = { word: CGI.escapeHTML(matches[0]) }
+       else
+         key = 'contains_blocked_words'
+-        translation_args = { words: matches.join(', ') }
++        translation_args = { words: CGI.escapeHTML(matches.join(', ')) }
+       end
+       record.errors.add(:base, I18n.t(key, translation_args))
+     end
+diff --git a/spec/integration/watched_words_spec.rb b/spec/integration/watched_words_spec.rb
+index b8f5fff39b5b..7fb3c04708e7 100644
+--- a/spec/integration/watched_words_spec.rb
++++ b/spec/integration/watched_words_spec.rb
+@@ -32,6 +32,14 @@ def should_block_post(manager)
+       }.to_not change { Post.count }
+     end
+ 
++    it "escapes the blocked word in error message" do
++      block_word = Fabricate(:watched_word, action: WatchedWord.actions[:block], word: "<a>")
++      manager = NewPostManager.new(tl2_user, raw: "Want some #{block_word.word} for cheap?", topic_id: topic.id)
++      result = manager.perform
++      expect(result).to_not be_success
++      expect(result.errors[:base]&.first).to eq(I18n.t('contains_blocked_word', word: "&lt;a&gt;"))
++    end
++
+     it "should prevent the post from being created" do
+       manager = NewPostManager.new(tl2_user, raw: "Want some #{block_word.word} for cheap?", topic_id: topic.id)
+       should_block_post(manager)

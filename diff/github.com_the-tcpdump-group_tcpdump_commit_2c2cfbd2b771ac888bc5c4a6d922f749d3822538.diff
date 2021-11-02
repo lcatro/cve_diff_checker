@@ -1,0 +1,113 @@
+From 2c2cfbd2b771ac888bc5c4a6d922f749d3822538 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Fri, 24 Mar 2017 18:42:09 -0700
+Subject: [PATCH] CVE-2017-13037/IP: Add bounds checks when printing time stamp
+ options.
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s), modified
+so the capture file won't be rejected as an invalid capture.
+---
+ print-ip.c                 |  14 +++++++++++---
+ tests/TESTLIST             |   1 +
+ tests/ip_ts_opts_asan.out  |   2 ++
+ tests/ip_ts_opts_asan.pcap | Bin 0 -> 90 bytes
+ 4 files changed, 14 insertions(+), 3 deletions(-)
+ create mode 100644 tests/ip_ts_opts_asan.out
+ create mode 100644 tests/ip_ts_opts_asan.pcap
+
+diff --git a/print-ip.c b/print-ip.c
+index 6831b7aa2..f8e02c1e7 100644
+--- a/print-ip.c
++++ b/print-ip.c
+@@ -168,7 +168,7 @@ nextproto4_cksum(netdissect_options *ndo,
+ 	return (in_cksum(vec, 2));
+ }
+ 
+-static void
++static int
+ ip_printts(netdissect_options *ndo,
+            register const u_char *cp, u_int length)
+ {
+@@ -179,16 +179,18 @@ ip_printts(netdissect_options *ndo,
+ 
+ 	if (length < 4) {
+ 		ND_PRINT((ndo, "[bad length %u]", length));
+-		return;
++		return (0);
+ 	}
+ 	ND_PRINT((ndo, " TS{"));
+ 	hoplen = ((cp[3]&0xF) != IPOPT_TS_TSONLY) ? 8 : 4;
+ 	if ((length - 4) & (hoplen-1))
+ 		ND_PRINT((ndo, "[bad length %u]", length));
++	ND_TCHECK(cp[2]);
+ 	ptr = cp[2] - 1;
+ 	len = 0;
+ 	if (ptr < 4 || ((ptr - 4) & (hoplen-1)) || ptr > length + 1)
+ 		ND_PRINT((ndo, "[bad ptr %u]", cp[2]));
++	ND_TCHECK(cp[3]);
+ 	switch (cp[3]&0xF) {
+ 	case IPOPT_TS_TSONLY:
+ 		ND_PRINT((ndo, "TSONLY"));
+@@ -217,6 +219,7 @@ ip_printts(netdissect_options *ndo,
+ 	for (len = 4; len < length; len += hoplen) {
+ 		if (ptr == len)
+ 			type = " ^ ";
++		ND_TCHECK2(cp[len], hoplen);
+ 		ND_PRINT((ndo, "%s%d@%s", type, EXTRACT_32BITS(&cp[len+hoplen-4]),
+ 		       hoplen!=8 ? "" : ipaddr_string(ndo, &cp[len])));
+ 		type = " ";
+@@ -229,6 +232,10 @@ ip_printts(netdissect_options *ndo,
+ 		ND_PRINT((ndo, " [%d hops not recorded]} ", cp[3]>>4));
+ 	else
+ 		ND_PRINT((ndo, "}"));
++	return (0);
++
++trunc:
++	return (-1);
+ }
+ 
+ /*
+@@ -278,7 +285,8 @@ ip_optprint(netdissect_options *ndo,
+ 			return;
+ 
+ 		case IPOPT_TS:
+-			ip_printts(ndo, cp, option_len);
++			if (ip_printts(ndo, cp, option_len) == -1)
++				goto trunc;
+ 			break;
+ 
+ 		case IPOPT_RR:       /* fall through */
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 27c38b9c3..5732f8ff5 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -552,6 +552,7 @@ pim_header_asan-4	pim_header_asan-4.pcap		pim_header_asan-4.out	-v
+ ip6_frag_asan		ip6_frag_asan.pcap		ip6_frag_asan.out	-v
+ radius_attr_asan	radius_attr_asan.pcap		radius_attr_asan.out	-v
+ ospf6_decode_v3_asan	ospf6_decode_v3_asan.pcap	ospf6_decode_v3_asan.out -v
++ip_ts_opts_asan		ip_ts_opts_asan.pcap		ip_ts_opts_asan.out	-v
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/ip_ts_opts_asan.out b/tests/ip_ts_opts_asan.out
+new file mode 100644
+index 000000000..ce890b1ba
+--- /dev/null
++++ b/tests/ip_ts_opts_asan.out
+@@ -0,0 +1,2 @@
++IP (tos 0xe2,ECT(0), id 32, offset 0, flags [+, DF, rsvd], proto ICMP (1), length 65319, options (timestamp TS{[bad length 14]TS+ADDR ^ 1229070338@0.0.52.112[|ip]), bad cksum a09b (->90a7)!)
++    149.8.33.81 > 95.18.83.227: [|icmp]
+diff --git a/tests/ip_ts_opts_asan.pcap b/tests/ip_ts_opts_asan.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9bb6b46bf781bd112938c0d3e8695de7561c028
+GIT binary patch
+literal 90
+zcmca|c+)~A1{Q{GDZvjJfWQcd8G+cZ{=X{&GZUDv^#3CR1JD1T4F3<59_X7nmxICc
+m(SLOYg$F>T3uaH{Pz;P03V!Uu#|qSFQsC*Nz{JS<RTu!tw;GB7
+
+literal 0
+HcmV?d00001
+

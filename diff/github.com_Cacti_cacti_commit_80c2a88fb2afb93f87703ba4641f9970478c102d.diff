@@ -1,0 +1,727 @@
+From 80c2a88fb2afb93f87703ba4641f9970478c102d Mon Sep 17 00:00:00 2001
+From: cigamit <jimmy@sqmail.org>
+Date: Sun, 16 Dec 2018 09:54:11 -0600
+Subject: [PATCH] Resolving Issues #2213, #2214, #2215 and Additional
+
+Multiple XSS vectors associated with un-escaped strings.  Introduce new
+function, audit all calls, remove inline styles for classes, some i18n
+missed.
+---
+ CHANGELOG                 |  3 +++
+ aggregate_graphs.php      |  6 +++---
+ aggregate_templates.php   |  4 ++--
+ automation_networks.php   | 20 ++++++++++----------
+ automation_tree_rules.php |  4 ++--
+ cdef.php                  | 10 +++++-----
+ color_templates.php       |  6 +++---
+ data_debug.php            | 37 ++++++++++++++-----------------------
+ data_input.php            |  6 +++---
+ data_queries.php          |  8 ++++----
+ data_source_profiles.php  | 14 +++++++-------
+ data_sources.php          |  4 ++--
+ data_templates.php        |  6 +++---
+ gprint_presets.php        |  8 ++++----
+ graph_templates.php       | 12 ++++++------
+ graph_view.php            |  6 +++---
+ graphs.php                |  4 ++--
+ host_templates.php        |  6 +++---
+ lib/html_reports.php      |  8 ++++----
+ lib/html_utility.php      | 10 ++++++++++
+ links.php                 |  8 ++++----
+ managers.php              | 12 ++++++------
+ sites.php                 |  8 ++++----
+ tree.php                  | 14 +++++++-------
+ user_admin.php            |  2 +-
+ user_domains.php          |  6 +++---
+ user_group_admin.php      |  4 ++--
+ utilities.php             |  4 ++--
+ vdef.php                  | 10 +++++-----
+ 29 files changed, 127 insertions(+), 123 deletions(-)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 52558e8a5..880337d88 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -6,6 +6,9 @@ Cacti CHANGELOG
+ -issue#2202: Can't create more than one graph with add_graphs.php from one template
+ -issue#2207: Removing Graph Template does not Remove Data Query Associations
+ -issue#2212: Stored XSS in "Website Hostname" field
++-issue#2213: Stored XSS in "Website Hostname" field - Devices
++-issue#2214: Stored XSS in "Vertical Label" field - Graph
++-issue#2215: Stored XSS in "Name" field - Color 
+ -feature: Update phpseclib to version 2.0.12
+ 
+ 1.2.0 Beta 4
+diff --git a/aggregate_graphs.php b/aggregate_graphs.php
+index 32fdad2f3..3a1699c23 100644
+--- a/aggregate_graphs.php
++++ b/aggregate_graphs.php
+@@ -1199,12 +1199,12 @@ function clearFilter() {
+ 			if (validate_is_regex(get_request_var('rfilter'))) {
+ 				form_selectable_cell(filter_value($graph['title_cache'], get_request_var('rfilter')), $graph['local_graph_id']);
+ 			} else {
+-				form_selectable_cell(get_request_var('rfilter') != '' ? aggregate_format_text(html_escape($graph['title_cache']), get_request_var('rfilter')) : html_escape($graph['title_cache']), $graph['local_graph_id']);
++				form_selectable_ecell(get_request_var('rfilter') != '' ? aggregate_format_text($graph['title_cache'], get_request_var('rfilter')) : $graph['title_cache'], $graph['local_graph_id']);
+ 			}
+ 
+ 			form_selectable_cell($graph['local_graph_id'], $graph['local_graph_id'], '', 'right');
+ 			form_selectable_cell(($graph['agg_graph_id'] != '' ? "<span class='associated'>" . __('Yes') . '</span>':"<span class='notAssociated'>" . __('No') . "</span>"), $graph['local_graph_id']);
+-			form_selectable_cell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
++			form_selectable_ecell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
+ 			form_checkbox_cell($graph['title_cache'], $graph['local_graph_id']);
+ 			form_end_row();
+ 		}
+@@ -1528,7 +1528,7 @@ function clearFilter() {
+ 			form_selectable_cell(filter_value(title_trim($graph['title_cache'], read_config_option('max_title_length')), get_request_var('filter'), 'aggregate_graphs.php?action=edit&id=' . $graph['local_graph_id']), $graph['local_graph_id']);
+ 			form_selectable_cell($graph['local_graph_id'], $graph['local_graph_id'], '', 'right');
+ 			form_selectable_cell((empty($graph['name']) ? '<em>' . __('None') . '</em>' : filter_value($template_name, get_request_var('filter'))), $graph['local_graph_id']);
+-			form_selectable_cell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
++			form_selectable_ecell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
+ 			form_checkbox_cell($graph['title_cache'], $graph['local_graph_id']);
+ 			form_end_row();
+ 		}
+diff --git a/aggregate_templates.php b/aggregate_templates.php
+index df1f2b389..eecd891e2 100644
+--- a/aggregate_templates.php
++++ b/aggregate_templates.php
+@@ -658,8 +658,8 @@ function aggregate_template() {
+ 
+ 			form_alternate_row('line' . $template['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($template['name'], get_request_var('filter'), 'aggregate_templates.php?action=edit&id=' . $template['id'] . '&page=1'), $template['id']);
+-			form_selectable_cell($disabled ? 'No':'Yes', $template['id'], '', 'text-align:right');
+-			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('aggregate_graphs.php?reset=true&template_id=' . $template['id']) . '">' . number_format_i18n($template['graphs'], '-1') . '</a>', $template['id'], '', 'text-align:right;');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'right');
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('aggregate_graphs.php?reset=true&template_id=' . $template['id']) . '">' . number_format_i18n($template['graphs'], '-1') . '</a>', $template['id'], '', 'right');
+ 			form_selectable_cell(filter_value($template['graph_template_name'], get_request_var('filter')), $template['id']);
+ 			form_checkbox_cell($template['graph_template_name'], $template['id'], $disabled);
+ 			form_end_row();
+diff --git a/automation_networks.php b/automation_networks.php
+index 984fa317d..7c827d915 100644
+--- a/automation_networks.php
++++ b/automation_networks.php
+@@ -1133,17 +1133,17 @@ function networks() {
+ 			}
+ 
+ 			form_alternate_row('line' . $network['id'], true);
+-			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('automation_networks.php?action=edit&id=' . $network['id']) . '">' . $network['name'] . '</a>', $network['id']);
+-			form_selectable_cell($network['data_collector'], $network['id']);
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('automation_networks.php?action=edit&id=' . $network['id']) . '">' . html_escape($network['name']) . '</a>', $network['id']);
++			form_selectable_ecell($network['data_collector'], $network['id']);
+ 			form_selectable_cell($sched_types[$network['sched_type']], $network['id']);
+-			form_selectable_cell(number_format_i18n($network['total_ips']), $network['id'], '', 'text-align:right;');
+-			form_selectable_cell($mystat, $network['id'], '', 'text-align:right;');
+-			form_selectable_cell($progress, $network['id'], '', 'text-align:right;');
+-			form_selectable_cell(number_format_i18n($updown['up']) . '/' . number_format_i18n($updown['snmp']), $network['id'], '', 'text-align:right;');
+-			form_selectable_cell(number_format_i18n($network['threads']), $network['id'], '', 'text-align:right;');
+-			form_selectable_cell(round($network['last_runtime'],2), $network['id'], '', 'text-align:right;');
+-			form_selectable_cell($network['enabled'] == '' || $network['sched_type'] == '1' ? __('N/A'):($network['next_start'] == '0000-00-00 00:00:00' ? substr($network['start_at'],0,16):substr($network['next_start'],0,16)), $network['id'], '', 'text-align:right;');
+-			form_selectable_cell($network['last_started'] == '0000-00-00 00:00:00' ? 'Never':substr($network['last_started'],0,16), $network['id'], '', 'text-align:right;');
++			form_selectable_cell(number_format_i18n($network['total_ips']), $network['id'], '', 'right');
++			form_selectable_cell($mystat, $network['id'], '', 'right');
++			form_selectable_cell($progress, $network['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($updown['up']) . '/' . number_format_i18n($updown['snmp']), $network['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($network['threads']), $network['id'], '', 'right');
++			form_selectable_cell(round($network['last_runtime'],2), $network['id'], '', 'right');
++			form_selectable_cell($network['enabled'] == '' || $network['sched_type'] == '1' ? __('N/A'):($network['next_start'] == '0000-00-00 00:00:00' ? substr($network['start_at'],0,16):substr($network['next_start'],0,16)), $network['id'], '', 'right');
++			form_selectable_cell($network['last_started'] == '0000-00-00 00:00:00' ? __('Never'):substr($network['last_started'],0,16), $network['id'], '', 'right');
+ 			form_checkbox_cell($network['name'], $network['id']);
+ 			form_end_row();
+ 		}
+diff --git a/automation_tree_rules.php b/automation_tree_rules.php
+index 1139c7e33..4588b2d44 100644
+--- a/automation_tree_rules.php
++++ b/automation_tree_rules.php
+@@ -947,13 +947,13 @@ function clearFilter() {
+ 	if (cacti_sizeof($automation_tree_rules)) {
+ 		foreach ($automation_tree_rules as 	$automation_tree_rule) {
+ 			$tree_item_type_name = ((empty($automation_tree_rule['leaf_type'])) ? '<em>' . __('None') . '</em>' : $automation_tree_item_types[$automation_tree_rule['leaf_type']]);
+-			$subtree_name = ((empty($automation_tree_rule['subtree_name'])) ? '<em>' . __('ROOT') . '</em>' : $automation_tree_rule['subtree_name']);
++			$subtree_name = ((empty($automation_tree_rule['subtree_name'])) ? '<em>' . __('ROOT') . '</em>' : html_escape($automation_tree_rule['subtree_name']));
+ 			$tree_host_grouping_type = ((empty($host_group_types[$automation_tree_rule['host_grouping_type']])) ? '' : $host_group_types[$automation_tree_rule['host_grouping_type']]);
+ 			form_alternate_row('line' .  $automation_tree_rule['id'], true);
+ 
+ 			form_selectable_cell(filter_value($automation_tree_rule['name'], get_request_var('filter'), 'automation_tree_rules.php?action=edit&id=' . $automation_tree_rule['id'] . '&page=1'), $automation_tree_rule['id']);
+ 			form_selectable_cell($automation_tree_rule['id'], $automation_tree_rule['id'], '', 'text-align:right');
+-			form_selectable_cell($automation_tree_rule['tree_name'], $automation_tree_rule['id']);
++			form_selectable_ecell($automation_tree_rule['tree_name'], $automation_tree_rule['id']);
+ 			form_selectable_cell($subtree_name, $automation_tree_rule['id']);
+ 			form_selectable_cell($tree_item_type_name, $automation_tree_rule['id']);
+ 			form_selectable_cell($tree_host_grouping_type, $automation_tree_rule['id']);
+diff --git a/cdef.php b/cdef.php
+index 2e7666ebb..485f07075 100644
+--- a/cdef.php
++++ b/cdef.php
+@@ -106,7 +106,7 @@ function draw_cdef_preview($cdef_id) {
+ 	?>
+ 	<tr class='even'>
+ 		<td style='padding:4px'>
+-			<pre>cdef=<?php print get_cdef($cdef_id, true);?></pre>
++			<pre>cdef=<?php print html_escape(get_cdef($cdef_id, true));?></pre>
+ 		</td>
+ 	</tr>
+ 	<?php
+@@ -433,7 +433,7 @@ function item_edit() {
+ 	draw_cdef_preview(get_request_var('cdef_id'));
+ 	html_end_box();
+ 
+-	form_start('cdef.php', 'form_cdef');
++	form_start('cdef.php', 'chk');
+ 
+ 	$cdef_name = db_fetch_cell_prepared('SELECT name
+ 		FROM cdef
+@@ -897,9 +897,9 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $cdef['id'], false, $disabled);
+ 			form_selectable_cell(filter_value($cdef['name'], get_request_var('filter'), 'cdef.php?action=edit&id=' . $cdef['id']), $cdef['id']);
+-			form_selectable_cell($disabled ? __('No') : __('Yes'), $cdef['id'], '', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($cdef['graphs'], '-1'), $cdef['id'], '', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($cdef['templates'], '-1'), $cdef['id'], '', 'text-align:right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $cdef['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($cdef['graphs'], '-1'), $cdef['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($cdef['templates'], '-1'), $cdef['id'], '', 'right');
+ 			form_checkbox_cell($cdef['name'], $cdef['id'], $disabled);
+ 			form_end_row();
+ 		}
+diff --git a/color_templates.php b/color_templates.php
+index 91a839238..fb0ffd610 100644
+--- a/color_templates.php
++++ b/color_templates.php
+@@ -575,9 +575,9 @@ function aggregate_color_template() {
+ 			form_alternate_row('line' . $template['color_template_id'], true);
+ 
+ 			form_selectable_cell(filter_value($template['name'], get_request_var('filter'), 'color_templates.php?action=template_edit&color_template_id=' . $template['color_template_id'] . '&page=1'), $template['color_template_id']);
+-			form_selectable_cell($disabled ? __('No') : __('Yes'), $template['color_template_id'], '', 'text-align:right');
+-            form_selectable_cell(number_format_i18n($template['graphs']), $template['color_template_id'], '', 'text-align:right;');
+-            form_selectable_cell(number_format_i18n($template['templates']), $template['color_template_id'], '', 'text-align:right;');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['color_template_id'], '', 'right');
++			form_selectable_cell(number_format_i18n($template['graphs']), $template['color_template_id'], '', 'right');
++			form_selectable_cell(number_format_i18n($template['templates']), $template['color_template_id'], '', 'right');
+ 			form_checkbox_cell($template['name'], $template['color_template_id'], $disabled);
+ 			form_end_row();
+ 		}
+diff --git a/data_debug.php b/data_debug.php
+index 20c62358c..29cc67c45 100644
+--- a/data_debug.php
++++ b/data_debug.php
+@@ -259,18 +259,18 @@ function debug_wizard() {
+ 			if (strlen($name) > 50) {
+ 				$name = substr($name, 0, 50);
+ 			}
+-			form_selectable_cell('<a class="linkEditMain" title="' . $title .'" href="' . htmlspecialchars('data_debug.php?action=view&id=' . $check['id']) . '">' . $name . '</a>', $check['id']);
+-			form_selectable_cell($user, $check['id']);
++			form_selectable_cell('<a class="linkEditMain" title="' . $title .'" href="' . html_escape('data_debug.php?action=view&id=' . $check['id']) . '">' . html_escape($name) . '</a>', $check['id']);
++			form_selectable_ecell($user, $check['id']);
+ 			form_selectable_cell(date('F j, Y, G:i', $check['started']), $check['id']);
+-			form_selectable_cell($check['datasource'], $check['id']);
+-			form_selectable_cell(debug_icon(($check['done'] ? (strlen($issue_line) ? 'off' : 'on' ) : '')), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon($info['rrd_writable']), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon($info['rrd_exists']), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon($info['active']), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon($info['rrd_match']), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon($info['valid_data']), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell(debug_icon(($info['rra_timestamp2'] != '' ? 1 : '')), $check['id'], '', 'text-align: center;');
+-			form_selectable_cell('<a class=\'linkEditMain\' href=\'#\' title="' . html_escape($issue_title) . '">' . html_escape(strlen(trim($issue_line)) ? $issue_line : '<none>') . '</a>', $check['id']);
++			form_selectable_ecell($check['datasource'], $check['id']);
++			form_selectable_cell(debug_icon(($check['done'] ? (strlen($issue_line) ? 'off' : 'on' ) : '')), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon($info['rrd_writable']), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon($info['rrd_exists']), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon($info['active']), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon($info['rrd_match']), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon($info['valid_data']), $check['id'], '', 'center');
++			form_selectable_cell(debug_icon(($info['rra_timestamp2'] != '' ? 1 : '')), $check['id'], '', 'center');
++			form_selectable_cell('<a class=\'linkEditMain\' href=\'#\' title="' . html_escape($issue_title) . '">' . html_escape(strlen(trim($issue_line)) ? $issue_line : __('<none>')) . '</a>', $check['id']);
+ 			form_checkbox_cell($check['id'], $check['id']);
+ 			form_end_row();
+ 		}
+@@ -345,9 +345,9 @@ function debug_view() {
+ 		$field_name = $field['name'];
+ 
+ 		form_alternate_row('line' . $i);
+-		form_selectable_cell($field['title'], $i);
++		form_selectable_ecell($field['title'], $i);
+ 
+-		$value = '<not set>';
++		$value = __('<not set>');
+ 		$icon  = '';
+ 
+ 		if (array_key_exists($field_name, $check['info'])) {
+@@ -368,7 +368,7 @@ function debug_view() {
+ 			$value = substr($value, 0, 100);
+ 		}
+ 
+-		form_selectable_cell($value, $i, '', '', $value_title);
++		form_selectable_ecell($value, $i, '', '', $value_title);
+ 		form_selectable_cell($icon, $i);
+ 
+ 		form_end_row();
+@@ -377,15 +377,6 @@ function debug_view() {
+ 
+ 
+ 	html_end_box(false);
+-
+-/*
+-	print "<pre>";
+-	if (isset($check) && is_array($check)) {
+-		print_r($check);
+-	}
+-	print "</pre>";
+-*/
+-
+ }
+ 
+ function debug_icon($result) {
+diff --git a/data_input.php b/data_input.php
+index ce6415a63..26b3dcb16 100644
+--- a/data_input.php
++++ b/data_input.php
+@@ -922,9 +922,9 @@ function clearFilter() {
+ 			}
+ 			form_alternate_row('line' . $data_input['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($data_input['name'], get_request_var('filter'), 'data_input.php?action=edit&id=' . $data_input['id']), $data_input['id']);
+-			form_selectable_cell($disabled ? __('No'): __('Yes'), $data_input['id'],'', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($data_input['data_sources'], '-1'), $data_input['id'],'', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($data_input['templates'], '-1'), $data_input['id'],'', 'text-align:right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $data_input['id'],'', 'right');
++			form_selectable_cell(number_format_i18n($data_input['data_sources'], '-1'), $data_input['id'],'', 'right');
++			form_selectable_cell(number_format_i18n($data_input['templates'], '-1'), $data_input['id'],'', 'right');
+ 			form_selectable_cell($input_types[$data_input['type_id']], $data_input['id']);
+ 			form_checkbox_cell($data_input['name'], $data_input['id'], $disabled);
+ 			form_end_row();
+diff --git a/data_queries.php b/data_queries.php
+index 09150de86..11f6b17e6 100644
+--- a/data_queries.php
++++ b/data_queries.php
+@@ -1379,10 +1379,10 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $snmp_query['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($snmp_query['name'], get_request_var('filter'), 'data_queries.php?action=edit&id=' . $snmp_query['id']), $snmp_query['id']);
+-			form_selectable_cell($snmp_query['id'], $snmp_query['id'], '', 'text-align:right;');
+-			form_selectable_cell($disabled ? __('No') : __('Yes'), $snmp_query['id'], '', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($snmp_query['graphs'], '-1'), $snmp_query['id'], '', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($snmp_query['templates'], '-1'), $snmp_query['id'], '', 'text-align:right');
++			form_selectable_cell($snmp_query['id'], $snmp_query['id'], '', 'right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $snmp_query['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($snmp_query['graphs'], '-1'), $snmp_query['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($snmp_query['templates'], '-1'), $snmp_query['id'], '', 'right');
+ 			form_selectable_cell(filter_value($snmp_query['data_input_method'], get_request_var('filter')), $snmp_query['id']);
+ 			form_checkbox_cell($snmp_query['name'], $snmp_query['id'], $disabled);
+ 			form_end_row();
+diff --git a/data_source_profiles.php b/data_source_profiles.php
+index 410913c80..ba001841c 100644
+--- a/data_source_profiles.php
++++ b/data_source_profiles.php
+@@ -1001,13 +1001,13 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $profile['id'], false, $disabled);
+ 			form_selectable_cell(filter_value($profile['name'], get_request_var('filter'), 'data_source_profiles.php?action=edit&id=' . $profile['id']), $profile['id']);
+-			form_selectable_cell($profile['default'] == 'on' ? __('Yes'):'', $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($disabled ? __('No') : __('Yes'), $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($readonly ? __('Yes') : __('No'), $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($sampling_intervals[$profile['step']], $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($heartbeats[$profile['heartbeat']], $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($ds, $profile['id'], '', 'text-align:right');
+-			form_selectable_cell($dt, $profile['id'], '', 'text-align:right');
++			form_selectable_cell($profile['default'] == 'on' ? __('Yes'):'', $profile['id'], '', 'right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $profile['id'], '', 'right');
++			form_selectable_cell($readonly ? __('Yes'):__('No'), $profile['id'], '', 'right');
++			form_selectable_cell($sampling_intervals[$profile['step']], $profile['id'], '', 'right');
++			form_selectable_cell($heartbeats[$profile['heartbeat']], $profile['id'], '', 'right');
++			form_selectable_cell($ds, $profile['id'], '', 'right');
++			form_selectable_cell($dt, $profile['id'], '', 'right');
+ 			form_checkbox_cell($profile['name'], $profile['id'], $disabled);
+ 			form_end_row();
+ 		}
+diff --git a/data_sources.php b/data_sources.php
+index 5ec67b213..2243bb4d6 100644
+--- a/data_sources.php
++++ b/data_sources.php
+@@ -1560,10 +1560,10 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $data_source['local_data_id'], true, $disabled);
+ 			form_selectable_cell(filter_value(title_trim($data_source['name_cache'], read_config_option('max_title_length')), get_request_var('rfilter'), 'data_sources.php?action=ds_edit&id=' . $data_source['local_data_id']), $data_source['local_data_id']);
+-			form_selectable_cell($data_source['local_data_id'], $data_source['local_data_id'], '', 'text-align:right');
++			form_selectable_cell($data_source['local_data_id'], $data_source['local_data_id'], '', 'right');
+ 			form_selectable_cell(get_poller_interval($data_source['rrd_step'], $data_source['data_source_profile_id']), $data_source['local_data_id']);
+ 			form_selectable_cell(api_data_source_deletable($data_source['local_data_id']) ? __('Yes') : __('No'), $data_source['local_data_id']);
+-			form_selectable_cell(($data_source['active'] == 'on' ? __('Yes') : __('No')), $data_source['local_data_id']);
++			form_selectable_cell(($data_source['active'] == 'on' ? __('Yes'):__('No')), $data_source['local_data_id']);
+ 			form_selectable_cell($data_template_name, $data_source['local_data_id']);
+ 			form_checkbox_cell($data_source['name_cache'], $data_source['local_data_id'], $disabled);
+ 			form_end_row();
+diff --git a/data_templates.php b/data_templates.php
+index 0a5f82f11..8d45bcc62 100644
+--- a/data_templates.php
++++ b/data_templates.php
+@@ -1016,9 +1016,9 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $template['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($template['name'], get_request_var('filter'), 'data_templates.php?action=template_edit&id=' . $template['id']), $template['id']);
+-			form_selectable_cell($template['id'], $template['id'], '', 'text-align:right');
+-			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'text-align:right');
+-			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('data_sources.php?reset=true&template_id=' . $template['id']) . '">' . number_format_i18n($template['data_sources']) . '</a>', $template['id'], '', 'text-align:right');
++			form_selectable_cell($template['id'], $template['id'], '', 'right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'right');
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('data_sources.php?reset=true&template_id=' . $template['id']) . '">' . number_format_i18n($template['data_sources']) . '</a>', $template['id'], '', 'right');
+ 			form_selectable_cell((empty($template['data_input_method']) ? '<em>' . __('None') .'</em>': html_escape($template['data_input_method'])), $template['id']);
+ 			form_selectable_cell((empty($template['profile_name']) ? __('External'):html_escape($template['profile_name'])), $template['id']);
+ 			form_selectable_cell((($template['active'] == 'on') ? __('Active'):__('Disabled')), $template['id']);
+diff --git a/gprint_presets.php b/gprint_presets.php
+index d8ab3d62e..cd3a22bcd 100644
+--- a/gprint_presets.php
++++ b/gprint_presets.php
+@@ -410,10 +410,10 @@ function clearFilter() {
+ 
+             form_alternate_row('line' . $gp['id'], false, $disabled);
+ 			form_selectable_cell(filter_value($gp['name'], get_request_var('filter'), 'gprint_presets.php?action=edit&id=' . $gp['id']), $gp['id']);
+-            form_selectable_cell($gp['gprint_text'], $gp['id'], '', 'text-align:right');
+-            form_selectable_cell($disabled ? __('No'):__('Yes'), $gp['id'], '', 'text-align:right');
+-            form_selectable_cell(number_format_i18n($gp['graphs'], '-1'), $gp['id'], '', 'text-align:right');
+-            form_selectable_cell(number_format_i18n($gp['templates'], '-1'), $gp['id'], '', 'text-align:right');
++            form_selectable_cell($gp['gprint_text'], $gp['id'], '', 'right');
++            form_selectable_cell($disabled ? __('No'):__('Yes'), $gp['id'], '', 'right');
++            form_selectable_cell(number_format_i18n($gp['graphs'], '-1'), $gp['id'], '', 'right');
++            form_selectable_cell(number_format_i18n($gp['templates'], '-1'), $gp['id'], '', 'right');
+             form_checkbox_cell($gp['name'], $gp['id'], $disabled);
+             form_end_row();
+ 		}
+diff --git a/graph_templates.php b/graph_templates.php
+index c09e1a280..3e26dc840 100644
+--- a/graph_templates.php
++++ b/graph_templates.php
+@@ -808,12 +808,12 @@ function clearFilter() {
+ 			}
+ 			form_alternate_row('line' . $template['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($template['name'], get_request_var('filter'), 'graph_templates.php?action=template_edit&id=' . $template['id']), $template['id']);
+-			form_selectable_cell($template['id'], $template['id'], '', 'text-align:right');
+-			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'text-align:right');
+-			form_selectable_cell(number_format_i18n($template['graphs'], '-1'), $template['id'], '', 'text-align:right');
+-			form_selectable_cell($template['size'], $template['id'], '', 'text-align:right');
+-			form_selectable_cell($image_types[$template['image_format_id']], $template['id'], '', 'text-align:right');
+-			form_selectable_cell($template['vertical_label'], $template['id'], '', 'text-align:right');
++			form_selectable_cell($template['id'], $template['id'], '', 'right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'right');
++			form_selectable_cell(number_format_i18n($template['graphs'], '-1'), $template['id'], '', 'right');
++			form_selectable_ecell($template['size'], $template['id'], '', 'right');
++			form_selectable_cell($image_types[$template['image_format_id']], $template['id'], '', 'right');
++			form_selectable_ecell($template['vertical_label'], $template['id'], '', 'right');
+ 			form_checkbox_cell($template['name'], $template['id'], $disabled);
+ 			form_end_row();
+ 		}
+diff --git a/graph_view.php b/graph_view.php
+index 77e8e8aa8..48743d8f1 100644
+--- a/graph_view.php
++++ b/graph_view.php
+@@ -721,9 +721,9 @@ function get_matching_nodes() {
+ 
+ 			form_alternate_row('line' . $graph['local_graph_id'], true);
+ 			form_selectable_cell(filter_value($graph['title_cache'], get_request_var('rfilter'), 'graph.php?local_graph_id=' . $graph['local_graph_id'] . '&rra_id=0'), $graph['local_graph_id']);
+-			form_selectable_cell($graph['description'], $graph['local_graph_id']);
+-			form_selectable_cell($graph['template_name'], $graph['local_graph_id']);
+-			form_selectable_cell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id']);
++			form_selectable_ecell($graph['description'], $graph['local_graph_id']);
++			form_selectable_ecell($graph['template_name'], $graph['local_graph_id']);
++			form_selectable_ecell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id']);
+ 			form_checkbox_cell($graph['title_cache'], $graph['local_graph_id']);
+ 			form_end_row();
+ 		}
+diff --git a/graphs.php b/graphs.php
+index 8be44f7b0..6e751dd13 100644
+--- a/graphs.php
++++ b/graphs.php
+@@ -2043,10 +2043,10 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $graph['local_graph_id'], true);
+ 			form_selectable_cell(filter_value(title_trim($graph['title_cache'], read_config_option('max_title_length')), get_request_var('rfilter'), 'graphs.php?action=graph_edit&id=' . $graph['local_graph_id']), $graph['local_graph_id']);
+-			form_selectable_cell($graph['local_graph_id'], $graph['local_graph_id'], '', 'text-align:right');
++			form_selectable_cell($graph['local_graph_id'], $graph['local_graph_id'], '', 'right');
+ 			form_selectable_cell(filter_value($sources[$graph['source']], get_request_var('rfilter')), $graph['local_graph_id'], '', 'right');
+ 			form_selectable_cell(filter_value($template_details['name'], get_request_var('rfilter'), $url), $graph['local_graph_id'], '', 'right');
+-			form_selectable_cell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
++			form_selectable_ecell($graph['height'] . 'x' . $graph['width'], $graph['local_graph_id'], '', 'right');
+ 			form_checkbox_cell($graph['title_cache'], $graph['local_graph_id']);
+ 			form_end_row();
+ 		}
+diff --git a/host_templates.php b/host_templates.php
+index b671fce58..316b25dd8 100644
+--- a/host_templates.php
++++ b/host_templates.php
+@@ -851,9 +851,9 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $template['id'], true, $disabled);
+ 			form_selectable_cell(filter_value($template['name'], get_request_var('filter'), 'host_templates.php?action=edit&id=' . $template['id']), $template['id']);
+-			form_selectable_cell($template['id'], $template['id'], '', 'text-align:right');
+-			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'text-align:right');
+-			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('host.php?reset=true&host_template_id=' . $template['id']) . '">' . number_format_i18n($template['hosts'], '-1') . '</a>', $template['id'], '', 'text-align:right');
++			form_selectable_cell($template['id'], $template['id'], '', 'right');
++			form_selectable_cell($disabled ? __('No'):__('Yes'), $template['id'], '', 'right');
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape('host.php?reset=true&host_template_id=' . $template['id']) . '">' . number_format_i18n($template['hosts'], '-1') . '</a>', $template['id'], '', 'right');
+ 			form_checkbox_cell($template['name'], $template['id'], $disabled);
+ 			form_end_row();
+ 		}
+diff --git a/lib/html_reports.php b/lib/html_reports.php
+index 57dfe3d0a..963369a31 100644
+--- a/lib/html_reports.php
++++ b/lib/html_reports.php
+@@ -1622,7 +1622,7 @@ function reports() {
+ 
+ 			if (is_reports_admin()) {
+ 				if (reports_html_account_exists($report['user_id'])) {
+-					form_selectable_cell($report['full_name'], $report['id']);
++					form_selectable_ecell($report['full_name'], $report['id']);
+ 				} else {
+ 					form_selectable_cell(__('Report Disabled - No Owner'), $report['id']);
+ 				}
+@@ -1633,10 +1633,10 @@ function reports() {
+ 			form_selectable_cell($interval, $report['id']);
+ 			form_selectable_cell(($report['lastsent'] == 0) ? __('Never') : date($date_format, $report['lastsent']), $report['lastsent']);
+ 			form_selectable_cell(date($date_format, $report['mailtime']), $report['id']);
+-			form_selectable_cell($report['from_name'], $report['id']);
+-			form_selectable_cell((substr_count($report['email'], ',') ? __('Multiple'): $report['email']), $report['id']);
++			form_selectable_ecell($report['from_name'], $report['id']);
++			form_selectable_ecell((substr_count($report['email'], ',') ? __('Multiple'): $report['email']), $report['id']);
+ 			form_selectable_cell((isset($attach_types[$report['attachment_type']])) ? $attach_types[$report['attachment_type']] : __('Invalid'), $report['id']);
+-			form_selectable_cell($report['enabled'] ? __('Enabled'): __('Disabled'), $report['id']);
++			form_selectable_cell($report['enabled'] ? __('Enabled'):__('Disabled'), $report['id']);
+ 			form_checkbox_cell($report['name'], $report['id']);
+ 
+ 			form_end_row();
+diff --git a/lib/html_utility.php b/lib/html_utility.php
+index 37a23ffee..6ea099709 100644
+--- a/lib/html_utility.php
++++ b/lib/html_utility.php
+@@ -149,6 +149,16 @@ function form_alternate_row($row_id = '', $light = false, $disabled = false) {
+ 	}
+ }
+ 
++/* form_selectable_ecell - a wrapper to form_selectable_cell that escapes the contents
++   @arg $contents - the readable portion of the
++   @arg $id - the id of the object that will be highlighted
++   @arg $width - the width of the table element
++   @arg $style_or_class - the style or class to apply to the table element
++   @arg $title - optional title for the column */
++function form_selectable_ecell($contents, $id, $width = '', $style_or_class = '', $title = '') {
++	form_selectable_cell(html_escape($contents), $id, $width, $style_or_class, $title);
++}
++
+ /* form_selectable_cell - format's a table row such that it can be highlighted using cacti's js actions
+    @arg $contents - the readable portion of the
+    @arg $id - the id of the object that will be highlighted
+diff --git a/links.php b/links.php
+index ee2b80ae4..bdfc8abff 100644
+--- a/links.php
++++ b/links.php
+@@ -397,10 +397,10 @@ function clearFilter() {
+ 			}
+ 
+ 			form_selectable_cell($actions, $page['id'], '50');
+-			form_selectable_cell(html_escape($page['contentfile']), $page['id']);
+-			form_selectable_cell(html_escape($page['title']), $page['id']);
+-			form_selectable_cell(html_escape($style_translate[$page['style']]) . ($page['style'] == 'CONSOLE' ? ' ( ' . ($page['extendedstyle'] == '' ? 'External Links':$page['extendedstyle']) . ' )':''), $page['id']);
+-			form_selectable_cell(($page['enabled'] == 'on' ? 'Yes':'No'), $page['id']);
++			form_selectable_ecell($page['contentfile'], $page['id']);
++			form_selectable_ecell($page['title'], $page['id']);
++			form_selectable_ecell($style_translate[$page['style']] . ($page['style'] == 'CONSOLE' ? ' ( ' . ($page['extendedstyle'] == '' ? __('External Links'):$page['extendedstyle']) . ' )':''), $page['id']);
++			form_selectable_cell(($page['enabled'] == 'on' ? __('Yes'):__('No')), $page['id']);
+ 
+ 			if (get_request_var('sort_column') == 'sortorder') {
+ 				if ($i != 0) {
+diff --git a/managers.php b/managers.php
+index cb7e0658e..904693200 100644
+--- a/managers.php
++++ b/managers.php
+@@ -66,7 +66,7 @@
+ }
+ 
+ function manager(){
+-	global $manager_actions, $item_rows;
++	global $config, $manager_actions, $item_rows;
+ 
+ 	/* ================= input validation and session storage ================= */
+ 	$filters = array(
+@@ -238,12 +238,12 @@ function clearFilter() {
+ 			$description = filter_value($item['description'], get_request_var('filter'));
+ 			$hostname    = filter_value($item['hostname'], get_request_var('filter'));
+ 			form_alternate_row('line' . $item['id'], false);
+-			form_selectable_cell('<a class="linkEditMain" href="managers.php?action=edit&id=' . $item['id'] . '">' . $description . '</a>', $item['id']);
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape($config['url_path'] . 'managers.php?action=edit&id=' . $item['id']) . '">' . html_escape($description) . '</a>', $item['id']);
+ 			form_selectable_cell($item['id'], $item['id']);
+ 			form_selectable_cell($item['disabled'] ? '<span class="deviceDown">' . __('Disabled') . '</span>' : '<span class="deviceUp">' . __('Enabled') . '</span>', $item['id']);
+-			form_selectable_cell($hostname, $item['id']);
+-			form_selectable_cell('<a class="linkEditMain" href="managers.php?action=edit&tab=notifications&id=' . $item['id'] . '">' . ($item['count_notify'] ? $item['count_notify'] : 0) . '</a>' , $item['id']);
+-			form_selectable_cell('<a class="linkEditMain" href="managers.php?action=edit&tab=logs&id=' . $item['id'] . '">' . ($item['count_log'] ? $item['count_log'] : 0 ) . '</a>', $item['id']);
++			form_selectable_ecell($hostname, $item['id']);
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape($config['url_path'] . 'managers.php?action=edit&tab=notifications&id=' . $item['id']) . '">' . ($item['count_notify'] ? $item['count_notify'] : 0) . '</a>' , $item['id']);
++			form_selectable_cell('<a class="linkEditMain" href="' . html_escape($config['url_path'] . 'managers.php?action=edit&tab=logs&id=' . $item['id']) . '">' . ($item['count_log'] ? $item['count_log'] : 0 ) . '</a>', $item['id']);
+ 			form_checkbox_cell($item['description'], $item['id']);
+ 			form_end_row();
+ 		}
+@@ -595,7 +595,7 @@ function clearFilter() {
+ 			form_selectable_cell($mib, $row_id);
+ 			form_selectable_cell($item['kind'], $row_id);
+ 			form_selectable_cell($item['max-access'],$row_id);
+-			form_selectable_cell(((isset($notifications[$item['mib']]) && isset($notifications[$item['mib']][$item['name']])) ? '<span class="deviceUp">' .__('Enabled') : '<span class="deviceDown">' .  __('Disabled')) . '</span>', $row_id);
++			form_selectable_cell(((isset($notifications[$item['mib']]) && isset($notifications[$item['mib']][$item['name']])) ? '<span class="deviceUp">' . __('Enabled'):'<span class="deviceDown">' . __('Disabled')) . '</span>', $row_id);
+ 			form_checkbox_cell($item['oid'], $row_id);
+ 			form_end_row();
+ 		}
+diff --git a/sites.php b/sites.php
+index e3a80df10..6f0f41bab 100644
+--- a/sites.php
++++ b/sites.php
+@@ -529,14 +529,14 @@ function clearFilter() {
+ 	$i = 0;
+ 	if (cacti_sizeof($site_list)) {
+ 		foreach ($site_list as $site) {
+-			$devices_url = $config['url_path'] . 'host.php?reset=1&site_id=' . $site['id'];
++			$devices_url = html_escape($config['url_path'] . 'host.php?reset=1&site_id=' . $site['id']);
+ 			form_alternate_row('line' . $site['id'], true);
+ 			form_selectable_cell(filter_value($site['name'], get_request_var('filter'), 'sites.php?action=edit&id=' . $site['id']), $site['id']);
+ 			form_selectable_cell($site['id'], $site['id'], '', 'right');
+ 			form_selectable_cell('<a class="linkEditMain" href="' . $devices_url . '">' . number_format_i18n($site['hosts'], '-1') . '</a>', $site['id'], '', 'right');
+-			form_selectable_cell($site['city'], $site['id'], '', 'left');
+-			form_selectable_cell($site['state'], $site['id'], '', 'left');
+-			form_selectable_cell($site['country'], $site['id'], '', 'left');
++			form_selectable_ecell($site['city'], $site['id'], '', 'left');
++			form_selectable_ecell($site['state'], $site['id'], '', 'left');
++			form_selectable_ecell($site['country'], $site['id'], '', 'left');
+ 			form_checkbox_cell($site['name'], $site['id']);
+ 			form_end_row();
+ 		}
+diff --git a/tree.php b/tree.php
+index 92e2dadaa..7077680dc 100644
+--- a/tree.php
++++ b/tree.php
+@@ -2009,17 +2009,17 @@ function clearFilter() {
+ 
+ 			form_alternate_row('line' . $tree['id'], true);
+ 			form_selectable_cell(filter_value($tree['name'], get_request_var('filter'), 'tree.php?action=edit&id=' . $tree['id']), $tree['id']);
+-			form_selectable_cell($tree['id'], $tree['id'], '', 'text-align:right');
++			form_selectable_cell($tree['id'], $tree['id'], '', 'right');
+ 			form_selectable_cell($tree['enabled'] == 'on' ? __('Yes'):__('No'), $tree['id']);
+ 			form_selectable_cell($tree['locked'] == '1' ? __('Yes'):__('No'), $tree['id']);
+ 			form_selectable_cell(get_username($tree['user_id']), $tree['id']);
+ 			form_selectable_cell($sequence, $tree['id'], '', 'nowrap center');
+-			form_selectable_cell(substr($tree['last_modified'],0,16), $tree['id'], '', 'text-align:right');
+-			form_selectable_cell(get_username($tree['modified_by']), $tree['id'], '', 'text-align:right');
+-			form_selectable_cell($tree['sites'] > 0 ? number_format_i18n($tree['sites'], '-1'):'-', $tree['id'], '', 'text-align:right');
+-			form_selectable_cell($tree['branches'] > 0 ? number_format_i18n($tree['branches'], '-1'):'-', $tree['id'], '', 'text-align:right');
+-			form_selectable_cell($tree['hosts'] > 0 ? number_format_i18n($tree['hosts'], '-1'):'-', $tree['id'], '', 'text-align:right');
+-			form_selectable_cell($tree['graphs'] > 0 ? number_format_i18n($tree['graphs'], '-1'):'-', $tree['id'], '', 'text-align:right');
++			form_selectable_cell(substr($tree['last_modified'],0,16), $tree['id'], '', 'right');
++			form_selectable_cell(get_username($tree['modified_by']), $tree['id'], '', 'right');
++			form_selectable_cell($tree['sites'] > 0 ? number_format_i18n($tree['sites'], '-1'):'-', $tree['id'], '', 'right');
++			form_selectable_cell($tree['branches'] > 0 ? number_format_i18n($tree['branches'], '-1'):'-', $tree['id'], '', 'right');
++			form_selectable_cell($tree['hosts'] > 0 ? number_format_i18n($tree['hosts'], '-1'):'-', $tree['id'], '', 'right');
++			form_selectable_cell($tree['graphs'] > 0 ? number_format_i18n($tree['graphs'], '-1'):'-', $tree['id'], '', 'right');
+ 			form_checkbox_cell($tree['name'], $tree['id']);
+ 			form_end_row();
+ 
+diff --git a/user_admin.php b/user_admin.php
+index 602d4c05f..3cd348ed9 100644
+--- a/user_admin.php
++++ b/user_admin.php
+@@ -1241,7 +1241,7 @@ function graph_perms_edit($tab, $header_label) {
+ 			foreach ($hosts as $host) {
+ 				form_alternate_row('line' . $host['id'], true);
+ 				form_selectable_cell(filter_value($host['description'], get_request_var('filter')), $host['id']);
+-				form_selectable_cell(round(($host['id']), 2), $host['id']);
++				form_selectable_cell($host['id'], $host['id']);
+ 				if (empty($host['user_id']) || $host['user_id'] == NULL) {
+ 					if ($policy['policy_hosts'] == 1) {
+ 						form_selectable_cell('<span class="accessGranted">' . __('Access Granted') . '</span>', $host['id']);
+diff --git a/user_domains.php b/user_domains.php
+index 212b4c56c..e269fb1c7 100644
+--- a/user_domains.php
++++ b/user_domains.php
+@@ -760,9 +760,9 @@ function clearFilter() {
+ 			form_selectable_cell(filter_value($domain['domain_name'], get_request_var('filter'), 'user_domains.php?action=edit&domain_id=' . $domain['domain_id']), $domain['domain_id']);
+ 			form_selectable_cell($domain_types[$domain['type']], $domain['domain_id']);
+ 			form_selectable_cell(($domain['defdomain'] == '0' ? '--': __('Yes') ), $domain['domain_id']);
+-			form_selectable_cell(($domain['user_id'] == '0' ? __('None Selected') : db_fetch_cell_prepared('SELECT username FROM user_auth WHERE id = ?', array($domain['user_id']))), $domain['domain_id']);
+-			form_selectable_cell(db_fetch_cell_prepared('SELECT cn_full_name FROM user_domains_ldap WHERE domain_id = ?', array($domain['domain_id'])), $domain['domain_id']);
+-			form_selectable_cell(db_fetch_cell_prepared('SELECT cn_email FROM user_domains_ldap WHERE domain_id = ?', array($domain['domain_id'])), $domain['domain_id']);
++			form_selectable_ecell(($domain['user_id'] == '0' ? __('None Selected') : db_fetch_cell_prepared('SELECT username FROM user_auth WHERE id = ?', array($domain['user_id']))), $domain['domain_id']);
++			form_selectable_ecell(db_fetch_cell_prepared('SELECT cn_full_name FROM user_domains_ldap WHERE domain_id = ?', array($domain['domain_id'])), $domain['domain_id']);
++			form_selectable_ecell(db_fetch_cell_prepared('SELECT cn_email FROM user_domains_ldap WHERE domain_id = ?', array($domain['domain_id'])), $domain['domain_id']);
+ 			form_selectable_cell($domain['enabled'] == 'on' ? __('Yes'):__('No'), $domain['domain_id']);
+ 			form_checkbox_cell($domain['domain_name'], $domain['domain_id']);
+ 			form_end_row();
+diff --git a/user_group_admin.php b/user_group_admin.php
+index 5510effaf..931e819f5 100644
+--- a/user_group_admin.php
++++ b/user_group_admin.php
+@@ -688,7 +688,7 @@ function user_group_members_edit($header_label) {
+ 			} else {
+ 				form_selectable_cell('<span class="accessRestricted">' . __('Non Member') . '</span>', $g['id']);
+ 			}
+-			form_selectable_cell(($g['enabled'] == 'on' ? __('Enabled'): __('Disabled') ), $g['id']);
++			form_selectable_cell(($g['enabled'] == 'on' ? __('Enabled'):__('Disabled') ), $g['id']);
+ 			form_selectable_cell((isset($auth_realms[$g['realm']]) ? $auth_realms[$g['realm']]:'Unknown'), $g['id']);
+ 			form_checkbox_cell($g['full_name'], $g['id']);
+ 			form_end_row();
+@@ -975,7 +975,7 @@ function user_group_graph_perms_edit($tab, $header_label) {
+ 			foreach ($hosts as $host) {
+ 				form_alternate_row('line' . $host['id'], true);
+ 				form_selectable_cell(filter_value($host['description'], get_request_var('filter')), $host['id']);
+-				form_selectable_cell(round(($host['id']), 2), $host['id']);
++				form_selectable_cell($host['id'], $host['id']);
+ 				if (empty($host['group_id']) || $host['group_id'] == NULL) {
+ 					if ($policy['policy_hosts'] == 1) {
+ 						form_selectable_cell('<span class="accessGranted">' . __('Access Granted') . '</span>', $host['id']);
+diff --git a/utilities.php b/utilities.php
+index 215786e2b..12628666d 100644
+--- a/utilities.php
++++ b/utilities.php
+@@ -2481,7 +2481,7 @@ function clearFilter() {
+ 			$max_access = filter_value($item['max-access'], get_request_var('filter'));
+ 
+ 			form_alternate_row('line' . $item['oid'], false);
+-			form_selectable_cell( $oid, $item['oid']);
++			form_selectable_cell($oid, $item['oid']);
+ 			if($item['description']) {
+ 				print '<td><a href="#" title="<div class=\'header\'>' . $name . '</div><div class=\'content preformatted\'>' . html_escape($item['description']) . '</div>" class="tooltip">' . $name . '</a></td>';
+ 			}else {
+@@ -2490,7 +2490,7 @@ function clearFilter() {
+ 			form_selectable_cell($mib, $item['oid']);
+ 			form_selectable_cell($item['kind'], $item['oid']);
+ 			form_selectable_cell($max_access, $item['oid']);
+-			form_selectable_cell((in_array($item['kind'], array(__('Scalar'), __('Column Data'))) ? $item['value'] : __('N/A')), $item['oid']);
++			form_selectable_ecell((in_array($item['kind'], array(__('Scalar'), __('Column Data'))) ? $item['value'] : __('N/A')), $item['oid']);
+ 			form_end_row();
+ 		}
+ 	}
+diff --git a/vdef.php b/vdef.php
+index 6fa3a969c..b745317f5 100644
+--- a/vdef.php
++++ b/vdef.php
+@@ -99,7 +99,7 @@ function draw_vdef_preview($vdef_id) {
+ 	?>
+ 	<tr class='even'>
+ 		<td style='padding:4px'>
+-			<pre>vdef=<?php print get_vdef($vdef_id, true);?></pre>
++			<pre>vdef=<?php print html_escape(get_vdef($vdef_id, true));?></pre>
+ 		</td>
+ 	</tr>
+ 	<?php
+@@ -404,7 +404,7 @@ function vdef_item_edit() {
+ 		$header_label = __('VDEF Items [new]');
+ 	}
+ 
+-	form_start('vdef.php', 'form_vdef');
++	form_start('vdef.php', 'chk');
+ 
+ 	html_start_box($header_label, '100%', '', '3', 'center', '');
+ 
+@@ -897,9 +897,9 @@ function vdef($refresh = true) {
+ 
+             form_alternate_row('line' . $vdef['id'], false, $disabled);
+ 			form_selectable_cell(filter_value($vdef['name'], get_request_var('filter'), 'vdef.php?action=edit&id=' . $vdef['id']), $vdef['id']);
+-            form_selectable_cell($disabled ? __('No'):__('Yes'), $vdef['id'], '', 'text-align:right');
+-            form_selectable_cell(number_format_i18n($vdef['graphs'], '-1'), $vdef['id'], '', 'text-align:right');
+-            form_selectable_cell(number_format_i18n($vdef['templates'], '-1'), $vdef['id'], '', 'text-align:right');
++            form_selectable_cell($disabled ? __('No'):__('Yes'), $vdef['id'], '', 'right');
++            form_selectable_cell(number_format_i18n($vdef['graphs'], '-1'), $vdef['id'], '', 'right');
++            form_selectable_cell(number_format_i18n($vdef['templates'], '-1'), $vdef['id'], '', 'right');
+             form_checkbox_cell($vdef['name'], $vdef['id'], $disabled);
+             form_end_row();
+         }

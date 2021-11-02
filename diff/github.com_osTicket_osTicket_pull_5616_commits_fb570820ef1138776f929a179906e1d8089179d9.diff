@@ -1,0 +1,182 @@
+From fb570820ef1138776f929a179906e1d8089179d9 Mon Sep 17 00:00:00 2001
+From: JediKev <kevin@enhancesoft.com>
+Date: Tue, 18 Aug 2020 10:15:52 -0500
+Subject: [PATCH] xss: Internal Notes
+
+This addresses a vulnerability reported by heinhtetaung where Internal Note
+contents are not correctly sanitized if errors are returned. This adds
+`true` as the second argument to `Format::htmlchars()` so that all content
+is sanitized properly. In some cases however we cannot blanket sanitize all
+the content as Inline Images, etc. tend to get obfuscated. So in those cases
+this adds `Format::sanitize()` to the Internal Notes directly.
+---
+ include/staff/apikey.inc.php         | 2 +-
+ include/staff/banrule.inc.php        | 2 +-
+ include/staff/cannedresponse.inc.php | 2 +-
+ include/staff/category.inc.php       | 2 +-
+ include/staff/dynamic-list.inc.php   | 2 +-
+ include/staff/email.inc.php          | 2 +-
+ include/staff/faq.inc.php            | 2 +-
+ include/staff/filter.inc.php         | 2 +-
+ include/staff/page.inc.php           | 2 +-
+ include/staff/role.inc.php           | 2 +-
+ include/staff/slaplan.inc.php        | 2 +-
+ include/staff/template.inc.php       | 2 +-
+ 12 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/include/staff/apikey.inc.php b/include/staff/apikey.inc.php
+index c7da2e8e9e..3a7675e592 100644
+--- a/include/staff/apikey.inc.php
++++ b/include/staff/apikey.inc.php
+@@ -15,7 +15,7 @@
+     $info['isactive']=isset($info['isactive'])?$info['isactive']:1;
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <form action="apikeys.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+  <?php csrf_token(); ?>
+diff --git a/include/staff/banrule.inc.php b/include/staff/banrule.inc.php
+index ad8c69b81f..5dbd1e3b5c 100644
+--- a/include/staff/banrule.inc.php
++++ b/include/staff/banrule.inc.php
+@@ -17,7 +17,7 @@
+     $qs += array('a' => $_REQUEST['a']);
+ }
+ 
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <form action="banlist.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+  <?php csrf_token(); ?>
+diff --git a/include/staff/cannedresponse.inc.php b/include/staff/cannedresponse.inc.php
+index 981eef289a..9c855e7df0 100644
+--- a/include/staff/cannedresponse.inc.php
++++ b/include/staff/cannedresponse.inc.php
+@@ -110,7 +110,7 @@
+         <tr>
+             <td colspan=2>
+                 <textarea class="richtext no-bar" name="notes" cols="21"
+-                    rows="8" style="width: 80%;"><?php echo $info['notes']; ?></textarea>
++                    rows="8" style="width: 80%;"><?php echo Format::sanitize($info['notes']); ?></textarea>
+             </td>
+         </tr>
+     </tbody>
+diff --git a/include/staff/category.inc.php b/include/staff/category.inc.php
+index a1b6c2631f..6e6fd0a672 100644
+--- a/include/staff/category.inc.php
++++ b/include/staff/category.inc.php
+@@ -33,7 +33,7 @@
+     $submit_text=__('Add');
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ 
+ ?>
+ <form action="categories.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+diff --git a/include/staff/dynamic-list.inc.php b/include/staff/dynamic-list.inc.php
+index 8fb39d2cf4..da62a5f3e5 100644
+--- a/include/staff/dynamic-list.inc.php
++++ b/include/staff/dynamic-list.inc.php
+@@ -16,7 +16,7 @@
+     $newcount=4;
+ }
+ 
+-$info=Format::htmlchars(($errors && $_POST) ? array_merge($info,$_POST) : $info);
++$info=Format::htmlchars(($errors && $_POST) ? array_merge($info,$_POST) : $info, true);
+ 
+ ?>
+ <form action="" method="post" class="save">
+diff --git a/include/staff/email.inc.php b/include/staff/email.inc.php
+index 644ffb0e5d..c47171d970 100644
+--- a/include/staff/email.inc.php
++++ b/include/staff/email.inc.php
+@@ -32,7 +32,7 @@
+         $info['smtp_auth'] = 1;
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <h2><?php echo $title; ?>
+     <?php if (isset($info['email'])) { ?><small>
+diff --git a/include/staff/faq.inc.php b/include/staff/faq.inc.php
+index 80bf224155..25ee6d9d26 100644
+--- a/include/staff/faq.inc.php
++++ b/include/staff/faq.inc.php
+@@ -250,7 +250,7 @@ class="richtext draft" <?php
+     </div>
+     <div style="margin-top:10px"></div>
+     <textarea class="richtext no-bar" name="notes" cols="21"
+-        rows="8" style="width: 80%;"><?php echo $info['notes']; ?></textarea>
++        rows="8" style="width: 80%;"><?php echo Format::sanitize($info['notes']); ?></textarea>
+ </div>
+ 
+ <p style="text-align:center;">
+diff --git a/include/staff/filter.inc.php b/include/staff/filter.inc.php
+index 12f3c9af0a..7484a696cf 100644
+--- a/include/staff/filter.inc.php
++++ b/include/staff/filter.inc.php
+@@ -21,7 +21,7 @@
+     $info['rules'] = array();
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <form action="filters.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+     <?php csrf_token(); ?>
+diff --git a/include/staff/page.inc.php b/include/staff/page.inc.php
+index cdde2d4fec..ebd7aed4e3 100644
+--- a/include/staff/page.inc.php
++++ b/include/staff/page.inc.php
+@@ -184,7 +184,7 @@
+     <em><strong><?php echo __('Internal Notes'); ?></strong>:
+       <?php echo __("Be liberal, they're internal"); ?></em>
+     <textarea class="richtext no-bar" name="notes" cols="21"
+-      rows="8" style="width: 80%;"><?php echo $info['notes']; ?></textarea>
++      rows="8" style="width: 80%;"><?php echo Format::sanitize($info['notes']); ?></textarea>
+   </div>
+ </div>
+ 
+diff --git a/include/staff/role.inc.php b/include/staff/role.inc.php
+index 5f05c6d794..e6cdc6bf99 100644
+--- a/include/staff/role.inc.php
++++ b/include/staff/role.inc.php
+@@ -15,7 +15,7 @@
+     $newcount=4;
+ }
+ 
+-$info = Format::htmlchars(($errors && $_POST) ? array_merge($info, $_POST) : $info);
++$info = Format::htmlchars(($errors && $_POST) ? array_merge($info, $_POST) : $info, true);
+ 
+ ?>
+ <form action="" method="post" class="save">
+diff --git a/include/staff/slaplan.inc.php b/include/staff/slaplan.inc.php
+index 55c0b8c24d..4fdeede8c8 100644
+--- a/include/staff/slaplan.inc.php
++++ b/include/staff/slaplan.inc.php
+@@ -18,7 +18,7 @@
+     $info['disable_overdue_alerts']=isset($info['disable_overdue_alerts'])?$info['disable_overdue_alerts']:0;
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <form action="slas.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+  <?php csrf_token(); ?>
+diff --git a/include/staff/template.inc.php b/include/staff/template.inc.php
+index 17a417ed01..1a04818ec1 100644
+--- a/include/staff/template.inc.php
++++ b/include/staff/template.inc.php
+@@ -17,7 +17,7 @@
+     $info['lang_id'] = $cfg->getPrimaryLanguage();
+     $qs += array('a' => $_REQUEST['a']);
+ }
+-$info=Format::htmlchars(($errors && $_POST)?$_POST:$info);
++$info=Format::htmlchars(($errors && $_POST)?$_POST:$info, true);
+ ?>
+ <form action="templates.php?<?php echo Http::build_query($qs); ?>" method="post" class="save">
+  <?php csrf_token(); ?>

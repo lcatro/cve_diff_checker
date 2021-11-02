@@ -1,0 +1,31 @@
+From fa730b726aa1e0f4601f428ee29830007eea0080 Mon Sep 17 00:00:00 2001
+From: Fred Dixon <ffdixon@gmail.com>
+Date: Sun, 7 Jun 2020 10:48:25 -0500
+Subject: [PATCH] Update default freeSWITCH ESL Password
+
+---
+ bigbluebutton-config/bin/bbb-conf | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/bigbluebutton-config/bin/bbb-conf b/bigbluebutton-config/bin/bbb-conf
+index e91de19bb62..03b1b4b9a4c 100755
+--- a/bigbluebutton-config/bin/bbb-conf
++++ b/bigbluebutton-config/bin/bbb-conf
+@@ -2007,6 +2007,17 @@ if [ -n "$HOST" ]; then
+         #fi
+     fi
+ 
++    ESL_PASSWORD=$(xmlstarlet sel -t -m 'configuration/settings/param[@name="password"]' -v @value /opt/freeswitch/etc/freeswitch/autoload_configs/event_socket.conf.xml)
++    if [ "$ESL_PASSWORD" == "ClueCon" ]; then
++        NEW_ESL_PASSWORD=$(openssl rand -hex 8)
++        echo "Changing default password for FreeSWITCH Event Socket Layer to $NEW_ESL_PASSWORD"
++        # Update to a new password
++
++       sudo sed -i "s/ClueCon/$NEW_ESL_PASSWORD/g" /opt/freeswitch/etc/freeswitch/autoload_configs/event_socket.conf.xml
++       sudo sed -i "s/ClueCon/$NEW_ESL_PASSWORD/g" /usr/share/bbb-fsesl-akka/conf/application.conf
++       sudo yq w -i /usr/local/bigbluebutton/bbb-webrtc-sfu/config/default.yml freeswitch.esl_password "$NEW_ESL_PASSWORD"
++    fi
++
+     echo "Restarting the BigBlueButton $BIGBLUEBUTTON_RELEASE ..."
+     stop_bigbluebutton
+     update_gstreamer

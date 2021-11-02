@@ -1,0 +1,211 @@
+From b6491eba7f942d424f6267045a417c747e2f1996 Mon Sep 17 00:00:00 2001
+From: Grant Gainey <ggainey@redhat.com>
+Date: Wed, 30 Mar 2016 12:53:19 -0400
+Subject: [PATCH] 1320452 - Cleaning up some remaining Tag/Group XSS issues
+
+---
+ .../action/groups/DeleteGroupAction.java      | 18 +++--
+ .../WEB-INF/pages/admin/assignedgroups.jsp    | 75 +++++++------------
+ .../webapp/WEB-INF/pages/groups/delete.jsp    |  3 +-
+ .../sdc/history/snapshots/snapshot_tags.jsp   |  4 +-
+ .../sdc/history/snapshots/tags_delete.jsp     |  4 +-
+ 5 files changed, 47 insertions(+), 57 deletions(-)
+
+diff --git a/java/code/src/com/redhat/rhn/frontend/action/groups/DeleteGroupAction.java b/java/code/src/com/redhat/rhn/frontend/action/groups/DeleteGroupAction.java
+index 774fa3c809f..ca6184d1824 100644
+--- a/java/code/src/com/redhat/rhn/frontend/action/groups/DeleteGroupAction.java
++++ b/java/code/src/com/redhat/rhn/frontend/action/groups/DeleteGroupAction.java
+@@ -15,18 +15,19 @@
+ 
+ package com.redhat.rhn.frontend.action.groups;
+ 
+-import com.redhat.rhn.domain.server.ManagedServerGroup;
+-import com.redhat.rhn.frontend.struts.RequestContext;
+-import com.redhat.rhn.frontend.struts.RhnAction;
+-import com.redhat.rhn.frontend.struts.RhnHelper;
+-import com.redhat.rhn.manager.system.ServerGroupManager;
++import javax.servlet.http.HttpServletRequest;
++import javax.servlet.http.HttpServletResponse;
+ 
++import org.apache.commons.lang.StringEscapeUtils;
+ import org.apache.struts.action.ActionForm;
+ import org.apache.struts.action.ActionForward;
+ import org.apache.struts.action.ActionMapping;
+ 
+-import javax.servlet.http.HttpServletRequest;
+-import javax.servlet.http.HttpServletResponse;
++import com.redhat.rhn.domain.server.ManagedServerGroup;
++import com.redhat.rhn.frontend.struts.RequestContext;
++import com.redhat.rhn.frontend.struts.RhnAction;
++import com.redhat.rhn.frontend.struts.RhnHelper;
++import com.redhat.rhn.manager.system.ServerGroupManager;
+ 
+ 
+ /**
+@@ -36,6 +37,7 @@
+ public class DeleteGroupAction extends RhnAction {
+     private static final String DELETED_MESSAGE_KEY = "systemgroup.delete.deleted";
+     /** {@inheritDoc} */
++    @Override
+     public ActionForward execute(ActionMapping mapping,
+                                  ActionForm formIn,
+                                  HttpServletRequest request,
+@@ -43,9 +45,9 @@ public ActionForward execute(ActionMapping mapping,
+         RequestContext context = new RequestContext(request);
+         ManagedServerGroup serverGroup = context.lookupAndBindServerGroup();
+         if (context.isSubmitted()) {
+-            String [] params = {serverGroup.getName()};
+             ServerGroupManager manager = ServerGroupManager.getInstance();
+             manager.remove(context.getCurrentUser(), serverGroup);
++            String [] params = {StringEscapeUtils.escapeHtml(serverGroup.getName())};
+             getStrutsDelegate().saveMessage(DELETED_MESSAGE_KEY, params, request);
+             return mapping.findForward("success");
+         }
+diff --git a/java/code/webapp/WEB-INF/pages/admin/assignedgroups.jsp b/java/code/webapp/WEB-INF/pages/admin/assignedgroups.jsp
+index a5392cfe4cf..8f5329d39c4 100644
+--- a/java/code/webapp/WEB-INF/pages/admin/assignedgroups.jsp
++++ b/java/code/webapp/WEB-INF/pages/admin/assignedgroups.jsp
+@@ -18,55 +18,42 @@
+     <p><bean:message key="assignedgroups.jsp.asadmin"/></p>
+   </rhn:require>
+ </div>
+-
+-
+-<rl:listset name="groupSet">
+-    <rhn:csrf />
+-
+-        <rl:list dataset="pageList" name="groupList" decorator="SelectableDecorator"
+-             emptykey="grouplist.jsp.nogroups"
+-                         filter="com.redhat.rhn.frontend.taglibs.list.filters.SystemGroupFilter">
+-
+-
+- <rl:selectablecolumn value="${current.id}"
+-                                        selected="${current.selected}"/>
+-
+-                <rl:column sortable="true"
+-                                        headerkey="assignedgroups.jsp.group"
+-                                        sortattr="name">
+-
+-                <c:out value="<a href=\"/rhn/groups/GroupDetail.do?sgid=${current.id}\">${current.name}</a>" escapeXml="false" />
+-            </rl:column>
+-
+-                <rl:column sortable="true"
+-                                        headerkey="grouplist.jsp.systems"
+-                                        sortattr="serverCount">
+-
+-                                                <c:out value="<a href=\"/rhn/groups/ListRemoveSystems.do?sgid=${current.id}\">${current.serverCount}</a>" escapeXml="false" />
+-            </rl:column>
+-
+-
+-
+-
+-</rl:list>
++ <rl:listset name="groupSet">
++  <rhn:csrf />
++
++  <rl:list dataset="pageList" name="groupList"
++           decorator="SelectableDecorator" emptykey="grouplist.jsp.nogroups"
++           filter="com.redhat.rhn.frontend.taglibs.list.filters.SystemGroupFilter">
++
++   <rl:selectablecolumn value="${current.id}" selected="${current.selected}" />
++
++   <rl:column sortable="true" headerkey="assignedgroups.jsp.group" sortattr="name">
++    <a href="/rhn/groups/GroupDetail.do?sgid=${current.id}">
++      <c:out value="${current.name}" />
++    </a>
++   </rl:column>
++   <rl:column sortable="true" headerkey="grouplist.jsp.systems" sortattr="serverCount">
++    <a href="/rhn/groups/ListRemoveSystems.do?sgid=${current.id}">
++     <c:out value="${current.serverCount}" />
++    </a>
++   </rl:column>
++  </rl:list>
+   <c:if test="${not (userIsOrgAdmin)}">
+-    <div class="text-right">
+-      <hr />
+-      <html:submit styleClass="btn btn-success" property="submit">
+-        <bean:message key="assignedgroups.jsp.submitpermissions"/>
+-      </html:submit>
+-    </div>
++   <div class="text-right">
++    <hr />
++    <html:submit styleClass="btn btn-success" property="submit">
++     <bean:message key="assignedgroups.jsp.submitpermissions" />
++    </html:submit>
++   </div>
+   </c:if>
+ 
+   <rhn:hidden name="uid" value="${user.id}" />
+   <rhn:hidden name="formvars" value="uid" />
+ 
+-        <rhn:submitted/>
+-</rl:listset>
+-
++  <rhn:submitted />
++ </rl:listset>
+ 
+-
+-<html:form action="/users/AssignedSystemGroups">
++ <html:form action="/users/AssignedSystemGroups">
+ <rhn:csrf />
+ <rhn:submitted />
+ <div class="page-summary">
+@@ -104,9 +91,5 @@
+ 
+ </html:form>
+ 
+-
+-
+-
+-
+ </body>
+ </html>
+diff --git a/java/code/webapp/WEB-INF/pages/groups/delete.jsp b/java/code/webapp/WEB-INF/pages/groups/delete.jsp
+index d9c9466f2fc..cd52a90cafd 100644
+--- a/java/code/webapp/WEB-INF/pages/groups/delete.jsp
++++ b/java/code/webapp/WEB-INF/pages/groups/delete.jsp
+@@ -1,4 +1,5 @@
+ <%@ taglib uri="http://java.sun.com/jsp/jstl/core" prefix="c" %>
++<%@ taglib uri="http://java.sun.com/jsp/jstl/functions" prefix="fn" %>
+ <%@ taglib uri="http://struts.apache.org/tags-html" prefix="html" %>
+ <%@ taglib uri="http://struts.apache.org/tags-bean" prefix="bean" %>
+ <%@ taglib uri="http://rhn.redhat.com/rhn" prefix="rhn" %>
+@@ -13,7 +14,7 @@
+ 
+     <div class="page-summary">
+     <p><bean:message key="systemgroup.delete.subtitle"
+-                  arg0="${systemgroup.name}"
++                  arg0="${fn:escapeXml(systemgroup.name)}"
+                   arg1="<strong>"
+                   arg2="</strong>"/></p>
+     <bean:message key="systemgroup.delete.summary"
+diff --git a/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/snapshot_tags.jsp b/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/snapshot_tags.jsp
+index 93b7ac7d362..12de8bbfe2a 100644
+--- a/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/snapshot_tags.jsp
++++ b/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/snapshot_tags.jsp
+@@ -24,7 +24,9 @@
+     <rl:decorator name="PageSizeDecorator" />
+     <rl:decorator name="ElaborationDecorator" />
+     <rl:column headerkey="system.history.snapshot.tagName">
+-      <a href="/rhn/systems/details/history/snapshots/Rollback.do?sid=${param.sid}&ss_id=${current.ssId}">${current.name}</a>
++      <a href="/rhn/systems/details/history/snapshots/Rollback.do?sid=${param.sid}&ss_id=${current.ssId}">
++        <c:out value="${current.name}"/>
++      </a>
+     </rl:column>
+     <rl:column headerkey="system.history.snapshot.tagAppliedToSnapshot">
+       ${current.created}
+diff --git a/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/tags_delete.jsp b/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/tags_delete.jsp
+index dcb5fcce07d..787f3f92081 100644
+--- a/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/tags_delete.jsp
++++ b/java/code/webapp/WEB-INF/pages/systems/sdc/history/snapshots/tags_delete.jsp
+@@ -22,7 +22,9 @@
+            emptykey="system.history.snapshot.noTags">
+     <rl:decorator name="PageSizeDecorator" />
+     <rl:column headerkey="system.history.snapshot.tagName">
+-      <a href="/rhn/systems/details/history/snapshots/Rollback.do?sid=${param.sid}&ss_id=${current.ssId}">${current.name}</a>
++      <a href="/rhn/systems/details/history/snapshots/Rollback.do?sid=${param.sid}&ss_id=${current.ssId}">
++        <c:out value="${current.name}" />
++      </a>
+     </rl:column>
+     <rl:column headerkey="column.created">
+       ${current.created}

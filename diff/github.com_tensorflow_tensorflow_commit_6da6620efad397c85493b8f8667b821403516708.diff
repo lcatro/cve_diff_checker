@@ -1,0 +1,69 @@
+From 6da6620efad397c85493b8f8667b821403516708 Mon Sep 17 00:00:00 2001
+From: Laura Pak <lpak@google.com>
+Date: Tue, 27 Jul 2021 17:19:57 -0700
+Subject: [PATCH] Secure tf.raw_ops.QuantizeV2
+
+Validate size and shape of min_range and max_range
+Ensure axis is within input dims limits
+
+PiperOrigin-RevId: 387232799
+Change-Id: I36975281f7b5758e9e31a8dcc73fe610ef456318
+---
+ tensorflow/core/kernels/quantize_op.cc | 43 ++++++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/tensorflow/core/kernels/quantize_op.cc b/tensorflow/core/kernels/quantize_op.cc
+index f64a2188fa954..be73d4f8291f7 100644
+--- a/tensorflow/core/kernels/quantize_op.cc
++++ b/tensorflow/core/kernels/quantize_op.cc
+@@ -113,7 +113,50 @@ class QuantizeV2Op : public OpKernel {
+ 
+     int num_slices = 1;
+     if (axis_ > -1) {
++      OP_REQUIRES(
++          ctx, input.dims() > axis_,
++          errors::InvalidArgument(
++              "Axis is on a zero-based index, so its value must always be less "
++              "than number of input's dims, but given axis value was ",
++              axis_, " and input's dims was ", input.dims()));
+       num_slices = input.dim_size(axis_);
++      OP_REQUIRES(ctx, input_min_range.dims() == 1,
++                  errors::InvalidArgument(
++                      "If axis is specified, min_range must be a 1-D tensor "
++                      "whose size matches the axis dimension of the input and "
++                      "output tensors, but min_range dims are ",
++                      input_min_range.dims()));
++      OP_REQUIRES(ctx, input_min_range.dim_size(0) == num_slices,
++                  errors::InvalidArgument(
++                      "If axis is specified, min_range must be a 1-D tensor "
++                      "whose size matches the axis dimension of the input and "
++                      "output tensors, but min_range is a 1-D tensor of size ",
++                      input_min_range.dim_size(0),
++                      " and input's axis dimension is of size ", num_slices));
++      OP_REQUIRES(ctx, input_max_range.dims() == 1,
++                  errors::InvalidArgument(
++                      "If axis is specified, max_range must be a 1-D tensor "
++                      "whose size matches the axis dimension of the input and "
++                      "output tensors, but max_range dims are ",
++                      input_max_range.dims()));
++      OP_REQUIRES(ctx, input_max_range.dim_size(0) == num_slices,
++                  errors::InvalidArgument(
++                      "If axis is specified, max_range must be a 1-D tensor "
++                      "whose size matches the axis dimension of the input and "
++                      "output tensors, but max_range is a 1-D tensor of size ",
++                      input_max_range.dim_size(0),
++                      " and input's axis dimension is of size ", num_slices));
++    } else {
++      OP_REQUIRES(ctx, input_min_range.NumElements() == 1,
++                  errors::InvalidArgument(
++                      "If axis is not specified, min_range must contain a "
++                      "single float element, but it contains ",
++                      input_min_range.NumElements(), " elements"));
++      OP_REQUIRES(ctx, input_max_range.NumElements() == 1,
++                  errors::InvalidArgument(
++                      "If axis is not specified, max_range must contain a "
++                      "single float element, but it contains ",
++                      input_max_range.NumElements(), " elements"));
+     }
+ 
+     const TensorShape& minmax_shape = ctx->input(1).shape();

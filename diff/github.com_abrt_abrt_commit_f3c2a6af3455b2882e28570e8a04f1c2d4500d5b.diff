@@ -1,0 +1,46 @@
+From f3c2a6af3455b2882e28570e8a04f1c2d4500d5b Mon Sep 17 00:00:00 2001
+From: Jakub Filak <jfilak@redhat.com>
+Date: Mon, 27 Apr 2015 07:52:00 +0200
+Subject: [PATCH] dbus: report invalid element names
+
+Return D-Bus error in case of invalid problem element name.
+
+Related: #1214451
+
+Signed-off-by: Jakub Filak <jfilak@redhat.com>
+---
+ src/dbus/abrt-dbus.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/dbus/abrt-dbus.c b/src/dbus/abrt-dbus.c
+index 9e1844a30..6de15e98d 100644
+--- a/src/dbus/abrt-dbus.c
++++ b/src/dbus/abrt-dbus.c
+@@ -599,7 +599,7 @@ static void handle_method_call(GDBusConnection *connection,
+ 
+         g_variant_get(parameters, "(&s&s&s)", &problem_id, &element, &value);
+ 
+-        if (element == NULL || element[0] == '\0' || strlen(element) > 64)
++        if (!str_is_correct_filename(element))
+         {
+             log_notice("'%s' is not a valid element name of '%s'", element, problem_id);
+             char *error = xasprintf(_("'%s' is not a valid element name"), element);
+@@ -658,6 +658,18 @@ static void handle_method_call(GDBusConnection *connection,
+ 
+         g_variant_get(parameters, "(&s&s)", &problem_id, &element);
+ 
++        if (!str_is_correct_filename(element))
++        {
++            log_notice("'%s' is not a valid element name of '%s'", element, problem_id);
++            char *error = xasprintf(_("'%s' is not a valid element name"), element);
++            g_dbus_method_invocation_return_dbus_error(invocation,
++                                              "org.freedesktop.problems.InvalidElement",
++                                              error);
++
++            free(error);
++            return;
++        }
++
+         struct dump_dir *dd = open_directory_for_modification_of_element(
+                                     invocation, caller_uid, problem_id, element);
+         if (!dd)

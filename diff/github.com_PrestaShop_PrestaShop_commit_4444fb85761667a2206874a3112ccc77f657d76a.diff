@@ -1,0 +1,637 @@
+From 0de31e34bcb746f7ea2971043ac70492d4e0de8b Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Fri, 27 Mar 2020 15:21:59 +0100
+Subject: [PATCH 1/7] Add @AdminSecurity annotation on AttributeController
+
+---
+ .../Controller/Admin/AttributeController.php           | 10 +++++-----
+ src/PrestaShopBundle/Controller/Api/I18nController.php |  3 +++
+ .../Controller/Api/TranslationController.php           |  9 +++++++++
+ .../routing/admin/sell/catalog/products/attributes.yml |  5 +++++
+ .../Resources/config/routing/api/i18n.yml              |  1 +
+ .../Resources/config/routing/api/translations.yml      |  4 ++++
+ 6 files changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/src/PrestaShopBundle/Controller/Admin/AttributeController.php b/src/PrestaShopBundle/Controller/Admin/AttributeController.php
+index 098830e4003f..206dbfef8f13 100644
+--- a/src/PrestaShopBundle/Controller/Admin/AttributeController.php
++++ b/src/PrestaShopBundle/Controller/Admin/AttributeController.php
+@@ -39,7 +39,7 @@ class AttributeController extends FrameworkBundleAdminController
+     /**
+      * get All Attributes as json.
+      *
+-     * @AdminSecurity("is_granted(['read'], 'ADMINPRODUCTS_')")
++     * @AdminSecurity("is_granted(['read'], request.get('_legacy_controller'))")
+      *
+      * @return JsonResponse
+      */
+@@ -82,7 +82,7 @@ public function getAllAttributesAction()
+     /**
+      * Attributes generator.
+      *
+-     * @AdminSecurity("is_granted(['create', 'update'], 'ADMINPRODUCTS_')")
++     * @AdminSecurity("is_granted(['create', 'update'], request.get('_legacy_controller'))")
+      *
+      * @param Request $request The request
+      *
+@@ -200,7 +200,7 @@ public function ensureProductHasDefaultCombination(Product $product, array $comb
+     /**
+      * Delete a product attribute.
+      *
+-     * @AdminSecurity("is_granted(['delete'], 'ADMINPRODUCTS_')")
++     * @AdminSecurity("is_granted(['delete'], request.get('_legacy_controller'))")
+      *
+      * @param int $idProduct The product ID
+      * @param Request $request The request
+@@ -237,7 +237,7 @@ public function deleteAttributeAction($idProduct, Request $request)
+     /**
+      * Delete all product attributes.
+      *
+-     * @AdminSecurity("is_granted(['delete'], 'ADMINPRODUCTS_')")
++     * @AdminSecurity("is_granted(['delete'], request.get('_legacy_controller'))")
+      *
+      * @param int $idProduct The product ID
+      * @param Request $request The request
+@@ -277,7 +277,7 @@ public function deleteAllAttributeAction($idProduct, Request $request)
+     /**
+      * get the images form for a product combinations.
+      *
+-     * @AdminSecurity("is_granted(['read'], 'ADMINPRODUCTS_')")
++     * @AdminSecurity("is_granted(['read'], request.get('_legacy_controller'))")
+      *
+      * @param int $idProduct The product id
+      * @param Request $request The request
+diff --git a/src/PrestaShopBundle/Controller/Api/I18nController.php b/src/PrestaShopBundle/Controller/Api/I18nController.php
+index 4afaa76bd641..ca030ecabe23 100644
+--- a/src/PrestaShopBundle/Controller/Api/I18nController.php
++++ b/src/PrestaShopBundle/Controller/Api/I18nController.php
+@@ -27,6 +27,7 @@
+ namespace PrestaShopBundle\Controller\Api;
+ 
+ use Exception;
++use PrestaShopBundle\Security\Annotation\AdminSecurity;
+ use Symfony\Component\HttpFoundation\JsonResponse;
+ use Symfony\Component\HttpFoundation\Request;
+ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+@@ -36,6 +37,8 @@ class I18nController extends ApiController
+     /**
+      * Show translation for page-app build with vue-js.
+      *
++     * @AdminSecurity("is_granted('read', request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+diff --git a/src/PrestaShopBundle/Controller/Api/TranslationController.php b/src/PrestaShopBundle/Controller/Api/TranslationController.php
+index 395151d54a75..b027cb34dd58 100644
+--- a/src/PrestaShopBundle/Controller/Api/TranslationController.php
++++ b/src/PrestaShopBundle/Controller/Api/TranslationController.php
+@@ -29,6 +29,7 @@
+ use Exception;
+ use PrestaShopBundle\Api\QueryTranslationParamsCollection;
+ use PrestaShopBundle\Exception\InvalidLanguageException;
++use PrestaShopBundle\Security\Annotation\AdminSecurity;
+ use PrestaShopBundle\Service\TranslationService;
+ use PrestaShopBundle\Translation\View\TreeBuilder;
+ use Symfony\Component\HttpFoundation\JsonResponse;
+@@ -51,6 +52,8 @@ class TranslationController extends ApiController
+     /**
+      * Show translations for 1 domain & 1 locale given & 1 theme given (optional).
+      *
++     * @AdminSecurity("is_granted('read', request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+@@ -115,6 +118,8 @@ public function listDomainTranslationAction(Request $request)
+     /**
+      * Show tree for translation page with some params.
+      *
++     * @AdminSecurity("is_granted('read', request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+@@ -166,6 +171,8 @@ public function listTreeAction(Request $request)
+     /**
+      * Route to edit translation.
+      *
++     * @AdminSecurity("is_granted(['create', 'update'], request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+@@ -211,6 +218,8 @@ public function translationEditAction(Request $request)
+     /**
+      * Route to reset translation.
+      *
++     * @AdminSecurity("is_granted(['create', 'update'], request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+diff --git a/src/PrestaShopBundle/Resources/config/routing/admin/sell/catalog/products/attributes.yml b/src/PrestaShopBundle/Resources/config/routing/admin/sell/catalog/products/attributes.yml
+index 6f32a434ef81..af87b07325eb 100644
+--- a/src/PrestaShopBundle/Resources/config/routing/admin/sell/catalog/products/attributes.yml
++++ b/src/PrestaShopBundle/Resources/config/routing/admin/sell/catalog/products/attributes.yml
+@@ -4,24 +4,28 @@ admin_attribute_get_all:
+     defaults:
+         _controller: PrestaShopBundle:Admin/Attribute:getAllAttributes
+         _format: json
++        _legacy_controller: AdminProducts
+ 
+ admin_attribute_generator:
+     path:     /generator
+     methods:  [POST]
+     defaults:
+         _controller: PrestaShopBundle:Admin/Attribute:attributesGenerator
++        _legacy_controller: AdminProducts
+ 
+ admin_delete_attribute:
+     path:     /{idProduct}
+     methods:  [DELETE]
+     defaults:
+         _controller: PrestaShopBundle:Admin/Attribute:deleteAttribute
++        _legacy_controller: AdminProducts
+ 
+ admin_delete_all_attributes:
+     path:     /delete-all/{idProduct}
+     methods:  [GET]
+     defaults:
+         _controller: PrestaShopBundle:Admin/Attribute:deleteAllAttribute
++        _legacy_controller: AdminProducts
+         idProduct: 0
+     requirements:
+         idProduct: \d+
+@@ -32,6 +36,7 @@ admin_get_form_images_combination:
+     defaults:
+         _controller: PrestaShopBundle:Admin/Attribute:getFormImages
+         _format: json
++        _legacy_controller: AdminProducts
+         idProduct: 0
+     requirements:
+         idProduct: \d+
+diff --git a/src/PrestaShopBundle/Resources/config/routing/api/i18n.yml b/src/PrestaShopBundle/Resources/config/routing/api/i18n.yml
+index 76c03d4ce382..3aceac9c8e81 100644
+--- a/src/PrestaShopBundle/Resources/config/routing/api/i18n.yml
++++ b/src/PrestaShopBundle/Resources/config/routing/api/i18n.yml
+@@ -3,5 +3,6 @@ api_i18n_translations_list:
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.i18n.controller:listTranslationAction
++        _legacy_controller: AdminTranslations
+     requirements:
+         page: \w+
+diff --git a/src/PrestaShopBundle/Resources/config/routing/api/translations.yml b/src/PrestaShopBundle/Resources/config/routing/api/translations.yml
+index 3988173e5a0d..09de266dcd9d 100644
+--- a/src/PrestaShopBundle/Resources/config/routing/api/translations.yml
++++ b/src/PrestaShopBundle/Resources/config/routing/api/translations.yml
+@@ -3,6 +3,7 @@ api_translation_domains_tree:
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.translation.controller:listTreeAction
++        _legacy_controller: AdminTranslations
+         selected: null
+ 
+ api_translation_domain_catalog:
+@@ -10,6 +11,7 @@ api_translation_domain_catalog:
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.translation.controller:listDomainTranslationAction
++        _legacy_controller: AdminTranslations
+         theme: null
+         module: null
+ 
+@@ -18,9 +20,11 @@ api_translation_value_edit:
+     methods: [POST]
+     defaults:
+         _controller: prestashop.core.api.translation.controller:translationEditAction
++        _legacy_controller: AdminTranslations
+ 
+ api_translation_value_reset:
+     path: /reset
+     methods: [POST]
+     defaults:
+         _controller: prestashop.core.api.translation.controller:translationResetAction
++        _legacy_controller: AdminTranslations
+
+From 59f84545b10e9416c15320d7c20feac8023ed930 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Tue, 7 Apr 2020 10:53:52 +0200
+Subject: [PATCH 2/7]  Make sure employee has the right to see cart rules
+
+---
+ controllers/admin/AdminCartRulesController.php | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/controllers/admin/AdminCartRulesController.php b/controllers/admin/AdminCartRulesController.php
+index 94679679895a..b121fc9ceedd 100644
+--- a/controllers/admin/AdminCartRulesController.php
++++ b/controllers/admin/AdminCartRulesController.php
+@@ -56,6 +56,10 @@ public function __construct()
+ 
+     public function ajaxProcessLoadCartRules()
+     {
++        if (!$this->access('view')) {
++            return die(json_encode(array('error' => 'You do not have the right permission')));
++        }
++
+         $type = $token = $search = '';
+         $limit = $count = $id_cart_rule = 0;
+         if (Tools::getIsset('limit')) {
+
+From 7a9c963149dfb0824aa48f6734344e1a7cb714ab Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 8 Apr 2020 17:38:57 +0200
+Subject: [PATCH 3/7] Check permissions for Stats ajax requests
+
+---
+ controllers/admin/AdminStatsController.php | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/controllers/admin/AdminStatsController.php b/controllers/admin/AdminStatsController.php
+index b0579706d6c9..ee6b876c5860 100644
+--- a/controllers/admin/AdminStatsController.php
++++ b/controllers/admin/AdminStatsController.php
+@@ -629,6 +629,10 @@ public static function getExpenses($date_from, $date_to, $granularity = false)
+ 
+     public function displayAjaxGetKpi()
+     {
++        if (!$this->access('view')) {
++            return die(json_encode(array('error' => 'You do not have the right permission')));
++        }
++
+         $currency = new Currency(Configuration::get('PS_CURRENCY_DEFAULT'));
+         $tooltip = null;
+         switch (Tools::getValue('kpi')) {
+@@ -1039,6 +1043,10 @@ public function displayAjaxGetKpi()
+      */
+     public function displayAjaxGraphDraw()
+     {
++        if (!$this->access('view')) {
++            return die(json_encode(array('error' => 'You do not have the right permission')));
++        }
++
+         $module = Tools::getValue('module');
+         $render = Tools::getValue('render');
+         $type = Tools::getValue('type');
+@@ -1071,6 +1079,10 @@ public function displayAjaxGraphDraw()
+      */
+     public function displayAjaxGraphGrid()
+     {
++        if (!$this->access('view')) {
++            return die(json_encode(array('error' => 'You do not have the right permission')));
++        }
++
+         $module = Tools::getValue('module');
+         $render = Tools::getValue('render');
+         $type = Tools::getValue('type');
+
+From 17a1585ab0219e0cede11b038ba2ac0d938a995f Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 15 Apr 2020 12:17:08 +0200
+Subject: [PATCH 4/7] Do not allow read for process form
+
+---
+ .../Admin/Configure/AdvancedParameters/ImportController.php     | 2 +-
+ .../Configure/AdvancedParameters/PerformanceController.php      | 2 +-
+ .../Configure/ShopParameters/CustomerPreferencesController.php  | 2 +-
+ .../Admin/Improve/International/GeolocationController.php       | 2 +-
+ .../Admin/Improve/International/LocalizationController.php      | 2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/ImportController.php b/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/ImportController.php
+index 5ea0137742cd..25cff1454d83 100644
+--- a/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/ImportController.php
++++ b/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/ImportController.php
+@@ -256,7 +256,7 @@ public function getAvailableEntityFieldsAction(Request $request)
+     /**
+      * Process the import.
+      *
+-     * @AdminSecurity("is_granted(['read','update', 'create','delete'], request.get('_legacy_controller'))", redirectRoute="admin_import")
++     * @AdminSecurity("is_granted(['update', 'create', 'delete'], request.get('_legacy_controller'))", redirectRoute="admin_import")
+      * @DemoRestricted(redirectRoute="admin_import")
+      *
+      * @param Request $request
+diff --git a/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/PerformanceController.php b/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/PerformanceController.php
+index 56c533db527f..b9b87c228d3f 100644
+--- a/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/PerformanceController.php
++++ b/src/PrestaShopBundle/Controller/Admin/Configure/AdvancedParameters/PerformanceController.php
+@@ -80,7 +80,7 @@ public function indexAction(FormInterface $form = null)
+     /**
+      * Process the Performance configuration form.
+      *
+-     * @AdminSecurity("is_granted(['read','update', 'create','delete'], request.get('_legacy_controller'))", message="You do not have permission to update this.")
++     * @AdminSecurity("is_granted(['update', 'create', 'delete'], request.get('_legacy_controller'))", message="You do not have permission to update this.")
+      * @DemoRestricted(redirectRoute="admin_performance")
+      *
+      * @param Request $request
+diff --git a/src/PrestaShopBundle/Controller/Admin/Configure/ShopParameters/CustomerPreferencesController.php b/src/PrestaShopBundle/Controller/Admin/Configure/ShopParameters/CustomerPreferencesController.php
+index 258065ec5754..12ebc83f64f0 100644
+--- a/src/PrestaShopBundle/Controller/Admin/Configure/ShopParameters/CustomerPreferencesController.php
++++ b/src/PrestaShopBundle/Controller/Admin/Configure/ShopParameters/CustomerPreferencesController.php
+@@ -66,7 +66,7 @@ public function indexAction(Request $request)
+     /**
+      * Process the Customer Preferences configuration form.
+      *
+-     * @AdminSecurity("is_granted(['read','update', 'create','delete'], request.get('_legacy_controller'))", message="You do not have permission to update this.", redirectRoute="admin_customer_preferences")
++     * @AdminSecurity("is_granted(['update', 'create','delete'], request.get('_legacy_controller'))", message="You do not have permission to update this.", redirectRoute="admin_customer_preferences")
+      * @DemoRestricted(redirectRoute="admin_customer_preferences")
+      *
+      * @param Request $request
+diff --git a/src/PrestaShopBundle/Controller/Admin/Improve/International/GeolocationController.php b/src/PrestaShopBundle/Controller/Admin/Improve/International/GeolocationController.php
+index 16356502c479..458898a101cd 100644
+--- a/src/PrestaShopBundle/Controller/Admin/Improve/International/GeolocationController.php
++++ b/src/PrestaShopBundle/Controller/Admin/Improve/International/GeolocationController.php
+@@ -68,7 +68,7 @@ public function indexAction(Request $request)
+      * Process geolocation configuration form.
+      *
+      * @AdminSecurity(
+-     *     "is_granted(['read', 'update', 'create', 'delete'], request.get('_legacy_controller'))",
++     *     "is_granted(['update', 'create', 'delete'], request.get('_legacy_controller'))",
+      *     message="You do not have permission to edit this.",
+      *     redirectRoute="admin_geolocation"
+      * )
+diff --git a/src/PrestaShopBundle/Controller/Admin/Improve/International/LocalizationController.php b/src/PrestaShopBundle/Controller/Admin/Improve/International/LocalizationController.php
+index 5d05f36c17e0..a35b77186a14 100644
+--- a/src/PrestaShopBundle/Controller/Admin/Improve/International/LocalizationController.php
++++ b/src/PrestaShopBundle/Controller/Admin/Improve/International/LocalizationController.php
+@@ -75,7 +75,7 @@ public function indexAction(Request $request)
+     /**
+      * Save localization settings.
+      *
+-     * @AdminSecurity("is_granted(['read','update', 'create','delete'], request.get('_legacy_controller'))", message="You do not have permission to edit this.")
++     * @AdminSecurity("is_granted(['update', 'create', 'delete'], request.get('_legacy_controller'))", message="You do not have permission to edit this.")
+      * @DemoRestricted(redirectRoute="admin_localization_index")
+      *
+      * @param Request $request
+
+From a6f5f15d6961212190d5ca537f1a0ba674fe4122 Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 15 Apr 2020 12:24:51 +0200
+Subject: [PATCH 5/7] Stock mouvement permissions
+
+---
+ .../Controller/Api/StockController.php        |  9 +++++
+ .../Api/StockMovementController.php           |  7 ++++
+ .../config/routing/api/stock_movements.yml    | 40 ++++++++++---------
+ .../Resources/config/routing/api/stocks.yml   |  3 ++
+ 4 files changed, 41 insertions(+), 18 deletions(-)
+
+diff --git a/src/PrestaShopBundle/Controller/Api/StockController.php b/src/PrestaShopBundle/Controller/Api/StockController.php
+index 4ca1f7feaed4..5cabb2368b00 100644
+--- a/src/PrestaShopBundle/Controller/Api/StockController.php
++++ b/src/PrestaShopBundle/Controller/Api/StockController.php
+@@ -34,6 +34,7 @@
+ use PrestaShopBundle\Entity\Repository\StockRepository;
+ use PrestaShopBundle\Exception\InvalidPaginationParamsException;
+ use PrestaShopBundle\Exception\ProductNotFoundException;
++use PrestaShopBundle\Security\Annotation\AdminSecurity;
+ use PrestaShopBundle\Security\Voter\PageVoter;
+ use Symfony\Component\HttpFoundation\JsonResponse;
+ use Symfony\Component\HttpFoundation\Request;
+@@ -64,6 +65,10 @@ class StockController extends ApiController
+      */
+     public function listProductsAction(Request $request)
+     {
++        if (!$this->isGranted([PageVoter::READ], $request->get('_legacy_controller'))) {
++            return new JsonResponse(null, Response::HTTP_FORBIDDEN);
++        }
++
+         try {
+             $queryParamsCollection = $this->queryParams->fromRequest($request);
+         } catch (InvalidPaginationParamsException $exception) {
+@@ -150,6 +155,10 @@ public function bulkEditProductsAction(Request $request)
+      */
+     public function listProductsExportAction(Request $request)
+     {
++        if (!$this->isGranted([PageVoter::READ], $request->get('_legacy_controller'))) {
++            return new JsonResponse(null, Response::HTTP_FORBIDDEN);
++        }
++
+         try {
+             $queryParamsCollection = $this->queryParams->fromRequest($request);
+         } catch (InvalidPaginationParamsException $exception) {
+diff --git a/src/PrestaShopBundle/Controller/Api/StockMovementController.php b/src/PrestaShopBundle/Controller/Api/StockMovementController.php
+index 992fb460b8d9..f647d6229092 100644
+--- a/src/PrestaShopBundle/Controller/Api/StockMovementController.php
++++ b/src/PrestaShopBundle/Controller/Api/StockMovementController.php
+@@ -29,6 +29,7 @@
+ use PrestaShopBundle\Api\QueryStockMovementParamsCollection;
+ use PrestaShopBundle\Entity\Repository\StockMovementRepository;
+ use PrestaShopBundle\Exception\InvalidPaginationParamsException;
++use PrestaShopBundle\Security\Annotation\AdminSecurity;
+ use Symfony\Component\HttpFoundation\JsonResponse;
+ use Symfony\Component\HttpFoundation\Request;
+ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+@@ -46,6 +47,8 @@ class StockMovementController extends ApiController
+     public $queryParams;
+ 
+     /**
++     * @AdminSecurity("is_granted(['read'], request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+@@ -65,6 +68,8 @@ public function listMovementsAction(Request $request)
+     }
+ 
+     /**
++     * @AdminSecurity("is_granted(['read'], request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+@@ -75,6 +80,8 @@ public function listMovementsEmployeesAction(Request $request)
+     }
+ 
+     /**
++     * @AdminSecurity("is_granted(['read'], request.get('_legacy_controller'))")
++     *
+      * @param Request $request
+      *
+      * @return JsonResponse
+diff --git a/src/PrestaShopBundle/Resources/config/routing/api/stock_movements.yml b/src/PrestaShopBundle/Resources/config/routing/api/stock_movements.yml
+index 55df7ca1eb25..55a087b89e62 100644
+--- a/src/PrestaShopBundle/Resources/config/routing/api/stock_movements.yml
++++ b/src/PrestaShopBundle/Resources/config/routing/api/stock_movements.yml
+@@ -1,26 +1,30 @@
+ api_stock_list_movements:
+-     path: /
+-     methods: [GET]
+-     defaults:
+-         _controller: prestashop.core.api.stock_movement.controller:listMovementsAction
++    path: /
++    methods: [GET]
++    defaults:
++        _controller: prestashop.core.api.stock_movement.controller:listMovementsAction
++        _legacy_controller: AdminStockManagement
+ 
+ api_stock_product_list_movements:
+-     path: /product/{productId}
+-     methods: [GET]
+-     defaults:
+-         _controller: prestashop.core.api.stock_movement.controller:listMovementsAction
+-     requirements:
+-         productId: \d+
++    path: /product/{productId}
++    methods: [GET]
++    defaults:
++        _controller: prestashop.core.api.stock_movement.controller:listMovementsAction
++        _legacy_controller: AdminStockManagement
++    requirements:
++        productId: \d+
+ 
+ api_stock_list_movements_employees:
+-     path: /employees
+-     methods: [GET]
+-     defaults:
+-         _controller: prestashop.core.api.stock_movement.controller:listMovementsEmployeesAction
++    path: /employees
++    methods: [GET]
++    defaults:
++        _controller: prestashop.core.api.stock_movement.controller:listMovementsEmployeesAction
++        _legacy_controller: AdminStockManagement
+ 
+ 
+ api_stock_list_movements_types:
+-     path: /types
+-     methods: [GET]
+-     defaults:
+-         _controller: prestashop.core.api.stock_movement.controller:listMovementsTypesAction
++    path: /types
++    methods: [GET]
++    defaults:
++        _controller: prestashop.core.api.stock_movement.controller:listMovementsTypesAction
++        _legacy_controller: AdminStockManagement
+diff --git a/src/PrestaShopBundle/Resources/config/routing/api/stocks.yml b/src/PrestaShopBundle/Resources/config/routing/api/stocks.yml
+index 6964e4f75b83..f9a47adf9968 100644
+--- a/src/PrestaShopBundle/Resources/config/routing/api/stocks.yml
++++ b/src/PrestaShopBundle/Resources/config/routing/api/stocks.yml
+@@ -3,18 +3,21 @@ api_stock_list_products:
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.stock.controller:listProductsAction
++        _legacy_controller: AdminStockManagement
+ 
+ api_stock_list_products_export:
+     path: /export
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.stock.controller:listProductsExportAction
++        _legacy_controller: AdminStockManagement
+ 
+ api_stock_list_product_combinations:
+     path: /{productId}
+     methods: [GET]
+     defaults:
+         _controller: prestashop.core.api.stock.controller:listProductsAction
++        _legacy_controller: AdminStockManagement
+     requirements:
+         productId: \d+
+ 
+
+From 74bb95ed220932d996364ee24655d7738bd87a7b Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 15 Apr 2020 12:28:53 +0200
+Subject: [PATCH 6/7] Product list permissions
+
+---
+ src/PrestaShopBundle/Controller/Admin/ProductController.php | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/PrestaShopBundle/Controller/Admin/ProductController.php b/src/PrestaShopBundle/Controller/Admin/ProductController.php
+index 8f667a58c20c..0ec9405ccec2 100644
+--- a/src/PrestaShopBundle/Controller/Admin/ProductController.php
++++ b/src/PrestaShopBundle/Controller/Admin/ProductController.php
+@@ -262,6 +262,10 @@ public function listAction(
+         $sortOrder = 'asc',
+         $view = 'full'
+     ) {
++        if (!$this->isGranted(array(PageVoter::READ), self::PRODUCT_OBJECT)) {
++            return $this->redirect('admin_dashboard');
++        }
++
+         /** @var $productProvider ProductInterfaceProvider */
+         $productProvider = $this->get('prestashop.core.admin.data_provider.product_interface');
+         $adminProductWrapper = $this->get('prestashop.adapter.admin.wrapper.product');
+
+From c85734fefd1399c9883a7a4ce038cb770f183a8b Mon Sep 17 00:00:00 2001
+From: Pierre RAMBAUD <pierre.rambaud@prestashop.com>
+Date: Wed, 15 Apr 2020 14:41:47 +0200
+Subject: [PATCH 7/7] Statuses permissions
+
+---
+ controllers/admin/AdminStatusesController.php | 24 +++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/controllers/admin/AdminStatusesController.php b/controllers/admin/AdminStatusesController.php
+index 24252e13dac3..cbad55f5e413 100644
+--- a/controllers/admin/AdminStatusesController.php
++++ b/controllers/admin/AdminStatusesController.php
+@@ -540,6 +540,10 @@ public function postProcess()
+         }
+ 
+         if (Tools::isSubmit('submitAddorder_return_state')) {
++            if (!$this->access('add')) {
++                return;
++            }
++
+             $id_order_return_state = Tools::getValue('id_order_return_state');
+ 
+             // Create Object OrderReturnState
+@@ -560,6 +564,10 @@ public function postProcess()
+         }
+ 
+         if (Tools::isSubmit('submitBulkdeleteorder_return_state')) {
++            if (!$this->access('delete')) {
++                return;
++            }
++
+             $this->className = 'OrderReturnState';
+             $this->table = 'order_return_state';
+             $this->boxes = Tools::getValue('order_return_stateBox');
+@@ -567,6 +575,10 @@ public function postProcess()
+         }
+ 
+         if (Tools::isSubmit('deleteorder_return_state')) {
++            if (!$this->access('delete')) {
++                return;
++            }
++
+             $id_order_return_state = Tools::getValue('id_order_return_state');
+ 
+             // Create Object OrderReturnState
+@@ -580,6 +592,10 @@ public function postProcess()
+         }
+ 
+         if (Tools::isSubmit('submitAdd' . $this->table)) {
++            if (!$this->access('add')) {
++                return;
++            }
++
+             $this->deleted = false; // Disabling saving historisation
+             $_POST['invoice'] = (int) Tools::getValue('invoice_on');
+             $_POST['logable'] = (int) Tools::getValue('logable_on');
+@@ -598,6 +614,10 @@ public function postProcess()
+ 
+             return parent::postProcess();
+         } elseif (Tools::isSubmit('delete' . $this->table)) {
++            if (!$this->access('delete')) {
++                return;
++            }
++
+             $order_state = new OrderState(Tools::getValue('id_order_state'), $this->context->language->id);
+             if (!$order_state->isRemovable()) {
+                 $this->errors[] = $this->trans('For security reasons, you cannot delete default order statuses.', array(), 'Admin.Shopparameters.Notification');
+@@ -605,6 +625,10 @@ public function postProcess()
+                 return parent::postProcess();
+             }
+         } elseif (Tools::isSubmit('submitBulkdelete' . $this->table)) {
++            if (!$this->access('delete')) {
++                return;
++            }
++
+             foreach (Tools::getValue($this->table . 'Box') as $selection) {
+                 $order_state = new OrderState((int) $selection, $this->context->language->id);
+                 if (!$order_state->isRemovable()) {

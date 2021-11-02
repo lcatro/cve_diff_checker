@@ -1,0 +1,42 @@
+From 6c59d851e2967410cc8fb6ba3f374b1d3efa988e Mon Sep 17 00:00:00 2001
+From: Alexey Shmalko <rasen.dubi@gmail.com>
+Date: Mon, 27 Mar 2017 16:11:44 +0300
+Subject: [PATCH] docker: fix socket permissions
+
+Docker socket is world writable. This means any user on the system is
+able to invoke docker command. (Which is equal to having a root access
+to the machine.)
+
+This commit makes socket group-writable and owned by docker group.
+
+Inspired by
+https://github.com/docker/docker/blob/master/contrib/init/systemd/docker.socket
+
+(cherry picked from commit fa4fe7110566d8370983fa81f2b04a833339236d)
+---
+ nixos/modules/virtualisation/docker.nix | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/nixos/modules/virtualisation/docker.nix b/nixos/modules/virtualisation/docker.nix
+index 4b30a38f832f9..f1101d7ea66ea 100644
+--- a/nixos/modules/virtualisation/docker.nix
++++ b/nixos/modules/virtualisation/docker.nix
+@@ -126,7 +126,17 @@ in
+ 
+         path = [ pkgs.kmod ] ++ (optional (cfg.storageDriver == "zfs") pkgs.zfs);
+       };
+-      systemd.sockets.docker.socketConfig.ListenStream = cfg.listenOptions;
++
++      systemd.sockets.docker = {
++        description = "Docker Socket for the API";
++        wantedBy = [ "sockets.target" ];
++        socketConfig = {
++          ListenStream = cfg.listenOptions;
++          SocketMode = "0660";
++          SocketUser = "root";
++          SocketGroup = "docker";
++        };
++      };
+     }
+   ]);
+ 

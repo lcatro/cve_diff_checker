@@ -1,0 +1,64 @@
+From 5c7bfb5c05202b4db971dd672d88a42298a0d84e Mon Sep 17 00:00:00 2001
+From: Evan Phoenix <evan@phx.io>
+Date: Mon, 18 May 2015 13:42:34 -0700
+Subject: [PATCH] Fix API endpoint domain clamping
+
+---
+ lib/rubygems/remote_fetcher.rb           |  2 +-
+ test/rubygems/test_gem_remote_fetcher.rb | 30 ++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/lib/rubygems/remote_fetcher.rb b/lib/rubygems/remote_fetcher.rb
+index ec78e5f704a0..3f107a398151 100644
+--- a/lib/rubygems/remote_fetcher.rb
++++ b/lib/rubygems/remote_fetcher.rb
+@@ -96,7 +96,7 @@ def api_endpoint(uri)
+     else
+       target = res.target.to_s.strip
+ 
+-      if /#{host}\z/ =~ target
++      if /\.#{Regexp.quote(host)}\z/ =~ target
+         return URI.parse "#{uri.scheme}://#{target}#{uri.path}"
+       end
+ 
+diff --git a/test/rubygems/test_gem_remote_fetcher.rb b/test/rubygems/test_gem_remote_fetcher.rb
+index a590dca59b2a..6b29e185cab5 100644
+--- a/test/rubygems/test_gem_remote_fetcher.rb
++++ b/test/rubygems/test_gem_remote_fetcher.rb
+@@ -196,6 +196,36 @@ def test_api_endpoint_ignores_trans_domain_values
+     dns.verify
+   end
+ 
++  def test_api_endpoint_ignores_trans_domain_values_that_starts_with_original
++    uri = URI.parse "http://example.com/foo"
++    target = MiniTest::Mock.new
++    target.expect :target, "example.combadguy.com"
++
++    dns = MiniTest::Mock.new
++    dns.expect :getresource, target, [String, Object]
++
++    fetch = Gem::RemoteFetcher.new nil, dns
++    assert_equal URI.parse("http://example.com/foo"), fetch.api_endpoint(uri)
++
++    target.verify
++    dns.verify
++  end
++
++  def test_api_endpoint_ignores_trans_domain_values_that_end_with_original
++    uri = URI.parse "http://example.com/foo"
++    target = MiniTest::Mock.new
++    target.expect :target, "badexample.com"
++
++    dns = MiniTest::Mock.new
++    dns.expect :getresource, target, [String, Object]
++
++    fetch = Gem::RemoteFetcher.new nil, dns
++    assert_equal URI.parse("http://example.com/foo"), fetch.api_endpoint(uri)
++
++    target.verify
++    dns.verify
++  end
++
+   def test_cache_update_path
+     uri = URI 'http://example/file'
+     path = File.join @tempdir, 'file'

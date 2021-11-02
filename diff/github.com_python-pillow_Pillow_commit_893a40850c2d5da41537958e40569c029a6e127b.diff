@@ -1,0 +1,59 @@
+From 893a40850c2d5da41537958e40569c029a6e127b Mon Sep 17 00:00:00 2001
+From: wiredfool <eric-github@soroos.net>
+Date: Wed, 20 Jan 2016 22:37:28 +0000
+Subject: [PATCH] FLI overflow error fix and testcase CVE-2016-0775
+
+---
+ Tests/check_fli_overflow.py   |  16 ++++++++++++++++
+ Tests/images/fli_overflow.fli | Bin 0 -> 4645 bytes
+ libImaging/FliDecode.c        |   2 +-
+ 3 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/check_fli_overflow.py
+ create mode 100644 Tests/images/fli_overflow.fli
+
+diff --git a/Tests/check_fli_overflow.py b/Tests/check_fli_overflow.py
+new file mode 100644
+index 00000000000..d89a82761be
+--- /dev/null
++++ b/Tests/check_fli_overflow.py
+@@ -0,0 +1,16 @@
++from helper import unittest, PillowTestCase
++from PIL import Image
++
++TEST_FILE = "Tests/images/fli_overflow.fli"
++
++
++class TestFliOverflow(PillowTestCase):
++    def test_fli_overflow(self):
++
++        # this should not crash with a malloc error or access violation
++        im = Image.open(TEST_FILE)
++        im.load()
++        
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/Tests/images/fli_overflow.fli b/Tests/images/fli_overflow.fli
+new file mode 100644
+index 0000000000000000000000000000000000000000..bea12160efef040c06ad1491e99e42ab3bc984bc
+GIT binary patch
+literal 4645
+zcmeIvu?c`c5Jb^0ikWy=k?omXBVq@ZVheKVCAyg<9LS$3V28K&xnIlCLF#Fe0c!bf
+ok1=9mi$OEbn%mX^#CsCiD4>7>3Mim}0tzUgfC36Apuq11UX)j+L;wH)
+
+literal 0
+HcmV?d00001
+
+diff --git a/libImaging/FliDecode.c b/libImaging/FliDecode.c
+index 75eebe86c90..6d22c6c4ea8 100644
+--- a/libImaging/FliDecode.c
++++ b/libImaging/FliDecode.c
+@@ -185,7 +185,7 @@ ImagingFliDecode(Imaging im, ImagingCodecState state, UINT8* buf, int bytes)
+ 	    /* COPY chunk */
+ 	    for (y = 0; y < state->ysize; y++) {
+ 		UINT8* buf = (UINT8*) im->image[y];
+-		memcpy(buf+x, data, state->xsize);
++		memcpy(buf, data, state->xsize);
+ 		data += state->xsize;
+ 	    }
+ 	    break;

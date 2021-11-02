@@ -1,0 +1,56 @@
+From 316136f292cedaecf17823d6f3b63cf2d11314b3 Mon Sep 17 00:00:00 2001
+From: lijuang <lijuang@codeaurora.org>
+Date: Mon, 4 Sep 2017 20:46:34 +0800
+Subject: QcomModulePkg: Fix the buffer overflow issue when convert string from
+ ASCII to Unicode
+
+The length of the first parameter of AsciiStrToUnicodeStr maybe it's
+longer than the second one. It will cause the buffer overflow issue
+
+Change-Id: I9b5b96c1fd05f83ad0d147f852274441868a2b0d
+---
+ QcomModulePkg/Library/FastbootLib/FastbootCmds.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+index 9870c29..a5ac63e 100644
+--- a/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
++++ b/QcomModulePkg/Library/FastbootLib/FastbootCmds.c
+@@ -1170,6 +1170,11 @@ STATIC VOID CmdFlash(
+ 		FastbootFail("No data to flash");
+ 		return;
+ 	}
++
++	if (AsciiStrLen(arg) >= MAX_GPT_NAME_SIZE) {
++		FastbootFail("Invalid partition name");
++		return;
++	}
+ 	AsciiStrToUnicodeStr(arg, PartitionName);
+ 
+ 	if (TargetBuildVariantUser()) {
+@@ -1345,6 +1350,11 @@ STATIC VOID CmdErase(
+ 	CHAR16 SlotSuffix[MAX_SLOT_SUFFIX_SZ];
+ 	BOOLEAN MultiSlotBoot = PartitionHasMultiSlot(L"boot");
+ 	CHAR16 PartitionName[MAX_GPT_NAME_SIZE];
++
++	if (AsciiStrLen(arg) >= MAX_GPT_NAME_SIZE) {
++		FastbootFail("Invalid partition name");
++		return;
++	}
+ 	AsciiStrToUnicodeStr(arg, PartitionName);
+ 
+ 	if (TargetBuildVariantUser()) {
+@@ -1433,6 +1443,10 @@ VOID CmdSetActive(CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
+ 	InputSlot = AsciiStrStr(Arg, Delim);
+ 	if (InputSlot) {
+ 		InputSlot++;
++		if (AsciiStrLen(InputSlot) >= MAX_SLOT_SUFFIX_SZ) {
++			FastbootFail("Invalid Slot");
++			return;
++		}
+ 		if (!AsciiStrStr(InputSlot, "_")) {
+ 			AsciiStrToUnicodeStr(InputSlot, InputSlotInUnicodetemp);
+ 			StrnCpyS(InputSlotInUnicode, MAX_SLOT_SUFFIX_SZ, L"_", StrLen(L"_"));
+-- 
+cgit v1.1
+

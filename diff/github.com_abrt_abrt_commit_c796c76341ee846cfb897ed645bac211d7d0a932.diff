@@ -1,0 +1,51 @@
+From c796c76341ee846cfb897ed645bac211d7d0a932 Mon Sep 17 00:00:00 2001
+From: Jakub Filak <jfilak@redhat.com>
+Date: Thu, 23 Apr 2015 13:12:01 +0200
+Subject: [PATCH] daemon: use libreport's function checking file name
+
+Move the functions to libreport because we need the same functionality
+there too.
+
+Related: #1214451
+
+Signed-off-by: Jakub Filak <jfilak@redhat.com>
+---
+ src/daemon/abrt-server.c | 18 +-----------------
+ 1 file changed, 1 insertion(+), 17 deletions(-)
+
+diff --git a/src/daemon/abrt-server.c b/src/daemon/abrt-server.c
+index 5789075ca..4d486d4b1 100644
+--- a/src/daemon/abrt-server.c
++++ b/src/daemon/abrt-server.c
+@@ -476,22 +476,6 @@ static int create_problem_dir(GHashTable *problem_info, unsigned pid)
+     exit(0);
+ }
+ 
+-/* Checks if a string contains only printable characters. */
+-static gboolean printable_str(const char *str)
+-{
+-    do {
+-        if ((unsigned char)(*str) < ' ' || *str == 0x7f)
+-            return FALSE;
+-        str++;
+-    } while (*str);
+-    return TRUE;
+-}
+-
+-static gboolean is_correct_filename(const char *value)
+-{
+-    return printable_str(value) && !strchr(value, '/') && !strchr(value, '.');
+-}
+-
+ static gboolean key_value_ok(gchar *key, gchar *value)
+ {
+     char *i;
+@@ -510,7 +494,7 @@ static gboolean key_value_ok(gchar *key, gchar *value)
+      || strcmp(key, FILENAME_TYPE) == 0
+     )
+     {
+-        if (!is_correct_filename(value))
++        if (!str_is_correct_filename(value))
+         {
+             error_msg("Value of '%s' ('%s') is not a valid directory name",
+                       key, value);

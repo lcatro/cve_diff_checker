@@ -1,0 +1,157 @@
+From 65a9c8119b4bc7493fd957e1a8d6f6f731298b45 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Fri, 20 Nov 2015 08:06:52 +0100
+Subject: [PATCH] Fix h1 report 97123
+
+Cross-Site Request Forgery (CSRF)
+---------------------------------
+
+The HackerOne user @decidedlygray has reported a number of scripts in Revive
+Adserver's user interface that were vulnerable to CSRF attacks:
+
+- www/admin/banner-acl.php
+- www/admin/banner-activate.php
+- www/admin/banner-advanced.php
+- www/admin/banner-modify.php
+- www/admin/banner-swf.php
+- www/admin/banner-zone.php
+- www/admin/tracker-modify.php
+
+A CVE-ID has been requested, but not assigned yet.
+
+CWE: CWE-352
+CVSSv2: 5 (AV:N/AC:L/Au:N/C:N/I:N/A:P)
+---
+ www/admin/banner-acl.php      |  2 ++
+ www/admin/banner-activate.php |  2 ++
+ www/admin/banner-advanced.php | 35 +++++++++++++++++++----------------
+ www/admin/banner-modify.php   |  1 +
+ www/admin/banner-swf.php      |  2 ++
+ www/admin/banner-zone.php     |  2 ++
+ www/admin/tracker-modify.php  |  2 ++
+ 7 files changed, 30 insertions(+), 16 deletions(-)
+
+diff --git a/www/admin/banner-acl.php b/www/admin/banner-acl.php
+index 24b4888e63..0e08588642 100644
+--- a/www/admin/banner-acl.php
++++ b/www/admin/banner-acl.php
+@@ -48,6 +48,8 @@
+ if (!empty($action)) {
+     $acl = MAX_AclAdjust($acl, $action);
+ } elseif (!empty($submit)) {
++    OA_Permission::checkSessionToken();
++
+     $acl = (isset($acl)) ? $acl : array();
+ 
+     // Only save when inputs are valid
+diff --git a/www/admin/banner-activate.php b/www/admin/banner-activate.php
+index 25b46965b5..917079799e 100644
+--- a/www/admin/banner-activate.php
++++ b/www/admin/banner-activate.php
+@@ -36,6 +36,8 @@
+ OA_Permission::enforceAccessToObject('campaigns', $campaignid);
+ OA_Permission::enforceAccessToObject('banners',   $bannerid, true);
+ 
++OA_Permission::checkSessionToken();
++
+ if (OA_Permission::isAccount(OA_ACCOUNT_ADVERTISER)) {
+     if ($value == OA_ENTITY_STATUS_RUNNING) {
+         OA_Permission::enforceAllowed(OA_PERM_BANNER_ACTIVATE);
+diff --git a/www/admin/banner-advanced.php b/www/admin/banner-advanced.php
+index 15c1e32e24..6845be78e9 100644
+--- a/www/admin/banner-advanced.php
++++ b/www/admin/banner-advanced.php
+@@ -39,23 +39,26 @@
+ /*-------------------------------------------------------*/
+ 
+ if (isset($submitbutton)) {
+-    if (isset($bannerid) && $bannerid != '') {
+-        // Update banner
+-        $doBanners = OA_Dal::factoryDO('banners');
+-        $doBanners->get($bannerid);
+-        $doBanners->prepend = $prepend;
+-        $doBanners->append  = $append;
+-        $doBanners->update();
+-
+-        // Queue confirmation message
+-        $translation = new OX_Translation();
+-        $translated_message = $translation->translate($GLOBALS['strBannerAdvancedHasBeenUpdated'], array(
+-            MAX::constructURL(MAX_URL_ADMIN, 'banner-edit.php?clientid=' .  $clientid . '&campaignid=' . $campaignid . '&bannerid=' . $bannerid),
+-            htmlspecialchars($doBanners->description)
+-        ));
+-        OA_Admin_UI::queueMessage($translated_message, 'local', 'confirm', 0);
+-    }
++    OA_Permission::checkSessionToken();
++
++    // Update banner
++    $doBanners = OA_Dal::factoryDO('banners');
++    $doBanners->get($bannerid);
++    $doBanners->prepend = $prepend;
++    $doBanners->append  = $append;
++    $doBanners->update();
++
++    // Queue confirmation message
++    $translation = new OX_Translation();
++    $translated_message = $translation->translate($GLOBALS['strBannerAdvancedHasBeenUpdated'], array(
++        MAX::constructURL(MAX_URL_ADMIN, 'banner-edit.php?clientid=' .  $clientid . '&campaignid=' . $campaignid . '&bannerid=' . $bannerid),
++        htmlspecialchars($doBanners->description)
++    ));
++
++    OA_Admin_UI::queueMessage($translated_message, 'local', 'confirm', 0);
++
+     header ("Location: banner-advanced.php?clientid=".$clientid."&campaignid=".$campaignid."&bannerid=".$bannerid);
++    exit;
+ }
+ 
+ /*-------------------------------------------------------*/
+diff --git a/www/admin/banner-modify.php b/www/admin/banner-modify.php
+index f71b237a24..421d79282c 100644
+--- a/www/admin/banner-modify.php
++++ b/www/admin/banner-modify.php
+@@ -31,6 +31,7 @@
+ // Security check
+ OA_Permission::enforceAccount(OA_ACCOUNT_MANAGER);
+ 
++OA_Permission::checkSessionToken();
+ 
+ /*-------------------------------------------------------*/
+ /* Main code                                             */
+diff --git a/www/admin/banner-swf.php b/www/admin/banner-swf.php
+index 0f6a101f66..7e671a5d21 100644
+--- a/www/admin/banner-swf.php
++++ b/www/admin/banner-swf.php
+@@ -35,6 +35,8 @@
+ OA_Permission::enforceAccessToObject('campaigns', $campaignid);
+ OA_Permission::enforceAccessToObject('banners',   $bannerid);
+ 
++    OA_Permission::checkSessionToken();
++
+ if (OA_Permission::isAccount(OA_ACCOUNT_ADVERTISER)) {
+     OA_Permission::enforceAllowed(OA_PERM_BANNER_EDIT);
+ }
+diff --git a/www/admin/banner-zone.php b/www/admin/banner-zone.php
+index 8ab74c2f90..6fc97ec4eb 100644
+--- a/www/admin/banner-zone.php
++++ b/www/admin/banner-zone.php
+@@ -31,6 +31,8 @@
+ OA_Permission::enforceAccessToObject('campaigns', $campaignid);
+ OA_Permission::enforceAccessToObject('banners',   $bannerid);
+ 
++OA_Permission::checkSessionToken();
++
+ /*-------------------------------------------------------*/
+ /* Store preferences									 */
+ /*-------------------------------------------------------*/
+diff --git a/www/admin/tracker-modify.php b/www/admin/tracker-modify.php
+index faa4834e86..41e10c9fd8 100644
+--- a/www/admin/tracker-modify.php
++++ b/www/admin/tracker-modify.php
+@@ -38,6 +38,8 @@
+ 
+ if (!empty($trackerid))
+ {
++    OA_Permission::checkSessionToken();
++    
+     if (!empty($moveto))
+     {
+         // Delete any campaign-tracker links

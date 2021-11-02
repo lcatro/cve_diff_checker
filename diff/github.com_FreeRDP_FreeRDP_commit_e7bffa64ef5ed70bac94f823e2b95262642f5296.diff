@@ -1,0 +1,30 @@
+From e7bffa64ef5ed70bac94f823e2b95262642f5296 Mon Sep 17 00:00:00 2001
+From: akallabeth <akallabeth@posteo.net>
+Date: Wed, 27 May 2020 08:10:11 +0200
+Subject: [PATCH] Fixed OOB read in update_recv_secondary_order
+
+CVE-2020-4032 thanks to @antonio-morales for finding this.
+---
+ libfreerdp/core/orders.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/libfreerdp/core/orders.c b/libfreerdp/core/orders.c
+index 744bf3cd6ac..dc4e51a8739 100644
+--- a/libfreerdp/core/orders.c
++++ b/libfreerdp/core/orders.c
+@@ -3762,12 +3762,13 @@ static BOOL update_recv_secondary_order(rdpUpdate* update, wStream* s, BYTE flag
+ 		           name, end - start);
+ 		return FALSE;
+ 	}
+-	diff = start - end;
++	diff = end - start;
+ 	if (diff > 0)
+ 	{
+ 		WLog_Print(update->log, WLOG_DEBUG,
+ 		           "SECONDARY_ORDER %s: read %" PRIuz "bytes short, skipping", name, diff);
+-		Stream_Seek(s, diff);
++		if (!Stream_SafeSeek(s, diff))
++			return FALSE;
+ 	}
+ 	return rc;
+ }

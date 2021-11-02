@@ -1,0 +1,65 @@
+From 15aac363749e46ec6806d01734aeaff20116a073 Mon Sep 17 00:00:00 2001
+From: Matteo Beccati <matteo@beccati.com>
+Date: Mon, 28 Sep 2015 14:37:29 +0200
+Subject: [PATCH] Fix CVE-2015-7368
+
+Information Exposure Through Browser Caching
+--------------------------------------------
+
+N B Sri Harsha has discovered that the cached copies of pages visited in
+Revive Adserver's Admin UI were still reachable via the browser history after
+succesfully logging out. That could potentially expose sensitive information to
+unauthorised parties.
+
+CWE: CWE-525
+CVSSv2: 2.1 (AV:L/AC:L/Au:N/C:P/I:N/A:N)
+---
+ lib/max/Delivery/common.php | 4 ++--
+ www/admin/config.php        | 5 +++++
+ www/admin/stats.php         | 2 --
+ 3 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/lib/max/Delivery/common.php b/lib/max/Delivery/common.php
+index 8091514a29..14f79a5990 100644
+--- a/lib/max/Delivery/common.php
++++ b/lib/max/Delivery/common.php
+@@ -221,8 +221,8 @@ function MAX_commonSendContentTypeHeader($type = 'text/html', $charset = null)
+ function MAX_commonSetNoCacheHeaders()
+ {
+     MAX_header('Pragma: no-cache');
+-    MAX_header('Cache-Control: private, max-age=0, no-cache');
+-    MAX_header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
++    MAX_header('Cache-Control: no-cache, no-store, must-revalidate');
++    MAX_header('Expires: 0');
+ 
+     // Also send default CORS headers
+     MAX_header('Access-Control-Allow-Origin: *');
+diff --git a/www/admin/config.php b/www/admin/config.php
+index 006a5ffe45..2d915e4971 100644
+--- a/www/admin/config.php
++++ b/www/admin/config.php
+@@ -91,6 +91,11 @@ function OA_Start($checkRedirectFunc = null)
+     $conf = $GLOBALS['_MAX']['CONF'];
+     global $session;
+ 
++    // Send no cache headers
++    MAX_header('Pragma: no-cache');
++    MAX_header('Cache-Control: no-cache, no-store, must-revalidate');
++    MAX_header('Expires: 0');
++
+     // XXX: Why not try loading session data when OpenX is not installed?
+     //if ($conf['openads']['installed'])
+     if (OA_INSTALLATION_STATUS == OA_INSTALLATION_STATUS_INSTALLED)
+diff --git a/www/admin/stats.php b/www/admin/stats.php
+index 29720f7455..1f0165be4f 100644
+--- a/www/admin/stats.php
++++ b/www/admin/stats.php
+@@ -23,8 +23,6 @@
+ require_once MAX_PATH . '/lib/OA/Admin/Statistics/Factory.php';
+ require_once MAX_PATH . '/lib/pear/Date.php';
+ 
+-// No cache
+-MAX_commonSetNoCacheHeaders();
+ 
+ // The URL for stats pages may include values for "period_preset",
+ // "period_start" and "period_end". However, the user may have

@@ -1,0 +1,141 @@
+From d97e94223720684c6aa740ff219e0d19426c2220 Mon Sep 17 00:00:00 2001
+From: Francois-Xavier Le Bail <devel.fx.lebail@orange.fr>
+Date: Tue, 17 Oct 2017 21:56:46 +0200
+Subject: [PATCH] (for 4.9.3) CVE-2018-14464/LMP: Add a missing bounds check
+
+In lmp_print_data_link_subobjs().
+
+This fixes a buffer over-read discovered by Bhargava Shastry,
+SecT/TU Berlin.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-lmp.c                                   |  20 ++++++++++++----
+ tests/TESTLIST                                |   1 +
+ .../lmp-lmp_print_data_link_subobjs-oobr.out  |  22 ++++++++++++++++++
+ .../lmp-lmp_print_data_link_subobjs-oobr.pcap | Bin 0 -> 11547 bytes
+ 4 files changed, 39 insertions(+), 4 deletions(-)
+ create mode 100644 tests/lmp-lmp_print_data_link_subobjs-oobr.out
+ create mode 100644 tests/lmp-lmp_print_data_link_subobjs-oobr.pcap
+
+diff --git a/print-lmp.c b/print-lmp.c
+index 2edbb5813..ee126a019 100644
+--- a/print-lmp.c
++++ b/print-lmp.c
+@@ -399,6 +399,7 @@ lmp_print_data_link_subobjs(netdissect_options *ndo, const u_char *obj_tptr,
+ 			"Unknown",
+ 			EXTRACT_8BITS(obj_tptr + offset + 3)),
+ 			EXTRACT_8BITS(obj_tptr + offset + 3)));
++	    ND_TCHECK_32BITS(obj_tptr + offset + 4);
+ 	    bw.i = EXTRACT_32BITS(obj_tptr+offset+4);
+ 	    ND_PRINT((ndo, "\n\t      Min Reservable Bandwidth: %.3f Mbps",
+                 bw.f*8/1000000));
+@@ -419,6 +420,8 @@ lmp_print_data_link_subobjs(netdissect_options *ndo, const u_char *obj_tptr,
+ 	offset+=subobj_len;
+     }
+     return (hexdump);
++trunc:
++    return -1;
+ }
+ 
+ void
+@@ -429,7 +432,7 @@ lmp_print(netdissect_options *ndo,
+     const struct lmp_object_header *lmp_obj_header;
+     const u_char *tptr,*obj_tptr;
+     u_int tlen,lmp_obj_len,lmp_obj_ctype,obj_tlen;
+-    int hexdump;
++    int hexdump, ret;
+     u_int offset;
+     u_int link_type;
+ 
+@@ -731,7 +734,10 @@ lmp_print(netdissect_options *ndo,
+                        ipaddr_string(ndo, obj_tptr+8),
+                        EXTRACT_32BITS(obj_tptr+8)));
+ 
+-		if (lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 12, 12))
++		ret = lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 12, 12);
++		if (ret == -1)
++		    goto trunc;
++		if (ret == TRUE)
+ 		    hexdump=TRUE;
+ 		break;
+ 
+@@ -751,7 +757,10 @@ lmp_print(netdissect_options *ndo,
+                        ip6addr_string(ndo, obj_tptr+20),
+                        EXTRACT_32BITS(obj_tptr+20)));
+ 
+-		if (lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 36, 36))
++		ret = lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 36, 36);
++		if (ret == -1)
++		    goto trunc;
++		if (ret == TRUE)
+ 		    hexdump=TRUE;
+ 		break;
+ 
+@@ -771,7 +780,10 @@ lmp_print(netdissect_options *ndo,
+                        EXTRACT_32BITS(obj_tptr+8),
+                        EXTRACT_32BITS(obj_tptr+8)));
+ 
+-		if (lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 12, 12))
++		ret = lmp_print_data_link_subobjs(ndo, obj_tptr, obj_tlen - 12, 12);
++		if (ret == -1)
++		    goto trunc;
++		if (ret == TRUE)
+ 		    hexdump=TRUE;
+ 		break;
+ 
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index 5d379ea4d..6ea71af1b 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -560,6 +560,7 @@ vrrp-vrrp_print-oobr vrrp-vrrp_print-oobr.pcap vrrp-vrrp_print-oobr.out -v -c3
+ vrrp-vrrp_print-oobr-2 vrrp-vrrp_print-oobr-2.pcap vrrp-vrrp_print-oobr-2.out -v
+ bgp-bgp_capabilities_print-oobr-1 bgp-bgp_capabilities_print-oobr-1.pcap bgp-bgp_capabilities_print-oobr-1.out -v -c1
+ bgp-bgp_capabilities_print-oobr-2 bgp-bgp_capabilities_print-oobr-2.pcap bgp-bgp_capabilities_print-oobr-2.out -v -c1
++lmp-lmp_print_data_link_subobjs-oobr lmp-lmp_print_data_link_subobjs-oobr.pcap lmp-lmp_print_data_link_subobjs-oobr.out -v -c2
+ # The .pcap file is truncated after the 1st packet.
+ hncp_dhcpv6data-oobr	hncp_dhcpv6data-oobr.pcap	hncp_dhcpv6data-oobr.out -v -c1
+ hncp_dhcpv4data-oobr	hncp_dhcpv4data-oobr.pcap	hncp_dhcpv4data-oobr.out -v -c1
+diff --git a/tests/lmp-lmp_print_data_link_subobjs-oobr.out b/tests/lmp-lmp_print_data_link_subobjs-oobr.out
+new file mode 100644
+index 000000000..6709b26b7
+--- /dev/null
++++ b/tests/lmp-lmp_print_data_link_subobjs-oobr.out
+@@ -0,0 +1,22 @@
++IP (tos 0xfd,ECT(1), ttl 254, id 45839, offset 0, flags [+, DF, rsvd], proto UDP (17), length 56871, bad cksum fe07 (->ddf0)!)
++    17.8.8.255.701 > 40.184.42.8.12: 
++	LMPv1, msg-type: unknown, type: 249, Flags: [none], length: 212
++	  Data Link Object (12), Class-Type: Unnumbered (3) Flags: [non-negotiable], length: 20
++	    Flags: [none]
++	    Local Interface ID: 2435832538 (0x912fdada)
++	    Remote Interface ID: 3657433088 (0xda000000)
++	    Subobject, Type: Interface Switching Type (1), Length: 4
++	      Switching Type: Unknown (0)
++	      Encoding Type: Unknown (0)
++		 packet exceeded snapshot
++IP (tos 0xfd,ECT(1), ttl 254, id 45839, offset 0, flags [+, DF, rsvd], proto UDP (17), length 56871, bad cksum fe07 (->ddf0)!)
++    17.8.8.255.701 > 40.184.42.8.12: 
++	LMPv1, msg-type: unknown, type: 249, Flags: [none], length: 212
++	  Data Link Object (12), Class-Type: Unnumbered (3) Flags: [non-negotiable], length: 20
++	    Flags: [none]
++	    Local Interface ID: 2435832538 (0x912fdada)
++	    Remote Interface ID: 3657433088 (0xda000000)
++	    Subobject, Type: Interface Switching Type (1), Length: 4
++	      Switching Type: Unknown (0)
++	      Encoding Type: Unknown (0)
++		 packet exceeded snapshot
+diff --git a/tests/lmp-lmp_print_data_link_subobjs-oobr.pcap b/tests/lmp-lmp_print_data_link_subobjs-oobr.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..d1a6ad99739810e23061ca802a6dea93fd5c039f
+GIT binary patch
+literal 11547
+zcmeI&F-ikL6vpw-jpC>)af1fi1W~c^3N{j~E#eux#Oe_OA&m&JN@JxUS_mt-!d5Fp
+zu?Tk763pc3HX;aGDan6em|=L#<NfL{?OvP(nwFlWC#|U_Y0CEE)xmzb5cKPIuiDE^
+zIM`dNBzH;s<kV^Rt+#PmeAF-+&PLAp&Fd`}+$xNdhAT<0O1mnATDJO5V>`>T_g}3^
+z_2ai#3wF-jA0<{RYZEDNbL_nz9JZS2&R?~eXCZ(90tg_0z_<#`y^QN*%!L2~2q1s}
+z0tg_000IagfB*srAb`Mx2&_-YoQ#P80tg_000IagfB*srAb`Lx1-^uN&%X=v=9%Hu
+c6^rl2#omL@Gs6}W{y~^m^8VjuhCj!WN8S-!CIA2c
+
+literal 0
+HcmV?d00001
+

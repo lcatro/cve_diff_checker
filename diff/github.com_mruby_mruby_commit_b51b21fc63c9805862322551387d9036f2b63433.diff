@@ -1,0 +1,29 @@
+From b51b21fc63c9805862322551387d9036f2b63433 Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Tue, 17 Apr 2018 09:57:41 +0900
+Subject: [PATCH] Fix `use after free in File#initilialize_copy`; fix #4001
+
+The bug and the fix were reported by https://hackerone.com/pnoltof
+---
+ mrbgems/mruby-io/src/io.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mrbgems/mruby-io/src/io.c b/mrbgems/mruby-io/src/io.c
+index 58bcdd1ee1..6ace9e1673 100644
+--- a/mrbgems/mruby-io/src/io.c
++++ b/mrbgems/mruby-io/src/io.c
+@@ -561,13 +561,13 @@ mrb_io_initialize_copy(mrb_state *mrb, mrb_value copy)
+   mrb_bool failed = TRUE;
+ 
+   mrb_get_args(mrb, "o", &orig);
++  fptr_orig = io_get_open_fptr(mrb, orig);
+   fptr_copy = (struct mrb_io *)DATA_PTR(copy);
+   if (fptr_copy != NULL) {
+     fptr_finalize(mrb, fptr_copy, FALSE);
+     mrb_free(mrb, fptr_copy);
+   }
+   fptr_copy = (struct mrb_io *)mrb_io_alloc(mrb);
+-  fptr_orig = io_get_open_fptr(mrb, orig);
+ 
+   DATA_TYPE(copy) = &mrb_io_type;
+   DATA_PTR(copy) = fptr_copy;

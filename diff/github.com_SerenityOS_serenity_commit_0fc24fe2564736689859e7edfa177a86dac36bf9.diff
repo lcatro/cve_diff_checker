@@ -1,0 +1,41 @@
+From 0fc24fe2564736689859e7edfa177a86dac36bf9 Mon Sep 17 00:00:00 2001
+From: Andreas Kling <awesomekling@gmail.com>
+Date: Tue, 31 Dec 2019 00:21:50 +0100
+Subject: [PATCH] Kernel: User pointer validation should reject kernel-only
+ addresses
+
+We were happily allowing syscalls with pointers into kernel-only
+regions (virtual address >= 0xc0000000).
+
+This patch fixes that by only considering user regions in the current
+process, and also double-checking the Region::is_user_accessible() flag
+before approving an access.
+
+Thanks to Fire30 for finding the bug! :^)
+---
+ Kernel/VM/MemoryManager.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/Kernel/VM/MemoryManager.cpp b/Kernel/VM/MemoryManager.cpp
+index 8f44ddc25aeb..d6afdf0b975d 100644
+--- a/Kernel/VM/MemoryManager.cpp
++++ b/Kernel/VM/MemoryManager.cpp
+@@ -592,14 +592,14 @@ bool MemoryManager::validate_user_stack(const Process& process, VirtualAddress v
+ 
+ bool MemoryManager::validate_user_read(const Process& process, VirtualAddress vaddr) const
+ {
+-    auto* region = region_from_vaddr(process, vaddr);
+-    return region && region->is_readable();
++    auto* region = user_region_from_vaddr(const_cast<Process&>(process), vaddr);
++    return region && region->is_user_accessible() && region->is_readable();
+ }
+ 
+ bool MemoryManager::validate_user_write(const Process& process, VirtualAddress vaddr) const
+ {
+-    auto* region = region_from_vaddr(process, vaddr);
+-    return region && region->is_writable();
++    auto* region = user_region_from_vaddr(const_cast<Process&>(process), vaddr);
++    return region && region->is_user_accessible() && region->is_writable();
+ }
+ 
+ void MemoryManager::register_vmobject(VMObject& vmobject)

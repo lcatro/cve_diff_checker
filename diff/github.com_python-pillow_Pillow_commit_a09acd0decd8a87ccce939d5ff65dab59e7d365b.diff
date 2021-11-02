@@ -1,0 +1,66 @@
+From a09acd0decd8a87ccce939d5ff65dab59e7d365b Mon Sep 17 00:00:00 2001
+From: Andrew Murray <radarhere@users.noreply.github.com>
+Date: Wed, 1 Jan 2020 14:14:47 +1100
+Subject: [PATCH] Catch FLI buffer overrun
+
+---
+ Tests/images/fli_overrun2.bin | Bin 0 -> 188 bytes
+ Tests/test_image.py           |   7 +++++++
+ src/libImaging/FliDecode.c    |   7 +++++--
+ 3 files changed, 12 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/images/fli_overrun2.bin
+
+diff --git a/Tests/images/fli_overrun2.bin b/Tests/images/fli_overrun2.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..4afdb6f89098f6a6d66f2147ab6b053213dd4fc0
+GIT binary patch
+literal 188
+zcmd;cVqg$j&&0q8gd7aa3>plSfd&$_GXd5A`iRiP#mvCK0(1)l69b0~J2w+EgVLt6
+cr%$t97IhOAaTXEvmX`LBkZ@-Z_{+us01$i&SpWb4
+
+literal 0
+HcmV?d00001
+
+diff --git a/Tests/test_image.py b/Tests/test_image.py
+index 47196a1394a..cd7621e6b65 100644
+--- a/Tests/test_image.py
++++ b/Tests/test_image.py
+@@ -598,6 +598,13 @@ def test_overrun(self):
+             except IOError as e:
+                 self.assertEqual(str(e), "buffer overrun when reading image file")
+ 
++        with Image.open("Tests/images/fli_overrun2.bin") as im:
++            try:
++                im.seek(1)
++                self.assertFail()
++            except IOError as e:
++                self.assertEqual(str(e), "buffer overrun when reading image file")
++
+ 
+ class MockEncoder(object):
+     pass
+diff --git a/src/libImaging/FliDecode.c b/src/libImaging/FliDecode.c
+index 5f4485f890c..6f48c07d415 100644
+--- a/src/libImaging/FliDecode.c
++++ b/src/libImaging/FliDecode.c
+@@ -40,8 +40,7 @@ ImagingFliDecode(Imaging im, ImagingCodecState state, UINT8* buf, Py_ssize_t byt
+ 	return 0;
+ 
+     /* We don't decode anything unless we have a full chunk in the
+-       input buffer (on the other hand, the Python part of the driver
+-       makes sure this is always the case) */
++       input buffer */
+ 
+     ptr = buf;
+ 
+@@ -52,6 +51,10 @@ ImagingFliDecode(Imaging im, ImagingCodecState state, UINT8* buf, Py_ssize_t byt
+     /* Make sure this is a frame chunk.  The Python driver takes
+        case of other chunk types. */
+ 
++    if (bytes < 8) {
++        state->errcode = IMAGING_CODEC_OVERRUN;
++        return -1;
++    }
+     if (I16(ptr+4) != 0xF1FA) {
+ 	state->errcode = IMAGING_CODEC_UNKNOWN;
+ 	return -1;

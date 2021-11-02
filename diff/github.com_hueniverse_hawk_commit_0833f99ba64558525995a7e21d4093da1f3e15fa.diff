@@ -1,0 +1,196 @@
+From 0833f99ba64558525995a7e21d4093da1f3e15fa Mon Sep 17 00:00:00 2001
+From: Eran Hammer <eran@hammer.io>
+Date: Tue, 19 Jan 2016 11:53:57 -0800
+Subject: [PATCH] Fix minor DoS attack on long headers or uris. Closes #168
+
+---
+ lib/server.js  | 12 ++++++++++--
+ lib/utils.js   | 23 ++++++++++++++++++++---
+ package.json   |  2 +-
+ test/server.js | 27 +++++++++++++++++++++++++++
+ test/utils.js  | 28 ++++++++++++++++++++++++++++
+ 5 files changed, 86 insertions(+), 6 deletions(-)
+
+diff --git a/lib/server.js b/lib/server.js
+index e42c884..0486805 100755
+--- a/lib/server.js
++++ b/lib/server.js
+@@ -310,6 +310,11 @@ exports.header = function (credentials, artifacts, options) {
+  * 'hostHeaderName', 'localtimeOffsetMsec', 'host', 'port'
+  */
+ 
++
++//                       1     2             3           4
++internals.bewitRegex = /^(\/.*)([\?&])bewit\=([^&$]*)(?:&(.+))?$/;
++
++
+ exports.authenticateBewit = function (req, credentialsFunc, options, callback) {
+ 
+     callback = Hoek.nextTick(callback);
+@@ -327,8 +332,11 @@ exports.authenticateBewit = function (req, credentialsFunc, options, callback) {
+ 
+     // Extract bewit
+ 
+-    //                                 1     2             3           4
+-    const resource = request.url.match(/^(\/.*)([\?&])bewit\=([^&$]*)(?:&(.+))?$/);
++    if (request.url.length > Utils.limits.maxMatchLength) {
++        return callback(Boom.badRequest('Resource path exceeds max length'));
++    }
++
++    const resource = request.url.match(internals.bewitRegex);
+     if (!resource) {
+         return callback(Utils.unauthorized());
+     }
+diff --git a/lib/utils.js b/lib/utils.js
+index 29c8a22..ecb64d3 100755
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -17,6 +17,11 @@ exports.version = function () {
+ };
+ 
+ 
++exports.limits = {
++    maxMatchLength: 4096            // Limit the length of uris and headers to avoid a DoS attack on string matching
++};
++
++
+ // Extract host and port from request
+ 
+ //                                            $1                            $2
+@@ -31,6 +36,10 @@ exports.parseHost = function (req, hostHeaderName) {
+         return null;
+     }
+ 
++    if (hostHeader.length > exports.limits.maxMatchLength) {
++        return null;
++    }
++
+     const hostParts = hostHeader.match(internals.hostHeaderRegex);
+     if (!hostParts) {
+         return null;
+@@ -100,6 +109,10 @@ exports.nowSecs = function (localtimeOffsetMsec) {
+ };
+ 
+ 
++internals.authHeaderRegex = /^(\w+)(?:\s+(.*))?$/;                                      // Header: scheme[ something]
++internals.attributeRegex = /^[ \w\!#\$%&'\(\)\*\+,\-\.\/\:;<\=>\?@\[\]\^`\{\|\}~]+$/;   // !#$%&'()*+,-./:;<=>?@[]^_`{|}~ and space, a-z, A-Z, 0-9
++
++
+ // Parse Hawk HTTP Authorization header
+ 
+ exports.parseAuthorizationHeader = function (header, keys) {
+@@ -110,7 +123,11 @@ exports.parseAuthorizationHeader = function (header, keys) {
+         return Boom.unauthorized(null, 'Hawk');
+     }
+ 
+-    const headerParts = header.match(/^(\w+)(?:\s+(.*))?$/);       // Header: scheme[ something]
++    if (header.length > exports.limits.maxMatchLength) {
++        return Boom.badRequest('Header length too long');
++    }
++
++    const headerParts = header.match(internals.authHeaderRegex);
+     if (!headerParts) {
+         return Boom.badRequest('Invalid header syntax');
+     }
+@@ -136,9 +153,9 @@ exports.parseAuthorizationHeader = function (header, keys) {
+             return;
+         }
+ 
+-        // Allowed attribute value characters: !#$%&'()*+,-./:;<=>?@[]^_`{|}~ and space, a-z, A-Z, 0-9
++        // Allowed attribute value characters
+ 
+-        if ($2.match(/^[ \w\!#\$%&'\(\)\*\+,\-\.\/\:;<\=>\?@\[\]\^`\{\|\}~]+$/) === null) {
++        if ($2.match(internals.attributeRegex) === null) {
+             errorMessage = 'Bad attribute value: ' + $1;
+             return;
+         }
+diff --git a/package.json b/package.json
+index 58d5832..1538f7e 100755
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "hawk",
+   "description": "HTTP Hawk Authentication Scheme",
+-  "version": "4.1.0",
++  "version": "4.1.1",
+   "author": "Eran Hammer <eran@hammer.io> (http://hueniverse.com)",
+   "repository": "git://github.com/hueniverse/hawk",
+   "main": "lib/index.js",
+diff --git a/test/server.js b/test/server.js
+index f8f06d0..c88d9b5 100755
+--- a/test/server.js
++++ b/test/server.js
+@@ -971,6 +971,33 @@ describe('Server', () => {
+         });
+     });
+ 
++    describe('authenticateBewit()', () => {
++
++        it('errors on uri too long', (done) => {
++
++            let long = '/';
++            for (let i = 0; i < 5000; ++i) {
++                long += 'x';
++            }
++
++            const req = {
++                method: 'GET',
++                url: long,
++                host: 'example.com',
++                port: 8080,
++                authorization: 'Hawk id="1", ts="1353788437", nonce="k3j4h2", mac="zy79QQ5/EYFmQqutVnYb73gAc/U=", ext="hello"'
++            };
++
++            Hawk.server.authenticateBewit(req, credentialsFunc, {}, (err, credentials, bewit) => {
++
++                expect(err).to.exist();
++                expect(err.output.statusCode).to.equal(400);
++                expect(err.message).to.equal('Resource path exceeds max length');
++                done();
++            });
++        });
++    });
++
+     describe('authenticateMessage()', () => {
+ 
+         it('errors on invalid authorization (ts)', (done) => {
+diff --git a/test/utils.js b/test/utils.js
+index b7d517c..d7a265c 100755
+--- a/test/utils.js
++++ b/test/utils.js
+@@ -95,6 +95,34 @@ describe('Utils', () => {
+             expect(host.name).to.equal('[123:123:123]');
+             done();
+         });
++
++        it('errors on header too long', (done) => {
++
++            let long = '';
++            for (let i = 0; i < 5000; ++i) {
++                long += 'x';
++            }
++
++            expect(Hawk.utils.parseHost({ headers: { host: long } })).to.be.null();
++            done();
++        });
++    });
++
++    describe('parseAuthorizationHeader()', () => {
++
++        it('errors on header too long', (done) => {
++
++            let long = 'Scheme a="';
++            for (let i = 0; i < 5000; ++i) {
++                long += 'x';
++            }
++            long += '"';
++
++            const err = Hawk.utils.parseAuthorizationHeader(long, ['a']);
++            expect(err).to.be.instanceof(Error);
++            expect(err.message).to.equal('Header length too long');
++            done();
++        });
+     });
+ 
+     describe('version()', () => {

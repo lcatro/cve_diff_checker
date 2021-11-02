@@ -1,0 +1,112 @@
+From db24063b01cba8e9d4d88b7d8ac70c9000c104e4 Mon Sep 17 00:00:00 2001
+From: Guy Harris <guy@alum.mit.edu>
+Date: Tue, 7 Feb 2017 00:13:33 -0800
+Subject: [PATCH] CVE-2017-12989/RESP: Make sure resp_get_length() advances the
+ pointer for invalid lengths.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Make sure that it always sends *endp before returning and that, for
+invalid lengths where we don't like a character in the length string,
+what it sets *endp to is past the character in question, so we don't
+run the risk of infinitely looping (or doing something else random) if a
+character in the length is invalid.
+
+This fixes an infinite loop discovered by Forcepoint's security
+researchers Otto Airamo & Antti Levomäki.
+
+Add a test using the capture file supplied by the reporter(s).
+---
+ print-resp.c                   |  14 +++++++++++---
+ tests/TESTLIST                 |   1 +
+ tests/resp_4_infiniteloop.out  |   2 ++
+ tests/resp_4_infiniteloop.pcap | Bin 0 -> 1036 bytes
+ 4 files changed, 14 insertions(+), 3 deletions(-)
+ create mode 100644 tests/resp_4_infiniteloop.out
+ create mode 100644 tests/resp_4_infiniteloop.pcap
+
+diff --git a/print-resp.c b/print-resp.c
+index 9d71e21dc..dee22d63a 100644
+--- a/print-resp.c
++++ b/print-resp.c
+@@ -481,8 +481,10 @@ resp_get_length(netdissect_options *ndo, register const u_char *bp, int len, con
+         ND_TCHECK(*bp);
+         c = *bp;
+         if (!(c >= '0' && c <= '9')) {
+-            if (!saw_digit)
++            if (!saw_digit) {
++                bp++;
+                 goto invalid;
++            }
+             break;
+         }
+         c -= '0';
+@@ -510,15 +512,19 @@ resp_get_length(netdissect_options *ndo, register const u_char *bp, int len, con
+     if (len == 0)
+         goto trunc;
+     ND_TCHECK(*bp);
+-    if (*bp != '\r')
++    if (*bp != '\r') {
++        bp++;
+         goto invalid;
++    }
+     bp++;
+     len--;
+     if (len == 0)
+         goto trunc;
+     ND_TCHECK(*bp);
+-    if (*bp != '\n')
++    if (*bp != '\n') {
++        bp++;
+         goto invalid;
++    }
+     bp++;
+     len--;
+     *endp = bp;
+@@ -531,8 +537,10 @@ resp_get_length(netdissect_options *ndo, register const u_char *bp, int len, con
+     return (too_large ? -3 : result);
+ 
+ trunc:
++    *endp = bp;
+     return (-2);
+ 
+ invalid:
++    *endp = bp;
+     return (-5);
+ }
+diff --git a/tests/TESTLIST b/tests/TESTLIST
+index e0f0bb146..ecf54f69b 100644
+--- a/tests/TESTLIST
++++ b/tests/TESTLIST
+@@ -468,6 +468,7 @@ zephyr-oobr		zephyr-oobr.pcap		zephyr-oobr.out		-vvv -e
+ bgp-as-path-oobr	bgp-as-path-oobr.pcap		bgp-as-path-oobr.out	-vvv -e
+ isakmp-no-none-np	isakmp-no-none-np.pcap		isakmp-no-none-np.out	-vvv -e
+ telnet-iac-check-oobr	telnet-iac-check-oobr.pcap	telnet-iac-check-oobr.out	-vvv -e
++resp_4_infiniteloop	resp_4_infiniteloop.pcap	resp_4_infiniteloop.out	-vvv -e
+ 
+ # RTP tests
+ # fuzzed pcap
+diff --git a/tests/resp_4_infiniteloop.out b/tests/resp_4_infiniteloop.out
+new file mode 100644
+index 000000000..396cb8b39
+--- /dev/null
++++ b/tests/resp_4_infiniteloop.out
+@@ -0,0 +1,2 @@
++00:50:56:b4:08:69 > 00:50:56:b4:4c:2a, ethertype IPv4 (0x0800), length 920: (tos 0x0, ttl 64, id 27576, offset 0, flags [DF], proto TCP (6), length 906)
++    172.16.8.77.33926 > 172.16.8.149.6379: Flags [P.], cksum 0xa129 (incorrect -> 0xaaa0), seq 3839414413:3839415267, ack 2526552240, win 229, options [nop,nop,TS val 2407226 ecr 24894817], length 854: RESP length negative and not -1 invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid "4" "EVAL" invalid invalid invalid invalid "GKMbNZq^@0" "stuubt.pack('<ivdMFG4294967245',^V ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''319', 2',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',',', '-1494241318543828858')'L')N))'r')')~D')')E)')')')')')')')'l')')')')')'M-`'o')')'Pp)U)" invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid invalid "1" [|RESP]
+diff --git a/tests/resp_4_infiniteloop.pcap b/tests/resp_4_infiniteloop.pcap
+new file mode 100644
+index 0000000000000000000000000000000000000000..98a79bfb67d0098a747f02c3a945dcf401a98df9
+GIT binary patch
+literal 1036
+zcmd<$<>fMAU|{gI(UxKa(*L1=g@KpBH6^noIk7;&NY6me2q*^vAhjTM3Q+q0e+C9l
+zpa>g~4+0863}WwK1`<eM29OWJ3;|(Ve6&C$M<xe@D+6;^_6`RI2ezcmYXmrafp}_5
+zo5brUH!k!}o1w6wL4x7wLQSBJj2v7HD!Z*1tM4Xi>6#iFnV1?F7@AvHnwnY~SQ?q}
+za;c1PV8YAg8s_MO2ncs?-z2}NLIwj~uHur?(xei-g2d!(4RxE$vJ_u8cM~H^6H7C5
+zU_h$th$*NKFfcZ>RM$~3Qr8*TP(fYS(8SWj$i&dt(8AQj*uu!d!qh@tQ{6{h(@#@V
+py$HzEtaAa8u0V_ebC7rs)bqi-fC9}>O+=Ewl|>ABxeP%06#yXcv(o?o
+
+literal 0
+HcmV?d00001
+

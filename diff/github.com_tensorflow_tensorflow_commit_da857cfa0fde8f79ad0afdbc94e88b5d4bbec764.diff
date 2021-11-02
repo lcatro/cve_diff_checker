@@ -1,0 +1,26 @@
+From da857cfa0fde8f79ad0afdbc94e88b5d4bbec764 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Thu, 29 Jul 2021 18:24:18 -0700
+Subject: [PATCH] Fix a shape inference issue leading to nullptr deref.
+
+PiperOrigin-RevId: 387712259
+Change-Id: I7e670772b259c068a501a187cd89f18773bb95a1
+---
+ tensorflow/core/ops/array_ops.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/ops/array_ops.cc b/tensorflow/core/ops/array_ops.cc
+index 626afd5860370..3bd6f8a103872 100644
+--- a/tensorflow/core/ops/array_ops.cc
++++ b/tensorflow/core/ops/array_ops.cc
+@@ -2990,6 +2990,10 @@ REGISTER_OP("Dequantize")
+       if (!s.ok() && s.code() != error::NOT_FOUND) {
+         return s;
+       }
++      if (axis < -1) {
++        return errors::InvalidArgument("axis should be at least -1, got ",
++                                       axis);
++      }
+       const int minmax_rank = (axis == -1) ? 0 : 1;
+       TF_RETURN_IF_ERROR(shape_inference::UnchangedShape(c));
+       ShapeHandle minmax;

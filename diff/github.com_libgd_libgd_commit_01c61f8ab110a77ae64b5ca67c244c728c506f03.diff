@@ -1,0 +1,84 @@
+From 01c61f8ab110a77ae64b5ca67c244c728c506f03 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ond=C5=99ej=20Sur=C3=BD?= <ondrej@sury.org>
+Date: Fri, 15 Jul 2016 09:40:31 +0200
+Subject: [PATCH] Proper fix for #248
+
+---
+ src/gd_tga.c | 48 +++++++++++++++++++-----------------------------
+ 1 file changed, 19 insertions(+), 29 deletions(-)
+
+diff --git a/src/gd_tga.c b/src/gd_tga.c
+index 6420cae65..34879caa6 100644
+--- a/src/gd_tga.c
++++ b/src/gd_tga.c
+@@ -196,7 +196,6 @@ int read_image_tga( gdIOCtx *ctx, oTga *tga )
+ 	int buffer_caret = 0;
+ 	int bitmap_caret = 0;
+ 	int i = 0;
+-	int j = 0;
+ 	uint8_t encoded_pixels;
+ 
+ 	if(overflow2(tga->width, tga->height)) {
+@@ -280,43 +279,34 @@ int read_image_tga( gdIOCtx *ctx, oTga *tga )
+ 		while( bitmap_caret < image_block_size ) {
+ 			
+ 			if ((decompression_buffer[buffer_caret] & TGA_RLE_FLAG) == TGA_RLE_FLAG) {
+-				encoded_pixels = ( ( decompression_buffer[ buffer_caret ] & 127 ) + 1 );
++				encoded_pixels = ( ( decompression_buffer[ buffer_caret ] & !TGA_RLE_FLAG ) + 1 );
+ 				buffer_caret++;
+ 
+-				if (encoded_pixels != 0) {
+-				
+-					if (!((buffer_caret + (encoded_pixels * pixel_block_size)) < image_block_size)) {
+-						gdFree( decompression_buffer );
+-						gdFree( conversion_buffer );
+-						return -1;
+-					}
+-
+-					for (i = 0; i < encoded_pixels; i++) {
+-						for (j = 0; j < pixel_block_size; j++, bitmap_caret++) {
+-							tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
+-						}
+-					}
++				if ((bitmap_caret + (encoded_pixels * pixel_block_size)) >= image_block_size) {
++					gdFree( decompression_buffer );
++					gdFree( conversion_buffer );
++					return -1;
++				}
++
++				for (i = 0; i < encoded_pixels; i++) {
++					memcpy(tga->bitmap + bitmap_caret, decompression_buffer + buffer_caret, pixel_block_size);
++					bitmap_caret += pixel_block_size;
+ 				}
+ 				buffer_caret += pixel_block_size;
++
+ 			} else {
+ 				encoded_pixels = decompression_buffer[ buffer_caret ] + 1;
+ 				buffer_caret++;
+ 
+-				if (encoded_pixels != 0) {
+-				
+-					if (!((buffer_caret + (encoded_pixels * pixel_block_size)) < image_block_size)) {
+-						gdFree( decompression_buffer );
+-						gdFree( conversion_buffer );
+-						return -1;
+-					}
+-
+-					for (i = 0; i < encoded_pixels; i++) {
+-						for( j = 0; j < pixel_block_size; j++, bitmap_caret++ ) {
+-							tga->bitmap[ bitmap_caret ] = decompression_buffer[ buffer_caret + j ];
+-						}
+-						buffer_caret += pixel_block_size;
+-					}
++				if ((bitmap_caret + (encoded_pixels * pixel_block_size)) >= image_block_size) {
++					gdFree( decompression_buffer );
++					gdFree( conversion_buffer );
++					return -1;
+ 				}
++
++				memcpy(tga->bitmap + bitmap_caret, decompression_buffer + buffer_caret, encoded_pixels * pixel_block_size);
++				bitmap_caret += (encoded_pixels * pixel_block_size);
++				buffer_caret += (encoded_pixels * pixel_block_size);
+ 			}
+ 		}
+ 		gdFree( decompression_buffer );

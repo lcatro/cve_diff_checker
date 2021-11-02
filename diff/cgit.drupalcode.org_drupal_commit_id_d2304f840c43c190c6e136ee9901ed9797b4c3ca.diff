@@ -1,0 +1,578 @@
+diff --git a/core/lib/Drupal/Component/Utility/UrlHelper.php b/core/lib/Drupal/Component/Utility/UrlHelper.php
+index 3293d5cb1d2273664ed1ba923d580f5d0d9ae2a6..1564f8243dd2293bd69f9195c6f3d036ba7b2ffe 100644
+--- a/core/lib/Drupal/Component/Utility/UrlHelper.php
++++ b/core/lib/Drupal/Component/Utility/UrlHelper.php
+@@ -214,10 +214,15 @@ public static function encodePath($path) {
+    */
+   public static function isExternal($path) {
+     $colonpos = strpos($path, ':');
+-    // Avoid calling stripDangerousProtocols() if there is any
+-    // slash (/), hash (#) or question_mark (?) before the colon (:)
+-    // occurrence - if any - as this would clearly mean it is not a URL.
+-    return $colonpos !== FALSE && !preg_match('![/?#]!', substr($path, 0, $colonpos)) && static::stripDangerousProtocols($path) == $path;
++    // Avoid calling drupal_strip_dangerous_protocols() if there is any slash
++    // (/), hash (#) or question_mark (?) before the colon (:) occurrence - if
++    // any - as this would clearly mean it is not a URL. If the path starts with
++    // 2 slashes then it is always considered an external URL without an
++    // explicit protocol part.
++    return (strpos($path, '//') === 0)
++      || ($colonpos !== FALSE
++        && !preg_match('![/?#]!', substr($path, 0, $colonpos))
++        && static::stripDangerousProtocols($path) == $path);
+   }
+ 
+   /**
+diff --git a/core/lib/Drupal/Core/EventSubscriber/RedirectResponseSubscriber.php b/core/lib/Drupal/Core/EventSubscriber/RedirectResponseSubscriber.php
+index 1a468f1812e1f2048627a7b5b497ba6d24c4badd..0573eea259a6354c5c23297287c85d0495e5a9e1 100644
+--- a/core/lib/Drupal/Core/EventSubscriber/RedirectResponseSubscriber.php
++++ b/core/lib/Drupal/Core/EventSubscriber/RedirectResponseSubscriber.php
+@@ -10,6 +10,7 @@
+ use Drupal\Component\Utility\UrlHelper;
+ use Drupal\Core\Routing\RequestContext;
+ use Drupal\Core\Routing\UrlGeneratorInterface;
++use Symfony\Component\HttpKernel\Event\GetResponseEvent;
+ use Symfony\Component\HttpKernel\KernelEvents;
+ use Symfony\Component\HttpKernel\Event\FilterResponseEvent;
+ use Symfony\Component\HttpKernel\Event\GetResponseForControllerResultEvent;
+@@ -92,6 +93,36 @@ public function checkRedirectUrl(FilterResponseEvent $event) {
+     }
+   }
+ 
++  /**
++   * Sanitize the destination parameter to prevent open redirect attacks.
++   *
++   * @param \Symfony\Component\HttpKernel\Event\GetResponseEvent $event
++   *   The Event to process.
++   */
++  public function sanitizeDestination(GetResponseEvent $event) {
++    $request = $event->getRequest();
++    // Sanitize the destination parameter (which is often used for redirects) to
++    // prevent open redirect attacks leading to other domains. Sanitize both
++    // $_GET['destination'] and $_REQUEST['destination'] to protect code that
++    // relies on either, but do not sanitize $_POST to avoid interfering with
++    // unrelated form submissions. The sanitization happens here because
++    // url_is_external() requires the variable system to be available.
++    $query_info = $request->query;
++    $request_info = $request->request;
++    if ($query_info->has('destination') || $request_info->has('destination')) {
++      // If the destination is an external URL, remove it.
++      if ($query_info->has('destination') && UrlHelper::isExternal($query_info->get('destination'))) {
++        $query_info->remove('destination');
++        $request_info->remove('destination');
++      }
++      // If there's still something in $_REQUEST['destination'] that didn't come
++      // from $_GET, check it too.
++      if ($request_info->has('destination') && (!$query_info->has('destination') || $request_info->get('destination') != $query_info->get('destination')) && UrlHelper::isExternal($request_info->get('destination'))) {
++        $request_info->remove('destination');
++      }
++    }
++  }
++
+   /**
+    * Registers the methods in this class that should be listeners.
+    *
+@@ -100,6 +131,7 @@ public function checkRedirectUrl(FilterResponseEvent $event) {
+    */
+   static function getSubscribedEvents() {
+     $events[KernelEvents::RESPONSE][] = array('checkRedirectUrl');
++    $events[KernelEvents::REQUEST][] = array('sanitizeDestination', 100);
+     return $events;
+   }
+ }
+diff --git a/core/lib/Drupal/Core/Routing/RedirectDestination.php b/core/lib/Drupal/Core/Routing/RedirectDestination.php
+index 58d7184527d33b0685a46fa85d4cb995ec031f53..7c80b116c71f1163b30c5c3ff2dcebbe8b2f010b 100644
+--- a/core/lib/Drupal/Core/Routing/RedirectDestination.php
++++ b/core/lib/Drupal/Core/Routing/RedirectDestination.php
+@@ -62,7 +62,10 @@ public function getAsArray() {
+   public function get() {
+     if (!isset($this->destination)) {
+       $query = $this->requestStack->getCurrentRequest()->query;
+-      if ($query->has('destination')) {
++      if (UrlHelper::isExternal($query->get('destination'))) {
++        $this->destination = '/';
++      }
++      elseif ($query->has('destination')) {
+         $this->destination = $query->get('destination');
+       }
+       else {
+diff --git a/core/lib/Drupal/Core/Routing/UrlGenerator.php b/core/lib/Drupal/Core/Routing/UrlGenerator.php
+index 1926d44a5fda40a261a32a5b61ae9fe152b1731e..ba8427507827b267984e9bc38aa80f46fa63f6f2 100644
+--- a/core/lib/Drupal/Core/Routing/UrlGenerator.php
++++ b/core/lib/Drupal/Core/Routing/UrlGenerator.php
+@@ -245,15 +245,20 @@ public function generateFromPath($path = NULL, $options = array()) {
+       'prefix' => '',
+     );
+ 
++    // A duplicate of the code from
++    // \Drupal\Component\Utility\UrlHelper::isExternal() to avoid needing
++    // another function call, since performance inside url() is critical.
+     if (!isset($options['external'])) {
+-      // Return an external link if $path contains an allowed absolute URL. Only
+-      // call the slow
+-      // \Drupal\Component\Utility\UrlHelper::stripDangerousProtocols() if $path
+-      // contains a ':' before any / ? or #. Note: we could use
+-      // \Drupal\Component\Utility\UrlHelper::isExternal($path) here, but that
+-      // would require another function call, and performance here is critical.
+       $colonpos = strpos($path, ':');
+-      $options['external'] = ($colonpos !== FALSE && !preg_match('![/?#]!', substr($path, 0, $colonpos)) && UrlHelper::stripDangerousProtocols($path) == $path);
++      // Avoid calling drupal_strip_dangerous_protocols() if there is any slash
++      // (/), hash (#) or question_mark (?) before the colon (:) occurrence -
++      // if any - as this would clearly mean it is not a URL. If the path starts
++      // with 2 slashes then it is always considered an external URL without an
++      // explicit protocol part.
++      $options['external'] = (strpos($path, '//') === 0)
++      || ($colonpos !== FALSE
++        && !preg_match('![/?#]!', substr($path, 0, $colonpos))
++        && UrlHelper::stripDangerousProtocols($path) == $path);
+     }
+ 
+     if (isset($options['fragment']) && $options['fragment'] !== '') {
+diff --git a/core/lib/Drupal/Core/Utility/UnroutedUrlAssembler.php b/core/lib/Drupal/Core/Utility/UnroutedUrlAssembler.php
+index bc21ea817c19c5e27d06b6601e9885b197fa16c1..2aed98efa89d50b0307167f0fdd2195d6a1cb2ba 100644
+--- a/core/lib/Drupal/Core/Utility/UnroutedUrlAssembler.php
++++ b/core/lib/Drupal/Core/Utility/UnroutedUrlAssembler.php
+@@ -113,6 +113,11 @@ protected function buildLocalUrl($uri, array $options = []) {
+     //   https://www.drupal.org/node/2417459
+     $uri = substr($uri, 5);
+ 
++    // Strip leading slashes from internal paths to prevent them becoming
++    // external URLs without protocol. /example.com should not be turned into
++    // //example.com.
++    $uri = ltrim($uri, '/');
++
+     // Allow (outbound) path processing, if needed. A valid use case is the path
+     // alias overview form:
+     // @see \Drupal\path\Controller\PathController::adminOverview().
+diff --git a/core/modules/system/src/Tests/Form/ConfirmFormTest.php b/core/modules/system/src/Tests/Form/ConfirmFormTest.php
+index ffcc44a27fd0bb03d207c9ba95629b7359b99011..9521176797f70f82b47a29dbb2ffbc064b2f25f8 100644
+--- a/core/modules/system/src/Tests/Form/ConfirmFormTest.php
++++ b/core/modules/system/src/Tests/Form/ConfirmFormTest.php
+@@ -7,6 +7,8 @@
+ 
+ namespace Drupal\system\Tests\Form;
+ 
++use Drupal\Component\Utility\String;
++use Drupal\Core\Url;
+ use Drupal\simpletest\WebTestBase;
+ 
+ /**
+@@ -50,4 +52,35 @@ function testConfirmForm() {
+     $this->assertUrl('form-test/confirm-form', array('query' => array('destination' => 'admin/config')), "The form's complex cancel link was followed.");
+   }
+ 
++  /**
++   * Tests that the confirm form does not use external destinations.
++   */
++  public function testConfirmFormWithExternalDestination() {
++    $this->drupalGet('form-test/confirm-form');
++    $this->assertCancelLinkUrl(Url::fromRoute('form_test.route8'));
++    $this->drupalGet('form-test/confirm-form', array('query' => array('destination' => 'node')));
++    $this->assertCancelLinkUrl(Url::fromUri('internal:/node'));
++    $this->drupalGet('form-test/confirm-form', array('query' => array('destination' => 'http://example.com')));
++    $this->assertCancelLinkUrl(Url::fromRoute('form_test.route8'));
++  }
++
++  /**
++   * Asserts that a cancel link is present pointing to the provided URL.
++   *
++   * @param \Drupal\Core\Url $url
++   *   The url to check for.
++   * @param string $message
++   *   The assert message.
++   * @param string $group
++   *   The assertion group.
++   *
++   * @return bool
++   *   Result of the assertion.
++   */
++  public function assertCancelLinkUrl(Url $url, $message = '', $group = 'Other') {
++    $links = $this->xpath('//a[@href=:url]', [':url' => $url->toString()]);
++    $message = ($message ? $message : String::format('Cancel link with url %url found.', ['%url' => $url->toString()]));
++    return $this->assertTrue(isset($links[0]), $message, $group);
++  }
++
+ }
+diff --git a/core/modules/system/src/Tests/Routing/DestinationTest.php b/core/modules/system/src/Tests/Routing/DestinationTest.php
+new file mode 100644
+index 0000000000000000000000000000000000000000..a590d62396977d2fe1096df7fabeaa57f2d048a5
+--- /dev/null
++++ b/core/modules/system/src/Tests/Routing/DestinationTest.php
+@@ -0,0 +1,83 @@
++<?php
++
++/**
++ * @file
++ * Contains \Drupal\system\Tests\Routing\DestinationTest.
++ */
++
++namespace Drupal\system\Tests\Routing;
++
++use Drupal\Core\Url;
++use Drupal\simpletest\WebTestBase;
++
++/**
++ * Tests for $_GET['destination'] and $_REQUEST['destination'] validation.
++ *
++ * Note: This tests basically the same as
++ * \Drupal\Tests\Core\EventSubscriber\RedirectResponseSubscriberTest::testSanitizeDestinationForGet
++ * \Drupal\Tests\Core\EventSubscriber\RedirectResponseSubscriberTest::testSanitizeDestinationForPost
++ * but we want to be absolutely sure it works.
++ *
++ * @group Routing
++ */
++class DestinationTest extends WebTestBase {
++
++  /**
++   * {@inheritdoc}
++   */
++  public static $modules = ['system_test'];
++
++  /**
++   * Tests that $_GET/$_REQUEST['destination'] only contain internal URLs.
++   */
++  public function testDestination() {
++    $test_cases = [
++      [
++        'input' => 'node',
++        'output' => 'node',
++        'message' => "Standard internal example node path is present in the 'destination' parameter.",
++      ],
++      [
++        'input' => '/example.com',
++        'output' => '/example.com',
++        'message' => 'Internal path with one leading slash is allowed.',
++      ],
++      [
++        'input' => '//example.com/test',
++        'output' => '',
++        'message' => 'External URL without scheme is not allowed.',
++      ],
++      [
++        'input' => 'example:test',
++        'output' => 'example:test',
++        'message' => 'Internal URL using a colon is allowed.',
++      ],
++      [
++        'input' => 'http://example.com',
++        'output' => '',
++        'message' => 'External URL is not allowed.',
++      ],
++      [
++        'input' => 'javascript:alert(0)',
++        'output' => 'javascript:alert(0)',
++        'message' => 'Javascript URL is allowed because it is treated as an internal URL.',
++      ],
++    ];
++    foreach ($test_cases as $test_case) {
++      // Test $_GET['destination'].
++      $this->drupalGet('system-test/get-destination', ['query' => ['destination' => $test_case['input']]]);
++      $this->assertIdentical($test_case['output'], $this->getRawContent(), $test_case['message']);
++      // Test $_REQUEST['destination'].
++      $post_output = $this->drupalPost('system-test/request-destination', '*', ['destination' => $test_case['input']]);
++      $this->assertIdentical($test_case['output'], $post_output, $test_case['message']);
++    }
++
++    // Make sure that 404 pages do not populate $_GET['destination'] with
++    // external URLs.
++    \Drupal::configFactory()->getEditable('system.site')->set('page.404', 'system-test/get-destination')->save();
++    $this->drupalGet('http://example.com', ['external' => FALSE]);
++    $this->assertResponse(404);
++    $this->assertIdentical(Url::fromRoute('<front>')->toString(), $this->getRawContent(), 'External URL is not allowed on 404 pages.');
++  }
++
++}
+diff --git a/core/modules/system/tests/modules/system_test/src/Controller/SystemTestController.php b/core/modules/system/tests/modules/system_test/src/Controller/SystemTestController.php
+index 5b4bf737a4e1881dad975ac9b9ded9ab1c238fd9..6b6b06333f6b2e93671d20172d95996ee68c878a 100644
+--- a/core/modules/system/tests/modules/system_test/src/Controller/SystemTestController.php
++++ b/core/modules/system/tests/modules/system_test/src/Controller/SystemTestController.php
+@@ -87,6 +87,34 @@ public function drupalSetMessageTest() {
+     return [];
+   }
+ 
++  /**
++   * Controller to return $_GET['destination'] for testing.
++   *
++   * @param \Symfony\Component\HttpFoundation\Request $request
++   *   The request.
++   *
++   * @return \Symfony\Component\HttpFoundation\Response
++   *   The response.
++   */
++  public function getDestination(Request $request) {
++    $response = new Response($request->query->get('destination'));
++    return $response;
++  }
++
++  /**
++   * Controller to return $_REQUEST['destination'] for testing.
++   *
++   * @param \Symfony\Component\HttpFoundation\Request $request
++   *   The request.
++   *
++   * @return \Symfony\Component\HttpFoundation\Response
++   *   The response.
++   */
++  public function requestDestination(Request $request) {
++    $response = new Response($request->request->get('destination'));
++    return $response;
++  }
++
+   /**
+    * Try to acquire a named lock and report the outcome.
+    */
+diff --git a/core/modules/system/tests/modules/system_test/system_test.routing.yml b/core/modules/system/tests/modules/system_test/system_test.routing.yml
+index 4251cedc7b564eb67941a2cb41ffb2ead293be79..86d0a31ec92a12f1f8193b6c99ba9589f5005598 100644
+--- a/core/modules/system/tests/modules/system_test/system_test.routing.yml
++++ b/core/modules/system/tests/modules/system_test/system_test.routing.yml
+@@ -87,3 +87,19 @@ system_test.configure:
+     _title_callback: '\Drupal\system_test\Controller\SystemTestController::configureTitle'
+   requirements:
+     _access: 'TRUE'
++
++system_test.request_destination:
++  path: '/system-test/request-destination'
++  defaults:
++    _controller: '\Drupal\system_test\Controller\SystemTestController::requestDestination'
++  requirements:
++    _access: 'TRUE'
++
++
++system_test.get_destination:
++  path: '/system-test/get-destination'
++  defaults:
++    _controller: '\Drupal\system_test\Controller\SystemTestController::getDestination'
++  requirements:
++    _access: 'TRUE'
++
+diff --git a/core/tests/Drupal/Tests/Component/Utility/UrlHelperTest.php b/core/tests/Drupal/Tests/Component/Utility/UrlHelperTest.php
+index 0477b7aa48f8e1be18890566d354df6203d2cc73..9480a7e2fd33edfa40916322632d11a033f18761 100644
+--- a/core/tests/Drupal/Tests/Component/Utility/UrlHelperTest.php
++++ b/core/tests/Drupal/Tests/Component/Utility/UrlHelperTest.php
+@@ -358,6 +358,10 @@ public static function providerTestIsExternal() {
+       array('/internal/path', FALSE),
+       array('https://example.com/external/path', TRUE),
+       array('javascript://fake-external-path', FALSE),
++      // External URL without an explicit protocol.
++      array('//drupal.org/foo/bar?foo=bar&bar=baz&baz#foo', TRUE),
++      // Internal URL starting with a slash.
++      array('/drupal.org', FALSE),
+     );
+   }
+ 
+diff --git a/core/tests/Drupal/Tests/Core/EventSubscriber/RedirectResponseSubscriberTest.php b/core/tests/Drupal/Tests/Core/EventSubscriber/RedirectResponseSubscriberTest.php
+index 9ff5414a26bce465c1431ccfaa69c02ea4ff229d..51f299169ca137f3bcd8206293820f82ab06abf8 100644
+--- a/core/tests/Drupal/Tests/Core/EventSubscriber/RedirectResponseSubscriberTest.php
++++ b/core/tests/Drupal/Tests/Core/EventSubscriber/RedirectResponseSubscriberTest.php
+@@ -14,6 +14,7 @@
+ use Symfony\Component\HttpFoundation\RedirectResponse;
+ use Symfony\Component\HttpFoundation\Request;
+ use Symfony\Component\HttpKernel\Event\FilterResponseEvent;
++use Symfony\Component\HttpKernel\Event\GetResponseEvent;
+ use Symfony\Component\HttpKernel\HttpKernelInterface;
+ use Symfony\Component\HttpKernel\KernelEvents;
+ 
+@@ -48,7 +49,11 @@ public function testDestinationRedirect(Request $request, $expected) {
+         ->expects($this->any())
+         ->method('generateFromPath')
+           ->willReturnMap([
+-            ['test', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/drupal/test']
++            ['test', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/drupal/test'],
++            ['example.com', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/drupal/example.com'],
++            ['example:com', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/drupal/example:com'],
++            ['javascript:alert(0)', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/drupal/javascript:alert(0)'],
++            ['/test', ['query' => [], 'fragment' => '', 'absolute' => TRUE], 'http://example.com/test'],
+           ]);
+     }
+ 
+@@ -58,6 +63,7 @@ public function testDestinationRedirect(Request $request, $expected) {
+     $request_context->expects($this->any())
+       ->method('getCompleteBaseUrl')
+       ->willReturn('http://example.com/drupal');
++    $request->headers->set('HOST', 'example.com');
+ 
+     $listener = new RedirectResponseSubscriber($url_generator, $request_context);
+     $dispatcher->addListener(KernelEvents::RESPONSE, array($listener, 'checkRedirectUrl'));
+@@ -85,8 +91,118 @@ public static function providerTestDestinationRedirect() {
+       array(new Request(array('destination' => 'http://example.com/foobar')), FALSE),
+       array(new Request(array('destination' => 'http://example.ca/drupal')), FALSE),
+       array(new Request(array('destination' => 'test')), 'http://example.com/drupal/test'),
++      array(new Request(array('destination' => '/test')), 'http://example.com/test'),
++      array(new Request(array('destination' => '/example.com')), 'http://example.com/example.com'),
++      array(new Request(array('destination' => 'example:com')), 'http://example.com/drupal/example:com'),
++      array(new Request(array('destination' => 'javascript:alert(0)')), 'http://example.com/drupal/javascript:alert(0)'),
+       array(new Request(array('destination' => 'http://example.com/drupal/')), 'http://example.com/drupal/'),
+       array(new Request(array('destination' => 'http://example.com/drupal/test')), 'http://example.com/drupal/test'),
+     );
+   }
++
++  /**
++   * @expectedException \InvalidArgumentException
++   *
++   * @dataProvider providerTestDestinationRedirectWithInvalidUrl
++   */
++  public function testDestinationRedirectWithInvalidUrl(Request $request) {
++    $dispatcher = new EventDispatcher();
++    $kernel = $this->getMock('Symfony\Component\HttpKernel\HttpKernelInterface');
++    $response = new RedirectResponse('http://example.com/drupal');
++    $url_generator = $this->getMock('Drupal\Core\Routing\UrlGeneratorInterface');
++
++    $request_context = $this->getMockBuilder('Drupal\Core\Routing\RequestContext')
++      ->disableOriginalConstructor()
++      ->getMock();
++
++    $listener = new RedirectResponseSubscriber($url_generator, $request_context);
++    $dispatcher->addListener(KernelEvents::RESPONSE, array($listener, 'checkRedirectUrl'));
++    $event = new FilterResponseEvent($kernel, $request, HttpKernelInterface::SUB_REQUEST, $response);
++    $dispatcher->dispatch(KernelEvents::RESPONSE, $event);
++  }
++
++  /**
++   * Data provider for testDestinationRedirectWithInvalidUrl().
++   */
++  public function providerTestDestinationRedirectWithInvalidUrl() {
++    $data = [];
++    $data[] = [new Request(array('destination' => '//example:com'))];
++    $data[] = [new Request(array('destination' => '//example:com/test'))];
++
++    return $data;
++  }
++
++  /**
++   * Tests that $_GET only contain internal URLs.
++   *
++   * @covers ::sanitizeDestination
++   *
++   * @dataProvider providerTestSanitizeDestination
++   *
++   * @see \Drupal\Component\Utility\UrlHelper::isExternal
++   */
++  public function testSanitizeDestinationForGet($input, $output) {
++    $request = new Request();
++    $request->query->set('destination', $input);
++
++    $url_generator = $this->getMock('Drupal\Core\Routing\UrlGeneratorInterface');
++    $request_context = new RequestContext();
++    $listener = new RedirectResponseSubscriber($url_generator, $request_context);
++    $kernel = $this->getMock('Symfony\Component\HttpKernel\HttpKernelInterface');
++    $event = new GetResponseEvent($kernel, $request, HttpKernelInterface::MASTER_REQUEST);
++
++    $dispatcher = new EventDispatcher();
++    $dispatcher->addListener(KernelEvents::REQUEST, [$listener, 'sanitizeDestination'], 100);
++    $dispatcher->dispatch(KernelEvents::REQUEST, $event);
++
++    $this->assertEquals($output, $request->query->get('destination'));
++  }
++
++  /**
++   * Tests that $_REQUEST['destination'] only contain internal URLs.
++   *
++   * @covers ::sanitizeDestination
++   *
++   * @dataProvider providerTestSanitizeDestination
++   *
++   * @see \Drupal\Component\Utility\UrlHelper::isExternal
++   */
++  public function testSanitizeDestinationForPost($input, $output) {
++    $request = new Request();
++    $request->request->set('destination', $input);
++
++    $url_generator = $this->getMock('Drupal\Core\Routing\UrlGeneratorInterface');
++    $request_context = new RequestContext();
++    $listener = new RedirectResponseSubscriber($url_generator, $request_context);
++    $kernel = $this->getMock('Symfony\Component\HttpKernel\HttpKernelInterface');
++    $event = new GetResponseEvent($kernel, $request, HttpKernelInterface::MASTER_REQUEST);
++
++    $dispatcher = new EventDispatcher();
++    $dispatcher->addListener(KernelEvents::REQUEST, [$listener, 'sanitizeDestination'], 100);
++    $dispatcher->dispatch(KernelEvents::REQUEST, $event);
++
++    $this->assertEquals($output, $request->request->get('destination'));
++  }
++
++  /**
++   * Data provider for testSanitizeDestination().
++   */
++  public function providerTestSanitizeDestination() {
++    $data = [];
++    // Standard internal example node path is present in the 'destination'
++    // parameter.
++    $data[] = ['node', 'node'];
++    // Internal path with one leading slash is allowed.
++    $data[] = ['/example.com', '/example.com'];
++    // External URL without scheme is not allowed.
++    $data[] = ['//example.com/test', ''];
++    // Internal URL using a colon is allowed.
++    $data[] = ['example:test', 'example:test'];
++    // External URL is not allowed.
++    $data[] = ['http://example.com', ''];
++    // Javascript URL is allowed because it is treated as an internal URL.
++    $data[] = ['javascript:alert(0)', 'javascript:alert(0)'];
++
++    return $data;
++  }
+ }
+diff --git a/core/tests/Drupal/Tests/Core/Routing/RedirectDestinationTest.php b/core/tests/Drupal/Tests/Core/Routing/RedirectDestinationTest.php
+index 3f388597783fa0719749564fa13310323d3aa368..e305bd1e2ca0b16667567cccbd3e0d1e4f08cd6e 100644
+--- a/core/tests/Drupal/Tests/Core/Routing/RedirectDestinationTest.php
++++ b/core/tests/Drupal/Tests/Core/Routing/RedirectDestinationTest.php
+@@ -64,6 +64,13 @@ protected function setupUrlGenerator() {
+   }
+ 
+   /**
++   * Tests destination passed via $_GET.
++   *
++   * @param \Symfony\Component\HttpFoundation\Request $request
++   *   The request to test.
++   * @param string $expected_destination
++   *   The expected destination.
++   *
+    * @dataProvider providerGet
+    *
+    * @covers ::get
+@@ -108,6 +115,11 @@ public function providerGet() {
+     $request->query->set('other', 'value');
+     $data[] = [$request, '/current-path?other=value'];
+ 
++    // A request with a dedicated specified external destination.
++    $request = Request::create('/');
++    $request->query->set('destination', 'https://www.drupal.org');
++    $data[] = [$request, '/'];
++
+     return $data;
+   }
+ 
+diff --git a/core/tests/Drupal/Tests/Core/Utility/UnroutedUrlAssemblerTest.php b/core/tests/Drupal/Tests/Core/Utility/UnroutedUrlAssemblerTest.php
+index 6f5401f3e06ec8722834b42c071170d5c9fe4f8c..6a3642a50d0ba09a42c5ca331ef35eae3ad5ba82 100644
+--- a/core/tests/Drupal/Tests/Core/Utility/UnroutedUrlAssemblerTest.php
++++ b/core/tests/Drupal/Tests/Core/Utility/UnroutedUrlAssemblerTest.php
+@@ -66,6 +66,14 @@ public function testAssembleWithNeitherExternalNorDomainLocalUri() {
+     $this->unroutedUrlAssembler->assemble('wrong-url');
+   }
+ 
++  /**
++   * @covers ::assemble
++   * @expectedException \InvalidArgumentException
++   */
++  public function testAssembleWithLeadingSlash() {
++    $this->unroutedUrlAssembler->assemble('/drupal.org');
++  }
++
+   /**
+    * @covers ::assemble
+    * @covers ::buildExternalUrl
+@@ -89,6 +97,7 @@ public function providerTestAssembleWithExternalUrl() {
+       ['http://example.com/test', ['https' => TRUE], 'https://example.com/test'],
+       ['https://example.com/test', ['https' => FALSE], 'http://example.com/test'],
+       ['https://example.com/test?foo=1#bar', [], 'https://example.com/test?foo=1#bar'],
++      ['//drupal.org', [], '//drupal.org'],
+     ];
+   }
+ 
+@@ -115,6 +124,7 @@ public function providerTestAssembleWithLocalUri() {
+       ['base:example', [], TRUE, '/subdir/example'],
+       ['base:example', ['query' => ['foo' => 'bar']], TRUE, '/subdir/example?foo=bar'],
+       ['base:example', ['fragment' => 'example', ], TRUE, '/subdir/example#example'],
++      ['base:/drupal.org', [], FALSE, '/drupal.org'],
+     ];
+   }
+ 

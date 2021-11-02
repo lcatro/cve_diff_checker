@@ -1,0 +1,27 @@
+From 77dd114513d7796e1e2b8aece214a380af26fbf4 Mon Sep 17 00:00:00 2001
+From: Mihai Maruseac <mihaimaruseac@google.com>
+Date: Tue, 4 May 2021 15:46:30 -0700
+Subject: [PATCH] Fix a check fail
+
+PiperOrigin-RevId: 372011072
+Change-Id: I1062cfaed0aa16884e9a16312483794d188db76f
+---
+ tensorflow/core/kernels/load_and_remap_matrix_op.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tensorflow/core/kernels/load_and_remap_matrix_op.cc b/tensorflow/core/kernels/load_and_remap_matrix_op.cc
+index cb0245a9b6126..5ec28c7035813 100644
+--- a/tensorflow/core/kernels/load_and_remap_matrix_op.cc
++++ b/tensorflow/core/kernels/load_and_remap_matrix_op.cc
+@@ -123,6 +123,11 @@ class LoadAndRemapMatrixOp : public OpKernel {
+     // Processes the checkpoint source and the provided Tensor name.
+     const Tensor* ckpt_path_t;
+     OP_REQUIRES_OK(context, context->input("ckpt_path", &ckpt_path_t));
++    OP_REQUIRES(
++        context, ckpt_path_t->NumElements() == 1,
++        errors::InvalidArgument("The `ckpt_path` tensor must have exactly one "
++                                "element, got tensor of shape ",
++                                ckpt_path_t->shape().DebugString()));
+     const string& ckpt_path = ckpt_path_t->scalar<tstring>()();
+     const Tensor* old_tensor_name_t;
+     OP_REQUIRES_OK(context,
