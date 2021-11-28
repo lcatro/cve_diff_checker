@@ -40,7 +40,7 @@ no_fix_result
 
 ## 基本原理
 
-diff checker核心逻辑是以下论:
+diff checker核心逻辑是以下论证思路:
 
 1.旧代码存在,新代码不存在,故漏洞存在
 
