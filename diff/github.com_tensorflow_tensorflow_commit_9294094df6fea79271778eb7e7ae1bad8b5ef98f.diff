@@ -1,0 +1,51 @@
+From d9b27593638f2ae356c6205517f28ff9b21ae34c Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Wed, 4 Aug 2021 03:10:36 +0000
+Subject: [PATCH] Fix tf.tile crash when n is large
+
+This PR tries to fix the issue raised in 46911 where tf.tile
+will crash when n is large. This PR add additional check
+to make sure an error message is rendered (instead of crash).
+
+This PR fixes 46911.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/tile_ops.cc              | 4 +++-
+ tensorflow/python/kernel_tests/shape_ops_test.py | 8 ++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/tile_ops.cc b/tensorflow/core/kernels/tile_ops.cc
+index 7d967d8761077..e9b0428e610e8 100644
+--- a/tensorflow/core/kernels/tile_ops.cc
++++ b/tensorflow/core/kernels/tile_ops.cc
+@@ -188,7 +188,9 @@ class TileOp : public OpKernel {
+           context, multiples_array[i] >= 0,
+           errors::InvalidArgument("Expected multiples[", i, "] >= 0, but got ",
+                                   multiples_array[i]));
+-      output_shape.AddDim(input.dim_size(i) * multiples_array[i]);
++      OP_REQUIRES_OK(
++          context,
++          output_shape.AddDimWithStatus(input.dim_size(i) * multiples_array[i]));
+     }
+     if (output_shape == input.shape()) {
+       context->set_output(0, input);
+diff --git a/tensorflow/python/kernel_tests/shape_ops_test.py b/tensorflow/python/kernel_tests/shape_ops_test.py
+index c5f6d02da64ef..21dbd0dd59848 100644
+--- a/tensorflow/python/kernel_tests/shape_ops_test.py
++++ b/tensorflow/python/kernel_tests/shape_ops_test.py
+@@ -723,6 +723,14 @@ def testShapeFunctionEdgeCases(self):
+           inp, array_ops.placeholder(
+               dtypes.int32, shape=[3]))
+ 
++  def testLargeTensor(self):
++    # Test case for GItHub issue 46911.
++    with self.assertRaises(errors_impl.InternalError):
++      with self.cached_session():
++        tiled = array_ops.tile(
++            np.ones((1, 1, 1)), [100000000, 100000000, 100000000])
++        result = self.evaluate(tiled)
++
+ 
+ if __name__ == "__main__":
+   test.main()

@@ -1,0 +1,51 @@
+From 8ad2e07d0a4f2cf29ed0c9a63fb4bce550d34413 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Thu, 26 Aug 2021 14:58:48 +0000
+Subject: [PATCH] Fix crash with tf.range when start is large/negative
+
+This PR tries to address the issue raised in 46899 where
+tf.range will crash when start is large/negative.
+
+This PR fixes 46899.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/sequence_ops.cc         | 4 +++-
+ tensorflow/python/kernel_tests/init_ops_test.py | 7 +++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/sequence_ops.cc b/tensorflow/core/kernels/sequence_ops.cc
+index ad1b1471c3006..ca7fae0d91d4a 100644
+--- a/tensorflow/core/kernels/sequence_ops.cc
++++ b/tensorflow/core/kernels/sequence_ops.cc
+@@ -78,9 +78,11 @@ class RangeOp : public OpKernel {
+     } else {
+       size = static_cast<int64>(std::ceil(std::abs((limit - start) / delta)));
+     }
++    TensorShape shape;
++    OP_REQUIRES_OK(context, shape.AddDimWithStatus(size));
+     Tensor* out = nullptr;
+     OP_REQUIRES_OK(context,
+-                   context->allocate_output(0, TensorShape({size}), &out));
++                   context->allocate_output(0, shape, &out));
+     auto flat = out->flat<T>();
+     T val = start;
+     for (int64_t i = 0; i < size; ++i) {
+diff --git a/tensorflow/python/kernel_tests/init_ops_test.py b/tensorflow/python/kernel_tests/init_ops_test.py
+index 68c5f3c7ee942..8648bcaeee485 100644
+--- a/tensorflow/python/kernel_tests/init_ops_test.py
++++ b/tensorflow/python/kernel_tests/init_ops_test.py
+@@ -550,6 +550,13 @@ def testLargeLimits(self):
+         v = math_ops.range(0, 9223372036854775807)
+         self.evaluate(v)
+ 
++  def testLargeStarts(self):
++    # Test case for GitHub issue 46899.
++    with self.session():
++      with self.assertRaises(errors_impl.InternalError):
++        v = math_ops.range(start=-1e+38, limit=1)
++        self.evaluate(v)
++
+ 
+ # TODO(vrv): move to sequence_ops_test?
+ class LinSpaceTest(test.TestCase):

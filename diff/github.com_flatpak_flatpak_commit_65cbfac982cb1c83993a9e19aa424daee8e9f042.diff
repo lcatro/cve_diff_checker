@@ -1,0 +1,29 @@
+From 65cbfac982cb1c83993a9e19aa424daee8e9f042 Mon Sep 17 00:00:00 2001
+From: Alexander Larsson <alexl@redhat.com>
+Date: Wed, 12 Jan 2022 11:00:56 +0100
+Subject: [PATCH] Ensure that bundles have metadata on install
+
+If we have a bundle without metadata we wouldn't properly present
+the permissions in the transaction.
+---
+ common/flatpak-dir.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/common/flatpak-dir.c b/common/flatpak-dir.c
+index e8bf106cc..4debffea3 100644
+--- a/common/flatpak-dir.c
++++ b/common/flatpak-dir.c
+@@ -9372,6 +9372,13 @@ flatpak_dir_ensure_bundle_remote (FlatpakDir         *self,
+   if (metadata == NULL)
+     return NULL;
+ 
++  /* If we rely on metadata (to e.g. print permissions), check it exists before creating the remote */
++  if (out_metadata && fp_metadata == NULL)
++    {
++      flatpak_fail_error (error, FLATPAK_ERROR_INVALID_DATA, "No metadata in bundler header");
++      return NULL;
++    }
++
+   gpg_data = extra_gpg_data ? extra_gpg_data : included_gpg_data;
+ 
+   deploy_data = flatpak_dir_get_deploy_data (self, ref, FLATPAK_DEPLOY_VERSION_ANY, cancellable, NULL);

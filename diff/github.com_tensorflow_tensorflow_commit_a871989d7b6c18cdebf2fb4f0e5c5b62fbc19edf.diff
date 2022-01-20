@@ -1,0 +1,87 @@
+From db989ffa478a03c39d432d233e6017cfb10e0c45 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Tue, 24 Aug 2021 18:45:36 +0000
+Subject: [PATCH 1/2] Fix crash of tf.image.extract_glimpse with negative input
+
+This PR tries to fix the issue raised in 51618 where
+tf.image.extract_glimpse will crash in case of negative input.
+
+This PR adds additional checking to allow graceful error message.
+
+This PR fixes 51618.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/image/attention_ops.cc       |  5 +++--
+ tensorflow/python/kernel_tests/attention_ops_test.py | 10 ++++++++++
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/tensorflow/core/kernels/image/attention_ops.cc b/tensorflow/core/kernels/image/attention_ops.cc
+index 9a0513931ce25..60f6d9070dd55 100644
+--- a/tensorflow/core/kernels/image/attention_ops.cc
++++ b/tensorflow/core/kernels/image/attention_ops.cc
+@@ -87,9 +87,10 @@ class ExtractGlimpseOp : public OpKernel {
+ 
+     const int64_t output_height = window_size.tensor<int, 1>()(0);
+     const int64_t output_width = window_size.tensor<int, 1>()(1);
++
+     TensorShape output_shape = input_shape;
+-    output_shape.set_dim(1, output_height);
+-    output_shape.set_dim(2, output_width);
++    OP_REQUIRES_OK(context, output_shape.SetDimWithStatus(1, output_height));
++    OP_REQUIRES_OK(context, output_shape.SetDimWithStatus(2, output_width));
+ 
+     const Tensor& offsets = context->input(2);
+     OP_REQUIRES(context, offsets.shape().dims() == 2,
+diff --git a/tensorflow/python/kernel_tests/attention_ops_test.py b/tensorflow/python/kernel_tests/attention_ops_test.py
+index 804a0b20cc9dd..8a94c3936d521 100644
+--- a/tensorflow/python/kernel_tests/attention_ops_test.py
++++ b/tensorflow/python/kernel_tests/attention_ops_test.py
+@@ -22,6 +22,7 @@
+ 
+ from tensorflow.python.framework import constant_op
+ from tensorflow.python.framework import dtypes
++from tensorflow.python.framework import errors
+ from tensorflow.python.ops import array_ops
+ from tensorflow.python.ops import gen_image_ops
+ from tensorflow.python.ops import image_ops
+@@ -301,6 +302,15 @@ def testGlimpseNonNormalizedNonCentered(self):
+           np.asarray([[5, 6, 7], [10, 11, 12], [15, 16, 17]]),
+           self.evaluate(result2)[0, :, :, 0])
+ 
++  def testGlimpseNegativeInput(self):
++    img = np.arange(9).reshape([1,3,3,1])
++    with self.test_session():
++      with self.assertRaises(errors.InternalError):
++        result = image_ops.extract_glimpse_v2(
++            img, size=[1023, -63], offsets=[1023, 63],
++            centered=False, normalized=False)
++        self.evaluate(result)
++
+ 
+ if __name__ == '__main__':
+   test.main()
+
+From ad799ad85dcae4c3070390e0033dbe3ed64a682b Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Tue, 14 Sep 2021 11:34:08 -0600
+Subject: [PATCH 2/2] Capture additional ValueError in case of graph/eager mode
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/python/kernel_tests/attention_ops_test.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tensorflow/python/kernel_tests/attention_ops_test.py b/tensorflow/python/kernel_tests/attention_ops_test.py
+index 8a94c3936d521..34b6da4c6a8e6 100644
+--- a/tensorflow/python/kernel_tests/attention_ops_test.py
++++ b/tensorflow/python/kernel_tests/attention_ops_test.py
+@@ -305,7 +305,7 @@ def testGlimpseNonNormalizedNonCentered(self):
+   def testGlimpseNegativeInput(self):
+     img = np.arange(9).reshape([1,3,3,1])
+     with self.test_session():
+-      with self.assertRaises(errors.InternalError):
++      with self.assertRaises((errors.InternalError, ValueError)):
+         result = image_ops.extract_glimpse_v2(
+             img, size=[1023, -63], offsets=[1023, 63],
+             centered=False, normalized=False)

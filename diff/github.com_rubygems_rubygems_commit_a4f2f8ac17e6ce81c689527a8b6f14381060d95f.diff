@@ -1,0 +1,84 @@
+From a4f2f8ac17e6ce81c689527a8b6f14381060d95f Mon Sep 17 00:00:00 2001
+From: Simon Fish <si@mon.fish>
+Date: Tue, 26 Oct 2021 17:50:55 +0100
+Subject: [PATCH] Add require parameter to `bundle add``
+
+Test and ensure "false" is handled
+
+Don't use yield_self to operate on autorequire
+
+Remove duplicate autorequire
+
+Add banner to require option
+
+Don't use json to break down require params
+
+Pass linter
+---
+ bundler/lib/bundler/cli.rb        |  1 +
+ bundler/lib/bundler/injector.rb   |  9 ++++++++-
+ bundler/spec/commands/add_spec.rb | 12 ++++++++++++
+ 3 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/bundler/lib/bundler/cli.rb b/bundler/lib/bundler/cli.rb
+index d271086b254..9046c0115c9 100644
+--- a/bundler/lib/bundler/cli.rb
++++ b/bundler/lib/bundler/cli.rb
+@@ -367,6 +367,7 @@ def binstubs(*gems)
+     method_option "version", :aliases => "-v", :type => :string
+     method_option "group", :aliases => "-g", :type => :string
+     method_option "source", :aliases => "-s", :type => :string
++    method_option "require", :aliases => "-r", :type => :string, :banner => "Adds require path to gem. Provide false, or a path as a string."
+     method_option "git", :type => :string
+     method_option "branch", :type => :string
+     method_option "skip-install", :type => :boolean, :banner =>
+diff --git a/bundler/lib/bundler/injector.rb b/bundler/lib/bundler/injector.rb
+index 613bda4f844..5e5dfca02ee 100644
+--- a/bundler/lib/bundler/injector.rb
++++ b/bundler/lib/bundler/injector.rb
+@@ -113,8 +113,9 @@ def build_gem_lines(conservative_versioning)
+         source = ", :source => \"#{d.source}\"" unless d.source.nil?
+         git = ", :git => \"#{d.git}\"" unless d.git.nil?
+         branch = ", :branch => \"#{d.branch}\"" unless d.branch.nil?
++        require_path = ", :require => #{convert_autorequire(d.autorequire)}" unless d.autorequire.nil?
+ 
+-        %(gem #{name}#{requirement}#{group}#{source}#{git}#{branch})
++        %(gem #{name}#{requirement}#{group}#{source}#{git}#{branch}#{require_path})
+       end.join("\n")
+     end
+ 
+@@ -269,5 +270,11 @@ def cross_check_for_errors(gemfile_path, original_deps, removed_deps, initial_ge
+     def show_warning(message)
+       Bundler.ui.info Bundler.ui.add_color(message, :yellow)
+     end
++
++    def convert_autorequire(autorequire)
++      autorequire = autorequire.first
++      return autorequire if autorequire == "false"
++      autorequire.inspect
++    end
+   end
+ end
+diff --git a/bundler/spec/commands/add_spec.rb b/bundler/spec/commands/add_spec.rb
+index 4c533652ca6..093ec53fea0 100644
+--- a/bundler/spec/commands/add_spec.rb
++++ b/bundler/spec/commands/add_spec.rb
+@@ -68,6 +68,18 @@
+     end
+   end
+ 
++  describe "with --require" do
++    it "adds the require param for the gem" do
++      bundle "add 'foo' --require=foo/engine"
++      expect(bundled_app_gemfile.read).to match(%r{gem "foo",(?: .*,) :require => "foo\/engine"})
++    end
++
++    it "converts false to a boolean" do
++      bundle "add 'foo' --require=false"
++      expect(bundled_app_gemfile.read).to match(/gem "foo",(?: .*,) :require => false/)
++    end
++  end
++
+   describe "with --group" do
+     it "adds dependency for the specified group" do
+       bundle "add 'foo' --group='development'"

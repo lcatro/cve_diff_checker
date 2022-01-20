@@ -1,0 +1,43 @@
+From 4067e191a909ed06f250d09a40e43aa5edbb0289 Mon Sep 17 00:00:00 2001
+From: Kaj Magnus Lindberg <kajmagnus3@gmail.com>
+Date: Mon, 11 Oct 2021 12:05:17 +0200
+Subject: [PATCH] Bump get query limit from 29 to 50. Disallow access via IP.
+
+---
+ appsv/server/debiki/Globals.scala                    | 3 ++-
+ appsv/server/talkyard/server/api/GetController.scala | 4 ++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/appsv/server/debiki/Globals.scala b/appsv/server/debiki/Globals.scala
+index e6c43498e..844346490 100644
+--- a/appsv/server/debiki/Globals.scala
++++ b/appsv/server/debiki/Globals.scala
+@@ -801,11 +801,12 @@ class Globals(  // RENAME to TyApp? or AppContext? TyAppContext? variable name =
+             die("DwE20SE4")
+         }
+       case None =>
++        /* Not really needed. Better to use a real domain name.
+         if (Site.Ipv4AnyPortRegex.matches(hostname)) {
+           // Make it possible to access the server before any domain has been pointed
+           // to it, just after installation, by lazy-creating an empty default site.
+           return defaultSiteIdAndHostname
+-        }
++        } */
+         throwSiteNotFound(
+           hostname, debugCode = "LKPCANHOST")
+     }
+diff --git a/appsv/server/talkyard/server/api/GetController.scala b/appsv/server/talkyard/server/api/GetController.scala
+index c902a45e1..b34dcdf74 100644
+--- a/appsv/server/talkyard/server/api/GetController.scala
++++ b/appsv/server/talkyard/server/api/GetController.scala
+@@ -64,8 +64,8 @@ class GetController @Inject()(cc: ControllerComponents, edContext: EdContext)
+ 
+     val authzCtx = dao.getForumAuthzContext(requester)
+ 
+-    throwUnimplementedIf(pageRefs.size >= 30,
+-          "TyE603MRT4", "Currently at most 30 at a time")
++    throwUnimplementedIf(pageRefs.size > 50,
++          "TyE603MRT4", "Currently at most 50 at a time")
+ 
+     def notFoundMsg(embUrl: St, pageId: PageId = NoPageId): St = {
+       s"No page with that embedding url or discussion id: $embUrl"

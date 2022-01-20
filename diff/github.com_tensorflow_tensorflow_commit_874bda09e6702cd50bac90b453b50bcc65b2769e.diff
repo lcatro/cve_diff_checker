@@ -1,0 +1,70 @@
+From de260208f61c96abe0ddaefa2e47d24a6344ec5d Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Fri, 27 Aug 2021 16:16:23 +0000
+Subject: [PATCH] Fix crash with tf.summary.create_file_writer when non-scalar
+ values are passed
+
+This PR tries to fix the issue raised in 46909 where
+tf.summary.create_file_writer crashes when non-scalar values are passed.
+
+This PR fixes 46909.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/summary_kernels.cc      |  8 ++++++++
+ tensorflow/python/summary/writer/writer_test.py | 10 ++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/tensorflow/core/kernels/summary_kernels.cc b/tensorflow/core/kernels/summary_kernels.cc
+index 26aa2aa70f402..e121c4e751ac9 100644
+--- a/tensorflow/core/kernels/summary_kernels.cc
++++ b/tensorflow/core/kernels/summary_kernels.cc
+@@ -38,12 +38,20 @@ class CreateSummaryFileWriterOp : public OpKernel {
+   void Compute(OpKernelContext* ctx) override {
+     const Tensor* tmp;
+     OP_REQUIRES_OK(ctx, ctx->input("logdir", &tmp));
++    OP_REQUIRES(ctx, TensorShapeUtils::IsScalar(tmp->shape()),
++                errors::InvalidArgument("logdir must be a scalar"));
+     const string logdir = tmp->scalar<tstring>()();
+     OP_REQUIRES_OK(ctx, ctx->input("max_queue", &tmp));
++    OP_REQUIRES(ctx, TensorShapeUtils::IsScalar(tmp->shape()),
++                errors::InvalidArgument("max_queue must be a scalar"));
+     const int32_t max_queue = tmp->scalar<int32>()();
+     OP_REQUIRES_OK(ctx, ctx->input("flush_millis", &tmp));
++    OP_REQUIRES(ctx, TensorShapeUtils::IsScalar(tmp->shape()),
++                errors::InvalidArgument("flush_millis must be a scalar"));
+     const int32_t flush_millis = tmp->scalar<int32>()();
+     OP_REQUIRES_OK(ctx, ctx->input("filename_suffix", &tmp));
++    OP_REQUIRES(ctx, TensorShapeUtils::IsScalar(tmp->shape()),
++                errors::InvalidArgument("filename_suffix must be a scalar"));
+     const string filename_suffix = tmp->scalar<tstring>()();
+ 
+     core::RefCountPtr<SummaryWriterInterface> s;
+diff --git a/tensorflow/python/summary/writer/writer_test.py b/tensorflow/python/summary/writer/writer_test.py
+index 19138b1372dea..a9f107aa4c247 100644
+--- a/tensorflow/python/summary/writer/writer_test.py
++++ b/tensorflow/python/summary/writer/writer_test.py
+@@ -34,6 +34,7 @@
+ from tensorflow.python.client import session
+ from tensorflow.python.framework import constant_op
+ from tensorflow.python.framework import dtypes
++from tensorflow.python.framework import errors_impl
+ from tensorflow.python.framework import meta_graph
+ from tensorflow.python.framework import ops
+ from tensorflow.python.framework import test_util
+@@ -685,6 +686,15 @@ def testSharing_withExplicitSummaryFileWriters(self):
+     # No more files
+     self.assertRaises(StopIteration, lambda: next(event_paths))
+ 
++  def testSummaryFileWritersInvalidInput(self):
++    # Test case for GitHub issue 46909
++    logdir = self.get_temp_dir()
++    with session.Session() as sess:
++      with self.assertRaises(errors_impl.InvalidArgumentError):
++        writer = summary_ops_v2.create_file_writer(
++            logdir=logdir, flush_millis=[1, 2])
++        sess.run(writer.init())
++        sess.run(writer.flush())
+ 
+ class FileWriterCacheTest(test.TestCase):
+   """FileWriterCache tests."""

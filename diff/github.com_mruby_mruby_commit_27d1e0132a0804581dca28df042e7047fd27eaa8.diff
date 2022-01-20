@@ -1,0 +1,35 @@
+From 27d1e0132a0804581dca28df042e7047fd27eaa8 Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Wed, 29 Dec 2021 15:50:28 +0900
+Subject: [PATCH] array.c: fix `mrb_ary_shift_m` initialization bug.
+
+The `ARY_PTR` and `ARY_LEN` may be modified in `mrb_get_args`.
+---
+ src/array.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/array.c b/src/array.c
+index c100591ebe..1a95b75c93 100644
+--- a/src/array.c
++++ b/src/array.c
+@@ -581,14 +581,16 @@ mrb_ary_shift(mrb_state *mrb, mrb_value self)
+ static mrb_value
+ mrb_ary_shift_m(mrb_state *mrb, mrb_value self)
+ {
+-  struct RArray *a = mrb_ary_ptr(self);
+-  mrb_int len = ARY_LEN(a);
+   mrb_int n;
+-  mrb_value val;
+ 
+   if (mrb_get_args(mrb, "|i", &n) == 0) {
+     return mrb_ary_shift(mrb, self);
+-  };
++  }
++
++  struct RArray *a = mrb_ary_ptr(self);
++  mrb_int len = ARY_LEN(a);
++  mrb_value val;
++
+   ary_modify_check(mrb, a);
+   if (len == 0 || n == 0) return mrb_ary_new(mrb);
+   if (n < 0) mrb_raise(mrb, E_ARGUMENT_ERROR, "negative array shift");

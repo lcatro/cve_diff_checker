@@ -1,0 +1,141 @@
+From cb4d65a90c528f834e42a7baaf4638f1536249b2 Mon Sep 17 00:00:00 2001
+From: Greg Logan <gregorydlogan@gmail.com>
+Date: Fri, 29 Oct 2021 12:09:39 -0600
+Subject: [PATCH 1/3] Fixing security issue where any file readable by Opencast
+ could be added to the mediapackage.
+
+This issue allows users who have the ability to add content and view mediapackages to add potentially sensitive files
+to that mediapackage.  This includes all Opencast configuration files containing credentials (LMS, DB credentials), as
+well as any other insufficiently restricted file.  Badly permissioned config files in /etc?  Now attached to your MP!
+
+Filed as GHSA-59g4-hpg3-3gcp
+---
+ .../org/opencastproject/ingest/impl/IngestServiceImpl.java  | 6 +++++-
+ .../opencastproject/ingest/impl/IngestServiceImplTest.java  | 2 ++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+index c4f79f2da71..0ed67023e39 100644
+--- a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
++++ b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+@@ -1601,8 +1601,12 @@ protected URI addContentToRepo(MediaPackage mp, String elementId, URI uri) throw
+           throw new IOException(uri + " returns http " + httpStatusCode);
+         }
+         in = response.getEntity().getContent();
+-      } else {
++        // This weird path whitelists files which exist *inside this bundle during build*, but likely won't cause issues
++        // at runtime.  This will need to be changed if this module ever gets renamed though.
++      } else if (!uri.toString().startsWith("file") || uri.toString().contains("ingest-service-impl/target/test-classes")) {
+         in = uri.toURL().openStream();
++      } else {
++        throw new IOException("Refusing to fetch files from the local filesystem");
+       }
+       String fileName = FilenameUtils.getName(uri.getPath());
+       if (isBlank(FilenameUtils.getExtension(fileName)))
+diff --git a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+index 181bd86f687..bc1a279980a 100644
+--- a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
++++ b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+@@ -491,6 +491,8 @@ public void testAuthWhitelist() throws Exception {
+     testAuthWhitelist("http://www.example.org/testfile", "http://localhost.*", true, false, true);
+     //Matching regex
+     testAuthWhitelist("http://www.example.org/testfile", "http://localhost.*|http://www.example.org/.*", false, true, true);
++    //Local filesystem should be actively rejected.  This file needs to *not* be in the resources directory (look in the impl for why), and needs to be readable by the user running the test
++    testAuthWhitelist(getClass().getResource("/../classes/org/opencastproject/ingest/impl/IngestServiceImpl.class").toString(), ".*", true, false, false);
+   }
+ 
+ 
+
+From 672e2e92365f3d47ffa9430f98ea8bbc93bf9ae1 Mon Sep 17 00:00:00 2001
+From: Greg Logan <gregorydlogan@gmail.com>
+Date: Tue, 7 Dec 2021 16:08:35 -0600
+Subject: [PATCH 2/3] Adding exception to the exception to prevent people from
+ using the exception to traverse the path...
+
+---
+ .../org/opencastproject/ingest/impl/IngestServiceImpl.java | 2 +-
+ .../opencastproject/ingest/impl/IngestServiceImplTest.java | 7 ++++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+index 0ed67023e39..04acb1debc7 100644
+--- a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
++++ b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+@@ -1603,7 +1603,7 @@ protected URI addContentToRepo(MediaPackage mp, String elementId, URI uri) throw
+         in = response.getEntity().getContent();
+         // This weird path whitelists files which exist *inside this bundle during build*, but likely won't cause issues
+         // at runtime.  This will need to be changed if this module ever gets renamed though.
+-      } else if (!uri.toString().startsWith("file") || uri.toString().contains("ingest-service-impl/target/test-classes")) {
++      } else if (!uri.toString().startsWith("file") || (uri.toString().contains("ingest-service-impl/target/test-classes") && !uri.toString().contains(".."))) {
+         in = uri.toURL().openStream();
+       } else {
+         throw new IOException("Refusing to fetch files from the local filesystem");
+diff --git a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+index bc1a279980a..05f1639cd9d 100644
+--- a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
++++ b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+@@ -491,8 +491,13 @@ public void testAuthWhitelist() throws Exception {
+     testAuthWhitelist("http://www.example.org/testfile", "http://localhost.*", true, false, true);
+     //Matching regex
+     testAuthWhitelist("http://www.example.org/testfile", "http://localhost.*|http://www.example.org/.*", false, true, true);
++
+     //Local filesystem should be actively rejected.  This file needs to *not* be in the resources directory (look in the impl for why), and needs to be readable by the user running the test
+-    testAuthWhitelist(getClass().getResource("/../classes/org/opencastproject/ingest/impl/IngestServiceImpl.class").toString(), ".*", true, false, false);
++    //NB: This is a horrible, horrible hack, but it's the only way I can think of to get *out* of test-classes.  If you try and ../ your way up above that getResource NPEs, as expected.
++    testAuthWhitelist(getClass().getResource("./../../../../").toURI().resolve("../../pom.xml").toString(), ".*", true, false, false);
++    //Test to ensure we can't use '..' to get around filters.  Removing the ".." works as expected, see below
++    testAuthWhitelist(getClass().getResource("./../impl/IngestServiceImplTest.class").toURI().toString(), ".*", true, false, false);
++    testAuthWhitelist(getClass().getResource("./IngestServiceImplTest.class").toURI().toString(), ".*", false, false, false);
+   }
+ 
+ 
+
+From d881ba613267086bb7d41b81a0440d12b9941154 Mon Sep 17 00:00:00 2001
+From: Greg Logan <gregorydlogan@gmail.com>
+Date: Mon, 13 Dec 2021 10:48:45 -0600
+Subject: [PATCH 3/3] Per discussion on the security ticket, previous exception
+ based system can be worked around using file:///some/path?exclusion.  Now we
+ straight up blacklist file and only allow it if you turn on this flag.
+
+---
+ .../org/opencastproject/ingest/impl/IngestServiceImpl.java | 7 ++++---
+ .../opencastproject/ingest/impl/IngestServiceImplTest.java | 1 +
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+index 04acb1debc7..f50e7cbefec 100644
+--- a/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
++++ b/modules/ingest-service-impl/src/main/java/org/opencastproject/ingest/impl/IngestServiceImpl.java
+@@ -315,6 +315,8 @@
+   private boolean skipCatalogs = DEFAULT_SKIP;
+   private boolean skipAttachments = DEFAULT_SKIP;
+ 
++  protected boolean testMode = false;
++
+   /**
+    * Creates a new ingest service instance.
+    */
+@@ -1601,9 +1603,8 @@ protected URI addContentToRepo(MediaPackage mp, String elementId, URI uri) throw
+           throw new IOException(uri + " returns http " + httpStatusCode);
+         }
+         in = response.getEntity().getContent();
+-        // This weird path whitelists files which exist *inside this bundle during build*, but likely won't cause issues
+-        // at runtime.  This will need to be changed if this module ever gets renamed though.
+-      } else if (!uri.toString().startsWith("file") || (uri.toString().contains("ingest-service-impl/target/test-classes") && !uri.toString().contains(".."))) {
++        //If it does not start with file, or we're in test mode (ie, to allow arbitrary file:// access)
++      } else if (!uri.toString().startsWith("file") || testMode) {
+         in = uri.toURL().openStream();
+       } else {
+         throw new IOException("Refusing to fetch files from the local filesystem");
+diff --git a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+index 05f1639cd9d..0dd497590e8 100644
+--- a/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
++++ b/modules/ingest-service-impl/src/test/java/org/opencastproject/ingest/impl/IngestServiceImplTest.java
+@@ -344,6 +344,7 @@ protected CloseableHttpClient getNoAuthHttpClient() {
+     Dictionary<String, String> p = new Hashtable<>();
+     p.put(IngestServiceImpl.DOWNLOAD_SOURCE, "http://localhost.*|http://www.test.com/.*");
+     service.updated(p);
++    service.testMode = true;
+   }
+ 
+   @After

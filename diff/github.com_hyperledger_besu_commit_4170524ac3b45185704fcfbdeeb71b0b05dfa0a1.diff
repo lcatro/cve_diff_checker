@@ -1,0 +1,53 @@
+From 4170524ac3b45185704fcfbdeeb71b0b05dfa0a1 Mon Sep 17 00:00:00 2001
+From: Danno Ferrin <danno.ferrin@gmail.com>
+Date: Thu, 11 Nov 2021 07:56:53 -0700
+Subject: [PATCH] Shift Optimization (#3039)
+
+Reduce shift calculations to shifts that may have an actual result.
+
+Signed-off-by: Danno Ferrin <danno.ferrin@gmail.com>
+---
+ .../java/org/hyperledger/besu/evm/operation/SarOperation.java   | 2 +-
+ .../java/org/hyperledger/besu/evm/operation/ShlOperation.java   | 2 +-
+ .../java/org/hyperledger/besu/evm/operation/ShrOperation.java   | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/evm/src/main/java/org/hyperledger/besu/evm/operation/SarOperation.java b/evm/src/main/java/org/hyperledger/besu/evm/operation/SarOperation.java
+index fe241b90999..8b6d984f20c 100644
+--- a/evm/src/main/java/org/hyperledger/besu/evm/operation/SarOperation.java
++++ b/evm/src/main/java/org/hyperledger/besu/evm/operation/SarOperation.java
+@@ -44,7 +44,7 @@ public SarOperation(final GasCalculator gasCalculator) {
+     } else {
+       final int shiftAmountInt = shiftAmount.toInt();
+ 
+-      if (shiftAmountInt >= 256) {
++      if (shiftAmountInt >= 256 || shiftAmountInt < 0) {
+         frame.pushStackItem(negativeNumber ? ALL_BITS : UInt256.ZERO);
+       } else {
+         // first perform standard shift right.
+diff --git a/evm/src/main/java/org/hyperledger/besu/evm/operation/ShlOperation.java b/evm/src/main/java/org/hyperledger/besu/evm/operation/ShlOperation.java
+index 309e3900640..40429a5ecbb 100644
+--- a/evm/src/main/java/org/hyperledger/besu/evm/operation/ShlOperation.java
++++ b/evm/src/main/java/org/hyperledger/besu/evm/operation/ShlOperation.java
+@@ -40,7 +40,7 @@ public ShlOperation(final GasCalculator gasCalculator) {
+       final int shiftAmountInt = shiftAmount.toInt();
+       final Bytes value = leftPad(frame.popStackItem());
+ 
+-      if (shiftAmountInt >= 256) {
++      if (shiftAmountInt >= 256 || shiftAmountInt < 0) {
+         frame.pushStackItem(UInt256.ZERO);
+       } else {
+         frame.pushStackItem(value.shiftLeft(shiftAmountInt));
+diff --git a/evm/src/main/java/org/hyperledger/besu/evm/operation/ShrOperation.java b/evm/src/main/java/org/hyperledger/besu/evm/operation/ShrOperation.java
+index a69094c2f43..f9f3eb06317 100644
+--- a/evm/src/main/java/org/hyperledger/besu/evm/operation/ShrOperation.java
++++ b/evm/src/main/java/org/hyperledger/besu/evm/operation/ShrOperation.java
+@@ -40,7 +40,7 @@ public ShrOperation(final GasCalculator gasCalculator) {
+       final int shiftAmountInt = shiftAmount.toInt();
+       final Bytes value = leftPad(frame.popStackItem());
+ 
+-      if (shiftAmountInt >= 256) {
++      if (shiftAmountInt >= 256 || shiftAmountInt < 0) {
+         frame.pushStackItem(UInt256.ZERO);
+       } else {
+         frame.pushStackItem(value.shiftRight(shiftAmountInt));

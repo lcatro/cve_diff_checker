@@ -1,0 +1,139 @@
+From d11de8890a022901310758f08e5bc08db0ee1a40 Mon Sep 17 00:00:00 2001
+From: Michele Bologna <michele.bologna@suse.com>
+Date: Mon, 6 Sep 2021 17:04:35 +0200
+Subject: [PATCH 1/4] Fix: allow admins to modify only spacewalk config files
+ with rhn-config-satellite.pl (bsc#1190040)
+
+---
+ spacewalk/admin/rhn-config-satellite.pl | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/spacewalk/admin/rhn-config-satellite.pl b/spacewalk/admin/rhn-config-satellite.pl
+index cede2091465..fe1a918a2ea 100755
+--- a/spacewalk/admin/rhn-config-satellite.pl
++++ b/spacewalk/admin/rhn-config-satellite.pl
+@@ -28,6 +28,8 @@
+ my @options = ();
+ my @removals = ();
+ my $help = '';
++# bsc#1190040
++my @allowed_target_files = qw(/etc/rhn/rhn.conf /var/lib/rhn/rhn-satellite-prep/satellite-local-rules.conf );
+ 
+ GetOptions("target=s" => \$target, "option=s" => \@options, "remove=s" => \@removals, "help" => \$help) or die $usage;
+ 
+@@ -43,6 +45,10 @@
+ 
+ my $tmpfile = $target . ".bak.${PID}";
+ 
++if (! grep { $_ eq $target} @allowed_target_files) {
++  die("Cannot modify a file that is not a spacewalk config file: " . $target);
++}
++
+ if (-e $target . ".orig") {
+   unlink($target . ".orig") or die "Could not remove $target to ${target}.orig prior to new backup: $OS_ERROR";
+ }
+
+From fca09bafa6b9d4627dff5ab969740cebeae6099a Mon Sep 17 00:00:00 2001
+From: Michele Bologna <michele.bologna@suse.com>
+Date: Thu, 28 Oct 2021 11:39:35 +0200
+Subject: [PATCH 2/4] Chore: announce changes
+
+---
+ spacewalk/admin/spacewalk-admin.changes | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/spacewalk/admin/spacewalk-admin.changes b/spacewalk/admin/spacewalk-admin.changes
+index c227ae775a4..d2222fcc348 100644
+--- a/spacewalk/admin/spacewalk-admin.changes
++++ b/spacewalk/admin/spacewalk-admin.changes
+@@ -1,3 +1,6 @@
++- Allow admins to modify only spacewalk config files with
++  rhn-config-satellite.pl (bsc#1190040) (CVE-2021-40348)
++
+ -------------------------------------------------------------------
+ Mon Aug 09 10:57:26 CEST 2021 - jgonzalez@suse.com
+ 
+
+From d6762fad65c9849f77e5fb7881ce9676e8d89af6 Mon Sep 17 00:00:00 2001
+From: Michele Bologna <michele.bologna@suse.com>
+Date: Wed, 8 Sep 2021 15:38:50 +0200
+Subject: [PATCH 3/4] Fix: setup with rhn-config-satellite (bsc#1190300)
+
+---
+ spacewalk/admin/rhn-config-satellite.pl | 2 +-
+ spacewalk/admin/spacewalk-admin.changes | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/spacewalk/admin/rhn-config-satellite.pl b/spacewalk/admin/rhn-config-satellite.pl
+index fe1a918a2ea..baf710f41b4 100755
+--- a/spacewalk/admin/rhn-config-satellite.pl
++++ b/spacewalk/admin/rhn-config-satellite.pl
+@@ -29,7 +29,7 @@
+ my @removals = ();
+ my $help = '';
+ # bsc#1190040
+-my @allowed_target_files = qw(/etc/rhn/rhn.conf /var/lib/rhn/rhn-satellite-prep/satellite-local-rules.conf );
++my @allowed_target_files = qw(/etc/rhn/rhn.conf /var/lib/rhn/rhn-satellite-prep/satellite-local-rules.conf /var/lib/rhn/rhn-satellite-prep/etc/rhn/rhn.conf);
+ 
+ GetOptions("target=s" => \$target, "option=s" => \@options, "remove=s" => \@removals, "help" => \$help) or die $usage;
+ 
+diff --git a/spacewalk/admin/spacewalk-admin.changes b/spacewalk/admin/spacewalk-admin.changes
+index d2222fcc348..692f9506109 100644
+--- a/spacewalk/admin/spacewalk-admin.changes
++++ b/spacewalk/admin/spacewalk-admin.changes
+@@ -1,3 +1,4 @@
++- Fix setup with rhn-config-satellite (bsc#1190300)
+ - Allow admins to modify only spacewalk config files with
+   rhn-config-satellite.pl (bsc#1190040) (CVE-2021-40348)
+ 
+
+From 5813fe43226968da800f9fb9e086b465770412bc Mon Sep 17 00:00:00 2001
+From: Julio Gonzalez Gil <jgonzalez@suse.com>
+Date: Thu, 28 Oct 2021 12:17:01 +0200
+Subject: [PATCH 4/4] Automatic commit of package [spacewalk-admin] release
+ [4.3.2-1].
+
+---
+ rel-eng/packages/spacewalk-admin        |  2 +-
+ spacewalk/admin/spacewalk-admin.changes | 10 +++++++---
+ spacewalk/admin/spacewalk-admin.spec    |  2 +-
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/rel-eng/packages/spacewalk-admin b/rel-eng/packages/spacewalk-admin
+index b9cb3cf49af..c337f163ef4 100644
+--- a/rel-eng/packages/spacewalk-admin
++++ b/rel-eng/packages/spacewalk-admin
+@@ -1 +1 @@
+-4.3.1-1 spacewalk/admin/
++4.3.2-1 spacewalk/admin/
+diff --git a/spacewalk/admin/spacewalk-admin.changes b/spacewalk/admin/spacewalk-admin.changes
+index 692f9506109..bab34bad7c6 100644
+--- a/spacewalk/admin/spacewalk-admin.changes
++++ b/spacewalk/admin/spacewalk-admin.changes
+@@ -1,6 +1,10 @@
+-- Fix setup with rhn-config-satellite (bsc#1190300)
+-- Allow admins to modify only spacewalk config files with
+-  rhn-config-satellite.pl (bsc#1190040) (CVE-2021-40348)
++-------------------------------------------------------------------
++Thu Oct 28 12:16:53 CEST 2021 - jgonzalez@suse.com
++
++- version 4.3.2-1
++  * Fix setup with rhn-config-satellite (bsc#1190300)
++  * Allow admins to modify only spacewalk config files with
++    rhn-config-satellite.pl (bsc#1190040) (CVE-2021-40348)
+ 
+ -------------------------------------------------------------------
+ Mon Aug 09 10:57:26 CEST 2021 - jgonzalez@suse.com
+diff --git a/spacewalk/admin/spacewalk-admin.spec b/spacewalk/admin/spacewalk-admin.spec
+index 0e8a32b3068..e2137adf284 100644
+--- a/spacewalk/admin/spacewalk-admin.spec
++++ b/spacewalk/admin/spacewalk-admin.spec
+@@ -29,7 +29,7 @@ License:        GPL-2.0-only
+ Group:          Applications/Internet
+ Name:           spacewalk-admin
+ URL:            https://github.com/uyuni-project/uyuni
+-Version:        4.3.1
++Version:        4.3.2
+ Release:        1
+ Source0:        https://github.com/uyuni-project/uyuni/archive/%{name}-%{version}.tar.gz
+ BuildRoot:      %{_tmppath}/%{name}-%{version}-build

@@ -1,0 +1,32 @@
+From f410212e373eb2aec4c9e60bf3702eba99a38aba Mon Sep 17 00:00:00 2001
+From: Penporn Koanantakool <penporn@google.com>
+Date: Thu, 30 Sep 2021 06:36:55 -0700
+Subject: [PATCH] Prevent out-of-bound accesses in SparseBincount.
+
+PiperOrigin-RevId: 399918616
+Change-Id: I11d154f4444d3fde1f09c5c40628b8671791a30d
+---
+ tensorflow/core/kernels/bincount_op.cc | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/tensorflow/core/kernels/bincount_op.cc b/tensorflow/core/kernels/bincount_op.cc
+index 6d668211da096..0f661dd9f201a 100644
+--- a/tensorflow/core/kernels/bincount_op.cc
++++ b/tensorflow/core/kernels/bincount_op.cc
+@@ -405,6 +405,16 @@ class SparseBincountOp : public OpKernel {
+       for (int64_t i = 0; i < indices_mat.dimension(0); ++i) {
+         const int64_t batch = indices_mat(i, 0);
+         const Tidx bin = values(i);
++        OP_REQUIRES(
++            ctx, batch < out.dimension(0),
++            errors::InvalidArgument("Index out of bound. `batch` (", batch,
++                                    ") must be less than the dimension size (",
++                                    out.dimension(0), ")."));
++        OP_REQUIRES(
++            ctx, bin < out.dimension(1),
++            errors::InvalidArgument("Index out ouf bound. `bin` (", bin,
++                                    ") must be less then the dimension size (",
++                                    out.dimension(1), ")."));
+         if (bin < size) {
+           if (binary_output_) {
+             out(batch, bin) = T(1);

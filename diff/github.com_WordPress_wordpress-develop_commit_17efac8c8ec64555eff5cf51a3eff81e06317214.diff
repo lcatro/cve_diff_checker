@@ -1,0 +1,30 @@
+From 17efac8c8ec64555eff5cf51a3eff81e06317214 Mon Sep 17 00:00:00 2001
+From: Jonathan Desrosiers <desrosj@git.wordpress.org>
+Date: Thu, 6 Jan 2022 17:20:19 +0000
+Subject: [PATCH] Query: Improve sanitization within `WP_Tax_Query`.
+
+Merges [52454] to the 5.8 branch.
+Props dd32, xknown, peterwilsoncc, ehtis.
+
+git-svn-id: https://develop.svn.wordpress.org/branches/5.8@52459 602fd350-edb4-49c9-b593-d223f7449a82
+---
+ src/wp-includes/class-wp-tax-query.php | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/wp-includes/class-wp-tax-query.php b/src/wp-includes/class-wp-tax-query.php
+index 1432245cc05..795309b4984 100644
+--- a/src/wp-includes/class-wp-tax-query.php
++++ b/src/wp-includes/class-wp-tax-query.php
+@@ -556,7 +556,11 @@ private function clean_query( &$query ) {
+ 			return;
+ 		}
+ 
+-		$query['terms'] = array_unique( (array) $query['terms'] );
++		if ( 'slug' === $query['field'] || 'name' === $query['field'] ) {
++			$query['terms'] = array_unique( (array) $query['terms'] );
++		} else {
++			$query['terms'] = wp_parse_id_list( $query['terms'] );
++		}
+ 
+ 		if ( is_taxonomy_hierarchical( $query['taxonomy'] ) && $query['include_children'] ) {
+ 			$this->transform_query( $query, 'term_id' );

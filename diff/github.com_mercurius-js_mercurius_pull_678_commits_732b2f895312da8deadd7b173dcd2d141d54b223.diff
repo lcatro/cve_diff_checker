@@ -1,0 +1,139 @@
+From 732b2f895312da8deadd7b173dcd2d141d54b223 Mon Sep 17 00:00:00 2001
+From: Matteo Collina <hello@matteocollina.com>
+Date: Wed, 1 Dec 2021 19:24:05 +0100
+Subject: [PATCH] Fix regression in handling badly formed JSON
+
+---
+ lib/routes.js  | 17 ++++++++--
+ test/errors.js | 87 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 102 insertions(+), 2 deletions(-)
+
+diff --git a/lib/routes.js b/lib/routes.js
+index 1088d2fc..f3057979 100644
+--- a/lib/routes.js
++++ b/lib/routes.js
+@@ -135,14 +135,27 @@ module.exports = async function (app, opts) {
+   const errorFormatter = typeof opts.errorFormatter === 'function' ? opts.errorFormatter : defaultErrorFormatter
+ 
+   if (typeof opts.errorHandler === 'function') {
+-    app.setErrorHandler(opts.errorHandler)
++    app.setErrorHandler((error, request, reply) => {
++      const errorHandler = opts.errorHandler
++      if (!request[kRequestContext]) {
++        // Generate the context for this request
++        request[kRequestContext] = { reply, app }
++      }
++
++      return errorHandler(error, request, reply)
++    })
+   } else if (opts.errorHandler === true || opts.errorHandler === undefined) {
+     app.setErrorHandler((error, request, reply) => {
++      if (!request[kRequestContext]) {
++        // Generate the context for this request
++        request[kRequestContext] = { reply, app }
++      }
++
+       const { statusCode, response } = errorFormatter(
+         error,
+         request[kRequestContext]
+       )
+-      reply.code(statusCode).send(response)
++      return reply.code(statusCode).send(response)
+     })
+   }
+   const contextFn = opts.context
+diff --git a/test/errors.js b/test/errors.js
+index d01010ae..1c1ae1b0 100644
+--- a/test/errors.js
++++ b/test/errors.js
+@@ -767,3 +767,90 @@ test('errors - should override statusCode to 200 if the data is present', async
+ 
+   t.equal(res.statusCode, 200)
+ })
++
++test('bad json', async (t) => {
++  const schema = `
++    type Query {
++      successful: String
++    }
++  `
++
++  const resolvers = {
++    Query: {
++      successful () {
++        t.fail('Should not be called')
++        return 'Runs OK'
++      }
++    }
++  }
++
++  const app = Fastify()
++
++  app.register(GQL, {
++    schema,
++    resolvers
++  })
++
++  await app.ready()
++
++  const res = await app.inject({
++    method: 'POST',
++    headers: {
++      'content-type': 'application/json'
++    },
++    body: 'this is not a json',
++    url: '/graphql'
++  })
++
++  t.equal(res.statusCode, 400)
++  t.same(res.json(),
++    { data: null, errors: [{ message: 'Unexpected token h in JSON at position 1' }] }
++  )
++})
++
++test('bad json with custom error handler', async (t) => {
++  t.plan(3)
++  const schema = `
++    type Query {
++      successful: String
++    }
++  `
++
++  const resolvers = {
++    Query: {
++      successful () {
++        t.fail('Should not be called')
++        return 'Runs OK'
++      }
++    }
++  }
++
++  const app = Fastify()
++
++  app.register(GQL, {
++    schema,
++    resolvers,
++    errorHandler: (_, request, reply) => {
++      t.pass('custom error handler called')
++      reply.code(400).send({
++        is: 'error'
++      })
++    }
++  })
++
++  await app.ready()
++
++  const res = await app.inject({
++    method: 'POST',
++    headers: {
++      'content-type': 'application/json'
++    },
++    body: 'this is not a json',
++    url: '/graphql'
++  })
++
++  t.equal(res.statusCode, 400)
++  t.same(res.json(), {
++    is: 'error'
++  })
++})

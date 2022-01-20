@@ -1,0 +1,92 @@
+From 771728218dac2fbf6997a7e53225e75a4c6b7255 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 8 Jul 2021 19:00:45 +0100
+Subject: [PATCH] lib/node.c: Limit recursion in ri-records (CVE-2021-3622)
+
+Windows Registry hive "ri"-records are arbitrarily nested B-tree-like
+structures:
+
+  +-------------+
+  | ri          |
+  |-------------|
+  | nr_offsets  |
+  |   offset[0] ------>  points to another lf/lh/li/ri block
+  |   offset[1] ------>
+  |   offset[2] ------>
+  +-------------+
+
+It is possible to construct a hive with a very deeply nested tree of
+ri-records, causing the internal _get_children function to recurse to
+any depth which can cause programs linked to hivex to crash with a
+stack overflow.
+
+Since it is not thought that deeply nested ri-records occur in real
+hives, limit recursion depth.  If you hit this limit you will see the
+following error and the operation will return an error instead of
+crashing:
+
+  \> ls
+  hivex: _get_children: returning EINVAL because: ri-record nested to depth >= 32
+  ls: Invalid argument
+
+Thanks to Jeremy Galindo for finding and reporting this bug.
+
+Reported-by: Jeremy Galindo, Sr Security Engineer, Datto.com
+Signed-off-by: Richard W.M. Jones <rjones@redhat.com>
+Fixes: CVE-2021-3622
+Fixes: https://bugzilla.redhat.com/show_bug.cgi?id=1975489
+(cherry picked from commit 781a12c4a49dd81365c9c567c5aa5e19e894ba0e)
+---
+ lib/node.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/lib/node.c b/lib/node.c
+index 7b002a4..eb7fe93 100644
+--- a/lib/node.c
++++ b/lib/node.c
+@@ -203,7 +203,7 @@ hivex_node_classname (hive_h *h, hive_node_h node)
+ 
+ static int _get_children (hive_h *h, hive_node_h blkoff,
+                           offset_list *children, offset_list *blocks,
+-                          int flags);
++                          int flags, unsigned depth);
+ static int check_child_is_nk_block (hive_h *h, hive_node_h child, int flags);
+ 
+ /* Iterate over children (ie. subkeys of a node), returning child
+@@ -335,7 +335,7 @@ _hivex_get_children (hive_h *h, hive_node_h node,
+     goto error;
+   }
+ 
+-  if (_get_children (h, subkey_lf, &children, &blocks, flags) == -1)
++  if (_get_children (h, subkey_lf, &children, &blocks, flags, 0) == -1)
+     goto error;
+ 
+   /* Check the number of children we ended up reading matches
+@@ -383,7 +383,7 @@ _hivex_get_children (hive_h *h, hive_node_h node,
+ static int
+ _get_children (hive_h *h, hive_node_h blkoff,
+                offset_list *children, offset_list *blocks,
+-               int flags)
++               int flags, unsigned depth)
+ {
+   /* Add this intermediate block. */
+   if (_hivex_add_to_offset_list (blocks, blkoff) == -1)
+@@ -486,7 +486,17 @@ _get_children (hive_h *h, hive_node_h blkoff,
+         }
+       }
+ 
+-      if (_get_children (h, offset, children, blocks, flags) == -1)
++      /* Although in theory hive ri records might be nested to any
++       * depth, in practice this is unlikely.  Recursing here caused
++       * CVE-2021-3622.  Thus limit the depth we will recurse to
++       * something small.
++       */
++      if (depth >= 32) {
++        SET_ERRNO (EINVAL, "ri-record nested to depth >= %u", depth);
++        return -1;
++      }
++
++      if (_get_children (h, offset, children, blocks, flags, depth+1) == -1)
+         return -1;
+     }
+   }

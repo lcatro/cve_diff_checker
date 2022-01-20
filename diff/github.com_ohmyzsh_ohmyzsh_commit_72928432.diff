@@ -1,0 +1,83 @@
+From 72928432f1ddaa244e02067dd7fc14948a4a5ce4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20Cornell=C3=A0?= <hello@mcornella.com>
+Date: Tue, 9 Nov 2021 09:31:09 +0100
+Subject: [PATCH] fix(plugins): fix potential command injection in `rand-quote`
+ and `hitokoto`
+
+The `rand-quote` plugin uses quotationspage.com and prints part of its content to the
+shell without sanitization, which could trigger command injection. There is no evidence
+that this has been exploited, but this commit removes all possibility for exploit.
+
+Similarly, the `hitokoto` plugin uses the hitokoto.cn website to print quotes to the
+shell, also without sanitization. Furthermore, there is also no evidence that this has
+been exploited, but with this change it is now impossible.
+---
+ plugins/hitokoto/hitokoto.plugin.zsh     | 18 +++++++++++-------
+ plugins/rand-quote/rand-quote.plugin.zsh | 23 ++++++++++++++++-------
+ 2 files changed, 27 insertions(+), 14 deletions(-)
+
+diff --git a/plugins/hitokoto/hitokoto.plugin.zsh b/plugins/hitokoto/hitokoto.plugin.zsh
+index 8646ebf3b48..e346d18c515 100644
+--- a/plugins/hitokoto/hitokoto.plugin.zsh
++++ b/plugins/hitokoto/hitokoto.plugin.zsh
+@@ -1,14 +1,18 @@
+ if ! (( $+commands[curl] )); then
+-    echo "hitokoto plugin needs curl to work" >&2
+-    return
++  echo "hitokoto plugin needs curl to work" >&2
++  return
+ fi
+ 
+ function hitokoto {
+-    emulate -L zsh
+-    Q=$(curl -s --connect-timeout 2 "https://v1.hitokoto.cn" | jq -j '.hitokoto+"\t"+.from')
++  setopt localoptions nopromptsubst
+ 
+-    TXT=$(echo "$Q" | awk -F '\t' '{print $1}')
+-    WHO=$(echo "$Q" | awk -F '\t' '{print $2}')
++  # Get hitokoto data
++  local -a data
++  data=("${(ps:\n:)"$(command curl -s --connect-timeout 2 "https://v1.hitokoto.cn" | command jq -j '.hitokoto+"\n"+.from')"}")
+ 
+-    [[ -n "$WHO" && -n "$TXT" ]] && print -P "%F{3}${WHO}%f: “%F{5}${TXT}%f”"
++  # Exit if could not fetch hitokoto
++  [[ -n "$data" ]] || return 0
++
++  local quote="${data[1]}" author="${data[2]}"
++  print -P "%F{3}${author}%f: “%F{5}${quote}%f”"
+ }
+diff --git a/plugins/rand-quote/rand-quote.plugin.zsh b/plugins/rand-quote/rand-quote.plugin.zsh
+index 371b997d389..23c21dc8f24 100644
+--- a/plugins/rand-quote/rand-quote.plugin.zsh
++++ b/plugins/rand-quote/rand-quote.plugin.zsh
+@@ -1,14 +1,23 @@
+ if ! (( $+commands[curl] )); then
+-    echo "rand-quote plugin needs curl to work" >&2
+-    return
++  echo "rand-quote plugin needs curl to work" >&2
++  return
+ fi
+ 
+ function quote {
+-    emulate -L zsh
+-    Q=$(curl -s --connect-timeout 2 "http://www.quotationspage.com/random.php" | iconv -c -f ISO-8859-1 -t UTF-8 | grep -m 1 "dt ")
++  setopt localoptions nopromptsubst
+ 
+-    TXT=$(echo "$Q" | sed -e 's/<\/dt>.*//g' -e 's/.*html//g' -e 's/^[^a-zA-Z]*//' -e 's/<\/a..*$//g')
+-    WHO=$(echo "$Q" | sed -e 's/.*\/quotes\///g' -e 's/<.*//g' -e 's/.*">//g')
++  # Get random quote data
++  local data
++  data="$(command curl -s --connect-timeout 2 "http://www.quotationspage.com/random.php" \
++    | iconv -c -f ISO-8859-1 -t UTF-8 \
++    | command grep -a -m 1 'dt class="quote"')"
+ 
+-    [[ -n "$WHO" && -n "$TXT" ]] && print -P "%F{3}${WHO}%f: “%F{5}${TXT}%f”"
++  # Exit if could not fetch random quote
++  [[ -n "$data" ]] || return 0
++
++  local quote author
++  quote=$(sed -e 's|</dt>.*||g' -e 's|.*html||g' -e 's|^[^a-zA-Z]*||' -e 's|</a..*$||g' <<< "$data")
++  author=$(sed -e 's|.*/quotes/||g' -e 's|<.*||g' -e 's|.*">||g' <<< "$data")
++
++  print -P "%F{3}${author}%f: “%F{5}${quote}%f”"
+ }

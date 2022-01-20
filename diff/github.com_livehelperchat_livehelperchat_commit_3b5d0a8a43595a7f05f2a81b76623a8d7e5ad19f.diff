@@ -1,0 +1,51 @@
+From 3b5d0a8a43595a7f05f2a81b76623a8d7e5ad19f Mon Sep 17 00:00:00 2001
+From: Remigijus Kiminas <remdex@gmail.com>
+Date: Fri, 17 Dec 2021 01:14:35 -0500
+Subject: [PATCH] CSFR Token expire cache
+
+---
+ .../tpl/lhsystem/configuration_links/expirecache.tpl.php    | 2 +-
+ lhc_web/modules/lhsystem/expirecache.php                    | 6 ++++++
+ lhc_web/modules/lhsystem/module.php                         | 3 ++-
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/lhc_web/design/defaulttheme/tpl/lhsystem/configuration_links/expirecache.tpl.php b/lhc_web/design/defaulttheme/tpl/lhsystem/configuration_links/expirecache.tpl.php
+index b6961076c..0e5d85421 100644
+--- a/lhc_web/design/defaulttheme/tpl/lhsystem/configuration_links/expirecache.tpl.php
++++ b/lhc_web/design/defaulttheme/tpl/lhsystem/configuration_links/expirecache.tpl.php
+@@ -1,3 +1,3 @@
+ <?php if ($currentUser->hasAccessTo('lhsystem','expirecache')) : ?>		
+-	<li><a href="<?php echo erLhcoreClassDesign::baseurl('system/expirecache')?>"><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Clean cache');?></a></li>			
++	<li><a class="csfr-required" href="<?php echo erLhcoreClassDesign::baseurl('system/expirecache')?>"><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Clean cache');?></a></li>
+ <?php endif; ?>
+\ No newline at end of file
+diff --git a/lhc_web/modules/lhsystem/expirecache.php b/lhc_web/modules/lhsystem/expirecache.php
+index f10ad7119..79898c672 100644
+--- a/lhc_web/modules/lhsystem/expirecache.php
++++ b/lhc_web/modules/lhsystem/expirecache.php
+@@ -1,5 +1,11 @@
+ <?php
+ 
++$currentUser = erLhcoreClassUser::instance();
++
++if (!$currentUser->validateCSFRToken($Params['user_parameters_unordered']['csfr'])) {
++    die('Invalid CSFR Token');
++    exit;
++}
+ 
+ $CacheManager = erConfigClassLhCacheConfig::getInstance();
+ $CacheManager->expireCache(true);
+diff --git a/lhc_web/modules/lhsystem/module.php b/lhc_web/modules/lhsystem/module.php
+index 70a12d524..09864697f 100644
+--- a/lhc_web/modules/lhsystem/module.php
++++ b/lhc_web/modules/lhsystem/module.php
+@@ -36,7 +36,8 @@
+ 
+ $ViewList['expirecache'] = array(
+     'params' => array(),
+-    'functions' => array( 'expirecache' )
++    'functions' => array( 'expirecache' ),
++    'uparams' => array('csfr')
+ );
+ 
+ $ViewList['smtp'] = array(

@@ -1,0 +1,32 @@
+From 6cb41b70a6d04301fd50cd5862ecd705ba226c0e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20Cornell=C3=A0?= <hello@mcornella.com>
+Date: Mon, 8 Nov 2021 17:46:14 +0100
+Subject: [PATCH] fix(lib): fix `omz_urldecode` unsafe eval bug
+
+The `omz_urldecode` function uses an eval to decode the input which can be
+exploited to inject commands. This is used only in the svn plugin and it
+requires a complex process to exploit, so it is highly unlikely to have been
+used by an attacker.
+---
+ lib/functions.zsh | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/lib/functions.zsh b/lib/functions.zsh
+index fc53611b826..61f4dd49e0e 100644
+--- a/lib/functions.zsh
++++ b/lib/functions.zsh
+@@ -237,12 +237,11 @@ function omz_urldecode {
+   tmp=${tmp:gs/\\/\\\\/}
+   # Handle %-escapes by turning them into `\xXX` printf escapes
+   tmp=${tmp:gs/%/\\x/}
+-  local decoded
+-  eval "decoded=\$'$tmp'"
++  local decoded="$(printf -- "$tmp")"
+ 
+   # Now we have a UTF-8 encoded string in the variable. We need to re-encode
+   # it if caller is in a non-UTF-8 locale.
+-  local safe_encodings
++  local -a safe_encodings
+   safe_encodings=(UTF-8 utf8 US-ASCII)
+   if [[ -z ${safe_encodings[(r)$caller_encoding]} ]]; then
+     decoded=$(echo -E "$decoded" | iconv -f UTF-8 -t $caller_encoding)

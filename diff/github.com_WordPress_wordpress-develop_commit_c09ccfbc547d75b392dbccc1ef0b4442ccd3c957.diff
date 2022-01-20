@@ -1,0 +1,40 @@
+From c09ccfbc547d75b392dbccc1ef0b4442ccd3c957 Mon Sep 17 00:00:00 2001
+From: Jonathan Desrosiers <desrosj@git.wordpress.org>
+Date: Thu, 6 Jan 2022 17:22:56 +0000
+Subject: [PATCH] Query: Improve sanitization within `WP_Meta_Query`.
+
+Merges [52455] to the 5.8 branch.
+Props vortfu, xknown, dd32.
+
+git-svn-id: https://develop.svn.wordpress.org/branches/5.8@52461 602fd350-edb4-49c9-b593-d223f7449a82
+---
+ src/wp-includes/class-wp-meta-query.php | 2 +-
+ src/wp-includes/class-wp-tax-query.php  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/wp-includes/class-wp-meta-query.php b/src/wp-includes/class-wp-meta-query.php
+index 5a1b0c41479..d6d65772fc3 100644
+--- a/src/wp-includes/class-wp-meta-query.php
++++ b/src/wp-includes/class-wp-meta-query.php
+@@ -812,7 +812,7 @@ protected function find_compatible_table_alias( $clause, $parent_query ) {
+ 			$clause_compare  = strtoupper( $clause['compare'] );
+ 			$sibling_compare = strtoupper( $sibling['compare'] );
+ 			if ( in_array( $clause_compare, $compatible_compares, true ) && in_array( $sibling_compare, $compatible_compares, true ) ) {
+-				$alias = $sibling['alias'];
++				$alias = preg_replace( '/\W/', '_', $sibling['alias'] );
+ 				break;
+ 			}
+ 		}
+diff --git a/src/wp-includes/class-wp-tax-query.php b/src/wp-includes/class-wp-tax-query.php
+index 795309b4984..a026bb18522 100644
+--- a/src/wp-includes/class-wp-tax-query.php
++++ b/src/wp-includes/class-wp-tax-query.php
+@@ -527,7 +527,7 @@ protected function find_compatible_table_alias( $clause, $parent_query ) {
+ 
+ 			// The sibling must both have compatible operator to share its alias.
+ 			if ( in_array( strtoupper( $sibling['operator'] ), $compatible_operators, true ) ) {
+-				$alias = $sibling['alias'];
++				$alias = preg_replace( '/\W/', '_', $sibling['alias'] );
+ 				break;
+ 			}
+ 		}

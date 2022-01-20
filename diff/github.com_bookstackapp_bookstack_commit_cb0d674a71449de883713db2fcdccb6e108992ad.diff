@@ -1,0 +1,1383 @@
+From edc7c12edfbe4cabcf6d9a5090d29bb947ef35fb Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Tue, 4 Jan 2022 17:31:57 +0000
+Subject: [PATCH 1/6] Refactored sort system a little
+
+To standardise the handled data format a little better.
+---
+ app/Entities/Tools/BookContents.php         | 65 +++++++++++----------
+ app/Entities/Tools/BookSortMap.php          | 45 ++++++++++++++
+ app/Entities/Tools/BookSortMapItem.php      | 51 ++++++++++++++++
+ app/Http/Controllers/BookSortController.php |  3 +-
+ 4 files changed, 131 insertions(+), 33 deletions(-)
+ create mode 100644 app/Entities/Tools/BookSortMap.php
+ create mode 100644 app/Entities/Tools/BookSortMapItem.php
+
+diff --git a/app/Entities/Tools/BookContents.php b/app/Entities/Tools/BookContents.php
+index 9b2190ca23..96142bb7f4 100644
+--- a/app/Entities/Tools/BookContents.php
++++ b/app/Entities/Tools/BookContents.php
+@@ -107,30 +107,21 @@ protected function getPages(bool $showDrafts = false, bool $getPageContent = fal
+     }
+ 
+     /**
+-     * Sort the books content using the given map.
+-     * The map is a single-dimension collection of objects in the following format:
+-     *   {
+-     *     +"id": "294" (ID of item)
+-     *     +"sort": 1 (Sort order index)
+-     *     +"parentChapter": false (ID of parent chapter, as string, or false)
+-     *     +"type": "page" (Entity type of item)
+-     *     +"book": "1" (Id of book to place item in)
+-     *   }.
+-     *
++     * Sort the books content using the given sort map.
+      * Returns a list of books that were involved in the operation.
+      *
+      * @throws SortOperationException
+      */
+-    public function sortUsingMap(Collection $sortMap): Collection
++    public function sortUsingMap(BookSortMap $sortMap): Collection
+     {
+         // Load models into map
+         $this->loadModelsIntoSortMap($sortMap);
+         $booksInvolved = $this->getBooksInvolvedInSort($sortMap);
+ 
+         // Perform the sort
+-        $sortMap->each(function ($mapItem) {
+-            $this->applySortUpdates($mapItem);
+-        });
++        foreach ($sortMap->all() as $item) {
++            $this->applySortUpdates($item);
++        }
+ 
+         // Update permissions and activity.
+         $booksInvolved->each(function (Book $book) {
+@@ -144,26 +135,28 @@ public function sortUsingMap(Collection $sortMap): Collection
+      * Using the given sort map item, detect changes for the related model
+      * and update it if required.
+      */
+-    protected function applySortUpdates(\stdClass $sortMapItem)
++    protected function applySortUpdates(BookSortMapItem $sortMapItem): void
+     {
+-        /** @var BookChild $model */
+         $model = $sortMapItem->model;
++        if (!$model) {
++            return;
++        }
+ 
+-        $priorityChanged = intval($model->priority) !== intval($sortMapItem->sort);
+-        $bookChanged = intval($model->book_id) !== intval($sortMapItem->book);
+-        $chapterChanged = ($model instanceof Page) && intval($model->chapter_id) !== $sortMapItem->parentChapter;
++        $priorityChanged = $model->priority !== $sortMapItem->sort;
++        $bookChanged = $model->book_id !== $sortMapItem->parentBookId;
++        $chapterChanged = ($model instanceof Page) && $model->chapter_id !== $sortMapItem->parentChapterId;
+ 
+         if ($bookChanged) {
+-            $model->changeBook($sortMapItem->book);
++            $model->changeBook($sortMapItem->parentBookId);
+         }
+ 
+         if ($chapterChanged) {
+-            $model->chapter_id = intval($sortMapItem->parentChapter);
++            $model->chapter_id = intval($sortMapItem->parentChapterId);
+             $model->save();
+         }
+ 
+         if ($priorityChanged) {
+-            $model->priority = intval($sortMapItem->sort);
++            $model->priority = $sortMapItem->sort;
+             $model->save();
+         }
+     }
+@@ -171,23 +164,28 @@ protected function applySortUpdates(\stdClass $sortMapItem)
+     /**
+      * Load models from the database into the given sort map.
+      */
+-    protected function loadModelsIntoSortMap(Collection $sortMap): void
++    protected function loadModelsIntoSortMap(BookSortMap $sortMap): void
+     {
+-        $keyMap = $sortMap->keyBy(function (\stdClass $sortMapItem) {
++        $collection = collect($sortMap->all());
++
++        $keyMap = $collection->keyBy(function (BookSortMapItem $sortMapItem) {
+             return  $sortMapItem->type . ':' . $sortMapItem->id;
+         });
+-        $pageIds = $sortMap->where('type', '=', 'page')->pluck('id');
+-        $chapterIds = $sortMap->where('type', '=', 'chapter')->pluck('id');
++
++        $pageIds = $collection->where('type', '=', 'page')->pluck('id');
++        $chapterIds = $collection->where('type', '=', 'chapter')->pluck('id');
+ 
+         $pages = Page::visible()->whereIn('id', $pageIds)->get();
+         $chapters = Chapter::visible()->whereIn('id', $chapterIds)->get();
+ 
+         foreach ($pages as $page) {
++            /** @var BookSortMapItem $sortItem */
+             $sortItem = $keyMap->get('page:' . $page->id);
+             $sortItem->model = $page;
+         }
+ 
+         foreach ($chapters as $chapter) {
++            /** @var BookSortMapItem $sortItem */
+             $sortItem = $keyMap->get('chapter:' . $chapter->id);
+             $sortItem->model = $chapter;
+         }
+@@ -199,13 +197,16 @@ protected function loadModelsIntoSortMap(Collection $sortMap): void
+      *
+      * @throws SortOperationException
+      */
+-    protected function getBooksInvolvedInSort(Collection $sortMap): Collection
++    protected function getBooksInvolvedInSort(BookSortMap $sortMap): Collection
+     {
+-        $bookIdsInvolved = collect([$this->book->id]);
+-        $bookIdsInvolved = $bookIdsInvolved->concat($sortMap->pluck('book'));
+-        $bookIdsInvolved = $bookIdsInvolved->concat($sortMap->pluck('model.book_id'));
+-        $bookIdsInvolved = $bookIdsInvolved->unique()->toArray();
+-
++        $collection = collect($sortMap->all());
++
++        $bookIdsInvolved = array_unique(array_merge(
++            [$this->book->id],
++            $collection->pluck('parentBookId')->values()->all(),
++            $collection->pluck('model.book_id')->values()->all(),
++        ));
++        
+         $books = Book::hasPermission('update')->whereIn('id', $bookIdsInvolved)->get();
+ 
+         if (count($books) !== count($bookIdsInvolved)) {
+diff --git a/app/Entities/Tools/BookSortMap.php b/app/Entities/Tools/BookSortMap.php
+new file mode 100644
+index 0000000000..1ce4905f7b
+--- /dev/null
++++ b/app/Entities/Tools/BookSortMap.php
+@@ -0,0 +1,45 @@
++<?php
++
++namespace BookStack\Entities\Tools;
++
++class BookSortMap
++{
++    /**
++     * @var BookSortMapItem[]
++     */
++    protected $mapData = [];
++
++    public function addItem(BookSortMapItem $mapItem): void
++    {
++        $this->mapData[] = $mapItem;
++    }
++
++    /**
++     * @return BookSortMapItem[]
++     */
++    public function all(): array
++    {
++        return $this->mapData;
++    }
++
++    public static function fromJson(string $json): self
++    {
++        $map = new static();
++        $mapData = json_decode($json);
++
++        foreach ($mapData as $mapDataItem) {
++            $item = new BookSortMapItem(
++                intval($mapDataItem->id),
++                intval($mapDataItem->sort),
++                $mapDataItem->parentChapter ? intval($mapDataItem->parentChapter) : null,
++                $mapDataItem->type,
++                intval($mapDataItem->book)
++            );
++
++            $map->addItem($item);
++        }
++
++        return $map;
++    }
++
++}
+\ No newline at end of file
+diff --git a/app/Entities/Tools/BookSortMapItem.php b/app/Entities/Tools/BookSortMapItem.php
+new file mode 100644
+index 0000000000..6a2abc4229
+--- /dev/null
++++ b/app/Entities/Tools/BookSortMapItem.php
+@@ -0,0 +1,51 @@
++<?php
++
++namespace BookStack\Entities\Tools;
++
++use BookStack\Entities\Models\BookChild;
++
++class BookSortMapItem
++{
++
++    /**
++     * @var int
++     */
++    public $id;
++
++    /**
++     * @var int
++     */
++    public $sort;
++
++    /**
++     * @var ?int
++     */
++    public $parentChapterId;
++
++    /**
++     * @var string
++     */
++    public $type;
++
++    /**
++     * @var int
++     */
++    public $parentBookId;
++
++    /**
++     * @var ?BookChild
++     */
++    public $model = null;
++
++
++    public function __construct(int $id, int $sort, ?int $parentChapterId, string $type, int $parentBookId)
++    {
++        $this->id = $id;
++        $this->sort = $sort;
++        $this->parentChapterId = $parentChapterId;
++        $this->type = $type;
++        $this->parentBookId = $parentBookId;
++    }
++
++
++}
+\ No newline at end of file
+diff --git a/app/Http/Controllers/BookSortController.php b/app/Http/Controllers/BookSortController.php
+index 010e74fa4f..8fe05a9beb 100644
+--- a/app/Http/Controllers/BookSortController.php
++++ b/app/Http/Controllers/BookSortController.php
+@@ -6,6 +6,7 @@
+ use BookStack\Entities\Models\Book;
+ use BookStack\Entities\Repos\BookRepo;
+ use BookStack\Entities\Tools\BookContents;
++use BookStack\Entities\Tools\BookSortMap;
+ use BookStack\Exceptions\SortOperationException;
+ use BookStack\Facades\Activity;
+ use Illuminate\Http\Request;
+@@ -59,7 +60,7 @@ public function update(Request $request, string $bookSlug)
+             return redirect($book->getUrl());
+         }
+ 
+-        $sortMap = collect(json_decode($request->get('sort-tree')));
++        $sortMap = BookSortMap::fromJson($request->get('sort-tree'));
+         $bookContents = new BookContents($book);
+         $booksInvolved = collect();
+ 
+
+From d8c45f574605ef27d662cfa850d06b61e81aedb6 Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Tue, 4 Jan 2022 21:09:34 +0000
+Subject: [PATCH 2/6] Changed model loading and permission checking on book
+ sort
+
+Models are now loaded into their own map to then be used for sorting and
+reporting back of changed books. Prevents akward logic ordering issues
+of before where some bits of code assumed/hoped for loaded models on
+abstract data structures.
+
+New levels of permissions are now checked for items within the
+sort operation. Needs testing to cover.
+---
+ app/Entities/Tools/BookContents.php         | 139 ++++++++++++--------
+ app/Entities/Tools/BookSortMapItem.php      |   7 -
+ app/Exceptions/SortOperationException.php   |   9 --
+ app/Http/Controllers/BookSortController.php |  16 +--
+ 4 files changed, 89 insertions(+), 82 deletions(-)
+ delete mode 100644 app/Exceptions/SortOperationException.php
+
+diff --git a/app/Entities/Tools/BookContents.php b/app/Entities/Tools/BookContents.php
+index 96142bb7f4..ff018eda99 100644
+--- a/app/Entities/Tools/BookContents.php
++++ b/app/Entities/Tools/BookContents.php
+@@ -7,7 +7,6 @@
+ use BookStack\Entities\Models\Chapter;
+ use BookStack\Entities\Models\Entity;
+ use BookStack\Entities\Models\Page;
+-use BookStack\Exceptions\SortOperationException;
+ use Illuminate\Support\Collection;
+ 
+ class BookContents
+@@ -110,34 +109,42 @@ protected function getPages(bool $showDrafts = false, bool $getPageContent = fal
+      * Sort the books content using the given sort map.
+      * Returns a list of books that were involved in the operation.
+      *
+-     * @throws SortOperationException
++     * @returns Book[]
+      */
+-    public function sortUsingMap(BookSortMap $sortMap): Collection
++    public function sortUsingMap(BookSortMap $sortMap): array
+     {
+         // Load models into map
+-        $this->loadModelsIntoSortMap($sortMap);
+-        $booksInvolved = $this->getBooksInvolvedInSort($sortMap);
++        $modelMap = $this->loadModelsFromSortMap($sortMap);
+ 
+         // Perform the sort
+         foreach ($sortMap->all() as $item) {
+-            $this->applySortUpdates($item);
++            $this->applySortUpdates($item, $modelMap);
+         }
+ 
+-        // Update permissions and activity.
+-        $booksInvolved->each(function (Book $book) {
++        /** @var Book[] $booksInvolved */
++        $booksInvolved = array_values(array_filter($modelMap, function (string $key) {
++            return strpos($key, 'book:') === 0;
++        }, ARRAY_FILTER_USE_KEY));
++
++        // Update permissions of books involved
++        foreach ($booksInvolved as $book) {
+             $book->rebuildPermissions();
+-        });
++        }
+ 
+         return $booksInvolved;
+     }
+ 
+     /**
+      * Using the given sort map item, detect changes for the related model
+-     * and update it if required.
++     * and update it if required. Changes where permissions are lacking will
++     * be skipped and not throw an error.
++     *
++     * @param array<string, Entity> $modelMap
+      */
+-    protected function applySortUpdates(BookSortMapItem $sortMapItem): void
++    protected function applySortUpdates(BookSortMapItem $sortMapItem, array $modelMap): void
+     {
+-        $model = $sortMapItem->model;
++        /** @var BookChild $model */
++        $model = $modelMap[$sortMapItem->type . ':' . $sortMapItem->id] ?? null;
+         if (!$model) {
+             return;
+         }
+@@ -146,73 +153,97 @@ protected function applySortUpdates(BookSortMapItem $sortMapItem): void
+         $bookChanged = $model->book_id !== $sortMapItem->parentBookId;
+         $chapterChanged = ($model instanceof Page) && $model->chapter_id !== $sortMapItem->parentChapterId;
+ 
++        // Stop if there's no change
++        if (!$priorityChanged && !$bookChanged && !$chapterChanged) {
++            return;
++        }
++
++        $currentParentKey =  'book:' . $model->book_id;
++        if ($model instanceof Page && $model->chapter_id) {
++             $currentParentKey = 'chapter:' . $model->chapter_id;
++        }
++
++        $currentParent = $modelMap[$currentParentKey];
++        /** @var Book $newBook */
++        $newBook = $modelMap['book:' . $sortMapItem->parentBookId] ?? null;
++        /** @var ?Chapter $newChapter */
++        $newChapter = $sortMapItem->parentChapterId ? ($modelMap['chapter:' . $sortMapItem->parentChapterId] ?? null) : null;
++
++        // Check permissions of our changes to be made
++        if (!$currentParent || !$newBook) {
++            return;
++        } else if (!userCan('chapter-update', $currentParent) && !userCan('book-update', $currentParent)) {
++            return;
++        } else if ($bookChanged && !$newChapter && !userCan('book-update', $newBook)) {
++            return;
++        } else if ($newChapter && !userCan('chapter-update', $newChapter)) {
++            return;
++        } else if (($chapterChanged || $bookChanged) && $newChapter && $newBook->id !== $newChapter->book_id) {
++            return;
++        }
++
++        // Action the required changes
+         if ($bookChanged) {
+             $model->changeBook($sortMapItem->parentBookId);
+         }
+ 
+         if ($chapterChanged) {
+-            $model->chapter_id = intval($sortMapItem->parentChapterId);
+-            $model->save();
++            $model->chapter_id = $sortMapItem->parentChapterId ?? 0;
+         }
+ 
+         if ($priorityChanged) {
+             $model->priority = $sortMapItem->sort;
++        }
++
++        if ($chapterChanged || $priorityChanged) {
+             $model->save();
+         }
+     }
+ 
+     /**
+      * Load models from the database into the given sort map.
++     * @return array<string, Entity>
+      */
+-    protected function loadModelsIntoSortMap(BookSortMap $sortMap): void
++    protected function loadModelsFromSortMap(BookSortMap $sortMap): array
+     {
+-        $collection = collect($sortMap->all());
+-
+-        $keyMap = $collection->keyBy(function (BookSortMapItem $sortMapItem) {
+-            return  $sortMapItem->type . ':' . $sortMapItem->id;
+-        });
+-
+-        $pageIds = $collection->where('type', '=', 'page')->pluck('id');
+-        $chapterIds = $collection->where('type', '=', 'chapter')->pluck('id');
+-
+-        $pages = Page::visible()->whereIn('id', $pageIds)->get();
+-        $chapters = Chapter::visible()->whereIn('id', $chapterIds)->get();
++        $modelMap = [];
++        $ids = [
++            'chapter' => [],
++            'page' => [],
++            'book' => [],
++        ];
++
++        foreach ($sortMap->all() as $sortMapItem) {
++            $ids[$sortMapItem->type][] = $sortMapItem->id;
++            $ids['book'][] = $sortMapItem->parentBookId;
++            if ($sortMapItem->parentChapterId) {
++                $ids['chapter'][] = $sortMapItem->parentChapterId;
++            }
++        }
+ 
++        $pages = Page::visible()->whereIn('id', array_unique($ids['page']))->get(Page::$listAttributes);
++        /** @var Page $page */
+         foreach ($pages as $page) {
+-            /** @var BookSortMapItem $sortItem */
+-            $sortItem = $keyMap->get('page:' . $page->id);
+-            $sortItem->model = $page;
++            $modelMap['page:' . $page->id] = $page;
++            $ids['book'][] = $page->book_id;
++            if ($page->chapter_id) {
++                $ids['chapter'][] = $page->chapter_id;
++            }
+         }
+ 
++        $chapters = Chapter::visible()->whereIn('id', array_unique($ids['chapter']))->get();
++        /** @var Chapter $chapter */
+         foreach ($chapters as $chapter) {
+-            /** @var BookSortMapItem $sortItem */
+-            $sortItem = $keyMap->get('chapter:' . $chapter->id);
+-            $sortItem->model = $chapter;
++            $modelMap['chapter:' . $chapter->id] = $chapter;
++            $ids['book'][] = $chapter->book_id;
+         }
+-    }
+ 
+-    /**
+-     * Get the books involved in a sort.
+-     * The given sort map should have its models loaded first.
+-     *
+-     * @throws SortOperationException
+-     */
+-    protected function getBooksInvolvedInSort(BookSortMap $sortMap): Collection
+-    {
+-        $collection = collect($sortMap->all());
+-
+-        $bookIdsInvolved = array_unique(array_merge(
+-            [$this->book->id],
+-            $collection->pluck('parentBookId')->values()->all(),
+-            $collection->pluck('model.book_id')->values()->all(),
+-        ));
+-        
+-        $books = Book::hasPermission('update')->whereIn('id', $bookIdsInvolved)->get();
+-
+-        if (count($books) !== count($bookIdsInvolved)) {
+-            throw new SortOperationException('Could not find all books requested in sort operation');
++        $books = Book::visible()->whereIn('id', array_unique($ids['book']))->get();
++        /** @var Book $book */
++        foreach ($books as $book) {
++            $modelMap['book:' . $book->id] = $book;
+         }
+ 
+-        return $books;
++        return $modelMap;
+     }
+ }
+diff --git a/app/Entities/Tools/BookSortMapItem.php b/app/Entities/Tools/BookSortMapItem.php
+index 6a2abc4229..7fb9a1db56 100644
+--- a/app/Entities/Tools/BookSortMapItem.php
++++ b/app/Entities/Tools/BookSortMapItem.php
+@@ -2,8 +2,6 @@
+ 
+ namespace BookStack\Entities\Tools;
+ 
+-use BookStack\Entities\Models\BookChild;
+-
+ class BookSortMapItem
+ {
+ 
+@@ -32,11 +30,6 @@ class BookSortMapItem
+      */
+     public $parentBookId;
+ 
+-    /**
+-     * @var ?BookChild
+-     */
+-    public $model = null;
+-
+ 
+     public function __construct(int $id, int $sort, ?int $parentChapterId, string $type, int $parentBookId)
+     {
+diff --git a/app/Exceptions/SortOperationException.php b/app/Exceptions/SortOperationException.php
+deleted file mode 100644
+index ade9e47d21..0000000000
+--- a/app/Exceptions/SortOperationException.php
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<?php
+-
+-namespace BookStack\Exceptions;
+-
+-use Exception;
+-
+-class SortOperationException extends Exception
+-{
+-}
+diff --git a/app/Http/Controllers/BookSortController.php b/app/Http/Controllers/BookSortController.php
+index 8fe05a9beb..8aac2b7693 100644
+--- a/app/Http/Controllers/BookSortController.php
++++ b/app/Http/Controllers/BookSortController.php
+@@ -3,11 +3,9 @@
+ namespace BookStack\Http\Controllers;
+ 
+ use BookStack\Actions\ActivityType;
+-use BookStack\Entities\Models\Book;
+ use BookStack\Entities\Repos\BookRepo;
+ use BookStack\Entities\Tools\BookContents;
+ use BookStack\Entities\Tools\BookSortMap;
+-use BookStack\Exceptions\SortOperationException;
+ use BookStack\Facades\Activity;
+ use Illuminate\Http\Request;
+ 
+@@ -62,18 +60,12 @@ public function update(Request $request, string $bookSlug)
+ 
+         $sortMap = BookSortMap::fromJson($request->get('sort-tree'));
+         $bookContents = new BookContents($book);
+-        $booksInvolved = collect();
+-
+-        try {
+-            $booksInvolved = $bookContents->sortUsingMap($sortMap);
+-        } catch (SortOperationException $exception) {
+-            $this->showPermissionError();
+-        }
++        $booksInvolved = $bookContents->sortUsingMap($sortMap);
+ 
+         // Rebuild permissions and add activity for involved books.
+-        $booksInvolved->each(function (Book $book) {
+-            Activity::add(ActivityType::BOOK_SORT, $book);
+-        });
++        foreach ($booksInvolved as $bookInvolved) {
++            Activity::add(ActivityType::BOOK_SORT, $bookInvolved);
++        }
+ 
+         return redirect($book->getUrl());
+     }
+
+From 553954ad18bd684b7d83d1ee6f7d0bdbf7651acf Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Wed, 5 Jan 2022 14:39:21 +0000
+Subject: [PATCH 3/6] Altered sort permission checking and started tests
+
+Previous implemenations were hard to read so changing to be more
+logically simplistic. Still needs further coverage in tests and
+review/alignment of permissions to use.
+---
+ app/Entities/Tools/BookContents.php | 75 ++++++++++++++++++++-----
+ tests/Entity/SortTest.php           | 87 +++++++++++++++++++++++++----
+ 2 files changed, 136 insertions(+), 26 deletions(-)
+
+diff --git a/app/Entities/Tools/BookContents.php b/app/Entities/Tools/BookContents.php
+index ff018eda99..bdbc4262d2 100644
+--- a/app/Entities/Tools/BookContents.php
++++ b/app/Entities/Tools/BookContents.php
+@@ -116,8 +116,17 @@ public function sortUsingMap(BookSortMap $sortMap): array
+         // Load models into map
+         $modelMap = $this->loadModelsFromSortMap($sortMap);
+ 
++        // Sort our changes from our map to be chapters first
++        // Since they need to be process to ensure book alignment for child page changes.
++        $sortMapItems = $sortMap->all();
++        usort($sortMapItems, function(BookSortMapItem $itemA, BookSortMapItem $itemB) {
++            $aScore = $itemA->type === 'page' ? 2 : 1;
++            $bScore = $itemB->type === 'page' ? 2 : 1;
++            return $aScore - $bScore;
++        });
++
+         // Perform the sort
+-        foreach ($sortMap->all() as $item) {
++        foreach ($sortMapItems as $item) {
+             $this->applySortUpdates($item, $modelMap);
+         }
+ 
+@@ -163,32 +172,23 @@ protected function applySortUpdates(BookSortMapItem $sortMapItem, array $modelMa
+              $currentParentKey = 'chapter:' . $model->chapter_id;
+         }
+ 
+-        $currentParent = $modelMap[$currentParentKey];
++        $currentParent = $modelMap[$currentParentKey] ?? null;
+         /** @var Book $newBook */
+-        $newBook = $modelMap['book:' . $sortMapItem->parentBookId] ?? null;
++        $newBook = $modelMap['book:' . $sortMapItem->parentBookId];
+         /** @var ?Chapter $newChapter */
+         $newChapter = $sortMapItem->parentChapterId ? ($modelMap['chapter:' . $sortMapItem->parentChapterId] ?? null) : null;
+ 
+-        // Check permissions of our changes to be made
+-        if (!$currentParent || !$newBook) {
+-            return;
+-        } else if (!userCan('chapter-update', $currentParent) && !userCan('book-update', $currentParent)) {
+-            return;
+-        } else if ($bookChanged && !$newChapter && !userCan('book-update', $newBook)) {
+-            return;
+-        } else if ($newChapter && !userCan('chapter-update', $newChapter)) {
+-            return;
+-        } else if (($chapterChanged || $bookChanged) && $newChapter && $newBook->id !== $newChapter->book_id) {
++        if (!$this->isSortChangePermissible($sortMapItem, $model, $currentParent, $newBook, $newChapter)) {
+             return;
+         }
+ 
+         // Action the required changes
+         if ($bookChanged) {
+-            $model->changeBook($sortMapItem->parentBookId);
++            $model->changeBook($newBook->id);
+         }
+ 
+         if ($chapterChanged) {
+-            $model->chapter_id = $sortMapItem->parentChapterId ?? 0;
++            $model->chapter_id = $newChapter->id ?? 0;
+         }
+ 
+         if ($priorityChanged) {
+@@ -200,6 +200,51 @@ protected function applySortUpdates(BookSortMapItem $sortMapItem, array $modelMa
+         }
+     }
+ 
++    /**
++     * Check if the current user has permissions to apply the given sorting change.
++     */
++    protected function isSortChangePermissible(BookSortMapItem $sortMapItem, Entity $model, ?Entity $currentParent, ?Entity $newBook, ?Entity $newChapter): bool
++    {
++        // TODO - Move operations check for create permissions, Needs these also/instead?
++
++        // Stop if we can't see the current parent or new book.
++        if (!$currentParent || !$newBook) {
++            return false;
++        }
++
++        if ($model instanceof Chapter) {
++            $hasPermission = userCan('book-update', $currentParent)
++                && userCan('book-update', $newBook);
++            if (!$hasPermission) {
++                return false;
++            }
++        }
++
++        if ($model instanceof Page) {
++            $parentPermission = ($currentParent instanceof Chapter) ? 'chapter-update' : 'book-update';
++            $hasCurrentParentPermission = userCan($parentPermission, $currentParent);
++
++            // This needs to check if there was an intended chapter location in the original sort map
++            // rather than inferring from the $newChapter since that variable may be null
++            // due to other reasons (Visibility).
++            $newParent = $sortMapItem->parentChapterId ? $newChapter : $newBook;
++            if (!$newParent) {
++                return false;
++            }
++
++            $newParentInRightLocation = ($newParent instanceof Book || $newParent->book_id === $newBook->id);
++            $newParentPermission = ($newParent instanceof Chapter) ? 'chapter-update' : 'book-update';
++            $hasNewParentPermission = userCan($newParentPermission, $newParent);
++
++            $hasPermission = $hasCurrentParentPermission && $newParentInRightLocation && $hasNewParentPermission;
++            if (!$hasPermission) {
++                return false;
++            }
++        }
++
++        return true;
++    }
++
+     /**
+      * Load models from the database into the given sort map.
+      * @return array<string, Entity>
+diff --git a/tests/Entity/SortTest.php b/tests/Entity/SortTest.php
+index 89279bfcf9..07e8b8ca8d 100644
+--- a/tests/Entity/SortTest.php
++++ b/tests/Entity/SortTest.php
+@@ -239,20 +239,20 @@ public function test_book_sort()
+         // Create request data
+         $reqData = [
+             [
+-                'id'            => $chapterToMove->id,
+-                'sort'          => 0,
++                'id' => $chapterToMove->id,
++                'sort' => 0,
+                 'parentChapter' => false,
+-                'type'          => 'chapter',
+-                'book'          => $newBook->id,
++                'type' => 'chapter',
++                'book' => $newBook->id,
+             ],
+         ];
+         foreach ($pagesToMove as $index => $page) {
+             $reqData[] = [
+-                'id'            => $page->id,
+-                'sort'          => $index,
++                'id' => $page->id,
++                'sort' => $index,
+                 'parentChapter' => $index === count($pagesToMove) - 1 ? $chapterToMove->id : false,
+-                'type'          => 'page',
+-                'book'          => $newBook->id,
++                'type' => 'page',
++                'book' => $newBook->id,
+             ];
+         }
+ 
+@@ -260,18 +260,83 @@ public function test_book_sort()
+         $sortResp->assertRedirect($newBook->getUrl());
+         $sortResp->assertStatus(302);
+         $this->assertDatabaseHas('chapters', [
+-            'id'       => $chapterToMove->id,
+-            'book_id'  => $newBook->id,
++            'id' => $chapterToMove->id,
++            'book_id' => $newBook->id,
+             'priority' => 0,
+         ]);
+         $this->assertTrue($newBook->chapters()->count() === 1);
+         $this->assertTrue($newBook->chapters()->first()->pages()->count() === 1);
+ 
+         $checkPage = $pagesToMove[1];
+-        $checkResp = $this->get(Page::find($checkPage->id)->getUrl());
++        $checkResp = $this->get($checkPage->refresh()->getUrl());
+         $checkResp->assertSee($newBook->name);
+     }
+ 
++    public function test_book_sort_makes_no_changes_if_new_chapter_does_not_align_with_new_book()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $page->book_id,
++        ];
++        $this->asEditor()->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
++    public function test_book_sort_makes_no_changes_if_no_view_permissions_on_new_chapter()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        /** @var Chapter $otherChapter */
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++        $this->setEntityRestrictions($otherChapter);
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $otherChapter->book_id,
++        ];
++        $this->asEditor()->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
++    public function test_book_sort_makes_no_changes_if_no_update_permissions_on_new_chapter()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        /** @var Chapter $otherChapter */
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++        $editor = $this->getEditor();
++        $this->setEntityRestrictions($otherChapter, ['view'], [$editor->roles()->first()]);
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $otherChapter->book_id,
++        ];
++        $this->actingAs($editor)->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
+     public function test_book_sort_item_returns_book_content()
+     {
+         $books = Book::all();
+
+From d3ca23b195cf2484ac5eaeea0b0e8cb4ca0aad48 Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Wed, 5 Jan 2022 15:42:59 +0000
+Subject: [PATCH 4/6] Added additional permission checks and tests for book
+ sorts
+
+- Aligned permissions control with move operations to check
+  delete/create permissions against old/new locations.
+- Added tests to cover additional permissions scenarios.
+---
+ app/Entities/Repos/ChapterRepo.php         |   2 +
+ app/Entities/Tools/BookContents.php        |  30 ++++--
+ app/Http/Controllers/ChapterController.php |   2 +
+ tests/Entity/SortTest.php                  | 112 +++++++++++++++++----
+ 4 files changed, 119 insertions(+), 27 deletions(-)
+
+diff --git a/app/Entities/Repos/ChapterRepo.php b/app/Entities/Repos/ChapterRepo.php
+index 87f9e9e40c..672c2140c3 100644
+--- a/app/Entities/Repos/ChapterRepo.php
++++ b/app/Entities/Repos/ChapterRepo.php
+@@ -94,6 +94,8 @@ public function move(Chapter $chapter, string $parentIdentifier): Book
+             throw new MoveOperationException('Book to move chapter into not found');
+         }
+ 
++        // TODO - Check create permissions for new parent?
++
+         $chapter->changeBook($parent->id);
+         $chapter->rebuildPermissions();
+         Activity::add(ActivityType::CHAPTER_MOVE, $chapter);
+diff --git a/app/Entities/Tools/BookContents.php b/app/Entities/Tools/BookContents.php
+index bdbc4262d2..99602de414 100644
+--- a/app/Entities/Tools/BookContents.php
++++ b/app/Entities/Tools/BookContents.php
+@@ -174,7 +174,7 @@ protected function applySortUpdates(BookSortMapItem $sortMapItem, array $modelMa
+ 
+         $currentParent = $modelMap[$currentParentKey] ?? null;
+         /** @var Book $newBook */
+-        $newBook = $modelMap['book:' . $sortMapItem->parentBookId];
++        $newBook = $modelMap['book:' . $sortMapItem->parentBookId] ?? null;
+         /** @var ?Chapter $newChapter */
+         $newChapter = $sortMapItem->parentChapterId ? ($modelMap['chapter:' . $sortMapItem->parentChapterId] ?? null) : null;
+ 
+@@ -202,19 +202,27 @@ protected function applySortUpdates(BookSortMapItem $sortMapItem, array $modelMa
+ 
+     /**
+      * Check if the current user has permissions to apply the given sorting change.
++     * Is quite complex since items can gain a different parent change. Acts as a:
++     * - Update of old parent element (Change of content/order).
++     * - Update of sorted/moved element.
++     * - Deletion of element (Relative to parent upon move).
++     * - Creation of element within parent (Upon move to new parent).
+      */
+-    protected function isSortChangePermissible(BookSortMapItem $sortMapItem, Entity $model, ?Entity $currentParent, ?Entity $newBook, ?Entity $newChapter): bool
++    protected function isSortChangePermissible(BookSortMapItem $sortMapItem, BookChild $model, ?Entity $currentParent, ?Entity $newBook, ?Entity $newChapter): bool
+     {
+-        // TODO - Move operations check for create permissions, Needs these also/instead?
+-
+         // Stop if we can't see the current parent or new book.
+         if (!$currentParent || !$newBook) {
+             return false;
+         }
+ 
++        $hasNewParent = $newBook->id !== $model->book_id || ($model instanceof Page && $model->chapter_id !== ($sortMapItem->parentChapterId ?? 0));
+         if ($model instanceof Chapter) {
+             $hasPermission = userCan('book-update', $currentParent)
+-                && userCan('book-update', $newBook);
++                && userCan('book-update', $newBook)
++                && userCan('chapter-update', $model)
++                && (!$hasNewParent || userCan('chapter-create', $newBook))
++                && (!$hasNewParent || userCan('chapter-delete', $model));
++
+             if (!$hasPermission) {
+                 return false;
+             }
+@@ -232,11 +240,21 @@ protected function isSortChangePermissible(BookSortMapItem $sortMapItem, Entity
+                 return false;
+             }
+ 
++            $hasPageEditPermission = userCan('page-update', $model);
+             $newParentInRightLocation = ($newParent instanceof Book || $newParent->book_id === $newBook->id);
+             $newParentPermission = ($newParent instanceof Chapter) ? 'chapter-update' : 'book-update';
+             $hasNewParentPermission = userCan($newParentPermission, $newParent);
+ 
+-            $hasPermission = $hasCurrentParentPermission && $newParentInRightLocation && $hasNewParentPermission;
++            $hasDeletePermissionIfMoving = (!$hasNewParent || userCan('page-delete', $model));
++            $hasCreatePermissionIfMoving = (!$hasNewParent || userCan('page-create', $newParent));
++
++            $hasPermission = $hasCurrentParentPermission
++                && $newParentInRightLocation
++                && $hasNewParentPermission
++                && $hasPageEditPermission
++                && $hasDeletePermissionIfMoving
++                && $hasCreatePermissionIfMoving;
++
+             if (!$hasPermission) {
+                 return false;
+             }
+diff --git a/app/Http/Controllers/ChapterController.php b/app/Http/Controllers/ChapterController.php
+index 7541ad0dbd..5cd720f02b 100644
+--- a/app/Http/Controllers/ChapterController.php
++++ b/app/Http/Controllers/ChapterController.php
+@@ -178,6 +178,8 @@ public function move(Request $request, string $bookSlug, string $chapterSlug)
+             return redirect($chapter->getUrl());
+         }
+ 
++        // TODO - Check permissions against pages
++
+         try {
+             $newBook = $this->chapterRepo->move($chapter, $entitySelection);
+         } catch (MoveOperationException $exception) {
+diff --git a/tests/Entity/SortTest.php b/tests/Entity/SortTest.php
+index 07e8b8ca8d..dcca426f77 100644
+--- a/tests/Entity/SortTest.php
++++ b/tests/Entity/SortTest.php
+@@ -33,9 +33,9 @@ public function test_drafts_do_not_show_up()
+ 
+     public function test_page_move_into_book()
+     {
+-        $page = Page::first();
++        $page = Page::query()->first();
+         $currentBook = $page->book;
+-        $newBook = Book::where('id', '!=', $currentBook->id)->first();
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
+ 
+         $resp = $this->asEditor()->get($page->getUrl('/move'));
+         $resp->assertSee('Move Page');
+@@ -43,7 +43,7 @@ public function test_page_move_into_book()
+         $movePageResp = $this->put($page->getUrl('/move'), [
+             'entity_selection' => 'book:' . $newBook->id,
+         ]);
+-        $page = Page::find($page->id);
++        $page = Page::query()->find($page->id);
+ 
+         $movePageResp->assertRedirect($page->getUrl());
+         $this->assertTrue($page->book->id == $newBook->id, 'Page book is now the new book');
+@@ -55,15 +55,15 @@ public function test_page_move_into_book()
+ 
+     public function test_page_move_into_chapter()
+     {
+-        $page = Page::first();
++        $page = Page::query()->first();
+         $currentBook = $page->book;
+-        $newBook = Book::where('id', '!=', $currentBook->id)->first();
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
+         $newChapter = $newBook->chapters()->first();
+ 
+         $movePageResp = $this->actingAs($this->getEditor())->put($page->getUrl('/move'), [
+             'entity_selection' => 'chapter:' . $newChapter->id,
+         ]);
+-        $page = Page::find($page->id);
++        $page = Page::query()->find($page->id);
+ 
+         $movePageResp->assertRedirect($page->getUrl());
+         $this->assertTrue($page->book->id == $newBook->id, 'Page parent is now the new chapter');
+@@ -74,9 +74,9 @@ public function test_page_move_into_chapter()
+ 
+     public function test_page_move_from_chapter_to_book()
+     {
+-        $oldChapter = Chapter::first();
++        $oldChapter = Chapter::query()->first();
+         $page = $oldChapter->pages()->first();
+-        $newBook = Book::where('id', '!=', $oldChapter->book_id)->first();
++        $newBook = Book::query()->where('id', '!=', $oldChapter->book_id)->first();
+ 
+         $movePageResp = $this->actingAs($this->getEditor())->put($page->getUrl('/move'), [
+             'entity_selection' => 'book:' . $newBook->id,
+@@ -110,7 +110,7 @@ public function test_page_move_requires_create_permissions_on_parent()
+             'entity_selection' => 'book:' . $newBook->id,
+         ]);
+ 
+-        $page = Page::find($page->id);
++        $page = Page::query()->find($page->id);
+         $movePageResp->assertRedirect($page->getUrl());
+ 
+         $this->assertTrue($page->book->id == $newBook->id, 'Page book is now the new book');
+@@ -118,9 +118,9 @@ public function test_page_move_requires_create_permissions_on_parent()
+ 
+     public function test_page_move_requires_delete_permissions()
+     {
+-        $page = Page::first();
++        $page = Page::query()->first();
+         $currentBook = $page->book;
+-        $newBook = Book::where('id', '!=', $currentBook->id)->first();
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
+         $editor = $this->getEditor();
+ 
+         $this->setEntityRestrictions($newBook, ['view', 'update', 'create', 'delete'], $editor->roles->all());
+@@ -138,17 +138,17 @@ public function test_page_move_requires_delete_permissions()
+             'entity_selection' => 'book:' . $newBook->id,
+         ]);
+ 
+-        $page = Page::find($page->id);
++        $page = Page::query()->find($page->id);
+         $movePageResp->assertRedirect($page->getUrl());
+         $this->assertTrue($page->book->id == $newBook->id, 'Page book is now the new book');
+     }
+ 
+     public function test_chapter_move()
+     {
+-        $chapter = Chapter::first();
++        $chapter = Chapter::query()->first();
+         $currentBook = $chapter->book;
+         $pageToCheck = $chapter->pages->first();
+-        $newBook = Book::where('id', '!=', $currentBook->id)->first();
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
+ 
+         $chapterMoveResp = $this->asEditor()->get($chapter->getUrl('/move'));
+         $chapterMoveResp->assertSee('Move Chapter');
+@@ -157,7 +157,7 @@ public function test_chapter_move()
+             'entity_selection' => 'book:' . $newBook->id,
+         ]);
+ 
+-        $chapter = Chapter::find($chapter->id);
++        $chapter = Chapter::query()->find($chapter->id);
+         $moveChapterResp->assertRedirect($chapter->getUrl());
+         $this->assertTrue($chapter->book->id === $newBook->id, 'Chapter Book is now the new book');
+ 
+@@ -165,7 +165,7 @@ public function test_chapter_move()
+         $newBookResp->assertSee('moved chapter');
+         $newBookResp->assertSee($chapter->name);
+ 
+-        $pageToCheck = Page::find($pageToCheck->id);
++        $pageToCheck = Page::query()->find($pageToCheck->id);
+         $this->assertTrue($pageToCheck->book_id === $newBook->id, 'Chapter child page\'s book id has changed to the new book');
+         $pageCheckResp = $this->get($pageToCheck->getUrl());
+         $pageCheckResp->assertSee($newBook->name);
+@@ -173,9 +173,9 @@ public function test_chapter_move()
+ 
+     public function test_chapter_move_requires_delete_permissions()
+     {
+-        $chapter = Chapter::first();
++        $chapter = Chapter::query()->first();
+         $currentBook = $chapter->book;
+-        $newBook = Book::where('id', '!=', $currentBook->id)->first();
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
+         $editor = $this->getEditor();
+ 
+         $this->setEntityRestrictions($newBook, ['view', 'update', 'create', 'delete'], $editor->roles->all());
+@@ -193,7 +193,7 @@ public function test_chapter_move_requires_delete_permissions()
+             'entity_selection' => 'book:' . $newBook->id,
+         ]);
+ 
+-        $chapter = Chapter::find($chapter->id);
++        $chapter = Chapter::query()->find($chapter->id);
+         $moveChapterResp->assertRedirect($chapter->getUrl());
+         $this->assertTrue($chapter->book->id == $newBook->id, 'Page book is now the new book');
+     }
+@@ -314,14 +314,83 @@ public function test_book_sort_makes_no_changes_if_no_view_permissions_on_new_ch
+         ]);
+     }
+ 
+-    public function test_book_sort_makes_no_changes_if_no_update_permissions_on_new_chapter()
++    public function test_book_sort_makes_no_changes_if_no_view_permissions_on_new_book()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        /** @var Chapter $otherChapter */
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++        $editor = $this->getEditor();
++        $this->setEntityRestrictions($otherChapter->book, ['update', 'delete'], [$editor->roles()->first()]);
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $otherChapter->book_id,
++        ];
++        $this->actingAs($editor)->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
++    public function test_book_sort_makes_no_changes_if_no_update_or_create_permissions_on_new_chapter()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        /** @var Chapter $otherChapter */
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++        $editor = $this->getEditor();
++        $this->setEntityRestrictions($otherChapter, ['view', 'delete'], [$editor->roles()->first()]);
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $otherChapter->book_id,
++        ];
++        $this->actingAs($editor)->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
++    public function test_book_sort_makes_no_changes_if_no_update_permissions_on_moved_item()
++    {
++        /** @var Page $page */
++        $page = Page::query()->where('chapter_id', '!=', 0)->first();
++        /** @var Chapter $otherChapter */
++        $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
++        $editor = $this->getEditor();
++        $this->setEntityRestrictions($page, ['view', 'delete'], [$editor->roles()->first()]);
++
++        $sortData = [
++            'id' => $page->id,
++            'sort' => 0,
++            'parentChapter' => $otherChapter->id,
++            'type' => 'page',
++            'book' => $otherChapter->book_id,
++        ];
++        $this->actingAs($editor)->put($page->book->getUrl('/sort'), ['sort-tree' => json_encode([$sortData])])->assertRedirect();
++
++        $this->assertDatabaseHas('pages', [
++            'id' => $page->id, 'chapter_id' => $page->chapter_id, 'book_id' => $page->book_id,
++        ]);
++    }
++
++    public function test_book_sort_makes_no_changes_if_no_delete_permissions_on_moved_item()
+     {
+         /** @var Page $page */
+         $page = Page::query()->where('chapter_id', '!=', 0)->first();
+         /** @var Chapter $otherChapter */
+         $otherChapter = Chapter::query()->where('book_id', '!=', $page->book_id)->first();
+         $editor = $this->getEditor();
+-        $this->setEntityRestrictions($otherChapter, ['view'], [$editor->roles()->first()]);
++        $this->setEntityRestrictions($page, ['view', 'update'], [$editor->roles()->first()]);
+ 
+         $sortData = [
+             'id' => $page->id,
+@@ -337,6 +406,7 @@ public function test_book_sort_makes_no_changes_if_no_update_permissions_on_new_
+         ]);
+     }
+ 
++
+     public function test_book_sort_item_returns_book_content()
+     {
+         $books = Book::all();
+
+From fbd388ba4c5c1322038b362f8043532e7bd5596e Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Wed, 5 Jan 2022 16:11:11 +0000
+Subject: [PATCH 5/6] Aligned chapter move permissions with page move
+ permissions
+
+---
+ app/Entities/Repos/ChapterRepo.php         |  7 ++++--
+ app/Entities/Repos/PageRepo.php            |  2 +-
+ app/Http/Controllers/ChapterController.php |  5 +++--
+ app/Http/Controllers/PageController.php    |  6 ++----
+ tests/Entity/SortTest.php                  | 25 ++++++++++++++++++++++
+ 5 files changed, 36 insertions(+), 9 deletions(-)
+
+diff --git a/app/Entities/Repos/ChapterRepo.php b/app/Entities/Repos/ChapterRepo.php
+index 672c2140c3..2b81891af6 100644
+--- a/app/Entities/Repos/ChapterRepo.php
++++ b/app/Entities/Repos/ChapterRepo.php
+@@ -10,6 +10,7 @@
+ use BookStack\Entities\Tools\TrashCan;
+ use BookStack\Exceptions\MoveOperationException;
+ use BookStack\Exceptions\NotFoundException;
++use BookStack\Exceptions\PermissionsException;
+ use BookStack\Facades\Activity;
+ use Exception;
+ 
+@@ -85,16 +86,18 @@ public function destroy(Chapter $chapter)
+      * 'book:<id>' (book:5).
+      *
+      * @throws MoveOperationException
++     * @throws PermissionsException
+      */
+     public function move(Chapter $chapter, string $parentIdentifier): Book
+     {
+-        /** @var Book $parent */
+         $parent = $this->findParentByIdentifier($parentIdentifier);
+         if (is_null($parent)) {
+             throw new MoveOperationException('Book to move chapter into not found');
+         }
+ 
+-        // TODO - Check create permissions for new parent?
++        if (!userCan('chapter-create', $parent)) {
++            throw new PermissionsException('User does not have permission to create a chapter within the chosen book');
++        }
+ 
+         $chapter->changeBook($parent->id);
+         $chapter->rebuildPermissions();
+diff --git a/app/Entities/Repos/PageRepo.php b/app/Entities/Repos/PageRepo.php
+index 9929464614..828c4572fd 100644
+--- a/app/Entities/Repos/PageRepo.php
++++ b/app/Entities/Repos/PageRepo.php
+@@ -328,7 +328,7 @@ public function restoreRevision(Page $page, int $revisionId): Page
+     public function move(Page $page, string $parentIdentifier): Entity
+     {
+         $parent = $this->findParentByIdentifier($parentIdentifier);
+-        if ($parent === null) {
++        if (is_null($parent)) {
+             throw new MoveOperationException('Book or chapter to move page into not found');
+         }
+ 
+diff --git a/app/Http/Controllers/ChapterController.php b/app/Http/Controllers/ChapterController.php
+index 5cd720f02b..83b9bb692d 100644
+--- a/app/Http/Controllers/ChapterController.php
++++ b/app/Http/Controllers/ChapterController.php
+@@ -11,6 +11,7 @@
+ use BookStack\Entities\Tools\PermissionsUpdater;
+ use BookStack\Exceptions\MoveOperationException;
+ use BookStack\Exceptions\NotFoundException;
++use BookStack\Exceptions\PermissionsException;
+ use Illuminate\Http\Request;
+ use Illuminate\Validation\ValidationException;
+ use Throwable;
+@@ -178,10 +179,10 @@ public function move(Request $request, string $bookSlug, string $chapterSlug)
+             return redirect($chapter->getUrl());
+         }
+ 
+-        // TODO - Check permissions against pages
+-
+         try {
+             $newBook = $this->chapterRepo->move($chapter, $entitySelection);
++        } catch (PermissionsException $exception) {
++            $this->showPermissionError();
+         } catch (MoveOperationException $exception) {
+             $this->showErrorNotification(trans('errors.selected_book_not_found'));
+ 
+diff --git a/app/Http/Controllers/PageController.php b/app/Http/Controllers/PageController.php
+index 3e57657da7..fc4b463e15 100644
+--- a/app/Http/Controllers/PageController.php
++++ b/app/Http/Controllers/PageController.php
+@@ -412,11 +412,9 @@ public function move(Request $request, string $bookSlug, string $pageSlug)
+ 
+         try {
+             $parent = $this->pageRepo->move($page, $entitySelection);
++        } catch (PermissionsException $exception) {
++            $this->showPermissionError();
+         } catch (Exception $exception) {
+-            if ($exception instanceof PermissionsException) {
+-                $this->showPermissionError();
+-            }
+-
+             $this->showErrorNotification(trans('errors.selected_book_chapter_not_found'));
+ 
+             return redirect()->back();
+diff --git a/tests/Entity/SortTest.php b/tests/Entity/SortTest.php
+index dcca426f77..9ff75e7000 100644
+--- a/tests/Entity/SortTest.php
++++ b/tests/Entity/SortTest.php
+@@ -198,6 +198,31 @@ public function test_chapter_move_requires_delete_permissions()
+         $this->assertTrue($chapter->book->id == $newBook->id, 'Page book is now the new book');
+     }
+ 
++    public function test_chapter_move_requires_create_permissions_in_new_book()
++    {
++        $chapter = Chapter::query()->first();
++        $currentBook = $chapter->book;
++        $newBook = Book::query()->where('id', '!=', $currentBook->id)->first();
++        $editor = $this->getEditor();
++
++        $this->setEntityRestrictions($newBook, ['view', 'update', 'delete'], [$editor->roles->first()]);
++        $this->setEntityRestrictions($chapter, ['view', 'update', 'create', 'delete'], [$editor->roles->first()]);
++
++        $moveChapterResp = $this->actingAs($editor)->put($chapter->getUrl('/move'), [
++            'entity_selection' => 'book:' . $newBook->id,
++        ]);
++        $this->assertPermissionError($moveChapterResp);
++
++        $this->setEntityRestrictions($newBook, ['view', 'update', 'create', 'delete'], [$editor->roles->first()]);
++        $moveChapterResp = $this->put($chapter->getUrl('/move'), [
++            'entity_selection' => 'book:' . $newBook->id,
++        ]);
++
++        $chapter = Chapter::query()->find($chapter->id);
++        $moveChapterResp->assertRedirect($chapter->getUrl());
++        $this->assertTrue($chapter->book->id == $newBook->id, 'Page book is now the new book');
++    }
++
+     public function test_chapter_move_changes_book_for_deleted_pages_within()
+     {
+         /** @var Chapter $chapter */
+
+From 2312d07bb59b55a4efe0739d2176988a9bebb68c Mon Sep 17 00:00:00 2001
+From: Dan Brown <ssddanbrown@googlemail.com>
+Date: Wed, 5 Jan 2022 16:46:03 +0000
+Subject: [PATCH 6/6] Removed old book sort permission test
+
+Permission handling now done via other means with more extensive
+permissions testing in SortTest class.
+---
+ tests/Permissions/EntityPermissionsTest.php | 45 ---------------------
+ 1 file changed, 45 deletions(-)
+
+diff --git a/tests/Permissions/EntityPermissionsTest.php b/tests/Permissions/EntityPermissionsTest.php
+index 96d4792b9c..abd5065f50 100644
+--- a/tests/Permissions/EntityPermissionsTest.php
++++ b/tests/Permissions/EntityPermissionsTest.php
+@@ -670,51 +670,6 @@ public function test_book_sort_view_permission()
+         $this->actingAs($this->user)->get($firstBook->getUrl('/sort'));
+     }
+ 
+-    public function test_book_sort_permission()
+-    {
+-        /** @var Book $firstBook */
+-        $firstBook = Book::query()->first();
+-        /** @var Book $secondBook */
+-        $secondBook = Book::query()->find(2);
+-
+-        $this->setRestrictionsForTestRoles($firstBook, ['view', 'update']);
+-        $this->setRestrictionsForTestRoles($secondBook, ['view']);
+-
+-        $firstBookChapter = $this->newChapter(['name' => 'first book chapter'], $firstBook);
+-        $secondBookChapter = $this->newChapter(['name' => 'second book chapter'], $secondBook);
+-
+-        // Create request data
+-        $reqData = [
+-            [
+-                'id'            => $firstBookChapter->id,
+-                'sort'          => 0,
+-                'parentChapter' => false,
+-                'type'          => 'chapter',
+-                'book'          => $secondBook->id,
+-            ],
+-        ];
+-
+-        // Move chapter from first book to a second book
+-        $this->actingAs($this->user)->put($firstBook->getUrl() . '/sort', ['sort-tree' => json_encode($reqData)])
+-            ->assertRedirect('/');
+-        $this->get('/')->assertSee('You do not have permission');
+-
+-        $reqData = [
+-            [
+-                'id'            => $secondBookChapter->id,
+-                'sort'          => 0,
+-                'parentChapter' => false,
+-                'type'          => 'chapter',
+-                'book'          => $firstBook->id,
+-            ],
+-        ];
+-
+-        // Move chapter from second book to first book
+-        $this->actingAs($this->user)->put($firstBook->getUrl() . '/sort', ['sort-tree' => json_encode($reqData)])
+-                ->assertRedirect('/');
+-        $this->get('/')->assertSee('You do not have permission');
+-    }
+-
+     public function test_can_create_page_if_chapter_has_permissions_when_book_not_visible()
+     {
+         /** @var Book $book */

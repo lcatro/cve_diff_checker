@@ -1,0 +1,50 @@
+From 336d5ce80681be61a0bbf4f73d2af5d1ff67e93a Mon Sep 17 00:00:00 2001
+From: srosse <stephane.rosse@frentix.com>
+Date: Tue, 2 Nov 2021 10:04:49 +0100
+Subject: [PATCH] OO-5819: clean starting / for backward compatibility
+
+---
+ .../org/olat/core/util/vfs/LocalFolderImpl.java  | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/src/main/java/org/olat/core/util/vfs/LocalFolderImpl.java b/src/main/java/org/olat/core/util/vfs/LocalFolderImpl.java
+index 11e5869cf1..dee64b8f15 100644
+--- a/src/main/java/org/olat/core/util/vfs/LocalFolderImpl.java
++++ b/src/main/java/org/olat/core/util/vfs/LocalFolderImpl.java
+@@ -373,6 +373,7 @@ public String toString() {
+ 
+ 	@Override
+ 	public VFSContainer createChildContainer(String name) {
++		name = cleanFilename(name); // backward compatibility
+ 		File fNewFile = new File(getBasefile(), name);
+ 		if(!isInPath(name)) {
+ 			log.warn("Could not create a new container::{} in container::{} - file out of parent directory", name, getBasefile().getAbsolutePath());
+@@ -388,6 +389,7 @@ public VFSContainer createChildContainer(String name) {
+ 
+ 	@Override
+ 	public VFSLeaf createChildLeaf(String name) {
++		name = cleanFilename(name); // backward compatibility
+ 		File fNewFile = new File(getBasefile(), name);
+ 		try {
+ 			if(!isInPath(name)) {
+@@ -407,6 +409,20 @@ public VFSLeaf createChildLeaf(String name) {
+ 		}
+ 		return new LocalFileImpl(fNewFile, this);
+ 	}
++	
++	/**
++	 * It was allowed to have a filename starting with /, but
++	 * it's not legal.
++	 * 
++	 * @param name The name
++	 * @return Name without starting /
++	 */
++	private String cleanFilename(String name) {
++		if(name != null && name.startsWith("/")) {
++			name = name.substring(1, name.length());
++		}
++		return name;
++	}
+ 
+ 	@Override
+ 	public VFSItemFilter getDefaultItemFilter() {

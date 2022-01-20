@@ -1,0 +1,167 @@
+From e8a31ba4f2ce7e6bc34882dc27c97fba993f5868 Mon Sep 17 00:00:00 2001
+From: Jehan <jehan@girinstud.io>
+Date: Fri, 17 Dec 2021 17:19:34 +0100
+Subject: [PATCH] =?UTF-8?q?plug-ins:=20in=20file-gegl,=20use=20the=20accur?=
+ =?UTF-8?q?ate=20load/save=20GEGL=20operation=E2=80=A6?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+â¦ rather than generic "gegl:load" and "gegl:save".
+
+In particular, it means using "gegl:rgbe-load|save" for RGBE images and
+"gegl:exr-save" for EXR exporting.
+
+Without this, we could encounter weird run cases where for instance, we
+would detect a RGBE image through the file magic number in GIMP,
+redirect the load to file-gegl, but "gegl:load" only relies on file
+extension. So if the file extension was not ".hdr", "gegl:load" could
+redirect to a different handler operation meant for another format,
+hence break proper loading. If no extension was matched, it could even
+redirect to a fallback handler, such as Image Magick.
+
+This breaks loading or saving images which we would be otherwise able to
+load/save. And it could also have some security implications. So let's
+fix this by setting the accurate operations to use for each specific
+file formats we want to support through the file-gegl plug-in.
+---
+ plug-ins/common/file-gegl.c | 37 ++++++++++++++++++++++++-------------
+ 1 file changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/plug-ins/common/file-gegl.c b/plug-ins/common/file-gegl.c
+index 7e7f2b5416..a4643dc27e 100644
+--- a/plug-ins/common/file-gegl.c
++++ b/plug-ins/common/file-gegl.c
+@@ -46,10 +46,12 @@ struct _FileFormat
+   const gchar *load_proc;
+   const gchar *load_blurb;
+   const gchar *load_help;
++  const gchar *load_op;
+ 
+   const gchar *save_proc;
+   const gchar *save_blurb;
+   const gchar *save_help;
++  const gchar *save_op;
+ };
+ 
+ 
+@@ -91,8 +93,10 @@ static GimpValueArray * goat_save             (GimpProcedure        *procedure,
+                                                gpointer              run_data);
+ 
+ static GimpImage      * load_image            (GFile                *file,
++                                               const gchar          *gegl_op,
+                                                GError              **error);
+ static gboolean         save_image            (GFile                *file,
++                                               const gchar          *gegl_op,
+                                                GimpImage            *image,
+                                                GimpDrawable         *drawable,
+                                                GError              **error);
+@@ -113,11 +117,13 @@ static const FileFormat file_formats[] =
+ 
+     "file-load-rgbe",
+     "Load files in the RGBE file format",
+-    "This procedure loads images in the RGBE format, using gegl:load",
++    "This procedure loads images in the RGBE format, using gegl:rgbe-load",
++    "gegl:rgbe-load",
+ 
+     "file-save-rgbe",
+     "Saves files in the RGBE file format",
+-    "This procedure exports images in the RGBE format, using gegl:save"
++    "This procedure exports images in the RGBE format, using gegl:rgbe-save",
++    "gegl:rgbe-save",
+   },
+   {
+     N_("OpenEXR image"),
+@@ -126,11 +132,12 @@ static const FileFormat file_formats[] =
+     "0,lelong,20000630",
+ 
+     /* no EXR loading (implemented in native GIMP plug-in) */
+-    NULL, NULL, NULL,
++    NULL, NULL, NULL, NULL,
+ 
+     "file-exr-save",
+     "Saves files in the OpenEXR file format",
+-    "This procedure saves images in the OpenEXR format, using gegl:save"
++    "This procedure saves images in the OpenEXR format, using gegl:exr-save",
++    "gegl:exr-save"
+   }
+ };
+ 
+@@ -234,14 +241,15 @@ goat_load (GimpProcedure        *procedure,
+           const GimpValueArray *args,
+           gpointer              run_data)
+ {
+-  GimpValueArray *return_vals;
+-  GimpImage      *image;
+-  GError         *error = NULL;
++  const FileFormat *format = run_data;
++  GimpValueArray   *return_vals;
++  GimpImage        *image;
++  GError           *error  = NULL;
+ 
+   INIT_I18N ();
+   gegl_init (NULL, NULL);
+ 
+-  image = load_image (file, &error);
++  image = load_image (file, format->load_op, &error);
+ 
+   if (! image)
+     return gimp_procedure_new_return_values (procedure,
+@@ -267,6 +275,7 @@ goat_save (GimpProcedure        *procedure,
+            const GimpValueArray *args,
+            gpointer              run_data)
+ {
++  const FileFormat  *format = run_data;
+   GimpPDBStatusType  status = GIMP_PDB_SUCCESS;
+   GimpExportReturn   export = GIMP_EXPORT_CANCEL;
+   GError            *error = NULL;
+@@ -306,7 +315,7 @@ goat_save (GimpProcedure        *procedure,
+                                                error);
+     }
+ 
+-  if (! save_image (file, image, drawables[0],
++  if (! save_image (file, format->save_op, image, drawables[0],
+                     &error))
+     {
+       status = GIMP_PDB_EXECUTION_ERROR;
+@@ -322,8 +331,9 @@ goat_save (GimpProcedure        *procedure,
+ }
+ 
+ static GimpImage *
+-load_image (GFile   *file,
+-            GError **error)
++load_image (GFile        *file,
++            const gchar  *gegl_op,
++            GError      **error)
+ {
+   GimpImage         *image;
+   GimpLayer         *layer;
+@@ -345,7 +355,7 @@ load_image (GFile   *file,
+   graph = gegl_node_new ();
+ 
+   source = gegl_node_new_child (graph,
+-                                "operation", "gegl:load",
++                                "operation", gegl_op,
+                                 "path",      g_file_peek_path (file),
+                                 NULL);
+   sink = gegl_node_new_child (graph,
+@@ -478,6 +488,7 @@ load_image (GFile   *file,
+ 
+ static gboolean
+ save_image (GFile         *file,
++            const gchar   *gegl_op,
+             GimpImage     *image,
+             GimpDrawable  *drawable,
+             GError       **error)
+@@ -496,7 +507,7 @@ save_image (GFile         *file,
+                                 "buffer",    src_buf,
+                                 NULL);
+   sink = gegl_node_new_child (graph,
+-                              "operation", "gegl:save",
++                              "operation", gegl_op,
+                               "path",      g_file_peek_path (file),
+                               NULL);
+ 
+-- 
+GitLab
+

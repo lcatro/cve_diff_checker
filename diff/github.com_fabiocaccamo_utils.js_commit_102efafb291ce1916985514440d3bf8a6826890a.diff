@@ -1,0 +1,40 @@
+From 102efafb291ce1916985514440d3bf8a6826890a Mon Sep 17 00:00:00 2001
+From: Fabio Caccamo <fabio.caccamo@gmail.com>
+Date: Mon, 6 Dec 2021 11:45:54 +0100
+Subject: [PATCH] Fixed prototype pollution. #6
+
+---
+ src/utils/ObjectUtil.js | 3 +++
+ test/test_object.js     | 5 +++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/src/utils/ObjectUtil.js b/src/utils/ObjectUtil.js
+index e082be4..14c553f 100644
+--- a/src/utils/ObjectUtil.js
++++ b/src/utils/ObjectUtil.js
+@@ -217,6 +217,9 @@ ObjectUtil = {
+             var cursor = obj;
+             for (var i = 0, j = keys.length; i < j; i++) {
+                 key = keys[i];
++                if (key === '__proto__') {
++                    break;
++                }
+                 if (!TypeUtil.isObject(cursor[key])) {
+                     cursor[key] = {};
+                 }
+diff --git a/test/test_object.js b/test/test_object.js
+index 4bf50e1..3d4f0cf 100644
+--- a/test/test_object.js
++++ b/test/test_object.js
+@@ -304,6 +304,11 @@ describe('object', function() {
+             f(o, 'e.f.g', 'ok 2');
+             test.assertEqual(o['e']['f']['g'], 'ok 2');
+         });
++        it('test prototype pollution', function() {
++            f(o, '__proto__.polluted', true);
++            test.assertUndefined(o['polluted']);
++            test.assertUndefined({}.polluted);
++        });
+     });
+     describe('length', function() {
+         var f = obj.length;

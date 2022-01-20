@@ -1,0 +1,52 @@
+From 8a0c82f95115967868f066fc02eaf36ccb6a1233 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Fri, 27 Aug 2021 17:22:42 +0000
+Subject: [PATCH] Fix crash of tf.image.pad_to_bounding_box with large input
+ value.
+
+This PR tries to address one of the issues raised in 46890
+where tf.image.pad_to_bounding_box will crash with large input
+value.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/pad_op.cc       |  3 ++-
+ tensorflow/python/ops/image_ops_test.py | 11 +++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/kernels/pad_op.cc b/tensorflow/core/kernels/pad_op.cc
+index 20fd061ae0aff..a0a6a2f2f3c8a 100644
+--- a/tensorflow/core/kernels/pad_op.cc
++++ b/tensorflow/core/kernels/pad_op.cc
+@@ -85,7 +85,8 @@ class PadOp : public OpKernel {
+                   errors::InvalidArgument("Paddings must be non-negative: ",
+                                           before_d, " ", after_d));
+       const int64_t size_d = in0.dim_size(d);
+-      output_shape.AddDim(before_d + size_d + after_d);
++      OP_REQUIRES_OK(
++          context, output_shape.AddDimWithStatus(before_d + size_d + after_d));
+     }
+ 
+     // If there is no padding to be done, forward the input to output.
+diff --git a/tensorflow/python/ops/image_ops_test.py b/tensorflow/python/ops/image_ops_test.py
+index 17f00822ede98..8a4c88da87882 100644
+--- a/tensorflow/python/ops/image_ops_test.py
++++ b/tensorflow/python/ops/image_ops_test.py
+@@ -2293,6 +2293,17 @@ def testNameScope(self):
+       y = image_ops.pad_to_bounding_box(image, 0, 0, 55, 66)
+       self.assertTrue(y.op.name.startswith("pad_to_bounding_box"))
+ 
++  def testInvalidInput(self):
++    # Test case for GitHub issue 46890.
++    with self.session():
++      with self.assertRaises(errors_impl.InternalError):
++        v = image_ops.pad_to_bounding_box(
++            image=np.ones((1, 1, 1)),
++            target_height=5191549470,
++            target_width=5191549470,
++            offset_height=1, offset_width=1)
++        self.evaluate(v)
++
+ 
+ class SelectDistortedCropBoxTest(test_util.TensorFlowTestCase):
+ 

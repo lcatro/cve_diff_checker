@@ -1,0 +1,765 @@
+From fdc56dd345dcecfe617d3e29a42e44eef72b4dad Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Thu, 4 Nov 2021 17:51:50 +0000
+Subject: [PATCH 1/6] Regenerate when a new user session is replacing a
+ different user session
+
+---
+ lib/appSession.js      |  21 ++++++--
+ middleware/auth.js     |  20 ++++++--
+ test/callback.tests.js | 108 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 142 insertions(+), 7 deletions(-)
+
+diff --git a/lib/appSession.js b/lib/appSession.js
+index 9be1fce..e34fc3d 100644
+--- a/lib/appSession.js
++++ b/lib/appSession.js
+@@ -15,6 +15,9 @@ const debug = require('./debug')('appSession');
+ const epoch = () => (Date.now() / 1000) | 0;
+ const MAX_COOKIE_SIZE = 4096;
+ 
++const REASSIGN = Symbol('reassign');
++const REGENERATED_SESSION_ID = Symbol('regenerated_session_id');
++
+ function attachSessionObject(req, sessionName, value) {
+   Object.defineProperty(req, sessionName, {
+     enumerable: true,
+@@ -22,7 +25,7 @@ function attachSessionObject(req, sessionName, value) {
+       return value;
+     },
+     set(arg) {
+-      if (arg === null || arg === undefined) {
++      if (arg === null || arg === undefined || arg[REASSIGN]) {
+         value = arg;
+       } else {
+         throw new TypeError('session object cannot be reassigned');
+@@ -32,6 +35,14 @@ function attachSessionObject(req, sessionName, value) {
+   });
+ }
+ 
++function regenerateSession(req, session, config) {
++  session[REASSIGN] = true;
++  req[config.session.name] = session;
++  if (config.session.store) {
++    req[REGENERATED_SESSION_ID] = config.session.genid(req);
++  }
++}
++
+ module.exports = (config) => {
+   let current;
+ 
+@@ -332,13 +343,15 @@ module.exports = (config) => {
+ 
+     const id = existingSessionValue || generateId(req);
+ 
+-    onHeaders(res, () => store.setCookie(id, req, res, { iat }));
++    onHeaders(res, () =>
++      store.setCookie(req[REGENERATED_SESSION_ID] || id, req, res, { iat })
++    );
+ 
+     if (store.set) {
+       const { end: origEnd } = res;
+       res.end = async function resEnd(...args) {
+         try {
+-          await store.set(id, req, res, {
++          await store.set(req[REGENERATED_SESSION_ID] || id, req, res, {
+             iat,
+           });
+           origEnd.call(res, ...args);
+@@ -354,3 +367,5 @@ module.exports = (config) => {
+     return next();
+   };
+ };
++
++module.exports.regenerateSession = regenerateSession;
+diff --git a/middleware/auth.js b/middleware/auth.js
+index c13a949..fd9f7f4 100644
+--- a/middleware/auth.js
++++ b/middleware/auth.js
+@@ -10,6 +10,7 @@ const attemptSilentLogin = require('./attemptSilentLogin');
+ const TransientCookieHandler = require('../lib/transientHandler');
+ const { RequestContext, ResponseContext } = require('../lib/context');
+ const appSession = require('../lib/appSession');
++const { regenerateSession } = appSession;
+ const { decodeState } = require('../lib/hooks/getLoginState');
+ 
+ const enforceLeadingSlash = (path) => {
+@@ -83,7 +84,7 @@ const auth = function (params) {
+         try {
+           const redirectUri = res.oidc.getRedirectUri();
+ 
+-          let session;
++          let tokenSet;
+ 
+           try {
+             const callbackParams = client.callbackParams(req);
+@@ -110,7 +111,7 @@ const auth = function (params) {
+               extras = { exchangeBody: config.tokenEndpointParams };
+             }
+ 
+-            session = await client.callback(
++            tokenSet = await client.callback(
+               redirectUri,
+               callbackParams,
+               checks,
+@@ -120,16 +121,27 @@ const auth = function (params) {
+             throw createError.BadRequest(err.message);
+           }
+ 
++          let session = Object.assign({}, tokenSet); // Remove non-enumerable methods from the TokenSet
++
+           if (config.afterCallback) {
+             session = await config.afterCallback(
+               req,
+               res,
+-              Object.assign({}, session), // Remove non-enumerable methods from the TokenSet
++              session,
+               req.openidState
+             );
+           }
+ 
+-          Object.assign(req[config.session.name], session);
++          // Regenerate the session if a new user is logging in replacing
++          // a different user who is currently logged in.
++          if (
++            req.oidc.isAuthenticated() &&
++            tokenSet.claims().sub !== req.oidc.user.sub
++          ) {
++            regenerateSession(req, session, config);
++          } else {
++            Object.assign(req[config.session.name], session);
++          }
+           attemptSilentLogin.resumeSilentLogin(req, res);
+ 
+           next();
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index 7fefa24..a71dfbe 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -14,6 +14,7 @@ const { makeIdToken } = require('./fixture/cert');
+ const clientID = '__test_client_id__';
+ const expectedDefaultState = encodeState({ returnTo: 'https://example.org' });
+ const nock = require('nock');
++const MemoryStore = require('memorystore')(auth);
+ 
+ const baseUrl = 'http://localhost:3000';
+ const defaultConfig = {
+@@ -77,6 +78,14 @@ const setup = async (params) => {
+       };
+     });
+ 
++  if (params.existingSession) {
++    await request.post('/session', {
++      baseUrl,
++      jar,
++      json: params.existingSession,
++    });
++  }
++
+   const response = await request.post('/callback', {
+     baseUrl,
+     jar,
+@@ -85,6 +94,9 @@ const setup = async (params) => {
+   const currentUser = await request
+     .get('/user', { baseUrl, jar, json: true })
+     .then((r) => r.body);
++  const currentSession = await request
++    .get('/session', { baseUrl, jar, json: true })
++    .then((r) => r.body);
+   const tokens = await request
+     .get('/tokens', { baseUrl, jar, json: true })
+     .then((r) => r.body);
+@@ -96,6 +108,7 @@ const setup = async (params) => {
+     jar,
+     response,
+     currentUser,
++    currentSession,
+     tokenReqHeader,
+     tokenReqBody,
+     tokens,
+@@ -887,4 +900,99 @@ describe('callback response_mode: form_post', () => {
+       assert.equal(statusCode, 999);
+     });
+   });
++
++  it('should preserve session when a new user is logging in over an anonymous session', async () => {
++    const store = new MemoryStore({
++      checkPeriod: 24 * 60 * 1000,
++    });
++    const { currentSession, currentUser } = await setup({
++      cookies: generateCookies({
++        state: expectedDefaultState,
++        nonce: '__test_nonce__',
++      }),
++      body: {
++        state: expectedDefaultState,
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++      existingSession: {
++        shoppingCartId: 'bar',
++      },
++      authOpts: {
++        session: {
++          store,
++        },
++      },
++    });
++    assert.equal(currentUser.sub, 'foo');
++    assert.equal(currentSession.shoppingCartId, 'bar');
++    assert.equal(
++      store.store.length,
++      1,
++      'There should only be one session in the store'
++    );
++  });
++
++  it('should preserve session when the same user is logging in over their existing session', async () => {
++    const store = new MemoryStore({
++      checkPeriod: 24 * 60 * 1000,
++    });
++    const { currentSession, currentUser } = await setup({
++      cookies: generateCookies({
++        state: expectedDefaultState,
++        nonce: '__test_nonce__',
++      }),
++      body: {
++        state: expectedDefaultState,
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++      existingSession: {
++        shoppingCartId: 'bar',
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++      authOpts: {
++        session: {
++          store,
++        },
++      },
++    });
++    assert.equal(currentUser.sub, 'foo');
++    assert.equal(currentSession.shoppingCartId, 'bar');
++    assert.equal(
++      store.store.length,
++      1,
++      'There should only be one session in the store'
++    );
++  });
++
++  it('should regenerate the session when a new user is logging in over an existing different user', async () => {
++    const store = new MemoryStore({
++      checkPeriod: 24 * 60 * 1000,
++    });
++    const { currentSession, currentUser } = await setup({
++      cookies: generateCookies({
++        state: expectedDefaultState,
++        nonce: '__test_nonce__',
++      }),
++      body: {
++        state: expectedDefaultState,
++        id_token: makeIdToken({ sub: 'bar' }),
++      },
++      existingSession: {
++        shoppingCartId: 'bar',
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++      authOpts: {
++        session: {
++          store,
++        },
++      },
++    });
++    assert.equal(currentUser.sub, 'bar');
++    assert.isUndefined(currentSession.shoppingCartId);
++    assert.equal(
++      store.store.length,
++      2,
++      'There should only be two sessions in the store'
++    );
++  });
+ });
+
+From 8afcfec42553ea2ba3d36922c5cf4ac598c43abf Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Thu, 4 Nov 2021 18:04:13 +0000
+Subject: [PATCH 2/6] Update assert message
+
+---
+ test/callback.tests.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index a71dfbe..0bee708 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -992,7 +992,7 @@ describe('callback response_mode: form_post', () => {
+     assert.equal(
+       store.store.length,
+       2,
+-      'There should only be two sessions in the store'
++      'There should be two sessions in the store'
+     );
+   });
+ });
+
+From e7bfd27a33824bf0c42327e003a98a071991f31a Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Fri, 5 Nov 2021 09:04:24 +0000
+Subject: [PATCH 3/6] Need to update session store id for anonymous to logged
+ in
+
+---
+ lib/appSession.js      | 12 ++++++++----
+ middleware/auth.js     | 24 ++++++++++++++++--------
+ test/callback.tests.js |  4 ++--
+ 3 files changed, 26 insertions(+), 14 deletions(-)
+
+diff --git a/lib/appSession.js b/lib/appSession.js
+index e34fc3d..96b995f 100644
+--- a/lib/appSession.js
++++ b/lib/appSession.js
+@@ -35,14 +35,17 @@ function attachSessionObject(req, sessionName, value) {
+   });
+ }
+ 
+-function regenerateSession(req, session, config) {
+-  session[REASSIGN] = true;
+-  req[config.session.name] = session;
++function regenerateSessionStoreId(req, config) {
+   if (config.session.store) {
+     req[REGENERATED_SESSION_ID] = config.session.genid(req);
+   }
+ }
+ 
++function replaceSession(req, session, config) {
++  session[REASSIGN] = true;
++  req[config.session.name] = session;
++}
++
+ module.exports = (config) => {
+   let current;
+ 
+@@ -368,4 +371,5 @@ module.exports = (config) => {
+   };
+ };
+ 
+-module.exports.regenerateSession = regenerateSession;
++module.exports.regenerateSessionStoreId = regenerateSessionStoreId;
++module.exports.replaceSession = replaceSession;
+diff --git a/middleware/auth.js b/middleware/auth.js
+index fd9f7f4..68cae12 100644
+--- a/middleware/auth.js
++++ b/middleware/auth.js
+@@ -10,7 +10,7 @@ const attemptSilentLogin = require('./attemptSilentLogin');
+ const TransientCookieHandler = require('../lib/transientHandler');
+ const { RequestContext, ResponseContext } = require('../lib/context');
+ const appSession = require('../lib/appSession');
+-const { regenerateSession } = appSession;
++const { regenerateSessionStoreId, replaceSession } = appSession;
+ const { decodeState } = require('../lib/hooks/getLoginState');
+ 
+ const enforceLeadingSlash = (path) => {
+@@ -132,15 +132,23 @@ const auth = function (params) {
+             );
+           }
+ 
+-          // Regenerate the session if a new user is logging in replacing
+-          // a different user who is currently logged in.
+-          if (
+-            req.oidc.isAuthenticated() &&
+-            tokenSet.claims().sub !== req.oidc.user.sub
+-          ) {
+-            regenerateSession(req, session, config);
++          if (req.oidc.isAuthenticated()) {
++            if (req.oidc.user.sub === tokenSet.claims().sub) {
++              // If it's the same user logging in again, just update the existing session.
++              Object.assign(req[config.session.name], session);
++            } else {
++              // If it's a different user, replace the session to remove any custom user
++              // properties on the session
++              replaceSession(req, session, config);
++              // And regenerate the session id so the previous user wont know the new user's session id
++              regenerateSessionStoreId(req, config);
++            }
+           } else {
++            // If a new user is replacing an anonymous session, update the existing session to keep
++            // any anonymous session state (eg. checkout basket)
+             Object.assign(req[config.session.name], session);
++            // But update the session store id so a previous anonymous user wont know the new user's session id
++            regenerateSessionStoreId(req, config);
+           }
+           attemptSilentLogin.resumeSilentLogin(req, res);
+ 
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index 0bee708..be09867 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -901,7 +901,7 @@ describe('callback response_mode: form_post', () => {
+     });
+   });
+ 
+-  it('should preserve session when a new user is logging in over an anonymous session', async () => {
++  it('should preserve session but regenerate session id when a new user is logging in over an anonymous session', async () => {
+     const store = new MemoryStore({
+       checkPeriod: 24 * 60 * 1000,
+     });
+@@ -927,7 +927,7 @@ describe('callback response_mode: form_post', () => {
+     assert.equal(currentSession.shoppingCartId, 'bar');
+     assert.equal(
+       store.store.length,
+-      1,
++      2,
+       'There should only be one session in the store'
+     );
+   });
+
+From 37f48e8218a7a341d3b795c17838783a903019ed Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Fri, 5 Nov 2021 11:50:12 +0000
+Subject: [PATCH 4/6] Fix typo in message
+
+---
+ test/callback.tests.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index be09867..2cddb14 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -928,7 +928,7 @@ describe('callback response_mode: form_post', () => {
+     assert.equal(
+       store.store.length,
+       2,
+-      'There should only be one session in the store'
++      'There should be two sessions in the store'
+     );
+   });
+ 
+
+From d99202dcd2581ce6edaa2c174b581e284a5dea6b Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Fri, 5 Nov 2021 13:11:00 +0000
+Subject: [PATCH 5/6] Clear up previous session when replacing it
+
+---
+ lib/appSession.js                    | 35 +++++++++++++++++-----------
+ test/appSession.customStore.tests.js | 13 +++++++++++
+ test/callback.tests.js               | 33 ++++++++++++++++++++------
+ 3 files changed, 60 insertions(+), 21 deletions(-)
+
+diff --git a/lib/appSession.js b/lib/appSession.js
+index 96b995f..3c34d67 100644
+--- a/lib/appSession.js
++++ b/lib/appSession.js
+@@ -189,7 +189,7 @@ module.exports = (config) => {
+       };
+     }
+ 
+-    setCookie(id, req, res, iat) {
++    setCookie(req, res, iat) {
+       setCookie(req, res, iat);
+     }
+   }
+@@ -211,12 +211,14 @@ module.exports = (config) => {
+       res,
+       { uat = epoch(), iat = uat, exp = calculateExp(iat, uat) }
+     ) {
+-      if (!req[sessionName] || !Object.keys(req[sessionName]).length) {
+-        if (req[COOKIES][sessionName]) {
+-          await this._destroy(id);
+-        }
+-      } else {
+-        await this._set(id, {
++      const hasPrevSession = !!req[COOKIES][sessionName];
++      const replacingPrevSession = !!req[REGENERATED_SESSION_ID];
++      const hasCurrentSession = req[sessionName] && Object.keys(req[sessionName]).length;
++      if (hasPrevSession && (replacingPrevSession || !hasCurrentSession)) {
++        await this._destroy(id);
++      }
++      if (hasCurrentSession) {
++        await this._set(req[REGENERATED_SESSION_ID] || id, {
+           header: { iat, uat, exp },
+           data: req[sessionName],
+         });
+@@ -247,7 +249,8 @@ module.exports = (config) => {
+     }
+   }
+ 
+-  const store = config.session.store
++  const isCustomStore = !!config.session.store;
++  const store = isCustomStore
+     ? new CustomStore(config.session.store)
+     : new CookieStore();
+ 
+@@ -344,17 +347,17 @@ module.exports = (config) => {
+       attachSessionObject(req, sessionName, {});
+     }
+ 
+-    const id = existingSessionValue || generateId(req);
++    if (isCustomStore) {
++      const id = existingSessionValue || generateId(req);
+ 
+-    onHeaders(res, () =>
+-      store.setCookie(req[REGENERATED_SESSION_ID] || id, req, res, { iat })
+-    );
++      onHeaders(res, () =>
++        store.setCookie(req[REGENERATED_SESSION_ID] || id, req, res, { iat })
++      );
+ 
+-    if (store.set) {
+       const { end: origEnd } = res;
+       res.end = async function resEnd(...args) {
+         try {
+-          await store.set(req[REGENERATED_SESSION_ID] || id, req, res, {
++          await store.set(id, req, res, {
+             iat,
+           });
+           origEnd.call(res, ...args);
+@@ -365,6 +368,10 @@ module.exports = (config) => {
+           process.nextTick(() => next(e));
+         }
+       };
++    } else {
++      onHeaders(res, () =>
++        store.setCookie(req, res, { iat })
++      );
+     }
+ 
+     return next();
+diff --git a/test/appSession.customStore.tests.js b/test/appSession.customStore.tests.js
+index 4d7ede6..2b3c72b 100644
+--- a/test/appSession.customStore.tests.js
++++ b/test/appSession.customStore.tests.js
+@@ -57,6 +57,7 @@ describe('appSession custom store', () => {
+     const store = new RedisStore({ client: redisClient, prefix: '' });
+     redisClient.asyncSet = promisify(redisClient.set).bind(redisClient);
+     redisClient.asyncGet = promisify(redisClient.get).bind(redisClient);
++    redisClient.asyncDbsize = promisify(redisClient.dbsize).bind(redisClient);
+ 
+     const conf = getConfig({
+       ...defaultConfig,
+@@ -116,6 +117,15 @@ describe('appSession custom store', () => {
+     });
+   });
+ 
++  it('should not populate the store when there is no session', async () => {
++    await setup();
++    await request.get('/session', {
++      baseUrl,
++      json: true,
++    });
++    assert.equal(await redisClient.asyncDbsize(), 0);
++  });
++
+   it('should get a new session', async () => {
+     await setup();
+     const jar = await login({ sub: '__foo_user__' });
+@@ -126,6 +136,7 @@ describe('appSession custom store', () => {
+     });
+     assert.equal(res.statusCode, 200);
+     assert.deepEqual(res.body, { sub: '__foo_user__' });
++    assert.equal(await redisClient.asyncDbsize(), 1);
+   });
+ 
+   it('should destroy an existing session', async () => {
+@@ -153,6 +164,7 @@ describe('appSession custom store', () => {
+     });
+     assert.isEmpty(loggedOutRes.body);
+     assert.isEmpty(jar.getCookies(baseUrl));
++    assert.equal(await redisClient.asyncDbsize(), 0);
+   });
+ 
+   it('uses custom session id generator when provided', async () => {
+@@ -178,6 +190,7 @@ describe('appSession custom store', () => {
+       role: 'test',
+       userid: immId,
+     });
++    assert.equal(await redisClient.asyncDbsize(), 1);
+   });
+ 
+   it('should handle storage errors', async () => {
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index 2cddb14..2652d25 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -78,12 +78,15 @@ const setup = async (params) => {
+       };
+     });
+ 
++  let existingSessionCookie;
+   if (params.existingSession) {
+     await request.post('/session', {
+       baseUrl,
+       jar,
+       json: params.existingSession,
+     });
++    const cookies = jar.getCookies(baseUrl);
++    existingSessionCookie = cookies.find(({ key }) => key === 'appSession');
+   }
+ 
+   const response = await request.post('/callback', {
+@@ -112,6 +115,7 @@ const setup = async (params) => {
+     tokenReqHeader,
+     tokenReqBody,
+     tokens,
++    existingSessionCookie,
+   };
+ };
+ 
+@@ -905,7 +909,7 @@ describe('callback response_mode: form_post', () => {
+     const store = new MemoryStore({
+       checkPeriod: 24 * 60 * 1000,
+     });
+-    const { currentSession, currentUser } = await setup({
++    const { currentSession, currentUser, existingSessionCookie, jar } = await setup({
+       cookies: generateCookies({
+         state: expectedDefaultState,
+         nonce: '__test_nonce__',
+@@ -923,20 +927,25 @@ describe('callback response_mode: form_post', () => {
+         },
+       },
+     });
++
++    const cookies = jar.getCookies(baseUrl);
++    const newSessionCookie = cookies.find(({ key }) => key === 'appSession');
++    
+     assert.equal(currentUser.sub, 'foo');
+     assert.equal(currentSession.shoppingCartId, 'bar');
+     assert.equal(
+       store.store.length,
+-      2,
+-      'There should be two sessions in the store'
++      1,
++      'There should only be one session in the store'
+     );
++    assert.notEqual(existingSessionCookie.value, newSessionCookie.value);
+   });
+ 
+   it('should preserve session when the same user is logging in over their existing session', async () => {
+     const store = new MemoryStore({
+       checkPeriod: 24 * 60 * 1000,
+     });
+-    const { currentSession, currentUser } = await setup({
++    const { currentSession, currentUser, existingSessionCookie, jar } = await setup({
+       cookies: generateCookies({
+         state: expectedDefaultState,
+         nonce: '__test_nonce__',
+@@ -955,6 +964,10 @@ describe('callback response_mode: form_post', () => {
+         },
+       },
+     });
++
++    const cookies = jar.getCookies(baseUrl);
++    const newSessionCookie = cookies.find(({ key }) => key === 'appSession');
++    
+     assert.equal(currentUser.sub, 'foo');
+     assert.equal(currentSession.shoppingCartId, 'bar');
+     assert.equal(
+@@ -962,13 +975,14 @@ describe('callback response_mode: form_post', () => {
+       1,
+       'There should only be one session in the store'
+     );
++    assert.equal(existingSessionCookie.value, newSessionCookie.value);
+   });
+ 
+   it('should regenerate the session when a new user is logging in over an existing different user', async () => {
+     const store = new MemoryStore({
+       checkPeriod: 24 * 60 * 1000,
+     });
+-    const { currentSession, currentUser } = await setup({
++    const { currentSession, currentUser, existingSessionCookie, jar } = await setup({
+       cookies: generateCookies({
+         state: expectedDefaultState,
+         nonce: '__test_nonce__',
+@@ -987,12 +1001,17 @@ describe('callback response_mode: form_post', () => {
+         },
+       },
+     });
++
++    const cookies = jar.getCookies(baseUrl);
++    const newSessionCookie = cookies.find(({ key }) => key === 'appSession');
++    
+     assert.equal(currentUser.sub, 'bar');
+     assert.isUndefined(currentSession.shoppingCartId);
+     assert.equal(
+       store.store.length,
+-      2,
+-      'There should be two sessions in the store'
++      1,
++      'There should only be one session in the store'
+     );
++    assert.notEqual(existingSessionCookie.value, newSessionCookie.value);
+   });
+ });
+
+From 878876c9766a4c7a77c0ab739dd1adcc038e6023 Mon Sep 17 00:00:00 2001
+From: adamjmcgrath <adam.mcgrath@auth0.com>
+Date: Mon, 8 Nov 2021 11:49:02 +0000
+Subject: [PATCH 6/6] Fix leaky test and add tests for cookie session case
+
+---
+ test/appSession.customStore.tests.js |  1 +
+ test/callback.tests.js               | 39 ++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/test/appSession.customStore.tests.js b/test/appSession.customStore.tests.js
+index 2b3c72b..d323ec6 100644
+--- a/test/appSession.customStore.tests.js
++++ b/test/appSession.customStore.tests.js
+@@ -73,6 +73,7 @@ describe('appSession custom store', () => {
+       await new Promise((resolve) => server.close(resolve));
+     }
+     if (redisClient) {
++      await new Promise((resolve) => redisClient.flushall(resolve));
+       await new Promise((resolve) => redisClient.quit(resolve));
+     }
+   });
+diff --git a/test/callback.tests.js b/test/callback.tests.js
+index 2652d25..f08c8c1 100644
+--- a/test/callback.tests.js
++++ b/test/callback.tests.js
+@@ -905,6 +905,45 @@ describe('callback response_mode: form_post', () => {
+     });
+   });
+ 
++  it('should replace the cookie session when a new user is logging in over an existing different user', async () => {
++    const { currentSession, currentUser } = await setup({
++      cookies: generateCookies({
++        state: expectedDefaultState,
++        nonce: '__test_nonce__',
++      }),
++      body: {
++        state: expectedDefaultState,
++        id_token: makeIdToken({ sub: 'bar' }),
++      },
++      existingSession: {
++        shoppingCartId: 'bar',
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++    });
++
++    assert.equal(currentUser.sub, 'bar');
++    assert.isUndefined(currentSession.shoppingCartId);
++  });
++
++  it('should preserve the cookie session when a new user is logging in over an anonymous session', async () => {
++    const { currentSession, currentUser } = await setup({
++      cookies: generateCookies({
++        state: expectedDefaultState,
++        nonce: '__test_nonce__',
++      }),
++      body: {
++        state: expectedDefaultState,
++        id_token: makeIdToken({ sub: 'foo' }),
++      },
++      existingSession: {
++        shoppingCartId: 'bar',
++      },
++    });
++
++    assert.equal(currentUser.sub, 'foo');
++    assert.equal(currentSession.shoppingCartId, 'bar');
++  });
++
+   it('should preserve session but regenerate session id when a new user is logging in over an anonymous session', async () => {
+     const store = new MemoryStore({
+       checkPeriod: 24 * 60 * 1000,

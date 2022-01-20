@@ -1,0 +1,954 @@
+From a90046c765c57a46c4399dce17bd174253c32886 Mon Sep 17 00:00:00 2001
+From: Michael Telgmann <mt@shopware.com>
+Date: Thu, 9 Dec 2021 09:04:16 +0100
+Subject: [PATCH] SW-26435 - Improve routing
+
+---
+ .phpstan-baseline.neon                        | 195 ------------------
+ .../Shopware/Components/Plugin/Namespace.php  |   1 +
+ .../Plugins/Default/Core/Router/Bootstrap.php | 169 ++++++++-------
+ .../Components/Router/RouterTest.php          |   9 +-
+ .../Core/RestApi/Components/RouterTest.php    | 131 +++++++-----
+ .../Plugins/Core/Router/BootstrapTest.php     |  56 +++++
+ 6 files changed, 217 insertions(+), 344 deletions(-)
+ create mode 100644 tests/Functional/Plugins/Core/Router/BootstrapTest.php
+
+diff --git a/.phpstan-baseline.neon b/.phpstan-baseline.neon
+index 69faa77365c..e784209a914 100644
+--- a/.phpstan-baseline.neon
++++ b/.phpstan-baseline.neon
+@@ -47650,46 +47650,6 @@ parameters:
+ 			count: 1
+ 			path: engine/Shopware/Plugins/Default/Core/RestApi/Components/Router.php
+ 
+-		-
+-			message: "#^Access to an undefined property Shopware_Components_Config\\:\\:\\$offlineIp\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Method Shopware_Plugins_Core_Router_Bootstrap\\:\\:initServiceMode\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Method Shopware_Plugins_Core_Router_Bootstrap\\:\\:onRouteShutdown\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Method Shopware_Plugins_Core_Router_Bootstrap\\:\\:onRouteStartup\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Method Shopware_Plugins_Core_Router_Bootstrap\\:\\:upgradeShop\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Negated boolean expression is always false\\.$#"
+-			count: 3
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Parameter \\#1 \\$str of function trim expects string, string\\|null given\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+-		-
+-			message: "#^Strict comparison using \\=\\=\\= between string and null will always evaluate to false\\.$#"
+-			count: 1
+-			path: engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+-
+ 		-
+ 			message: "#^Method Shopware_Plugins_Core_System_Bootstrap\\:\\:onDispatchLoopShutdown\\(\\) has no return type specified\\.$#"
+ 			count: 1
+@@ -55920,161 +55880,6 @@ parameters:
+ 			count: 1
+ 			path: tests/Functional/Plugins/Core/PaymentMethods/Components/SepaPaymentMethodTest.php
+ 
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:routeDeleteProvider\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:routeGetProvider\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:routePostProvider\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:routePutProvider\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testCanGetInstance\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$expectedAction with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$expectedCode with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$expectedController with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$expectedId with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$expectedVersion with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testDeleteRoutes\\(\\) has parameter \\$uri with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has parameter \\$expectedAction with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has parameter \\$expectedController with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has parameter \\$expectedId with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has parameter \\$expectedVersion with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testGetRoutes\\(\\) has parameter \\$uri with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has parameter \\$expectedAction with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has parameter \\$expectedController with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has parameter \\$expectedId with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has parameter \\$expectedVersion with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPostRoutes\\(\\) has parameter \\$uri with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has no return type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$expectedAction with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$expectedCode with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$expectedController with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$expectedId with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$expectedVersion with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+-		-
+-			message: "#^Method Shopware\\\\Tests\\\\Functional\\\\Plugins\\\\Core\\\\RestApi\\\\Components\\\\RouterTest\\:\\:testPutRoutes\\(\\) has parameter \\$uri with no type specified\\.$#"
+-			count: 1
+-			path: tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+-
+ 		-
+ 			message: "#^Call to an undefined method Enlight_Controller_Request_Request\\:\\:setClientIp\\(\\)\\.$#"
+ 			count: 1
+diff --git a/engine/Shopware/Components/Plugin/Namespace.php b/engine/Shopware/Components/Plugin/Namespace.php
+index 934c42de8b1..b879a6ff5d7 100644
+--- a/engine/Shopware/Components/Plugin/Namespace.php
++++ b/engine/Shopware/Components/Plugin/Namespace.php
+@@ -39,6 +39,7 @@
+  * @method Shopware_Plugins_Core_HttpCache_Bootstrap          HttpCache()
+  * @method Shopware_Plugins_Core_MarketingAggregate_Bootstrap MarketingAggregate()
+  * @method Shopware_Plugins_Core_PostFilter_Bootstrap         PostFilter()
++ * @method Shopware_Plugins_Core_Router_Bootstrap             Router()
+  * @method Shopware_Plugins_Frontend_Statistics_Bootstrap     Statistics()
+  * @method Shopware_Plugins_Backend_SwagUpdate_Bootstrap      SwagUpdate()
+  * @method Shopware_Plugins_Frontend_TagCloud_Bootstrap       TagCloud()
+diff --git a/engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php b/engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+index efe9507876b..05344d165d4 100644
+--- a/engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
++++ b/engine/Shopware/Plugins/Default/Core/Router/Bootstrap.php
+@@ -24,27 +24,15 @@
+ 
+ use Enlight_Controller_Request_Request as Request;
+ use Shopware\Bundle\StoreFrontBundle\Service\ContextServiceInterface;
+-use Shopware\Bundle\StoreFrontBundle\Struct\ShopContext;
+ use Shopware\Components\Model\ModelManager;
+ use Shopware\Components\ShopRegistrationServiceInterface;
+-use Shopware\Models\Shop\Currency;
+-use Shopware\Models\Shop\DetachedShop;
++use Shopware\Models\Customer\Group as CustomerGroup;
+ use Shopware\Models\Shop\Shop;
+ use Shopware\Models\Shop\Template;
+ use Symfony\Component\HttpFoundation\Cookie;
+ 
+-/**
+- * Shopware Router Plugin
+- *
+- * @license    http://shopware.de/license
+- */
+ class Shopware_Plugins_Core_Router_Bootstrap extends Shopware_Components_Plugin_Bootstrap
+ {
+-    /**
+-     * Init plugin method
+-     *
+-     * @return bool
+-     */
+     public function install()
+     {
+         $this->subscribeEvent(
+@@ -61,14 +49,14 @@ public function install()
+     }
+ 
+     /**
+-     * Event listener method
++     * @return void
+      */
+     public function onRouteStartup(Enlight_Controller_EventArgs $args)
+     {
+         $request = $args->getRequest();
+ 
+-        if (strpos($request->getPathInfo(), '/backend') === 0
+-            || strpos($request->getPathInfo(), '/api/') === 0
++        if (str_starts_with($request->getPathInfo(), '/backend')
++            || str_starts_with($request->getPathInfo(), '/api/')
+         ) {
+             return;
+         }
+@@ -79,7 +67,7 @@ public function onRouteStartup(Enlight_Controller_EventArgs $args)
+             $shop->setHost($request->getHttpHost());
+         }
+         if (!$shop->getBaseUrl()) {
+-            $preferBasePath = $this->get(Shopware_Components_Config::class)->preferBasePath;
++            $preferBasePath = $this->get(Shopware_Components_Config::class)->get('preferBasePath');
+             $shop->setBaseUrl($preferBasePath ? $request->getBasePath() : $request->getBaseUrl());
+         }
+         if (!$shop->getBasePath()) {
+@@ -91,13 +79,10 @@ public function onRouteStartup(Enlight_Controller_EventArgs $args)
+         $request->setBaseUrl($shop->getBaseUrl());
+ 
+         // Update path info
+-        $request->setPathInfo(
+-            $this->createPathInfo($request, $shop)
+-        );
++        $request->setPathInfo($this->createPathInfo($request, $shop));
+ 
+-        if (($host = $request->getHeader('X_FORWARDED_HOST')) !== null
+-            && $host === $shop->getHost()
+-        ) {
++        $host = $request->getHeader('X_FORWARDED_HOST');
++        if ($host !== null && $host === $shop->getHost()) {
+             // If the base path is null, set it to empty string. Otherwise the request will try to assemble the base path. On a reverse proxy setup with varnish this will fail on virtual URLs like /en
+             // The X-Forwarded-Host header is only set in such environments
+             if ($shop->getBasePath() === null) {
+@@ -115,47 +100,48 @@ public function onRouteStartup(Enlight_Controller_EventArgs $args)
+     }
+ 
+     /**
+-     * Event listener method
++     * @return void
+      */
+     public function onRouteShutdown(Enlight_Controller_EventArgs $args)
+     {
+         $request = $args->getRequest();
+         $response = $args->getResponse();
+ 
+-        if (Shopware()->Container()->initialized('shop')) {
+-            /** @var DetachedShop $shop */
+-            $shop = $this->get('shop');
++        if (!Shopware()->Container()->initialized('shop')) {
++            return;
++        }
+ 
+-            if ($request->getHttpHost() !== $shop->getHost()) {
+-                if ($request->isSecure()) {
+-                    $newPath = 'https://' . $shop->getHost() . $request->getRequestUri();
+-                } else {
+-                    $newPath = 'http://' . $shop->getHost() . $shop->getBaseUrl();
+-                }
++        $shop = $this->get('shop');
++        if ($request->getHttpHost() !== $shop->getHost()) {
++            if ($request->isSecure()) {
++                $newPath = 'https://' . $shop->getHost() . $request->getRequestUri();
++            } else {
++                $newPath = 'http://' . $shop->getHost() . $shop->getBaseUrl();
+             }
++        }
+ 
+-            // Strip /shopware.php/ from string and perform a redirect
+-            $preferBasePath = $this->get(Shopware_Components_Config::class)->preferBasePath;
+-            if ($preferBasePath && strpos($request->getPathInfo(), '/shopware.php/') === 0) {
+-                $removePath = $request->getBasePath() . '/shopware.php';
+-                $newPath = str_replace($removePath, $request->getBasePath(), $request->getRequestUri());
+-            }
++        // Strip /shopware.php/ from string and perform a redirect
++        $preferBasePath = $this->get(Shopware_Components_Config::class)->get('preferBasePath');
++        if ($preferBasePath && str_starts_with($request->getPathInfo(), '/shopware.php/')) {
++            $removePath = $request->getBasePath() . '/shopware.php';
++            $newPath = str_replace($removePath, $request->getBasePath(), $request->getRequestUri());
++            $newPath = preg_replace('/\/{2,}/', '/', $newPath);
++        }
+ 
+-            if (isset($newPath)) {
+-                // reset the cookie so only one valid cookie will be set IE11 fix
+-                $basePath = $shop->getBasePath();
+-                if ($basePath === null || $basePath === '') {
+-                    $basePath = '/';
+-                }
+-                $response->headers->setCookie(new Cookie('session-' . $shop->getId(), '', 1, $basePath));
+-                $response->setRedirect($newPath, 301);
+-            } else {
+-                $this->upgradeShop($request, $response);
+-                $this->initServiceMode($request);
++        if (isset($newPath)) {
++            // reset the cookie so only one valid cookie will be set IE11 fix
++            $basePath = $shop->getBasePath();
++            if ($basePath === null || $basePath === '') {
++                $basePath = '/';
+             }
+-
+-            $this->get(ContextServiceInterface::class)->initializeShopContext();
++            $response->headers->setCookie(new Cookie('session-' . $shop->getId(), '', 1, $basePath));
++            $response->setRedirect($newPath, 301);
++        } else {
++            $this->upgradeShop($request, $response);
++            $this->initServiceMode($request);
+         }
++
++        $this->get(ContextServiceInterface::class)->initializeShopContext();
+     }
+ 
+     public function getCapabilities()
+@@ -168,25 +154,33 @@ public function getCapabilities()
+     }
+ 
+     /**
++     * @deprecated - Will be private with Shopware 5.8
++     *
+      * @param Request $request
++     *
++     * @return void
+      */
+     protected function initServiceMode($request)
+     {
+-        $config = $this->Application()->Config();
+-        if (!empty($config->setOffline) && strpos($config->offlineIp, $request->getClientIp()) === false) {
+-            if ($request->getControllerName() !== 'error') {
+-                $request->setControllerName('error')->setActionName('service')->setDispatched(false);
+-            }
++        $config = $this->get(Shopware_Components_Config::class);
++        if (!empty($config->get('setOffline'))
++            && !str_contains($config->get('offlineIp'), $request->getClientIp())
++            && $request->getControllerName() !== 'error'
++        ) {
++            $request->setControllerName('error')->setActionName('service')->setDispatched(false);
+         }
+     }
+ 
+     /**
++     * @deprecated - Will be private with Shopware 5.8
++     *
+      * @param Request                                  $request
+      * @param Enlight_Controller_Response_ResponseHttp $response
++     *
++     * @return void
+      */
+     protected function upgradeShop($request, $response)
+     {
+-        /** @var DetachedShop $shop */
+         $shop = $this->get('shop');
+ 
+         $cookieKey = null;
+@@ -309,7 +303,9 @@ protected function upgradeShop($request, $response)
+     }
+ 
+     /**
+-     * @return DetachedShop
++     * @deprecated - Will be private with Shopware 5.8
++     *
++     * @return Shop
+      */
+     protected function getShopByRequest(Request $request)
+     {
+@@ -324,7 +320,7 @@ protected function getShopByRequest(Request $request)
+             $shop = $repository->getActiveById($request->getCookie('shop'));
+         }
+ 
+-        if ($shop && $request->getCookie('shop') !== null && $request->getPost('__shop') == null) {
++        if ($shop && $request->getCookie('shop') !== null && $request->getPost('__shop') === null) {
+             $requestShop = $repository->getActiveByRequest($request);
+             if ($requestShop !== null && $shop->getId() !== $requestShop->getId() && $shop->getBaseUrl() !== $requestShop->getBaseUrl()) {
+                 $shop = $requestShop;
+@@ -343,6 +339,8 @@ protected function getShopByRequest(Request $request)
+     }
+ 
+     /**
++     * @deprecated - Will be private with Shopware 5.8
++     *
+      * @return string
+      */
+     protected function getNewShopUrl(Request $request, Shop $newShop)
+@@ -350,19 +348,18 @@ protected function getNewShopUrl(Request $request, Shop $newShop)
+         // Remove baseUrl from request url
+         $url = $request->getRequestUri();
+ 
+-        $repository = $this->get(ModelManager::class)->getRepository(Shop::class);
+-        $requestShop = $repository->getActiveShopByRequestAsArray($request);
+-        if ($requestShop && strpos($url, $requestShop['base_url']) === 0) {
++        $requestShop = $this->get(ModelManager::class)->getRepository(Shop::class)->getActiveShopByRequestAsArray($request);
++        if ($requestShop && str_starts_with($url, $requestShop['base_url'])) {
+             $url = substr($url, \strlen($requestShop['base_url']));
+         }
+ 
+         $baseUrl = $request->getBaseUrl();
+-        if (strpos($url, $baseUrl . '/') === 0) {
++        if (str_starts_with($url, $baseUrl . '/')) {
+             $url = substr($url, \strlen($baseUrl));
+         }
+ 
+         $basePath = (string) $newShop->getBasePath();
+-        if (strpos($url, $basePath) === 0) {
++        if (str_starts_with($url, $basePath)) {
+             $url = substr($url, \strlen($basePath));
+         }
+ 
+@@ -377,8 +374,12 @@ protected function getNewShopUrl(Request $request, Shop $newShop)
+             }
+         }
+ 
+-        $host = trim($host, '/');
+-        $baseUrl = trim($baseUrl, '/');
++        if (\is_string($host)) {
++            $host = trim($host, '/');
++        }
++        if (\is_string($baseUrl)) {
++            $baseUrl = trim($baseUrl, '/');
++        }
+         if (!empty($baseUrl)) {
+             $baseUrl = '/' . $baseUrl;
+         }
+@@ -399,6 +400,8 @@ protected function getNewShopUrl(Request $request, Shop $newShop)
+     }
+ 
+     /**
++     * @deprecated - Will be private with Shopware 5.8
++     *
+      * @return bool
+      */
+     protected function shouldRedirect(Request $request, Shop $shop)
+@@ -407,7 +410,7 @@ protected function shouldRedirect(Request $request, Shop $shop)
+             (
+                 $request->isGet()
+                 && $request->getQuery('__shop') !== null
+-                && $request->getQuery('__shop') != $shop->getId()
++                && (int) $request->getQuery('__shop') !== (int) $shop->getId()
+             )
+             //for example: shop language switch
+             || (
+@@ -418,20 +421,17 @@ protected function shouldRedirect(Request $request, Shop $shop)
+         ;
+     }
+ 
+-    private function createPathInfo(Request $request, Shop $shop): ?string
++    private function createPathInfo(Request $request, Shop $shop): string
+     {
+         $requestUri = $request->getRequestUri();
+-        if ($requestUri === null) {
+-            return null;
+-        }
+ 
+         // Remove the query string from REQUEST_URI
+-        if ($pos = strpos($requestUri, '?')) {
++        $pos = strpos($requestUri, '?');
++        if ($pos !== false) {
+             $requestUri = substr($requestUri, 0, $pos);
+         }
+ 
+-        $repository = $this->get(ModelManager::class)->getRepository(Shop::class);
+-        $requestShop = $repository->getActiveShopByRequestAsArray($request);
++        $requestShop = $this->get(ModelManager::class)->getRepository(Shop::class)->getActiveShopByRequestAsArray($request);
+ 
+         if ($requestShop && $requestShop['id'] !== $shop->getId()) {
+             $requestUri = $this->removePartOfUrl($requestUri, (string) $requestShop['base_url']);
+@@ -443,7 +443,7 @@ private function createPathInfo(Request $request, Shop $shop): ?string
+             $shop
+         );
+ 
+-        if (!$shop->getMain()) {
++        if (!$shop->getMain() instanceof Shop) {
+             return $requestUri;
+         }
+ 
+@@ -461,7 +461,7 @@ private function removePartOfUrl(string $requestUri, string $url): string
+     {
+         $temp = rtrim($url, '/') . '/';
+         switch (true) {
+-            case strpos($requestUri, $temp) === 0:
++            case str_starts_with($requestUri, $temp):
+                 return substr($requestUri, \strlen($url));
+             case $requestUri === $url:
+                 return substr($requestUri, \strlen($url));
+@@ -475,19 +475,14 @@ private function removePartOfUrl(string $requestUri, string $url): string
+      */
+     private function validateShop(Shop $shop): void
+     {
+-        if (!$shop->getCustomerGroup()) {
++        if (!$shop->getCustomerGroup() instanceof CustomerGroup) {
+             throw new RuntimeException(sprintf("Shop '%s (id: %s)' has no customer group.", $shop->getName(), $shop->getId()));
+         }
+ 
+-        if (!$shop->getCurrency()) {
+-            throw new RuntimeException(sprintf("Shop '%s (id: %s)' has no currency.", $shop->getName(), $shop->getId()));
+-        }
+-
+-        if (!$shop->getLocale()) {
+-            throw new RuntimeException(sprintf("Shop '%s (id: %s)' has no locale.", $shop->getName(), $shop->getId()));
+-        }
++        $shop->getCurrency();
++        $shop->getLocale();
+ 
+-        $mainShop = $shop->getMain() !== null ? $shop->getMain() : $shop;
++        $mainShop = $shop->getMain() ?? $shop;
+         if (!$mainShop->getTemplate()) {
+             throw new RuntimeException(sprintf("Shop '%s (id: %s)' has no template.", $shop->getName(), $shop->getId()));
+         }
+@@ -501,7 +496,6 @@ private function refreshCart(Shop $shop): void
+     {
+         $this->get(ShopRegistrationServiceInterface::class)->registerShop($shop);
+ 
+-        /** @var Shopware_Components_Modules $modules */
+         $modules = $this->get('modules');
+ 
+         if (empty($this->get('session')->get('sUserId'))) {
+@@ -512,7 +506,6 @@ private function refreshCart(Shop $shop): void
+ 
+         $this->get(ContextServiceInterface::class)->initializeContext();
+ 
+-        /** @var ShopContext $shopContext */
+         $shopContext = $this->get(ContextServiceInterface::class)->getShopContext();
+ 
+         $modules->Basket()->sRefreshBasket();
+diff --git a/tests/Functional/Components/Router/RouterTest.php b/tests/Functional/Components/Router/RouterTest.php
+index fa5c45cdffb..8f40dad2fd2 100644
+--- a/tests/Functional/Components/Router/RouterTest.php
++++ b/tests/Functional/Components/Router/RouterTest.php
+@@ -26,6 +26,7 @@
+ 
+ use Enlight_Components_Test_TestCase;
+ use Shopware\Components\Routing\Context;
++use Shopware\Components\Routing\RouterInterface;
+ 
+ class RouterTest extends Enlight_Components_Test_TestCase
+ {
+@@ -34,7 +35,7 @@ class RouterTest extends Enlight_Components_Test_TestCase
+      */
+     public function testSeoRouteGeneration(): void
+     {
+-        $router = Shopware()->Container()->get(\Shopware\Components\Routing\RouterInterface::class);
++        $router = Shopware()->Container()->get(RouterInterface::class);
+         $localRouter = clone $router;
+ 
+         $context = new Context();
+@@ -52,7 +53,7 @@ public function testSeoRouteGeneration(): void
+      */
+     public function testDeactivatingSeoRouteGeneration(): void
+     {
+-        $router = Shopware()->Container()->get(\Shopware\Components\Routing\RouterInterface::class);
++        $router = Shopware()->Container()->get(RouterInterface::class);
+         $localRouter = clone $router;
+ 
+         $context = new Context();
+@@ -70,7 +71,7 @@ public function testDeactivatingSeoRouteGeneration(): void
+      */
+     public function testNoneExistingSeoRouteGeneration(): void
+     {
+-        $router = Shopware()->Container()->get(\Shopware\Components\Routing\RouterInterface::class);
++        $router = Shopware()->Container()->get(RouterInterface::class);
+         $localRouter = clone $router;
+ 
+         $context = new Context();
+@@ -93,7 +94,7 @@ public function testNoneExistingSeoRouteGeneration(): void
+      */
+     public function testDefaultActionDoesntMatter(): void
+     {
+-        $router = Shopware()->Container()->get(\Shopware\Components\Routing\RouterInterface::class);
++        $router = Shopware()->Container()->get(RouterInterface::class);
+         $localRouter = clone $router;
+ 
+         $context = new Context();
+diff --git a/tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php b/tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+index 2c8a7a2ee9f..31491d71e1b 100644
+--- a/tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
++++ b/tests/Functional/Plugins/Core/RestApi/Components/RouterTest.php
+@@ -1,4 +1,6 @@
+ <?php
++
++declare(strict_types=1);
+ /**
+  * Shopware 5
+  * Copyright (c) shopware AG
+@@ -27,14 +29,12 @@
+ use Enlight_Controller_Request_RequestTestCase;
+ use Enlight_Controller_Response_ResponseTestCase;
+ use Enlight_Loader;
++use PHPUnit\Framework\TestCase;
+ use ShopwarePlugins\RestApi\Components\Router;
+ 
+-class RouterTest extends \PHPUnit\Framework\TestCase
++class RouterTest extends TestCase
+ {
+-    /**
+-     * @var Router
+-     */
+-    private $router;
++    private Router $router;
+ 
+     public function setUp(): void
+     {
+@@ -43,37 +43,39 @@ public function setUp(): void
+ 
+         $pluginDir = $helper->DocPath() . 'engine/Shopware/Plugins/Default/Core/RestApi';
+ 
+-        $loader->registerNamespace(
+-            'ShopwarePlugins\\RestApi\\Components',
+-            $pluginDir . '/Components/'
+-        );
++        $loader->registerNamespace('ShopwarePlugins\\RestApi\\Components', $pluginDir . '/Components/');
+ 
+         $this->router = new Router();
+     }
+ 
+-    public function testCanGetInstance()
++    public function testCanGetInstance(): void
+     {
+-        static::assertInstanceOf('ShopwarePlugins\RestApi\Components\Router', $this->router);
++        static::assertInstanceOf(Router::class, $this->router);
+     }
+ 
+-    public function routeGetProvider()
++    /**
++     * @return array<array<string|int|bool>>
++     */
++    public function routeGetProvider(): array
+     {
+         return [
+             ['/api/articles/', 1, 'articles', 'index', false],
+             ['/api/v1/articles/', 1, 'articles', 'index',  false],
+             ['/api/v2/articles/', 2, 'articles', 'index', false],
+-            ['/api/articles/5', 1, 'articles', 'get', 5],
++            ['/api/articles/5', 1, 'articles', 'get', '5'],
+             ['/api/articles/sw123', 1, 'articles', 'get', 'sw123'],
+-            ['/api/v1/articles/5', 1, 'articles', 'get', 5],
+-            ['/api/v2/articles/5', 2, 'articles', 'get', 5],
++            ['/api/v1/articles/5', 1, 'articles', 'get', '5'],
++            ['/api/v2/articles/5', 2, 'articles', 'get', '5'],
+         ];
+     }
+ 
+     /**
+      * @covers \ShopwarePlugins\RestApi\Components\Router::assembleRoute
+      * @dataProvider routeGetProvider
++     *
++     * @param string|false $expectedId
+      */
+-    public function testGetRoutes($uri, $expectedVersion, $expectedController, $expectedAction, $expectedId)
++    public function testGetRoutes(string $uri, int $expectedVersion, string $expectedController, string $expectedAction, $expectedId): void
+     {
+         $request = new Enlight_Controller_Request_RequestTestCase();
+         $request->setMethod('GET');
+@@ -83,30 +85,35 @@ public function testGetRoutes($uri, $expectedVersion, $expectedController, $expe
+         $request->setPathInfo($uri);
+         $this->router->assembleRoute($request, $response);
+ 
+-        static::assertEquals($expectedController, $request->getControllerName());
+-        static::assertEquals($expectedAction, $request->getActionName());
+-        static::assertEquals($expectedVersion, $request->getParam('version'));
+-        static::assertEquals($expectedId, $request->getParam('id'));
+-        static::assertEquals(200, $response->getHttpResponseCode());
++        static::assertSame($expectedController, $request->getControllerName());
++        static::assertSame($expectedAction, $request->getActionName());
++        static::assertSame($expectedVersion, $request->getParam('version'));
++        static::assertSame($expectedId, $request->getParam('id'));
++        static::assertSame(200, $response->getHttpResponseCode());
+     }
+ 
+-    public function routePostProvider()
++    /**
++     * @return array<array<string|int|bool>>
++     */
++    public function routePostProvider(): array
+     {
+         return [
+-            ['/api/articles/',     1, 'articles', 'post', false],
+-            ['/api/v1/articles/',  1, 'articles', 'post', false],
+-            ['/api/v2/articles/',  2, 'articles', 'post', false],
+-            ['/api/articles/5',    1, 'articles', 'post', 5],
+-            ['/api/v1/articles/5', 1, 'articles', 'post', 5],
+-            ['/api/v2/articles/5', 2, 'articles', 'post', 5],
++            ['/api/articles/', 1, 'articles', 'post', false],
++            ['/api/v1/articles/', 1, 'articles', 'post', false],
++            ['/api/v2/articles/', 2, 'articles', 'post', false],
++            ['/api/articles/5', 1, 'articles', 'post', '5'],
++            ['/api/v1/articles/5', 1, 'articles', 'post', '5'],
++            ['/api/v2/articles/5', 2, 'articles', 'post', '5'],
+         ];
+     }
+ 
+     /**
+      * @covers \ShopwarePlugins\RestApi\Components\Router::assembleRoute
+      * @dataProvider routePostProvider
++     *
++     * @param string|false $expectedId
+      */
+-    public function testPostRoutes($uri, $expectedVersion, $expectedController, $expectedAction, $expectedId)
++    public function testPostRoutes(string $uri, int $expectedVersion, string $expectedController, string $expectedAction, $expectedId): void
+     {
+         $request = new Enlight_Controller_Request_RequestTestCase();
+         $request->setMethod('POST');
+@@ -116,29 +123,34 @@ public function testPostRoutes($uri, $expectedVersion, $expectedController, $exp
+         $request->setPathInfo($uri);
+         $this->router->assembleRoute($request, $response);
+ 
+-        static::assertEquals($expectedController, $request->getControllerName());
+-        static::assertEquals($expectedAction, $request->getActionName());
+-        static::assertEquals($expectedVersion, $request->getParam('version'));
+-        static::assertEquals($expectedId, $request->getParam('id'));
++        static::assertSame($expectedController, $request->getControllerName());
++        static::assertSame($expectedAction, $request->getActionName());
++        static::assertSame($expectedVersion, $request->getParam('version'));
++        static::assertSame($expectedId, $request->getParam('id'));
+     }
+ 
+-    public function routePutProvider()
++    /**
++     * @return array<array<string|int|bool>>
++     */
++    public function routePutProvider(): array
+     {
+         return [
+-            ['/api/articles/',     1, 'articles', 'batch',  false, 200],
+-            ['/api/v1/articles/',  1, 'articles', 'batch',  false, 200],
+-            ['/api/v2/articles/',  2, 'articles', 'batch',  false, 200],
+-            ['/api/articles/5',    1, 'articles', 'put',      5,     200],
+-            ['/api/v1/articles/5', 1, 'articles', 'put',      5,     200],
+-            ['/api/v2/articles/5', 2, 'articles', 'put',      5,     200],
++            ['/api/articles/', 1, 'articles', 'batch', false, 200],
++            ['/api/v1/articles/', 1, 'articles', 'batch', false, 200],
++            ['/api/v2/articles/', 2, 'articles', 'batch', false, 200],
++            ['/api/articles/5', 1, 'articles', 'put', '5', 200],
++            ['/api/v1/articles/5', 1, 'articles', 'put', '5', 200],
++            ['/api/v2/articles/5', 2, 'articles', 'put', '5', 200],
+         ];
+     }
+ 
+     /**
+      * @covers \ShopwarePlugins\RestApi\Components\Router::assembleRoute
+      * @dataProvider routePutProvider
++     *
++     * @param string|false $expectedId
+      */
+-    public function testPutRoutes($uri, $expectedVersion, $expectedController, $expectedAction, $expectedId, $expectedCode)
++    public function testPutRoutes(string $uri, int $expectedVersion, string $expectedController, string $expectedAction, $expectedId, int $expectedCode): void
+     {
+         $request = new Enlight_Controller_Request_RequestTestCase();
+         $request->setMethod('PUT');
+@@ -148,31 +160,36 @@ public function testPutRoutes($uri, $expectedVersion, $expectedController, $expe
+         $request->setPathInfo($uri);
+         $this->router->assembleRoute($request, $response);
+ 
+-        static::assertEquals($expectedController, $request->getControllerName());
+-        static::assertEquals($expectedAction, $request->getActionName());
+-        static::assertEquals($expectedVersion, $request->getParam('version'));
+-        static::assertEquals($expectedId, $request->getParam('id'));
+-        static::assertEquals($expectedCode, $response->getHttpResponseCode());
++        static::assertSame($expectedController, $request->getControllerName());
++        static::assertSame($expectedAction, $request->getActionName());
++        static::assertSame($expectedVersion, $request->getParam('version'));
++        static::assertSame($expectedId, $request->getParam('id'));
++        static::assertSame($expectedCode, $response->getHttpResponseCode());
+     }
+ 
+-    public function routeDeleteProvider()
++    /**
++     * @return array<array<string|int|bool>>
++     */
++    public function routeDeleteProvider(): array
+     {
+         return [
+-            ['/api/articles/',    1, 'articles', 'batchDelete', false, 200],
++            ['/api/articles/', 1, 'articles', 'batchDelete', false, 200],
+             ['/api/v1/articles/', 1, 'articles', 'batchDelete', false, 200],
+             ['/api/v2/articles/', 2, 'articles', 'batchDelete', false, 200],
+ 
+-            ['/api/articles/5',    1, 'articles', 'delete', 5, 200],
+-            ['/api/v1/articles/5', 1, 'articles', 'delete', 5, 200],
+-            ['/api/v2/articles/5', 2, 'articles', 'delete', 5, 200],
++            ['/api/articles/5', 1, 'articles', 'delete', '5', 200],
++            ['/api/v1/articles/5', 1, 'articles', 'delete', '5', 200],
++            ['/api/v2/articles/5', 2, 'articles', 'delete', '5', 200],
+         ];
+     }
+ 
+     /**
+      * @covers \ShopwarePlugins\RestApi\Components\Router::assembleRoute
+      * @dataProvider routeDeleteProvider
++     *
++     * @param string|false $expectedId
+      */
+-    public function testDeleteRoutes($uri, $expectedVersion, $expectedController, $expectedAction, $expectedId, $expectedCode)
++    public function testDeleteRoutes(string $uri, int $expectedVersion, string $expectedController, string $expectedAction, $expectedId, int $expectedCode): void
+     {
+         $request = new Enlight_Controller_Request_RequestTestCase();
+         $request->setMethod('DELETE');
+@@ -182,10 +199,10 @@ public function testDeleteRoutes($uri, $expectedVersion, $expectedController, $e
+         $request->setPathInfo($uri);
+         $this->router->assembleRoute($request, $response);
+ 
+-        static::assertEquals($expectedController, $request->getControllerName());
+-        static::assertEquals($expectedAction, $request->getActionName());
+-        static::assertEquals($expectedVersion, $request->getParam('version'));
+-        static::assertEquals($expectedId, $request->getParam('id'));
+-        static::assertEquals($expectedCode, $response->getHttpResponseCode());
++        static::assertSame($expectedController, $request->getControllerName());
++        static::assertSame($expectedAction, $request->getActionName());
++        static::assertSame($expectedVersion, $request->getParam('version'));
++        static::assertSame($expectedId, $request->getParam('id'));
++        static::assertSame($expectedCode, $response->getHttpResponseCode());
+     }
+ }
+diff --git a/tests/Functional/Plugins/Core/Router/BootstrapTest.php b/tests/Functional/Plugins/Core/Router/BootstrapTest.php
+new file mode 100644
+index 00000000000..fb5260ee9be
+--- /dev/null
++++ b/tests/Functional/Plugins/Core/Router/BootstrapTest.php
+@@ -0,0 +1,56 @@
++<?php
++
++declare(strict_types=1);
++/**
++ * Shopware 5
++ * Copyright (c) shopware AG
++ *
++ * According to our dual licensing model, this program can be used either
++ * under the terms of the GNU Affero General Public License, version 3,
++ * or under a proprietary license.
++ *
++ * The texts of the GNU Affero General Public License with an additional
++ * permission and of our proprietary license can be found at and
++ * in the LICENSE file you have received along with this program.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU Affero General Public License for more details.
++ *
++ * "Shopware" is a registered trademark of shopware AG.
++ * The licensing of the program under the AGPLv3 does not imply a
++ * trademark license. Therefore any rights, title and interest in
++ * our trademarks remain entirely with us.
++ */
++
++namespace Shopware\Tests\Functional\Plugins\Core\Router;
++
++use Enlight_Controller_EventArgs;
++use Enlight_Controller_Request_RequestTestCase;
++use Enlight_Controller_Response_ResponseTestCase;
++use PHPUnit\Framework\TestCase;
++use Shopware\Tests\Functional\Traits\ContainerTrait;
++use Symfony\Component\HttpFoundation\Response;
++
++class BootstrapTest extends TestCase
++{
++    use ContainerTrait;
++
++    public function testOnRouteShutdown(): void
++    {
++        $pluginBootstrap = $this->getContainer()->get('plugins')->Core()->Router();
++
++        $request = new Enlight_Controller_Request_RequestTestCase();
++        $request->setRequestUri('shopware.php///www.test.de');
++        $response = new Enlight_Controller_Response_ResponseTestCase();
++        $args = new Enlight_Controller_EventArgs([
++            'request' => $request,
++            'response' => $response,
++        ]);
++        $pluginBootstrap->onRouteShutdown($args);
++
++        static::assertSame(Response::HTTP_MOVED_PERMANENTLY, $response->getStatusCode());
++        static::assertSame('shopware.php/www.test.de', $response->getHeader('location'));
++    }
++}

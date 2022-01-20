@@ -1,0 +1,27 @@
+From 05cbebd3c6bb8f517a158b0155debb8df79017ff Mon Sep 17 00:00:00 2001
+From: Xiao Yu <fishx@google.com>
+Date: Mon, 18 Oct 2021 16:17:46 -0700
+Subject: [PATCH] Fix a NPE issue in invalid Exit op. Now it will report an
+ error instead of crash.
+
+PiperOrigin-RevId: 404089902
+Change-Id: Ia6ec55445ea70ad045a4d339d354959ad0618f2a
+---
+ tensorflow/core/common_runtime/immutable_executor_state.cc | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tensorflow/core/common_runtime/immutable_executor_state.cc b/tensorflow/core/common_runtime/immutable_executor_state.cc
+index 3f90d027cf436..1f728334e2b7e 100644
+--- a/tensorflow/core/common_runtime/immutable_executor_state.cc
++++ b/tensorflow/core/common_runtime/immutable_executor_state.cc
+@@ -316,6 +316,10 @@ Status ImmutableExecutorState::BuildControlFlowInfo(const Graph* g,
+     } else if (IsExit(curr_node)) {
+       // Exit to the parent frame.
+       parent = parent_nodes[curr_id];
++      if (!parent) {
++        return errors::InvalidArgument(
++            "Invalid Exit op: Cannot find a corresponding Enter op.");
++      }
+       frame_name = cf_info->frame_names[parent->id()];
+       parent = parent_nodes[parent->id()];
+     } else {

@@ -1,0 +1,64 @@
+From 660ad5e76d8df64d855f77b5e2e39d8ddb40cab5 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Sun, 15 Aug 2021 04:22:00 +0000
+Subject: [PATCH] Fix crash with tf.image.resize if size is large
+
+This PR tries to address the issue raised in 46914 where
+tf.image.resize will crash if size is large, (implicitly
+causes tf.keras.layers.UpSampling2D to crash).
+
+This PR adds necessary shape overflow check to prevent
+crash.
+
+This PR fixes 46914.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/util/image_resizer_state.h | 12 +++++++++---
+ tensorflow/python/ops/image_ops_test.py    |  8 ++++++++
+ 2 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/tensorflow/core/util/image_resizer_state.h b/tensorflow/core/util/image_resizer_state.h
+index 31764bdd87976..2cb5715260ed8 100644
+--- a/tensorflow/core/util/image_resizer_state.h
++++ b/tensorflow/core/util/image_resizer_state.h
+@@ -143,11 +143,17 @@ struct ImageResizerState {
+   void ValidateAndCreateOutput(OpKernelContext* context) {
+     ValidateAndCalculateOutputSize(context);
+     if (!context->status().ok()) return;
++
++    TensorShape shape;
++    // Guard against shape overflow
++    OP_REQUIRES_OK(context, shape.AddDimWithStatus(batch_size));
++    OP_REQUIRES_OK(context, shape.AddDimWithStatus(out_height));
++    OP_REQUIRES_OK(context, shape.AddDimWithStatus(out_width));
++    OP_REQUIRES_OK(context, shape.AddDimWithStatus(channels));
++
+     OP_REQUIRES_OK(
+         context,
+-        context->allocate_output(
+-            0, TensorShape({batch_size, out_height, out_width, channels}),
+-            &output));
++        context->allocate_output( 0, shape, &output));
+   }
+ 
+   int64_t batch_size;
+diff --git a/tensorflow/python/ops/image_ops_test.py b/tensorflow/python/ops/image_ops_test.py
+index d589c7525b0ec..2eb82a213f515 100644
+--- a/tensorflow/python/ops/image_ops_test.py
++++ b/tensorflow/python/ops/image_ops_test.py
+@@ -3161,6 +3161,14 @@ def testPreserveAspectRatioSquare(self):
+ 
+     self._assertResizeCheckShape(x, x_shape, [320, 320], [320, 320, 3])
+ 
++  def testLargeDim(self):
++    with self.session():
++      with self.assertRaises(errors.InternalError):
++        x = np.ones((5, 1, 1, 2))
++        v = image_ops.resize_images_v2(
++          x, [1610637938, 1610637938], image_ops.ResizeMethod.BILINEAR)
++        _ = self.evaluate(v)
++
+ 
+ class ResizeImagesTest(test_util.TensorFlowTestCase,
+                        parameterized.TestCase):

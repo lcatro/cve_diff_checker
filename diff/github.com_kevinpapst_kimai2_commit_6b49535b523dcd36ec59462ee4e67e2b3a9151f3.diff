@@ -1,0 +1,58 @@
+From 6b49535b523dcd36ec59462ee4e67e2b3a9151f3 Mon Sep 17 00:00:00 2001
+From: Kevin Papst <kevinpapst@users.noreply.github.com>
+Date: Sun, 14 Nov 2021 20:39:22 +0100
+Subject: [PATCH] prevent csrf to flush logs (#2930)
+
+---
+ src/Controller/DoctorController.php | 14 ++++++++++++--
+ templates/doctor/index.html.twig    |  2 +-
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/src/Controller/DoctorController.php b/src/Controller/DoctorController.php
+index fca4d3e51..7e1b56254 100644
+--- a/src/Controller/DoctorController.php
++++ b/src/Controller/DoctorController.php
+@@ -15,6 +15,8 @@
+ use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
+ use Symfony\Component\HttpFoundation\Response;
+ use Symfony\Component\Routing\Annotation\Route;
++use Symfony\Component\Security\Csrf\CsrfToken;
++use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+ 
+ /**
+  * @Route(path="/doctor")
+@@ -56,11 +58,19 @@ public function __construct(string $projectDirectory, string $kernelEnvironment,
+     }
+ 
+     /**
+-     * @Route(path="/flush-log", name="doctor_flush_log", methods={"GET"})
++     * @Route(path="/flush-log/{token}", name="doctor_flush_log", methods={"GET"})
+      * @Security("is_granted('system_configuration')")
+      */
+-    public function deleteLogfileAction(): Response
++    public function deleteLogfileAction(string $token, CsrfTokenManagerInterface $csrfTokenManager): Response
+     {
++        if (!$csrfTokenManager->isTokenValid(new CsrfToken('doctor.flush_log', $token))) {
++            $this->flashError('action.delete.error');
++
++            return $this->redirectToRoute('doctor');
++        }
++
++        $csrfTokenManager->refreshToken($token);
++
+         $logfile = $this->getLogFilename();
+ 
+         if (file_exists($logfile)) {
+diff --git a/templates/doctor/index.html.twig b/templates/doctor/index.html.twig
+index 08e1d392c..baab28d9c 100644
+--- a/templates/doctor/index.html.twig
++++ b/templates/doctor/index.html.twig
+@@ -80,7 +80,7 @@
+         {% block box_title %}Logfile (max. {{ logLines }} last lines){% endblock %}
+         {% block box_tools %}
+             {% if log_delete %}
+-                <a class="btn-box-tool confirmation-link" href="{{ path('doctor_flush_log') }}" data-question="confirm.delete"><i class="{{ 'delete'|icon }}"></i></a>
++                <a class="btn-box-tool confirmation-link" href="{{ path('doctor_flush_log', {'token': csrf_token('doctor.flush_log')}) }}" data-question="confirm.delete"><i class="{{ 'delete'|icon }}"></i></a>
+             {% endif %}
+         {% endblock %}
+         {% block box_body %}

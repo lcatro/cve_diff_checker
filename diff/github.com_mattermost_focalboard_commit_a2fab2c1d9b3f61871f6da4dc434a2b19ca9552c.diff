@@ -1,0 +1,215 @@
+From a2fab2c1d9b3f61871f6da4dc434a2b19ca9552c Mon Sep 17 00:00:00 2001
+From: Scott Bishel <scott.bishel@mattermost.com>
+Date: Mon, 6 Dec 2021 13:20:48 -0700
+Subject: [PATCH] Adding explict logout logic (#1895) (#1933)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* Adding explict logout logic
+
+* Fixing golangci-lint errors
+
+(cherry picked from commit 2f08c6782762e58e008bd50f3892cb1cdd1be539)
+
+Co-authored-by: Jesús Espino <jespinog@gmail.com>
+---
+ server/api/api.go                             |  1 +
+ server/api/auth.go                            | 43 +++++++++++++++++++
+ server/app/auth.go                            | 12 ++++++
+ server/services/metrics/metrics.go            | 16 +++++++
+ .../components/sidebar/sidebarUserMenu.tsx    |  3 +-
+ webapp/src/octoClient.ts                      | 12 +++++-
+ webapp/src/pages/errorPage.tsx                |  4 +-
+ 7 files changed, 86 insertions(+), 5 deletions(-)
+
+diff --git a/server/api/api.go b/server/api/api.go
+index 5f19e0e77..820eff7bc 100644
+--- a/server/api/api.go
++++ b/server/api/api.go
+@@ -85,6 +85,7 @@ func (a *API) RegisterRoutes(r *mux.Router) {
+ 	apiv1.HandleFunc("/users/{userID}/changepassword", a.sessionRequired(a.handleChangePassword)).Methods("POST")
+ 
+ 	apiv1.HandleFunc("/login", a.handleLogin).Methods("POST")
++	apiv1.HandleFunc("/logout", a.sessionRequired(a.handleLogout)).Methods("POST")
+ 	apiv1.HandleFunc("/register", a.handleRegister).Methods("POST")
+ 
+ 	apiv1.HandleFunc("/workspaces/{workspaceID}/{rootID}/files", a.sessionRequired(a.handleUploadFile)).Methods("POST")
+diff --git a/server/api/auth.go b/server/api/auth.go
+index 8e2611d5c..254bb2512 100644
+--- a/server/api/auth.go
++++ b/server/api/auth.go
+@@ -208,6 +208,49 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
+ 	a.errorResponse(w, http.StatusBadRequest, "invalid login type", nil)
+ }
+ 
++func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
++	// swagger:operation POST /api/v1/logout logout
++	//
++	// Logout user
++	//
++	// ---
++	// produces:
++	// - application/json
++	// security:
++	// - BearerAuth: []
++	// responses:
++	//   '200':
++	//     description: success
++	//   '500':
++	//     description: internal error
++	//     schema:
++	//       "$ref": "#/definitions/ErrorResponse"
++
++	if len(a.singleUserToken) > 0 {
++		// Not permitted in single-user mode
++		a.errorResponse(w, r.URL.Path, http.StatusUnauthorized, "not permitted in single-user mode", nil)
++		return
++	}
++
++	ctx := r.Context()
++
++	session := ctx.Value(sessionContextKey).(*model.Session)
++
++	auditRec := a.makeAuditRecord(r, "logout", audit.Fail)
++	defer a.audit.LogRecord(audit.LevelAuth, auditRec)
++	auditRec.AddMeta("userID", session.UserID)
++
++	if err := a.app.Logout(session.ID); err != nil {
++		a.errorResponse(w, r.URL.Path, http.StatusUnauthorized, "incorrect login", err)
++		return
++	}
++
++	auditRec.AddMeta("sessionID", session.ID)
++
++	jsonStringResponse(w, http.StatusOK, "{}")
++	auditRec.Success()
++}
++
+ func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
+ 	// swagger:operation POST /api/v1/register register
+ 	//
+diff --git a/server/app/auth.go b/server/app/auth.go
+index 67b2589f1..31852d0aa 100644
+--- a/server/app/auth.go
++++ b/server/app/auth.go
+@@ -118,6 +118,18 @@ func (a *App) Login(username, email, password, mfaToken string) (string, error)
+ 	return session.Token, nil
+ }
+ 
++// Logout invalidates the user session.
++func (a *App) Logout(sessionID string) error {
++	err := a.store.DeleteSession(sessionID)
++	if err != nil {
++		return errors.Wrap(err, "unable to delete the session")
++	}
++
++	a.metrics.IncrementLogoutCount(1)
++
++	return nil
++}
++
+ // RegisterUser creates a new user if the provided data is valid.
+ func (a *App) RegisterUser(username, email, password string) error {
+ 	var user *model.User
+diff --git a/server/services/metrics/metrics.go b/server/services/metrics/metrics.go
+index 99d5d04bd..a2d0f5993 100644
+--- a/server/services/metrics/metrics.go
++++ b/server/services/metrics/metrics.go
+@@ -30,6 +30,7 @@ type Metrics struct {
+ 	startTime prometheus.Gauge
+ 
+ 	loginCount     prometheus.Counter
++	logoutCount    prometheus.Counter
+ 	loginFailCount prometheus.Counter
+ 
+ 	blocksInsertedCount prometheus.Counter
+@@ -66,6 +67,15 @@ func NewMetrics(info InstanceInfo) *Metrics {
+ 	})
+ 	m.registry.MustRegister(m.loginCount)
+ 
++	m.logoutCount = prometheus.NewCounter(prometheus.CounterOpts{
++		Namespace:   MetricsNamespace,
++		Subsystem:   MetricsSubsystemSystem,
++		Name:        "logout_total",
++		Help:        "Total number of logouts.",
++		ConstLabels: additionalLabels,
++	})
++	m.registry.MustRegister(m.logoutCount)
++
+ 	m.loginFailCount = prometheus.NewCounter(prometheus.CounterOpts{
+ 		Namespace:   MetricsNamespace,
+ 		Subsystem:   MetricsSubsystemSystem,
+@@ -149,6 +159,12 @@ func (m *Metrics) IncrementLoginCount(num int) {
+ 	}
+ }
+ 
++func (m *Metrics) IncrementLogoutCount(num int) {
++	if m != nil {
++		m.logoutCount.Add(float64(num))
++	}
++}
++
+ func (m *Metrics) IncrementLoginFailCount(num int) {
+ 	if m != nil {
+ 		m.loginFailCount.Add(float64(num))
+diff --git a/webapp/src/components/sidebar/sidebarUserMenu.tsx b/webapp/src/components/sidebar/sidebarUserMenu.tsx
+index d5e5fe2b3..90fe4a7ba 100644
+--- a/webapp/src/components/sidebar/sidebarUserMenu.tsx
++++ b/webapp/src/components/sidebar/sidebarUserMenu.tsx
+@@ -54,7 +54,7 @@ const SidebarUserMenu = React.memo((props: Props) => {
+                                             id='logout'
+                                             name={intl.formatMessage({id: 'Sidebar.logout', defaultMessage: 'Log out'})}
+                                             onClick={async () => {
+-                                                octoClient.logout()
++                                                await octoClient.logout()
+                                                 history.push('/login')
+                                             }}
+                                         />
+@@ -72,7 +72,6 @@ const SidebarUserMenu = React.memo((props: Props) => {
+                                                 setShowRegistrationLinkDialog(true)
+                                             }}
+                                         />
+-
+                                         <Menu.Separator/>
+                                     </>}
+ 
+diff --git a/webapp/src/octoClient.ts b/webapp/src/octoClient.ts
+index acc3052de..cd850b80f 100644
+--- a/webapp/src/octoClient.ts
++++ b/webapp/src/octoClient.ts
+@@ -59,8 +59,18 @@ class OctoClient {
+         return false
+     }
+ 
+-    logout() {
++    async logout(): Promise<boolean> {
++        const path = '/api/v1/logout'
++        const response = await fetch(this.serverUrl + path, {
++            method: 'POST',
++            headers: this.headers(),
++        })
+         localStorage.removeItem('focalboardSessionId')
++
++        if (response.status !== 200) {
++            return false
++        }
++        return true
+     }
+ 
+     async register(email: string, username: string, password: string, token?: string): Promise<{code: number, json: any}> {
+diff --git a/webapp/src/pages/errorPage.tsx b/webapp/src/pages/errorPage.tsx
+index 3cf60b062..b0601c92f 100644
+--- a/webapp/src/pages/errorPage.tsx
++++ b/webapp/src/pages/errorPage.tsx
+@@ -20,8 +20,8 @@ const ErrorPage = React.memo(() => {
+             <br/>
+             <Button
+                 filled={true}
+-                onClick={() => {
+-                    octoClient.logout()
++                onClick={async () => {
++                    await octoClient.logout()
+                     window.location.href = '/login'
+                 }}
+             >

@@ -1,0 +1,29 @@
+From 1783f918bc19568f421473824461ff2ed7755e4c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bar=C4=B1=C5=9F=20Soner=20U=C5=9Fakl=C4=B1?=
+ <barisusakli@gmail.com>
+Date: Mon, 25 Oct 2021 13:17:33 -0400
+Subject: [PATCH] fix: guard against prototype pollution
+
+---
+ src/socket.io/uploads.js | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/socket.io/uploads.js b/src/socket.io/uploads.js
+index c3fd025e0da..66b7266b012 100644
+--- a/src/socket.io/uploads.js
++++ b/src/socket.io/uploads.js
+@@ -15,11 +15,12 @@ uploads.upload = async function (socket, data) {
+ 		'user.updateCover': socketUser.updateCover,
+ 		'groups.cover.update': socketGroup.cover.update,
+ 	};
+-	if (!socket.uid || !data || !data.chunk || !data.params || !data.params.method || !methodToFunc[data.params.method]) {
++	if (!socket.uid || !data || !data.chunk ||
++		!data.params || !data.params.method || !methodToFunc.hasOwnProperty(data.params.method)) {
+ 		throw new Error('[[error:invalid-data]]');
+ 	}
+ 
+-	inProgress[socket.id] = inProgress[socket.id] || {};
++	inProgress[socket.id] = inProgress[socket.id] || Object.create(null);
+ 	const socketUploads = inProgress[socket.id];
+ 	const { method } = data.params;
+ 

@@ -1,0 +1,51 @@
+From 8541e4e07c97de7b6fd2ce22f4e072ef1072d627 Mon Sep 17 00:00:00 2001
+From: Alex Renoki <rennokki@gmail.com>
+Date: Fri, 7 Jan 2022 13:11:39 +0200
+Subject: [PATCH] Do not close the connection on empty payload
+
+---
+ src/http-handler.ts | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/src/http-handler.ts b/src/http-handler.ts
+index 6ef30a0d..5e565a06 100644
+--- a/src/http-handler.ts
++++ b/src/http-handler.ts
+@@ -417,19 +417,22 @@ export class HttpHandler {
+             let chunk = Buffer.from(ab);
+ 
+             if (isLast) {
+-                let json;
+-                let raw;
++                let json = {};
++                let raw = '{}';
+ 
+                 if (buffer) {
+                     try {
+                         // @ts-ignore
+                         json = JSON.parse(Buffer.concat([buffer, chunk]));
+                     } catch (e) {
+-                        res.close();
+-                        return;
++                        //
+                     }
+ 
+-                    raw = Buffer.concat([buffer, chunk]).toString();
++                    try {
++                        raw = Buffer.concat([buffer, chunk]).toString();
++                    } catch (e) {
++                        //
++                    }
+ 
+                     cb(json, raw);
+                     loggingAction(json);
+@@ -439,8 +442,7 @@ export class HttpHandler {
+                         json = JSON.parse(chunk);
+                         raw = chunk.toString();
+                     } catch (e) {
+-                        res.close();
+-                        return;
++                        //
+                     }
+ 
+                     cb(json, raw);

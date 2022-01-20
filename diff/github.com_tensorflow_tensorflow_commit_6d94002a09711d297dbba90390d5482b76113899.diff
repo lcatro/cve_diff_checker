@@ -1,0 +1,108 @@
+From bff2f49a6d5e1d2f6eac55db42105b24a76badc2 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Sat, 7 Aug 2021 17:20:52 +0000
+Subject: [PATCH 1/2] Fix overflow/crash in tf.range when limits is large
+
+This PR tries to address the issue raised in 46913 where
+tf.range (and implicitly tf.keras.layers.RepeatVector)
+will overflow/crash when limits is large.
+
+The reason of the overflow is that while calculating
+the size within the kernel, the conditional statements
+comes with `int64 = cond ? int64 : double` will implicitly
+convert to double first and then cast back to int64, causing
+the overflow and crash.
+
+This PR fixes the issue by casting to int64 in both selections
+within the conditional statements first.
+
+This PR fixes 46913.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/sequence_ops.cc         | 8 +++++---
+ tensorflow/python/kernel_tests/init_ops_test.py | 8 ++++++++
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/tensorflow/core/kernels/sequence_ops.cc b/tensorflow/core/kernels/sequence_ops.cc
+index 99426c1c32c5e..1cf93a142be67 100644
+--- a/tensorflow/core/kernels/sequence_ops.cc
++++ b/tensorflow/core/kernels/sequence_ops.cc
+@@ -72,9 +72,11 @@ class RangeOp : public OpKernel {
+               "Requires start >= limit when delta < 0: ", start, "/", limit));
+     }
+     int64_t size = (std::is_integral<T>::value
+-                        ? ((std::abs(limit - start) + std::abs(delta) - 1) /
+-                           std::abs(delta))
+-                        : std::ceil(std::abs((limit - start) / delta)));
++                        ? static_cast<int64>(
++                            (std::abs(limit - start) + std::abs(delta) - 1) /
++                              std::abs(delta))
++                        : static_cast<int64>(
++                            std::ceil(std::abs((limit - start) / delta))));
+     Tensor* out = nullptr;
+     OP_REQUIRES_OK(context,
+                    context->allocate_output(0, TensorShape({size}), &out));
+diff --git a/tensorflow/python/kernel_tests/init_ops_test.py b/tensorflow/python/kernel_tests/init_ops_test.py
+index 898d6f3e9e337..68c5f3c7ee942 100644
+--- a/tensorflow/python/kernel_tests/init_ops_test.py
++++ b/tensorflow/python/kernel_tests/init_ops_test.py
+@@ -23,6 +23,7 @@
+ 
+ from tensorflow.python.framework import constant_op
+ from tensorflow.python.framework import dtypes
++from tensorflow.python.framework import errors_impl
+ from tensorflow.python.framework import ops
+ from tensorflow.python.framework import random_seed
+ from tensorflow.python.framework import test_util
+@@ -542,6 +543,13 @@ def testMixedDType(self):
+         constant_op.constant(4, dtype=dtypes.int32), dtype=dtypes.int64)
+     self.assertAllEqual(self.evaluate(tf_ans), np.array([0, 1, 2, 3]))
+ 
++  def testLargeLimits(self):
++    # Test case for GitHub issue 46913.
++    with self.session():
++      with self.assertRaises(errors_impl.ResourceExhaustedError):
++        v = math_ops.range(0, 9223372036854775807)
++        self.evaluate(v)
++
+ 
+ # TODO(vrv): move to sequence_ops_test?
+ class LinSpaceTest(test.TestCase):
+
+From 89b5fa3b220fcddb4087fe3a904c5c5e69e1281d Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Mon, 9 Aug 2021 15:50:46 +0000
+Subject: [PATCH 2/2] Convert conditional statement to if..else.. to address
+ review feedback
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/sequence_ops.cc | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/tensorflow/core/kernels/sequence_ops.cc b/tensorflow/core/kernels/sequence_ops.cc
+index 1cf93a142be67..c803c89d059d6 100644
+--- a/tensorflow/core/kernels/sequence_ops.cc
++++ b/tensorflow/core/kernels/sequence_ops.cc
+@@ -71,12 +71,14 @@ class RangeOp : public OpKernel {
+           errors::InvalidArgument(
+               "Requires start >= limit when delta < 0: ", start, "/", limit));
+     }
+-    int64_t size = (std::is_integral<T>::value
+-                        ? static_cast<int64>(
+-                            (std::abs(limit - start) + std::abs(delta) - 1) /
+-                              std::abs(delta))
+-                        : static_cast<int64>(
+-                            std::ceil(std::abs((limit - start) / delta))));
++    int64_t size = 0;
++    if (std::is_integral<T>::value) {
++      size = static_cast<int64>(
++        (std::abs(limit - start) + std::abs(delta) - 1) / std::abs(delta));
++    } else {
++      size = static_cast<int64>(
++        std::ceil(std::abs((limit - start) / delta)));
++    }
+     Tensor* out = nullptr;
+     OP_REQUIRES_OK(context,
+                    context->allocate_output(0, TensorShape({size}), &out));

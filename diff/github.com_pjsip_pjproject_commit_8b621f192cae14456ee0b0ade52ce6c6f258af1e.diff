@@ -1,0 +1,29 @@
+From 8b621f192cae14456ee0b0ade52ce6c6f258af1e Mon Sep 17 00:00:00 2001
+From: sauwming <ming@teluu.com>
+Date: Wed, 22 Dec 2021 08:49:27 +0800
+Subject: [PATCH] Merge pull request from GHSA-3qx3-cg72-wrh9
+
+---
+ pjmedia/src/pjmedia/rtcp.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/pjmedia/src/pjmedia/rtcp.c b/pjmedia/src/pjmedia/rtcp.c
+index 31822d285..f67572457 100644
+--- a/pjmedia/src/pjmedia/rtcp.c
++++ b/pjmedia/src/pjmedia/rtcp.c
+@@ -757,8 +757,15 @@ static void parse_rtcp_bye(pjmedia_rtcp_session *sess,
+ 
+     /* Check and get BYE reason */
+     if (size > 8) {
++    	/* Make sure the BYE reason does not exceed:
++    	 * - the size of the available buffer
++    	 * - the declared reason's length
++    	 * - the actual packet size
++    	 */
+ 	reason.slen = PJ_MIN(sizeof(sess->stat.peer_sdes_buf_),
+                              *((pj_uint8_t*)pkt+8));
++        reason.slen = PJ_MIN(reason.slen, size-9);
++
+ 	pj_memcpy(sess->stat.peer_sdes_buf_, ((pj_uint8_t*)pkt+9),
+ 		  reason.slen);
+ 	reason.ptr = sess->stat.peer_sdes_buf_;

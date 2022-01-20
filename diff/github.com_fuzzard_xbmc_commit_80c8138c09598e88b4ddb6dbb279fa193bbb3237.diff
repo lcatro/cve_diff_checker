@@ -1,0 +1,35 @@
+From 80c8138c09598e88b4ddb6dbb279fa193bbb3237 Mon Sep 17 00:00:00 2001
+From: fuzzard <fuzzard@kodi.tv>
+Date: Tue, 12 Oct 2021 17:38:30 +1000
+Subject: [PATCH] [Playlist] dont use istream directly to a tinyxml structure
+
+Turn istream into a std::string to handle large buffers (#20305)
+---
+ xbmc/playlists/PlayListPLS.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/xbmc/playlists/PlayListPLS.cpp b/xbmc/playlists/PlayListPLS.cpp
+index bc62a1fe7ad5b..17d6e491d25b6 100644
+--- a/xbmc/playlists/PlayListPLS.cpp
++++ b/xbmc/playlists/PlayListPLS.cpp
+@@ -289,8 +289,9 @@ bool CPlayListASX::LoadData(std::istream& stream)
+   }
+   else
+   {
++    std::string asxstream(std::istreambuf_iterator<char>(stream), {});
+     CXBMCTinyXML xmlDoc;
+-    stream >> xmlDoc;
++    xmlDoc.Parse(asxstream, TIXML_DEFAULT_ENCODING);
+ 
+     if (xmlDoc.Error())
+     {
+@@ -300,6 +301,9 @@ bool CPlayListASX::LoadData(std::istream& stream)
+ 
+     TiXmlElement *pRootElement = xmlDoc.RootElement();
+ 
++    if (!pRootElement)
++      return false;
++
+     // lowercase every element
+     TiXmlNode *pNode = pRootElement;
+     TiXmlNode *pChild = NULL;

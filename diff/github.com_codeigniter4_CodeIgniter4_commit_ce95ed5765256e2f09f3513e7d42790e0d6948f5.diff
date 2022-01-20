@@ -1,0 +1,258 @@
+From 18138fa4c781b05ff4f091135644963a1024cad9 Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Thu, 11 Nov 2021 17:10:10 +0900
+Subject: [PATCH 1/8] fix: remove unserialize() in old()
+
+I can't think of any use cases.
+---
+ system/Common.php                    | 5 -----
+ tests/system/CommonFunctionsTest.php | 2 +-
+ 2 files changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/system/Common.php b/system/Common.php
+index 32943189b56..61e2716fb56 100644
+--- a/system/Common.php
++++ b/system/Common.php
+@@ -813,11 +813,6 @@ function old(string $key, $default = null, $escape = 'html')
+             return $default;
+         }
+ 
+-        // If the result was serialized array or string, then unserialize it for use...
+-        if (is_string($value) && (strpos($value, 'a:') === 0 || strpos($value, 's:') === 0)) {
+-            $value = unserialize($value);
+-        }
+-
+         return $escape === false ? $value : esc($value, $escape);
+     }
+ }
+diff --git a/tests/system/CommonFunctionsTest.php b/tests/system/CommonFunctionsTest.php
+index c6f1d6b9b2e..0febdb038c1 100644
+--- a/tests/system/CommonFunctionsTest.php
++++ b/tests/system/CommonFunctionsTest.php
+@@ -300,7 +300,7 @@ public function testOldInput()
+         $_GET     = ['foo' => 'bar'];
+         $_POST    = [
+             'bar'    => 'baz',
+-            'zibble' => serialize('fritz'),
++            'zibble' => 'fritz',
+         ];
+ 
+         $response = new RedirectResponse(new App());
+
+From c2ab3d24504b70893be116e09fb7c8b7fa0475c6 Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Fri, 12 Nov 2021 12:42:22 +0900
+Subject: [PATCH 2/8] docs: add security advisories URL in SECURITY.md
+
+---
+ SECURITY.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/SECURITY.md b/SECURITY.md
+index 7879188492b..87b894ee713 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -20,6 +20,7 @@ This person will coordinate the fix and release process, involving the following
+ - Confirm the problem and determine the affected versions.
+ - Audit code to find any potential similar problems.
+ - Prepare fixes for all releases still under maintenance. These fixes will be released as fast as possible.
++- Publish security advisories at https://github.com/codeigniter4/CodeIgniter4/security/advisories
+ 
+ ## Comments on this Policy
+ 
+
+From 7c69140b65a1d4705a63c0bbd55e61171bfd132e Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Fri, 12 Nov 2021 14:08:04 +0900
+Subject: [PATCH 3/8] docs: remove out-of-dated comment
+
+---
+ tests/system/CommonFunctionsTest.php | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/system/CommonFunctionsTest.php b/tests/system/CommonFunctionsTest.php
+index 0febdb038c1..1b9bcbbbf3a 100644
+--- a/tests/system/CommonFunctionsTest.php
++++ b/tests/system/CommonFunctionsTest.php
+@@ -308,7 +308,7 @@ public function testOldInput()
+ 
+         $this->assertSame('bar', old('foo')); // regular parameter
+         $this->assertSame('doo', old('yabba dabba', 'doo')); // non-existing parameter
+-        $this->assertSame('fritz', old('zibble')); // serialized parameter
++        $this->assertSame('fritz', old('zibble'));
+     }
+ 
+     /**
+
+From 78e4b27a16300c430248c0797a2d980093ef68e2 Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Fri, 12 Nov 2021 14:09:37 +0900
+Subject: [PATCH 4/8] test: add test for serialize data
+
+---
+ tests/system/CommonFunctionsTest.php | 33 ++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/tests/system/CommonFunctionsTest.php b/tests/system/CommonFunctionsTest.php
+index 1b9bcbbbf3a..35175209da6 100644
+--- a/tests/system/CommonFunctionsTest.php
++++ b/tests/system/CommonFunctionsTest.php
+@@ -311,6 +311,39 @@ public function testOldInput()
+         $this->assertSame('fritz', old('zibble'));
+     }
+ 
++    /**
++     * @runInSeparateProcess
++     * @preserveGlobalState  disabled
++     */
++    public function testOldInputSerializeData()
++    {
++        $this->injectSessionMock();
++        // setup from RedirectResponseTest...
++        $_SERVER['REQUEST_METHOD'] = 'GET';
++
++        $this->config          = new App();
++        $this->config->baseURL = 'http://example.com/';
++
++        $this->routes = new RouteCollection(Services::locator(), new Modules());
++        Services::injectMock('routes', $this->routes);
++
++        $this->request = new MockIncomingRequest($this->config, new URI('http://example.com'), null, new UserAgent());
++        Services::injectMock('request', $this->request);
++
++        // setup & ask for a redirect...
++        $_SESSION = [];
++        $_GET     = [];
++        $_POST    = [
++            'zibble' => serialize('fritz'),
++        ];
++
++        $response = new RedirectResponse(new App());
++        $response->withInput();
++
++        // serialized parameters are only HTML-escaped.
++        $this->assertSame('s:5:&quot;fritz&quot;;', old('zibble'));
++    }
++
+     /**
+      * @see https://github.com/codeigniter4/CodeIgniter4/issues/1492
+      * @runInSeparateProcess
+
+From b2d27c354c89b740a4c63443066a06b1bdf2469e Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Fri, 12 Nov 2021 14:24:49 +0900
+Subject: [PATCH 5/8] docs: add about Deserialization of Untrusted Data in
+ old() to changelogs/v4.1.6.rst
+
+---
+ user_guide_src/source/changelogs/v4.1.6.rst | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/user_guide_src/source/changelogs/v4.1.6.rst b/user_guide_src/source/changelogs/v4.1.6.rst
+index 82b03127cda..f3c513b48b9 100644
+--- a/user_guide_src/source/changelogs/v4.1.6.rst
++++ b/user_guide_src/source/changelogs/v4.1.6.rst
+@@ -9,6 +9,11 @@ Release Date: Not released
+     :local:
+     :depth: 2
+ 
++SECURITY
++========
++
++- *Deserialization of Untrusted Data* found in the ``old()`` function was fixed. See the `Security advisory <https://github.com/codeigniter4/CodeIgniter4/security/advisories/GHSA-w6jr-wj64-mc9x>`_ for more information.
++
+ BREAKING
+ ********
+ 
+
+From 19d27497ca0c5bbcfb978d23581285cef03d058f Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Sat, 13 Nov 2021 08:06:30 +0900
+Subject: [PATCH 6/8] docs: move // comments into PHPDoc
+
+---
+ tests/system/HTTP/IncomingRequestTest.php | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tests/system/HTTP/IncomingRequestTest.php b/tests/system/HTTP/IncomingRequestTest.php
+index 4229d5d264e..2ea9dd38914 100644
+--- a/tests/system/HTTP/IncomingRequestTest.php
++++ b/tests/system/HTTP/IncomingRequestTest.php
+@@ -107,7 +107,9 @@ public function testMissingOldInput()
+         $this->assertNull($this->request->getOldInput('pineapple.name'));
+     }
+ 
+-    // Reference: https://github.com/codeigniter4/CodeIgniter4/issues/1492
++    /**
++     * @see https://github.com/codeigniter4/CodeIgniter4/issues/1492
++     */
+     public function testCanGetOldInputArray()
+     {
+         $_SESSION['_ci_old_input'] = [
+@@ -119,9 +121,9 @@ public function testCanGetOldInputArray()
+         $this->assertSame(['name' => 'foo'], $this->request->getOldInput('banana'));
+     }
+ 
+-    // Reference: https://github.com/codeigniter4/CodeIgniter4/issues/1492
+-
+     /**
++     * @see https://github.com/codeigniter4/CodeIgniter4/issues/1492
++     *
+      * @runInSeparateProcess
+      * @preserveGlobalState  disabled
+      */
+
+From 24ae7250a91208a9dfd1ba0d14ccad6aad028d01 Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Sat, 13 Nov 2021 08:12:18 +0900
+Subject: [PATCH 7/8] test: refactor: fix test method names
+
+---
+ tests/system/HTTP/IncomingRequestTest.php | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tests/system/HTTP/IncomingRequestTest.php b/tests/system/HTTP/IncomingRequestTest.php
+index 2ea9dd38914..e8c91268a8e 100644
+--- a/tests/system/HTTP/IncomingRequestTest.php
++++ b/tests/system/HTTP/IncomingRequestTest.php
+@@ -110,7 +110,7 @@ public function testMissingOldInput()
+     /**
+      * @see https://github.com/codeigniter4/CodeIgniter4/issues/1492
+      */
+-    public function testCanGetOldInputArray()
++    public function testCanGetOldInputArrayWithSESSION()
+     {
+         $_SESSION['_ci_old_input'] = [
+             'get'  => ['apple' => ['name' => 'two']],
+@@ -127,7 +127,7 @@ public function testCanGetOldInputArray()
+      * @runInSeparateProcess
+      * @preserveGlobalState  disabled
+      */
+-    public function testCanSerializeOldArray()
++    public function testCanGetOldInputArrayWithSessionService()
+     {
+         $locations = [
+             'AB' => 'Alberta',
+
+From 025a63bb2a0a0c9a1a34334b35e87f8ac19d6c96 Mon Sep 17 00:00:00 2001
+From: kenjis <kenji.uui@gmail.com>
+Date: Thu, 9 Dec 2021 10:14:03 +0900
+Subject: [PATCH 8/8] docs: update header level
+
+---
+ user_guide_src/source/changelogs/v4.1.6.rst | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/user_guide_src/source/changelogs/v4.1.6.rst b/user_guide_src/source/changelogs/v4.1.6.rst
+index f3c513b48b9..60b2dca40e3 100644
+--- a/user_guide_src/source/changelogs/v4.1.6.rst
++++ b/user_guide_src/source/changelogs/v4.1.6.rst
+@@ -10,7 +10,7 @@ Release Date: Not released
+     :depth: 2
+ 
+ SECURITY
+-========
++********
+ 
+ - *Deserialization of Untrusted Data* found in the ``old()`` function was fixed. See the `Security advisory <https://github.com/codeigniter4/CodeIgniter4/security/advisories/GHSA-w6jr-wj64-mc9x>`_ for more information.
+ 

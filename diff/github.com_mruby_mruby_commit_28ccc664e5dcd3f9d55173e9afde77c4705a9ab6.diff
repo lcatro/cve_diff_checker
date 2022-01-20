@@ -1,0 +1,30 @@
+From 28ccc664e5dcd3f9d55173e9afde77c4705a9ab6 Mon Sep 17 00:00:00 2001
+From: "Yukihiro \"Matz\" Matsumoto" <matz@ruby.or.jp>
+Date: Sat, 1 Jan 2022 21:02:58 +0900
+Subject: [PATCH] proc.c: should not reference `irep` when copying failed.
+
+It may cause broken reference count numbers.
+---
+ src/proc.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/proc.c b/src/proc.c
+index e11cb7fec7..01a69fbf12 100644
+--- a/src/proc.c
++++ b/src/proc.c
+@@ -207,12 +207,12 @@ mrb_proc_copy(mrb_state *mrb, struct RProc *a, struct RProc *b)
+     /* already initialized proc */
+     return;
+   }
++  if (!MRB_PROC_CFUNC_P(b) && b->body.irep) {
++    mrb_irep_incref(mrb, (mrb_irep*)b->body.irep);
++  }
+   a->flags = b->flags;
+   a->body = b->body;
+   a->upper = b->upper;
+-  if (!MRB_PROC_CFUNC_P(a) && a->body.irep) {
+-    mrb_irep_incref(mrb, (mrb_irep*)a->body.irep);
+-  }
+   a->e.env = b->e.env;
+   /* a->e.target_class = a->e.target_class; */
+ }

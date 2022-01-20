@@ -1,0 +1,44 @@
+From 38707930103dcba49d89d993f56bebd346069640 Mon Sep 17 00:00:00 2001
+From: Adrien Joly <531781+adrienjoly@users.noreply.github.com>
+Date: Fri, 10 Dec 2021 11:03:41 +0100
+Subject: [PATCH] fix(security): Prevent redirect to a disguised domain (#498)
+
+Improves #496, as suggested on this report: https://huntr.dev/bounties/6b8acb0c-8b5d-461e-9b46-b1bfb5a8ccdf/
+---
+ app/models/logging.js          | 3 ++-
+ test/api/security.api.tests.js | 9 +++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/app/models/logging.js b/app/models/logging.js
+index fff3fbee..47245769 100644
+--- a/app/models/logging.js
++++ b/app/models/logging.js
+@@ -262,7 +262,8 @@ http.ServerResponse.prototype.redirect = function (url) {
+ 
+ http.ServerResponse.prototype.safeRedirect = function (url) {
+   const fullURL = new URL(url, config.urlPrefix);
+-  if (!fullURL.toString().startsWith(config.urlPrefix)) return this.forbidden();
++  if (`${fullURL.protocol}//${fullURL.host}` !== config.urlPrefix)
++    return this.forbidden();
+   this.redirect(url);
+ };
+ 
+diff --git a/test/api/security.api.tests.js b/test/api/security.api.tests.js
+index 4061fed1..c4d09f3e 100644
+--- a/test/api/security.api.tests.js
++++ b/test/api/security.api.tests.js
+@@ -43,5 +43,14 @@ describe('security', () => {
+       });
+       assert.equal(response.statusCode, 403); // forbidden
+     });
++
++    it('should NOT allow redirect to a disguised domain', async () => {
++      const { jar } = await loginAs(ADMIN_USER);
++      const { response } = await postRaw(jar, `/consent`, {
++        lang: 'en',
++        redirect: `${URL_PREFIX}@google.com`,
++      });
++      assert.equal(response.statusCode, 403); // forbidden
++    });
+   });
+ });

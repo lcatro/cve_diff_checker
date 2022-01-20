@@ -1,0 +1,33 @@
+From 496fc8b2a7f5997acaaec33cc44d0b8dba5fb5e1 Mon Sep 17 00:00:00 2001
+From: Sarhan Aissi <tux-tn@users.noreply.github.com>
+Date: Mon, 1 Nov 2021 21:30:39 +0100
+Subject: [PATCH] fix(rtrim): remove regex to prevent ReDOS attack (#1738)
+
+---
+ src/lib/rtrim.js | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/lib/rtrim.js b/src/lib/rtrim.js
+index d10aaa9de..2d311574b 100644
+--- a/src/lib/rtrim.js
++++ b/src/lib/rtrim.js
+@@ -2,7 +2,16 @@ import assertString from './util/assertString';
+ 
+ export default function rtrim(str, chars) {
+   assertString(str);
+-  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#Escaping
+-  const pattern = chars ? new RegExp(`[${chars.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}]+$`, 'g') : /(\s)+$/g;
+-  return str.replace(pattern, '');
++  if (chars) {
++    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#Escaping
++    const pattern = new RegExp(`[${chars.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}]+$`, 'g');
++    return str.replace(pattern, '');
++  }
++  // Use a faster and more safe than regex trim method https://blog.stevenlevithan.com/archives/faster-trim-javascript
++  let strIndex = str.length - 1;
++  while (/\s/.test(str.charAt(strIndex))) {
++    strIndex -= 1;
++  }
++
++  return str.slice(0, strIndex + 1);
+ }

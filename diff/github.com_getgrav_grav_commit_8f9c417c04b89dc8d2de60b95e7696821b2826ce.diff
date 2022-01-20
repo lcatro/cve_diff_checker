@@ -1,0 +1,55 @@
+From 8f9c417c04b89dc8d2de60b95e7696821b2826ce Mon Sep 17 00:00:00 2001
+From: Matias Griese <matias@trilbymedia.com>
+Date: Wed, 3 Nov 2021 14:06:42 +0200
+Subject: [PATCH] Fixed path traversal vulnerability when using `bin/grav
+ server`
+
+---
+ CHANGELOG.md      |  1 +
+ system/router.php | 21 +++++++++++++++++++--
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index fa41efcf6a..28dc8dbe68 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,7 @@
+     * Added `route` and `request` to `onPagesInitialized` event
+     * Improved page cloning, added method `Page::initialize()`
+ 2. [](#bugfix)
++    * Fixed path traversal vulnerability when using `bin/grav server`
+     * Fixed unescaped error messages in JSON error responses
+     * Fixed `|t(variable)` twig filter in admin
+ 
+diff --git a/system/router.php b/system/router.php
+index 187d4d8443..d58609c836 100644
+--- a/system/router.php
++++ b/system/router.php
+@@ -13,8 +13,25 @@
+ 
+ $_SERVER['PHP_CLI_ROUTER'] = true;
+ 
+-if (is_file($_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR . $_SERVER['SCRIPT_NAME'])) {
+-    return false;
++$root = $_SERVER['DOCUMENT_ROOT'];
++$path = $_SERVER['SCRIPT_NAME'];
++if ($path !== '/index.php' && is_file($root . $path)) {
++    if (!(
++        // Block all direct access to files and folders beginning with a dot
++        strpos($path, '/.') !== false
++        // Block all direct access for these folders
++        || preg_match('`^/(\.git|cache|bin|logs|backup|webserver-configs|tests)/`ui', $path)
++        // Block access to specific file types for these system folders
++        || preg_match('`^/(system|vendor)/(.*)\.(txt|xml|md|html|yaml|yml|php|pl|py|cgi|twig|sh|bat)$`ui', $path)
++        // Block access to specific file types for these user folders
++        || preg_match('`^/(user)/(.*)\.(txt|md|yaml|yml|php|pl|py|cgi|twig|sh|bat)$`ui', $path)
++        // Block all direct access to .md files
++        || preg_match('`\.md$`ui', $path)
++        // Block access to specific files in the root folder
++        || preg_match('`^/(LICENSE\.txt|composer\.lock|composer\.json|\.htaccess)$`ui', $path)
++    )) {
++        return false;
++    }
+ }
+ 
+ $grav_index = 'index.php';

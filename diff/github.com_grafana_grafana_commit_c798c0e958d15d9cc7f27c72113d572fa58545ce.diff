@@ -1,0 +1,100 @@
+From c798c0e958d15d9cc7f27c72113d572fa58545ce Mon Sep 17 00:00:00 2001
+From: Dimitris Sotirakis <dimitrios.sotirakis@grafana.com>
+Date: Tue, 7 Dec 2021 19:15:53 +0200
+Subject: [PATCH] Security: Fix directory traversal issue (#42846)
+
+* security: fix dir traversal issue
+
+(cherry picked from commit 00e38ba555cfb120361c9623de3285d70c60172f)
+
+* Improve comments and error message.
+
+Co-authored-by: Kyle Brandt <kyle@grafana.com>
+---
+ pkg/api/plugins.go      | 19 ++++++++++++++++---
+ pkg/api/plugins_test.go | 27 +++++++++++++++++++++++++++
+ 2 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/pkg/api/plugins.go b/pkg/api/plugins.go
+index 6e01a3414fe47..ca076671e3628 100644
+--- a/pkg/api/plugins.go
++++ b/pkg/api/plugins.go
+@@ -289,14 +289,27 @@ func (hs *HTTPServer) getPluginAssets(c *models.ReqContext) {
+ 		return
+ 	}
+ 
+-	requestedFile := filepath.Clean(web.Params(c.Req)["*"])
+-	pluginFilePath := filepath.Join(plugin.PluginDir, requestedFile)
++	// prepend slash for cleaning relative paths
++	requestedFile := filepath.Clean(filepath.Join("/", web.Params(c.Req)["*"]))
++	rel, err := filepath.Rel("/", requestedFile)
++	if err != nil {
++		// slash is prepended above therefore this is not expected to fail
++		c.JsonApiErr(500, "Failed to get the relative path", err)
++		return
++	}
+ 
+-	if !plugin.IncludedInSignature(requestedFile) {
++	if !plugin.IncludedInSignature(rel) {
+ 		hs.log.Warn("Access to requested plugin file will be forbidden in upcoming Grafana versions as the file "+
+ 			"is not included in the plugin signature", "file", requestedFile)
+ 	}
+ 
++	absPluginDir, err := filepath.Abs(plugin.PluginDir)
++	if err != nil {
++		c.JsonApiErr(500, "Failed to get plugin absolute path", nil)
++		return
++	}
++
++	pluginFilePath := filepath.Join(absPluginDir, rel)
+ 	// It's safe to ignore gosec warning G304 since we already clean the requested file path and subsequently
+ 	// use this with a prefix of the plugin's directory, which is set during plugin loading
+ 	// nolint:gosec
+diff --git a/pkg/api/plugins_test.go b/pkg/api/plugins_test.go
+index 8b6689a9fbc1a..fb10aa0e4d347 100644
+--- a/pkg/api/plugins_test.go
++++ b/pkg/api/plugins_test.go
+@@ -23,9 +23,13 @@ func Test_GetPluginAssets(t *testing.T) {
+ 	pluginDir := "."
+ 	tmpFile, err := ioutil.TempFile(pluginDir, "")
+ 	require.NoError(t, err)
++	tmpFileInParentDir, err := ioutil.TempFile("..", "")
++	require.NoError(t, err)
+ 	t.Cleanup(func() {
+ 		err := os.RemoveAll(tmpFile.Name())
+ 		assert.NoError(t, err)
++		err = os.RemoveAll(tmpFileInParentDir.Name())
++		assert.NoError(t, err)
+ 	})
+ 	expectedBody := "Plugin test"
+ 	_, err = tmpFile.WriteString(expectedBody)
+@@ -61,6 +65,29 @@ func Test_GetPluginAssets(t *testing.T) {
+ 			})
+ 	})
+ 
++	t.Run("Given a request for a relative path", func(t *testing.T) {
++		p := plugins.PluginDTO{
++			JSONData: plugins.JSONData{
++				ID: pluginID,
++			},
++			PluginDir: pluginDir,
++		}
++		service := &fakePluginStore{
++			plugins: map[string]plugins.PluginDTO{
++				pluginID: p,
++			},
++		}
++		l := &logger{}
++
++		url := fmt.Sprintf("/public/plugins/%s/%s", pluginID, tmpFileInParentDir.Name())
++		pluginAssetScenario(t, "When calling GET on", url, "/public/plugins/:pluginId/*", service, l,
++			func(sc *scenarioContext) {
++				callGetPluginAsset(sc)
++
++				require.Equal(t, 404, sc.resp.Code)
++			})
++	})
++
+ 	t.Run("Given a request for an existing plugin file that is not listed as a signature covered file", func(t *testing.T) {
+ 		p := plugins.PluginDTO{
+ 			JSONData: plugins.JSONData{

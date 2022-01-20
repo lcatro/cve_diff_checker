@@ -1,0 +1,87 @@
+From a263cdac9c15de4003d3289a53cad1d19c8cfb3f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20Cornell=C3=A0?= <hello@mcornella.com>
+Date: Tue, 9 Nov 2021 09:08:18 +0100
+Subject: [PATCH] fix(lib): fix potential command injection in `title` and
+ `spectrum` functions
+
+The `title` function unsafely prints its input without sanitization, which if used
+with custom user code that calls it, it could trigger command injection.
+
+The `spectrum_ls` and `spectrum_bls` could similarly be exploited if a variable is
+changed in the user's shell environment with a carefully crafted value. This is
+highly unlikely to occur (and if possible, other methods would be used instead),
+but with this change the exploit of these two functions is now impossible.
+---
+ lib/spectrum.zsh    |  6 ++++--
+ lib/termsupport.zsh | 13 ++++++-------
+ 2 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/lib/spectrum.zsh b/lib/spectrum.zsh
+index d5c22a8c547..97f5c360a05 100644
+--- a/lib/spectrum.zsh
++++ b/lib/spectrum.zsh
+@@ -20,16 +20,18 @@ done
+ 
+ # Show all 256 colors with color number
+ function spectrum_ls() {
++  setopt localoptions nopromptsubst
+   local ZSH_SPECTRUM_TEXT=${ZSH_SPECTRUM_TEXT:-Arma virumque cano Troiae qui primus ab oris}
+   for code in {000..255}; do
+-    print -P -- "$code: $FG[$code]$ZSH_SPECTRUM_TEXT%{$reset_color%}"
++    print -P -- "$code: ${FG[$code]}${ZSH_SPECTRUM_TEXT}%{$reset_color%}"
+   done
+ }
+ 
+ # Show all 256 colors where the background is set to specific color
+ function spectrum_bls() {
++  setopt localoptions nopromptsubst
+   local ZSH_SPECTRUM_TEXT=${ZSH_SPECTRUM_TEXT:-Arma virumque cano Troiae qui primus ab oris}
+   for code in {000..255}; do
+-    print -P -- "$code: $BG[$code]$ZSH_SPECTRUM_TEXT%{$reset_color%}"
++    print -P -- "$code: ${BG[$code]}${ZSH_SPECTRUM_TEXT}%{$reset_color%}"
+   done
+ }
+diff --git a/lib/termsupport.zsh b/lib/termsupport.zsh
+index ef0d78895b0..49f64400ba8 100644
+--- a/lib/termsupport.zsh
++++ b/lib/termsupport.zsh
+@@ -7,8 +7,7 @@
+ # (In screen, only short_tab_title is used)
+ # Limited support for Apple Terminal (Terminal can't set window and tab separately)
+ function title {
+-  emulate -L zsh
+-  setopt prompt_subst
++  setopt localoptions nopromptsubst
+ 
+   # Don't set the title if inside emacs, unless using vterm
+   [[ -n "$INSIDE_EMACS" && "$INSIDE_EMACS" != vterm ]] && return
+@@ -48,13 +47,13 @@ fi
+ 
+ # Runs before showing the prompt
+ function omz_termsupport_precmd {
+-  [[ "${DISABLE_AUTO_TITLE:-}" == true ]] && return
+-  title $ZSH_THEME_TERM_TAB_TITLE_IDLE $ZSH_THEME_TERM_TITLE_IDLE
++  [[ "${DISABLE_AUTO_TITLE:-}" != true ]] || return
++  title "$ZSH_THEME_TERM_TAB_TITLE_IDLE" "$ZSH_THEME_TERM_TITLE_IDLE"
+ }
+ 
+ # Runs before executing the command
+ function omz_termsupport_preexec {
+-  [[ "${DISABLE_AUTO_TITLE:-}" == true ]] && return
++  [[ "${DISABLE_AUTO_TITLE:-}" != true ]] || return
+ 
+   emulate -L zsh
+   setopt extended_glob
+@@ -97,10 +96,10 @@ function omz_termsupport_preexec {
+   fi
+ 
+   # cmd name only, or if this is sudo or ssh, the next cmd
+-  local CMD=${1[(wr)^(*=*|sudo|ssh|mosh|rake|-*)]:gs/%/%%}
++  local CMD="${1[(wr)^(*=*|sudo|ssh|mosh|rake|-*)]:gs/%/%%}"
+   local LINE="${2:gs/%/%%}"
+ 
+-  title '$CMD' '%100>...>$LINE%<<'
++  title "$CMD" "%100>...>${LINE}%<<"
+ }
+ 
+ autoload -Uz add-zsh-hook

@@ -1,0 +1,77 @@
+From 3712a2d3455e6ccb924daa5724a3652a86f6b585 Mon Sep 17 00:00:00 2001
+From: Edward Schwartz <schwartzedward@google.com>
+Date: Mon, 4 Oct 2021 12:41:58 -0700
+Subject: [PATCH] Fix macros for converting little endian to host for
+ TF_TSRT_OFFSET GetSize
+
+Make the macro that converts little endian data do nothing on little endian hosts,
+and byte swap otherwise.
+This only affects getting the size of TStrings of type "Offset".
+
+Added a test for TStrings of type "Offset" that checks if type and size are consistent.
+
+PiperOrigin-RevId: 400789721
+Change-Id: I1398bffd842ab1631614b212b7c3a2af88d99538
+---
+ tensorflow/core/platform/ctstring_internal.h |  4 +--
+ tensorflow/core/platform/ctstring_test.cc    | 27 ++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/tensorflow/core/platform/ctstring_internal.h b/tensorflow/core/platform/ctstring_internal.h
+index be8f7f24a060c..07fa6636b6171 100644
+--- a/tensorflow/core/platform/ctstring_internal.h
++++ b/tensorflow/core/platform/ctstring_internal.h
+@@ -63,9 +63,9 @@ static inline uint32_t TF_swap32(uint32_t host_int) {
+ #endif
+ 
+ #if TF_TSTRING_LITTLE_ENDIAN
+-#define TF_le32toh(x) TF_swap32(x)
+-#else  // TF_TSTRING_LITTLE_ENDIAN
+ #define TF_le32toh(x) x
++#else  // TF_TSTRING_LITTLE_ENDIAN
++#define TF_le32toh(x) TF_swap32(x)
+ #endif  // TF_TSTRING_LITTLE_ENDIAN
+ 
+ static inline size_t TF_align16(size_t i) { return (i + 0xF) & ~0xF; }
+diff --git a/tensorflow/core/platform/ctstring_test.cc b/tensorflow/core/platform/ctstring_test.cc
+index a2173a523a26d..d1e76812f4df8 100644
+--- a/tensorflow/core/platform/ctstring_test.cc
++++ b/tensorflow/core/platform/ctstring_test.cc
+@@ -18,6 +18,7 @@ limitations under the License.
+ #include <memory>
+ #include <string>
+ 
++#include "tensorflow/core/platform/ctstring_internal.h"
+ #include "tensorflow/core/platform/test.h"
+ 
+ static const char kLongString[] =
+@@ -380,3 +381,29 @@ TEST(TF_CTStringTest, ResizeReserve) {
+     TF_TString_Dealloc(&s70);
+   }
+ }
++
++TEST(TF_CTStringTest, OffsetType) {
++  {
++    TF_TString s71;
++
++    TF_TString_Init(&s71);
++    size_t header_length = 24;
++    size_t size = 8;
++    TF_TString_ResizeUninitialized(&s71, header_length + size);
++    uint32_t save_size = s71.u.offset.size;
++    uint32_t save_offset = s71.u.offset.offset;
++    uint32_t save_count = s71.u.offset.count;
++
++    s71.u.offset.size = TF_TString_ToInternalSizeT(size, TF_TSTR_OFFSET);
++    s71.u.offset.offset = header_length;
++    s71.u.offset.count = 0;
++    EXPECT_EQ(size, TF_TString_GetSize(&s71));
++    EXPECT_EQ(TF_TSTR_OFFSET, TF_TString_GetType(&s71));
++
++    // restore state so string can be deallocated
++    s71.u.offset.size = save_size;
++    s71.u.offset.offset = save_offset;
++    s71.u.offset.count = save_count;
++    TF_TString_Dealloc(&s71);
++  }
++}

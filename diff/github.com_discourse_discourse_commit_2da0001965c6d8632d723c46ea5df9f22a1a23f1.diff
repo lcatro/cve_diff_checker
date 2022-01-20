@@ -1,0 +1,60 @@
+From 2da0001965c6d8632d723c46ea5df9f22a1a23f1 Mon Sep 17 00:00:00 2001
+From: David Taylor <david@taylorhq.com>
+Date: Mon, 15 Nov 2021 12:02:56 +0000
+Subject: [PATCH] SECURITY: Disallow caching of MIME/Content-Type errors
+ (#14939)
+
+This will sign intermediary proxies and/or misconfigured CDNs to not
+cache those error responses.
+
+Co-authored-by: Rafael dos Santos Silva <xfalcox@gmail.com>
+---
+ lib/middleware/anonymous_cache.rb                  | 2 +-
+ lib/middleware/discourse_public_exceptions.rb      | 2 +-
+ spec/components/middleware/anonymous_cache_spec.rb | 3 ++-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/lib/middleware/anonymous_cache.rb b/lib/middleware/anonymous_cache.rb
+index ca869abb9774..0cdc1c630200 100644
+--- a/lib/middleware/anonymous_cache.rb
++++ b/lib/middleware/anonymous_cache.rb
+@@ -314,7 +314,7 @@ def call(env)
+       if PAYLOAD_INVALID_REQUEST_METHODS.include?(env[Rack::REQUEST_METHOD]) &&
+         env[Rack::RACK_INPUT].size > 0
+ 
+-        return [413, {}, []]
++        return [413, { "Cache-Control" => "private, max-age=0, must-revalidate" }, []]
+       end
+ 
+       helper = Helper.new(env)
+diff --git a/lib/middleware/discourse_public_exceptions.rb b/lib/middleware/discourse_public_exceptions.rb
+index 8b9cbc827df8..fcc2b5ed2684 100644
+--- a/lib/middleware/discourse_public_exceptions.rb
++++ b/lib/middleware/discourse_public_exceptions.rb
+@@ -35,7 +35,7 @@ def call(env)
+           begin
+             request.format
+           rescue Mime::Type::InvalidMimeType
+-            return [400, {}, ["Invalid MIME type"]]
++            return [400, { "Cache-Control" => "private, max-age=0, must-revalidate" }, ["Invalid MIME type"]]
+           end
+ 
+           if ApplicationController.rescue_with_handler(exception, object: fake_controller)
+diff --git a/spec/components/middleware/anonymous_cache_spec.rb b/spec/components/middleware/anonymous_cache_spec.rb
+index e2beddc40a8f..a4aa30be695c 100644
+--- a/spec/components/middleware/anonymous_cache_spec.rb
++++ b/spec/components/middleware/anonymous_cache_spec.rb
+@@ -243,11 +243,12 @@ def new_helper(opts = {})
+ 
+   context 'invalid request payload' do
+     it 'returns 413 for GET request with payload' do
+-      status, _, _ = middleware.call(env.tap do |environment|
++      status, headers, _ = middleware.call(env.tap do |environment|
+         environment[Rack::RACK_INPUT].write("test")
+       end)
+ 
+       expect(status).to eq(413)
++      expect(headers["Cache-Control"]).to eq("private, max-age=0, must-revalidate")
+     end
+   end
+ 

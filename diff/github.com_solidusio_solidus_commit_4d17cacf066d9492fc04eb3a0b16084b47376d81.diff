@@ -1,0 +1,57 @@
+From 4d17cacf066d9492fc04eb3a0b16084b47376d81 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20Busqu=C3=A9?= <marc@lamarciana.com>
+Date: Tue, 14 Dec 2021 10:36:44 +0100
+Subject: [PATCH] Protect `Spree::OrdersController#populate` against CSRF
+ attacks
+
+See
+https://github.com/solidusio/solidus/security/advisories/GHSA-h3fg-h5v3-vf8m
+for all the details.
+
+Some time ago, all order actions were left out of CSRF protection (see
+95ea57058ab1c5e722b327b10747cd41e68a4deb). The reason given was that the
+authentication token got stale after the second rendering because the
+product page is cached. That was limited to `#populate` in
+cb797542c6948ef33d2cc9e6076c88f4cc927fb2 (see also
+https://github.com/spree/spree/pull/5601).
+
+However, those assumptions are not correct. Although the authenticity
+token changes at every request, that doesn't mean that the old ones are
+no longer valid. The variation comes from a one-time pad added to a
+session-dependant token (and meant to avoid timing attacks). However,
+before validation, that one-time pad is removed. That means the token
+remains valid as long as the session has not been reset. Think about
+submitting a form from one browser tab after opening another with the
+same URL. Even if both tokens differ, the submission from the first tab
+will still be valid. You can read
+https://medium.com/rubyinside/a-deep-dive-into-csrf-protection-in-rails-19fa0a42c0ef
+for an in-deep understanding.
+
+The initial confusion could come because of
+https://github.com/rails/rails/issues/21948. Due to browser-side cache,
+a form can be re-rendered and sent without any attached request cookie.
+That will cause an authentication error, as the sent token won't match
+with the one in the session (none in this case). There's no perfect
+solution for that, and all partial fixes should be seen at the
+application level. From our side, we must provide a safe default. For an
+excellent survey of all the available options, take a look at
+https://github.com/betagouv/demarches-simplifiees.fr/blob/5b4f7f9ae9eaf0ac94008b62f7047e4714626cf9/doc/adr-csrf-forgery.md.
+The information given in that link is third-party but it's very
+relevant here. For that reason we've copied it in the security advisory
+(see link above), but all the credit goes to @kemenaran.
+---
+ frontend/app/controllers/spree/orders_controller.rb | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/frontend/app/controllers/spree/orders_controller.rb b/frontend/app/controllers/spree/orders_controller.rb
+index bc23c3b46a..f21e4db653 100644
+--- a/frontend/app/controllers/spree/orders_controller.rb
++++ b/frontend/app/controllers/spree/orders_controller.rb
+@@ -10,7 +10,6 @@ class OrdersController < Spree::StoreController
+     before_action :assign_order, only: :update
+     # note: do not lock the #edit action because that's where we redirect when we fail to acquire a lock
+     around_action :lock_order, only: :update
+-    skip_before_action :verify_authenticity_token, only: [:populate]
+ 
+     def show
+       @order = Spree::Order.find_by!(number: params[:id])

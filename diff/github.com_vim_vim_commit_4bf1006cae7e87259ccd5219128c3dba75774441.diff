@@ -1,0 +1,79 @@
+From 4bf1006cae7e87259ccd5219128c3dba75774441 Mon Sep 17 00:00:00 2001
+From: Bram Moolenaar <Bram@vim.org>
+Date: Tue, 28 Dec 2021 17:23:12 +0000
+Subject: [PATCH] patch 8.2.3923: Vim9: double free with split argument list in
+ nested function
+
+Problem:    Vim9: double free if a nested function has a line break in the
+            argument list.
+Solution:   Set cmdlinep when freeing the previous line.
+---
+ src/testdir/test_vim9_func.vim | 20 +++++++++++++++++++-
+ src/userfunc.c                 |  2 ++
+ src/version.c                  |  2 ++
+ 3 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/testdir/test_vim9_func.vim b/src/testdir/test_vim9_func.vim
+index 1a14c1016795..88c0af8e0da5 100644
+--- a/src/testdir/test_vim9_func.vim
++++ b/src/testdir/test_vim9_func.vim
+@@ -1669,7 +1669,7 @@ def Test_error_in_nested_function()
+   assert_fails('FuncWithForwardCall()', 'E1096:', '', 1, 'FuncWithForwardCall')
+ enddef
+ 
+-def Test_nested_functin_with_nextcmd()
++def Test_nested_function_with_nextcmd()
+   var lines =<< trim END
+       vim9script
+       # Define an outer function
+@@ -1689,6 +1689,24 @@ def Test_nested_functin_with_nextcmd()
+   CheckScriptFailure(lines, 'E476: Invalid command: AAAAA')
+ enddef
+ 
++def Test_nested_function_with_args_split()
++  var lines =<< trim END
++      vim9script
++      def FirstFunction()
++        def SecondFunction(
++        )
++        # had a double free if the right parenthesis of the nested function is
++        # on the next line
++         
++        enddef|BBBB
++      enddef
++      # Compile all functions
++      defcompile
++  END
++  # FIXME: this should fail on the BBBB
++  CheckScriptSuccess(lines)
++enddef
++
+ def Test_return_type_wrong()
+   CheckScriptFailure([
+         'def Func(): number',
+diff --git a/src/userfunc.c b/src/userfunc.c
+index e1028e772816..a7cbac3c8675 100644
+--- a/src/userfunc.c
++++ b/src/userfunc.c
+@@ -219,6 +219,8 @@ get_function_args(
+ 	    if (theline == NULL)
+ 		break;
+ 	    vim_free(*line_to_free);
++	    if (*eap->cmdlinep == *line_to_free)
++		*eap->cmdlinep = theline;
+ 	    *line_to_free = theline;
+ 	    whitep = (char_u *)" ";
+ 	    p = skipwhite(theline);
+diff --git a/src/version.c b/src/version.c
+index 6c8bced722b2..5d22d98e8dad 100644
+--- a/src/version.c
++++ b/src/version.c
+@@ -749,6 +749,8 @@ static char *(features[]) =
+ 
+ static int included_patches[] =
+ {   /* Add new patch number below this line */
++/**/
++    3923,
+ /**/
+     3922,
+ /**/

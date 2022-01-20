@@ -1,0 +1,100 @@
+From 7c1692bd417eb4f9b33ead749a41166d6080af85 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Tue, 31 Aug 2021 16:23:54 -0700
+Subject: [PATCH] PR #51732: Fix crash of tf.image.crop_and_resize when input
+ is large number
+
+Imported from GitHub PR https://github.com/tensorflow/tensorflow/pull/51732
+
+This PR is part of the effort in #46890 where
+tf.image.crop_and_resize will crash if shape consists of large number.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+Copybara import of the project:
+
+--
+c8d87055a56d8740d27ad8bdc74a7459ede6900e by Yong Tang <yong.tang.github@outlook.com>:
+
+Fix crash of tf.image.crop_and_resize when input is large number
+
+This PR is part of the effort in 46890 where
+tf.image.crop_and_resize will crash if shape consists of large number.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+COPYBARA_INTEGRATE_REVIEW=https://github.com/tensorflow/tensorflow/pull/51732 from yongtang:46890-tf.image.crop_and_resize c8d87055a56d8740d27ad8bdc74a7459ede6900e
+PiperOrigin-RevId: 394109830
+Change-Id: If049dad0844df9353722029ee95bc76819eda1f4
+---
+ .../core/kernels/image/crop_and_resize_op.cc  | 26 ++++++++++---------
+ tensorflow/python/ops/image_ops_test.py       | 10 +++++++
+ 2 files changed, 24 insertions(+), 12 deletions(-)
+
+diff --git a/tensorflow/core/kernels/image/crop_and_resize_op.cc b/tensorflow/core/kernels/image/crop_and_resize_op.cc
+index b6c49335ebff7..0fd905acabda3 100644
+--- a/tensorflow/core/kernels/image/crop_and_resize_op.cc
++++ b/tensorflow/core/kernels/image/crop_and_resize_op.cc
+@@ -170,14 +170,15 @@ class CropAndResizeOp : public AsyncOpKernel {
+         context, crop_height > 0 && crop_width > 0,
+         errors::InvalidArgument("crop dimensions must be positive"), done);
+ 
++    TensorShape shape;
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(num_boxes), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(crop_height), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(crop_width), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(depth), done);
+     // Allocate output tensor.
+     Tensor* output = nullptr;
+-    OP_REQUIRES_OK_ASYNC(
+-        context,
+-        context->allocate_output(
+-            0, TensorShape({num_boxes, crop_height, crop_width, depth}),
+-            &output),
+-        done);
++    OP_REQUIRES_OK_ASYNC(context, context->allocate_output(0, shape, &output),
++                         done);
+ 
+     auto compute_callback = [this, context, output]() {
+       const Tensor& image = context->input(0);
+@@ -417,14 +418,15 @@ class CropAndResizeGradImageOp : public AsyncOpKernel {
+           done);
+     }
+ 
++    TensorShape shape;
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(batch_size), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(image_height), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(image_width), done);
++    OP_REQUIRES_OK_ASYNC(context, shape.AddDimWithStatus(depth), done);
+     // Allocate output tensor.
+     Tensor* output = nullptr;
+-    OP_REQUIRES_OK_ASYNC(
+-        context,
+-        context->allocate_output(
+-            0, TensorShape({batch_size, image_height, image_width, depth}),
+-            &output),
+-        done);
++    OP_REQUIRES_OK_ASYNC(context, context->allocate_output(0, shape, &output),
++                         done);
+ 
+     auto compute_callback = [this, context, output]() {
+       const Tensor& grads = context->input(0);
+diff --git a/tensorflow/python/ops/image_ops_test.py b/tensorflow/python/ops/image_ops_test.py
+index 17f00822ede98..3e1e2da19f513 100644
+--- a/tensorflow/python/ops/image_ops_test.py
++++ b/tensorflow/python/ops/image_ops_test.py
+@@ -6075,6 +6075,16 @@ def testImageCropAndResize(self):
+             crop_size=[1, 1])
+         self.evaluate(op)
+ 
++  def testImageCropAndResizeWithInvalidInput(self):
++    with self.session():
++      with self.assertRaises((errors.InternalError, ValueError)):
++        op = image_ops_impl.crop_and_resize_v2(
++            image=np.ones((1, 1, 1, 1)),
++            boxes=np.ones((11, 4)),
++            box_indices=np.ones((11)),
++            crop_size=[2065374891, 1145309325])
++        self.evaluate(op)
++
+   @parameterized.named_parameters(
+       ("_jpeg", "JPEG", "jpeg_merge_test1.jpg"),
+       ("_png", "PNG", "lena_rgba.png"),

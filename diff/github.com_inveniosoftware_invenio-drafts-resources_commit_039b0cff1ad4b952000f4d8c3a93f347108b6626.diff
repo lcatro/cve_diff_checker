@@ -1,0 +1,32 @@
+From 039b0cff1ad4b952000f4d8c3a93f347108b6626 Mon Sep 17 00:00:00 2001
+From: Lars Holm Nielsen <lars.holm.nielsen@cern.ch>
+Date: Wed, 24 Nov 2021 15:32:41 +0100
+Subject: [PATCH] security: fix missing permission check of publish
+
+* Invenio-Drafts-Resources does not properly check permissions when a
+  record is published. The vulnerability is exploitable in a default
+  installation of InvenioRDM. An authenticated a user is able via REST
+  API calls to publish draft records of other users if they know the
+  record identifier and the draft validates (e.g. all require fields
+  filled out). An attacker is not able to modify the data in the record,
+  and thus e.g. cannot change a record from restricted to public.
+---
+ invenio_drafts_resources/services/records/service.py | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/invenio_drafts_resources/services/records/service.py b/invenio_drafts_resources/services/records/service.py
+index 20e367d..c9ee5df 100644
+--- a/invenio_drafts_resources/services/records/service.py
++++ b/invenio_drafts_resources/services/records/service.py
+@@ -267,10 +267,9 @@ def publish(self, id_, identity, uow=None):
+               into records)
+             - Create or update associated (published) record with data
+         """
+-        self.require_permission(identity, "publish")
+-
+         # Get the draft
+         draft = self.draft_cls.pid.resolve(id_, registered_only=False)
++        self.require_permission(identity, "publish", record=draft)
+ 
+         # Validate the draft strictly - since a draft can be saved with errors
+         # we do a strict validation here to make sure only valid drafts can be

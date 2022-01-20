@@ -1,0 +1,37 @@
+From f09caa532b6e1ac8d2aa61b7832c78c5b79300c6 Mon Sep 17 00:00:00 2001
+From: Bixia Zheng <bixia@google.com>
+Date: Thu, 19 Aug 2021 09:05:04 -0700
+Subject: [PATCH] Fix EinsumHelper::ParseEquation to avoid uninitialized
+ accesses.
+
+EinsumHelper::ParseEquation is supposed to return true or false in
+input_has_ellipsis and output_has_ellipsis to indicate whether there is
+ellipsis in the inputs and output. Previously, when there is no ellipsis in the
+inputs or output, the routine doesn't assign false to the variables. This
+change initializes the two variables with false to fix the problem.
+PiperOrigin-RevId: 391772004
+Change-Id: I17b6c88aadef4131470378e48cced054bf252e86
+---
+ tensorflow/core/kernels/linalg/einsum_op_impl.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tensorflow/core/kernels/linalg/einsum_op_impl.h b/tensorflow/core/kernels/linalg/einsum_op_impl.h
+index 5c41e38954d62..6f64334555131 100644
+--- a/tensorflow/core/kernels/linalg/einsum_op_impl.h
++++ b/tensorflow/core/kernels/linalg/einsum_op_impl.h
+@@ -153,6 +153,7 @@ struct EinsumHelper {
+     input_has_ellipsis->resize(num_inputs);
+     for (int i = 0; i < num_inputs; ++i) {
+       input_label_counts->at(i).resize(num_labels);
++      input_has_ellipsis->at(i) = false;
+       for (const int label : input_labels->at(i)) {
+         if (label != kEllipsisLabel)
+           input_label_counts->at(i)[label] += 1;
+@@ -161,6 +162,7 @@ struct EinsumHelper {
+       }
+     }
+     output_label_counts->resize(num_labels);
++    *output_has_ellipsis = false;
+     for (const int label : *output_labels) {
+       if (label != kEllipsisLabel)
+         output_label_counts->at(label) += 1;

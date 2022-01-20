@@ -1,0 +1,34 @@
+From 1ec02658fe6858162f5e6a24f97928de6696c5cb Mon Sep 17 00:00:00 2001
+From: Nico Mexis <nico.mexis@kabelmail.de>
+Date: Fri, 7 Jan 2022 21:52:01 +0100
+Subject: [PATCH] Improve Zip Slip detection
+
+---
+ .../the/bytecode/club/bytecodeviewer/util/ZipUtils.java    | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/main/java/the/bytecode/club/bytecodeviewer/util/ZipUtils.java b/src/main/java/the/bytecode/club/bytecodeviewer/util/ZipUtils.java
+index f7e9a648..9b28af92 100644
+--- a/src/main/java/the/bytecode/club/bytecodeviewer/util/ZipUtils.java
++++ b/src/main/java/the/bytecode/club/bytecodeviewer/util/ZipUtils.java
+@@ -44,6 +44,11 @@
+      * @throws IOException Signals that an I/O exception has occurred.
+      */
+     public static void unzipFilesToPath(String jarPath, String destinationDir) throws IOException {
++        String canonicalDestDir = new File(destinationDir).getCanonicalPath();
++        if (!canonicalDestDir.endsWith(File.separator)) {
++            canonicalDestDir += File.separator;
++        }
++
+         File file = new File(jarPath);
+         try (JarFile jar = new JarFile(file)) {
+ 
+@@ -68,7 +73,7 @@ public static void unzipFilesToPath(String jarPath, String destinationDir) throw
+                 String fileName = destinationDir + File.separator + entry.getName();
+                 File f = new File(fileName);
+ 
+-                if (!f.getCanonicalPath().startsWith(destinationDir)) {
++                if (!f.getCanonicalPath().startsWith(canonicalDestDir)) {
+                     System.out.println("Zip Slip exploit detected. Skipping entry " + entry.getName());
+                     continue;
+                 }

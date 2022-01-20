@@ -1,0 +1,120 @@
+From adf6ed4cd94d66091776b5febd4ff3767362de63 Mon Sep 17 00:00:00 2001
+From: Damian Legawiec <damian@sparksolutions.co>
+Date: Wed, 17 Nov 2021 12:29:01 +0100
+Subject: [PATCH] [PATCH] Fix account takeover through CSRF attack
+
+This commit fixes an account takeover vulnerability when [Rails
+`protect_from_forgery`](https://api.rubyonrails.org/classes/ActionController/RequestForgeryProtection/ClassMethods.html)
+method is both:
+
+- Executed whether as:
+  - A `before_action` callback (the default)
+  - A `prepend_before_action` (option `prepend: true`) before the
+  `:load_object` hook in `Spree::UsersController` (most likely order to
+  find).
+
+- Configured to use `:null_session` or `:reset_session`
+  strategies (`:null_session` is the default in case the no strategy is
+  given, but `rails --new` generated skeleton use `:exception`).
+
+Before this commit, the user was fetched in a `prepend_before_action`
+hook named `:load_object`. I.e., the user was loaded into an instance
+variable before touching the session as a safety countermeasure. As the
+request went forward, `#update` was called on that instance variable.
+
+The `:exception` strategy prevented the issue as, even if the user was
+still fetched, the request was aborted before the update phase. On the
+other hand, prepending `:protect_from_forgery` after the `:load_object`
+hook (not very likely, as `ApplicationController` is loaded in
+the first place and it's the most likely place to have that definition)
+wiped the session before trying to fetch the user from it.
+
+We could have fixed the most likely issue by just using a
+`before_action` for `:load_object`, but it's safer not to rely on the
+order of callbacks at all.
+---
+ .../frontend/spree/users_controller.rb        |  7 +++-
+ .../spree/frontend/user_update_spec.rb        | 42 +++++++++++++++++++
+ 2 files changed, 48 insertions(+), 1 deletion(-)
+ create mode 100644 spec/requests/spree/frontend/user_update_spec.rb
+
+diff --git a/lib/controllers/frontend/spree/users_controller.rb b/lib/controllers/frontend/spree/users_controller.rb
+index 531da3d2..a4a01c38 100644
+--- a/lib/controllers/frontend/spree/users_controller.rb
++++ b/lib/controllers/frontend/spree/users_controller.rb
+@@ -1,14 +1,18 @@
+ class Spree::UsersController < Spree::StoreController
+   before_action :set_current_order, except: :show
+-  prepend_before_action :load_object, only: [:show, :edit, :update]
+   prepend_before_action :authorize_actions, only: :new
+ 
+   include Spree::Core::ControllerHelpers
+ 
+   def show
++    load_object
+     @orders = @user.orders.for_store(current_store).complete.order('completed_at desc')
+   end
+ 
++  def edit
++    load_object
++  end
++
+   def create
+     @user = Spree.user_class.new(user_params)
+     if @user.save
+@@ -24,6 +28,7 @@ def create
+   end
+ 
+   def update
++    load_object
+     if @user.update(user_params)
+       if params[:user][:password].present?
+         # this logic needed b/c devise wants to log us out after password changes
+diff --git a/spec/requests/spree/frontend/user_update_spec.rb b/spec/requests/spree/frontend/user_update_spec.rb
+new file mode 100644
+index 00000000..f569199e
+--- /dev/null
++++ b/spec/requests/spree/frontend/user_update_spec.rb
+@@ -0,0 +1,42 @@
++# frozen_string_literal: true
++
++RSpec.feature 'User update', type: :request do
++  context 'CSRF protection' do
++    %i[exception reset_session null_session].each do |strategy|
++      # Completely clean the configuration of forgery protection for the
++      # controller and reset it after the expectations. However, besides `:with`,
++      # the options given to `protect_from_forgery` are processed on the fly.
++      # I.e., there's no way to retain them. The initial setup corresponds to the
++      # dummy application, which uses the default Rails skeleton in that regard.
++      # So, if at some point Rails changed the given options, we should update it
++      # here.
++      around do |example|
++        controller = Spree::UsersController
++        old_allow_forgery_protection_value = controller.allow_forgery_protection
++        old_forgery_protection_strategy = controller.forgery_protection_strategy
++        controller.skip_forgery_protection
++        controller.allow_forgery_protection = true
++        controller.protect_from_forgery with: strategy
++
++        example.run
++
++        controller.allow_forgery_protection = old_allow_forgery_protection_value
++        controller.forgery_protection_strategy = old_forgery_protection_strategy
++      end
++
++      it "is not possible to take account over with the #{strategy} forgery protection strategy" do
++        user = create(:user, email: 'legit@mail.com', password: 'password')
++
++        post '/login', params: "spree_user[email]=legit@mail.com&spree_user[password]=password"
++        begin
++          put '/users/123456', params: 'user[email]=hacked@example.com'
++        rescue
++          # testing that the account is not compromised regardless of any raised
++          # exception
++        end
++
++        expect(user.reload.email).to eq('legit@mail.com')
++      end
++    end
++  end
++end

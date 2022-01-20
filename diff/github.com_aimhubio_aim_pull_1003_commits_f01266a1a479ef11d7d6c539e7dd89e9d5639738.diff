@@ -1,0 +1,40 @@
+From f01266a1a479ef11d7d6c539e7dd89e9d5639738 Mon Sep 17 00:00:00 2001
+From: mihran113 <vanyanmihran@gmail.com>
+Date: Fri, 12 Nov 2021 18:03:22 +0400
+Subject: [PATCH] Fix security issue when incorrect path is given to the
+ endpoint that serves static files which can lead to a leak of non wanted
+ files (e.g. /static-files/../../../../etc/passwd)
+
+---
+ aim/web/api/views.py | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/aim/web/api/views.py b/aim/web/api/views.py
+index 30edbc3c0..04cad24fd 100644
+--- a/aim/web/api/views.py
++++ b/aim/web/api/views.py
+@@ -1,7 +1,9 @@
+ import os
++from pathlib import Path
+ 
+ from aim.web.api.utils import APIRouter  # wrapper for fastapi.APIRouter
+ from fastapi.responses import FileResponse
++from fastapi import HTTPException
+ 
+ statics_router = APIRouter()
+ 
+@@ -9,7 +11,13 @@
+ @statics_router.get('/static-files/{path:path}/')
+ async def serve_static_files(path):
+     from aim import web
+-    static_file_name = os.path.join(os.path.dirname(web.__file__), 'ui', 'build', path)
++    static_file_root = os.path.join(os.path.dirname(web.__file__), 'ui', 'build')
++    static_file_name = os.path.join(static_file_root, path)
++
++    # check if path is leading inside ui/build directory
++    if not Path(static_file_root) in Path(static_file_name).resolve().parents:
++        raise HTTPException(404)
++
+     compressed_file_name = '{}.gz'.format(static_file_name)
+     if os.path.exists(compressed_file_name):
+         return FileResponse(compressed_file_name, headers={'Content-Encoding': 'gzip'})

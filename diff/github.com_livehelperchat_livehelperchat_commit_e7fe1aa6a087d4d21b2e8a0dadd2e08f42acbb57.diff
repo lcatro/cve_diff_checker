@@ -1,0 +1,77 @@
+From e7fe1aa6a087d4d21b2e8a0dadd2e08f42acbb57 Mon Sep 17 00:00:00 2001
+From: Remigijus Kiminas <remdex@gmail.com>
+Date: Tue, 7 Dec 2021 04:11:58 -0500
+Subject: [PATCH] csrf for logout url
+
+---
+ .../design/defaulttheme/tpl/lhuser/wentinactive.tpl.php    | 2 +-
+ .../defaulttheme/tpl/pagelayouts/parts/user_box.tpl.php    | 2 +-
+ lhc_web/modules/lhuser/logout.php                          | 7 ++++++-
+ lhc_web/modules/lhuser/module.php                          | 3 ++-
+ 4 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/lhc_web/design/defaulttheme/tpl/lhuser/wentinactive.tpl.php b/lhc_web/design/defaulttheme/tpl/lhuser/wentinactive.tpl.php
+index dda6c9483..05530351c 100644
+--- a/lhc_web/design/defaulttheme/tpl/lhuser/wentinactive.tpl.php
++++ b/lhc_web/design/defaulttheme/tpl/lhuser/wentinactive.tpl.php
+@@ -5,6 +5,6 @@
+ 
+ <button type="button" class="btn btn-success" data-dismiss="modal" aria-label="Close"><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('user/wentinactive','Continue');?></button>
+ 
+-<a class="btn btn-secondary btn-warning float-right" href="<?php echo erLhcoreClassDesign::baseurl('user/logout')?>"><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('user/wentinactive','Logout');?></a>
++<a class="btn btn-secondary btn-warning float-right" onclick="$(this).attr('href',$(this).attr('href')+'/(csfr)/'+confLH.csrf_token)" href="<?php echo erLhcoreClassDesign::baseurl('user/logout')?>"><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('user/wentinactive','Logout');?></a>
+ 
+ <?php include(erLhcoreClassDesign::designtpl('lhkernel/modal_footer.tpl.php'));?>
+\ No newline at end of file
+diff --git a/lhc_web/design/defaulttheme/tpl/pagelayouts/parts/user_box.tpl.php b/lhc_web/design/defaulttheme/tpl/pagelayouts/parts/user_box.tpl.php
+index ed164cff6..9a908b970 100644
+--- a/lhc_web/design/defaulttheme/tpl/pagelayouts/parts/user_box.tpl.php
++++ b/lhc_web/design/defaulttheme/tpl/pagelayouts/parts/user_box.tpl.php
+@@ -30,7 +30,7 @@
+                 <a title="<?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('chat/user_settings','Toggle between dark and white themes');?>" href="<?php echo erLhcoreClassDesign::baseurl('front/switchdashboard')?>/(action)/mode" class="dropdown-item pl-2"><span class="material-icons">settings_brightness</span><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Dark/bright');?></a>
+             </div>
+             <div class="col-6">
+-                <a class="dropdown-item pl-2" href="<?php echo erLhcoreClassDesign::baseurl('user/logout')?>" title="<?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Logout');?>"><i class="material-icons">exit_to_app</i><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Logout');?></a>
++                <a class="dropdown-item pl-2" onclick="$(this).attr('href',$(this).attr('href')+'/(csfr)/'+confLH.csrf_token)" href="<?php echo erLhcoreClassDesign::baseurl('user/logout')?>" title="<?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Logout');?>"><i class="material-icons">exit_to_app</i><?php echo erTranslationClassLhTranslation::getInstance()->getTranslation('pagelayout/pagelayout','Logout');?></a>
+             </div>
+         </div>
+ 
+diff --git a/lhc_web/modules/lhuser/logout.php b/lhc_web/modules/lhuser/logout.php
+index 1846b637c..aab3351e6 100644
+--- a/lhc_web/modules/lhuser/logout.php
++++ b/lhc_web/modules/lhuser/logout.php
+@@ -4,13 +4,18 @@
+ 
+ $lhUser = erLhcoreClassUser::instance();
+ 
++if (!$lhUser->isLogged() || !$lhUser->validateCSFRToken($Params['user_parameters_unordered']['csfr'])) {
++    die('Invalid CSFR Token');
++    exit;
++}
++
+ erLhcoreClassChatEventDispatcher::getInstance()->dispatch('user.logout',array('user' => & $lhUser));
+ 
+ $lhUser->logout();
+ 
+ erLhcoreClassChatEventDispatcher::getInstance()->dispatch('user.after_logout',array('user' => & $lhUser));
+ 
+-erLhcoreClassModule::redirect('user/login');
++//erLhcoreClassModule::redirect('user/login');
+ exit;
+ 
+ ?>
+\ No newline at end of file
+diff --git a/lhc_web/modules/lhuser/module.php b/lhc_web/modules/lhuser/module.php
+index 31de060b1..0fcacb1d8 100644
+--- a/lhc_web/modules/lhuser/module.php
++++ b/lhc_web/modules/lhuser/module.php
+@@ -20,7 +20,8 @@
+ );
+ 
+ $ViewList['logout'] = array(
+-    'params' => array()
++    'params' => array(),
++    'uparams' => array('csfr')
+ );
+ 
+ $ViewList['loginas'] = array(

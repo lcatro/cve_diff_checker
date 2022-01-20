@@ -1,0 +1,46 @@
+From 55e1b2343f4deb1a1b5726cfe1e23b2068217ff2 Mon Sep 17 00:00:00 2001
+From: Neil Dhar <neildhar@fb.com>
+Date: Wed, 13 Oct 2021 11:18:13 -0700
+Subject: [PATCH] Handle typeof applied to empty in InstSimplify
+
+Summary:
+Do not simplify `typeof` if it is applied to an invalid type. This
+handles a case like the one in the added test, where `typeof` is called
+on a literal empty in unreachable code.
+
+Reviewed By: kodafb
+
+Differential Revision: D31000173
+
+fbshipit-source-id: 2d7f69cbcc9c1bb0a916585c07171089444c85dc
+---
+ lib/IR/IREval.cpp        | 2 +-
+ test/hermes/tdz-check.js | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/lib/IR/IREval.cpp b/lib/IR/IREval.cpp
+index a07efd66d..3ddb40d74 100644
+--- a/lib/IR/IREval.cpp
++++ b/lib/IR/IREval.cpp
+@@ -107,7 +107,7 @@ Literal *hermes::evalUnaryOperator(
+         case ValueKind::LiteralStringKind:
+           return builder.getLiteralString("string");
+         default:
+-          llvm_unreachable("Invalid literal kind.");
++          break;
+       }
+       break;
+ 
+diff --git a/test/hermes/tdz-check.js b/test/hermes/tdz-check.js
+index 0533c1c49..fa82b26e8 100644
+--- a/test/hermes/tdz-check.js
++++ b/test/hermes/tdz-check.js
+@@ -45,3 +45,8 @@ test(() => {
+     return x;
+ });
+ //CHECK-NEXT: caught ReferenceError: accessing an uninitialized variable
++
++test(() => {
++    const foo = print(foo, typeof foo)
++});
++//CHECK-NEXT: caught ReferenceError: accessing an uninitialized variable

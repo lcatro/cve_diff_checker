@@ -1,0 +1,25 @@
+From e83cf65438bef83a3503b25358bba97bcc156fef Mon Sep 17 00:00:00 2001
+From: Sergey Volkov <s.volkov@netris.ru>
+Date: Wed, 15 Dec 2021 20:14:56 +0300
+Subject: [PATCH] fix: file access outside the public dir
+
+---
+ src/server/services/HttpServer.ts | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/server/services/HttpServer.ts b/src/server/services/HttpServer.ts
+index 10ee844..145d3ae 100644
+--- a/src/server/services/HttpServer.ts
++++ b/src/server/services/HttpServer.ts
+@@ -45,6 +45,11 @@ export class HttpServer implements Service {
+             }
+             const parsedUrl = url.parse(req.url);
+             let pathname = path.join(publicDir, (parsedUrl.pathname || '.').replace(/^(\.)+/, '.'));
++            if (pathname.indexOf(publicDir) !== 0) {
++                res.statusCode = 403;
++                res.end();
++                return;
++            }
+             fs.stat(pathname, (statErr, stat) => {
+                 if (statErr) {
+                     if (statErr.code === 'ENOENT') {

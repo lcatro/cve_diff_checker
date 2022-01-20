@@ -1,0 +1,40 @@
+From 6ad1349dc5e7503b00c5017499a0a895d7654a61 Mon Sep 17 00:00:00 2001
+From: Remigijus Kiminas <remdex@gmail.com>
+Date: Fri, 14 Jan 2022 06:45:58 -0500
+Subject: [PATCH] CSRF for file configuration URL
+
+---
+ .../design/defaulttheme/tpl/lhfile/configuration.tpl.php    | 2 ++
+ lhc_web/modules/lhfile/configuration.php                    | 6 ++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/lhc_web/design/defaulttheme/tpl/lhfile/configuration.tpl.php b/lhc_web/design/defaulttheme/tpl/lhfile/configuration.tpl.php
+index 868e51c74..2bc4ec8c2 100644
+--- a/lhc_web/design/defaulttheme/tpl/lhfile/configuration.tpl.php
++++ b/lhc_web/design/defaulttheme/tpl/lhfile/configuration.tpl.php
+@@ -10,6 +10,8 @@
+ 
+ <form action="" ng-non-bindable method="post">
+ 
++    <?php include(erLhcoreClassDesign::designtpl('lhkernel/csfr_token.tpl.php'));?>
++
+     <div class="row">
+         <div class="col-6">
+             <div class="form-group">
+diff --git a/lhc_web/modules/lhfile/configuration.php b/lhc_web/modules/lhfile/configuration.php
+index e8e3663fe..08244dcc5 100644
+--- a/lhc_web/modules/lhfile/configuration.php
++++ b/lhc_web/modules/lhfile/configuration.php
+@@ -7,6 +7,12 @@
+ 
+ 
+ if (isset($_POST['StoreFileConfiguration'])) {
++
++    if (!isset($_POST['csfr_token']) || !$currentUser->validateCSFRToken($_POST['csfr_token'])) {
++        erLhcoreClassModule::redirect('file/configuration');
++        exit;
++    }
++
+     $definition = array(
+         'AllowedFileTypes' => new ezcInputFormDefinitionElement(
+             ezcInputFormDefinitionElement::OPTIONAL, 'string'

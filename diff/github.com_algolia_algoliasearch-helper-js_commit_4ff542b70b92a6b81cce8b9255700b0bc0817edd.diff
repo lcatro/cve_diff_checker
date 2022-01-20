@@ -1,0 +1,96 @@
+From 4ff542b70b92a6b81cce8b9255700b0bc0817edd Mon Sep 17 00:00:00 2001
+From: Haroen Viaene <hello@haroen.me>
+Date: Tue, 19 Oct 2021 15:00:44 +0100
+Subject: [PATCH] fix(SearchParameters): ignore invalid parameters (#880)
+
+* fix(SearchParameters): ignore invalid parameters
+
+These parameters could be used maliciously, so are explicilty not allowed in merge
+
+* clearer test
+---
+ src/functions/merge.js              | 10 ++++++++--
+ test/spec/functions/defaultsPure.js | 13 +++++++++++++
+ test/spec/functions/intersection.js |  1 -
+ test/spec/functions/merge.js        | 13 +++++++++++++
+ 4 files changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/src/functions/merge.js b/src/functions/merge.js
+index b8b95695e..131256b3e 100644
+--- a/src/functions/merge.js
++++ b/src/functions/merge.js
+@@ -21,7 +21,10 @@ function _merge(target, source) {
+   }
+ 
+   for (var key in source) {
+-    if (!Object.prototype.hasOwnProperty.call(source, key)) {
++    if (
++      !Object.prototype.hasOwnProperty.call(source, key) ||
++      key === '__proto__'
++    ) {
+       continue;
+     }
+ 
+@@ -32,7 +35,10 @@ function _merge(target, source) {
+       continue;
+     }
+ 
+-    if (isObjectOrArrayOrFunction(targetVal) && isObjectOrArrayOrFunction(sourceVal)) {
++    if (
++      isObjectOrArrayOrFunction(targetVal) &&
++      isObjectOrArrayOrFunction(sourceVal)
++    ) {
+       target[key] = _merge(targetVal, sourceVal);
+     } else {
+       target[key] = clone(sourceVal);
+diff --git a/test/spec/functions/defaultsPure.js b/test/spec/functions/defaultsPure.js
+index 93233cc70..8884a0c93 100644
+--- a/test/spec/functions/defaultsPure.js
++++ b/test/spec/functions/defaultsPure.js
+@@ -92,3 +92,16 @@ it('should keep the keys order when adding facet refinements', function() {
+   );
+   expect(Object.keys(actual)).toEqual(['facet1', 'facet2']);
+ });
++
++it('does not pollute the prototype', () => {
++  var payload = JSON.parse('{"__proto__": {"polluted": "vulnerable to PP"}}');
++  var subject = {};
++
++  expect(subject.polluted).toBe(undefined);
++
++  const out = defaults({}, payload);
++
++  expect(out).toEqual({});
++
++  expect({}.polluted).toBe(undefined);
++});
+diff --git a/test/spec/functions/intersection.js b/test/spec/functions/intersection.js
+index 6d83fb04a..b529e84ec 100644
+--- a/test/spec/functions/intersection.js
++++ b/test/spec/functions/intersection.js
+@@ -18,4 +18,3 @@ test('it should not produce duplicate primitive values', function() {
+     '2'
+   ]);
+ });
+-
+diff --git a/test/spec/functions/merge.js b/test/spec/functions/merge.js
+index e7f7015e0..64b92c32c 100644
+--- a/test/spec/functions/merge.js
++++ b/test/spec/functions/merge.js
+@@ -170,3 +170,16 @@ it('should not convert strings to arrays when merging arrays of `source`', funct
+ 
+   expect(actual).toStrictEqual({a: ['x', 'y', 'z']});
+ });
++
++it('does not pollute the prototype', () => {
++  var payload = JSON.parse('{"__proto__": {"polluted": "vulnerable to PP"}}');
++  var subject = {};
++
++  expect(subject.polluted).toBe(undefined);
++
++  const out = merge({}, payload);
++
++  expect(out).toEqual({});
++
++  expect({}.polluted).toBe(undefined);
++});

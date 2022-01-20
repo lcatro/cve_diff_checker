@@ -1,0 +1,26 @@
+From 3a889a37b5b74a45025aca13ebda394b8f706ef3 Mon Sep 17 00:00:00 2001
+From: jcdr428 <56721609+jcdr428@users.noreply.github.com>
+Date: Sun, 30 May 2021 09:34:13 +0100
+Subject: [PATCH] [bug] Buffer overflow when SEI payloadSize > bits left
+
+Fixes #433 .
+---
+ tsMuxer/hevc.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/tsMuxer/hevc.cpp b/tsMuxer/hevc.cpp
+index 7f408a65..4863fb07 100644
+--- a/tsMuxer/hevc.cpp
++++ b/tsMuxer/hevc.cpp
+@@ -979,6 +979,11 @@ int HevcHdrUnit::deserialize()
+                 nbyte = m_reader.getBits(8);
+                 payloadSize += nbyte;
+             }
++            if (m_reader.getBitsLeft() < payloadSize * 8)
++            {
++                LTRACE(LT_WARN, 2, "Bad SEI detected. SEI too short");
++                return 1;
++            }
+             if (payloadType == 137 && !isHDR10)  // mastering_display_colour_volume
+             {
+                 isHDR10 = true;

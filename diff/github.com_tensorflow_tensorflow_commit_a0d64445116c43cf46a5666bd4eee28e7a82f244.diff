@@ -1,0 +1,25 @@
+From a0d64445116c43cf46a5666bd4eee28e7a82f244 Mon Sep 17 00:00:00 2001
+From: Yu-Cheng Ling <ycling@google.com>
+Date: Fri, 1 Oct 2021 15:52:56 -0700
+Subject: [PATCH] Prevent OOB access in QuantizeV2 shape inference
+
+PiperOrigin-RevId: 400309614
+Change-Id: I31412c71b05b4f21b677f7fa715a61499cbee39d
+---
+ tensorflow/core/framework/common_shape_fns.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tensorflow/core/framework/common_shape_fns.cc b/tensorflow/core/framework/common_shape_fns.cc
+index 8c1b3bf1d1c9d..95f2670e0571d 100644
+--- a/tensorflow/core/framework/common_shape_fns.cc
++++ b/tensorflow/core/framework/common_shape_fns.cc
+@@ -2559,6 +2559,9 @@ Status QuantizeV2Shape(InferenceContext* c) {
+   if (!s.ok() && s.code() != error::NOT_FOUND) {
+     return s;
+   }
++  if (axis < -1) {
++    return errors::InvalidArgument("axis should be at least -1, got ", axis);
++  }
+   const int minmax_rank = (axis == -1) ? 0 : 1;
+   TF_RETURN_IF_ERROR(shape_inference::UnchangedShape(c));
+   ShapeHandle minmax;

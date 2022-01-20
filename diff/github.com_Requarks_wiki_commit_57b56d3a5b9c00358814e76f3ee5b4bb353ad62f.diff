@@ -1,0 +1,29 @@
+From 57b56d3a5b9c00358814e76f3ee5b4bb353ad62f Mon Sep 17 00:00:00 2001
+From: NGPixel <github@ngpixel.com>
+Date: Fri, 24 Dec 2021 19:36:30 -0500
+Subject: [PATCH] fix: validate svg file extension in addition to client mime
+ type
+
+---
+ server/models/assets.js | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/server/models/assets.js b/server/models/assets.js
+index 8548319fa..9d0a79b1c 100644
+--- a/server/models/assets.js
++++ b/server/models/assets.js
+@@ -100,7 +100,13 @@ module.exports = class Asset extends Model {
+     }
+ 
+     // Sanitize SVG contents
+-    if (WIKI.config.uploads.scanSVG && opts.mimetype === 'image/svg+xml') {
++    if (
++      WIKI.config.uploads.scanSVG &&
++      (
++        opts.mimetype.toLowerCase().startsWith('image/svg') ||
++        opts.ext.toLowerCase() === 'svg'
++      )
++    ) {
+       const svgSanitizeJob = await WIKI.scheduler.registerJob({
+         name: 'sanitize-svg',
+         immediate: true,

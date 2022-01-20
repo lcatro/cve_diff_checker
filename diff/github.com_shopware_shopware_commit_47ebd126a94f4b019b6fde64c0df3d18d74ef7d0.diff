@@ -1,0 +1,284 @@
+From 47ebd126a94f4b019b6fde64c0df3d18d74ef7d0 Mon Sep 17 00:00:00 2001
+From: Philip Gatzka <p.gatzka@shopware.com>
+Date: Mon, 27 Dec 2021 16:16:07 +0100
+Subject: [PATCH] SW-26448 - Invalidate login in corresponding sessions when
+ the password for a customer account is changed
+
+---
+ UPGRADE-5.7.md                                | 12 ++++
+ .../Shopware/Controllers/Frontend/Account.php |  6 ++
+ engine/Shopware/Core/sAdmin.php               | 14 ++++-
+ .../Core/sAdminSGetUserDataTest.php           | 58 +++++++++++++++++--
+ .../Functional/Traits/CustomerLoginTrait.php  | 14 +++++
+ 5 files changed, 96 insertions(+), 8 deletions(-)
+
+diff --git a/UPGRADE-5.7.md b/UPGRADE-5.7.md
+index e91d71ca14..9f310571cc 100644
+--- a/UPGRADE-5.7.md
++++ b/UPGRADE-5.7.md
+@@ -42,6 +42,18 @@ Use `TaxAggregator::taxSum` instead.
+ 
+ * Removed deprecated composer dependency `symfony/class-loader`. Use Composer ClassLoader instead
+ 
++### Session validation
++
++With v5.7.7 the session validation was adjusted, so that sessions created prior
++to the latest password change of a customer account can't be used to login with
++said account. This also means, that upon a password change, all existing
++sessions for a given customer account are automatically considered invalid.
++
++All sessions created prior to v5.7.7 are lacking the timestamp of the latest
++password change and are therefore not considered valid anymore. **After an
++upgrade to v5.7.7, all customers who have a session in the given shop, will need
++to log in again.**
++
+ ## 5.7.6
+ 
+ [View all changes from v5.7.5...v5.7.6](https://github.com/shopware/shopware/compare/v5.7.5...v5.7.6)
+diff --git a/engine/Shopware/Controllers/Frontend/Account.php b/engine/Shopware/Controllers/Frontend/Account.php
+index 1eb52be345..75b1f3922f 100644
+--- a/engine/Shopware/Controllers/Frontend/Account.php
++++ b/engine/Shopware/Controllers/Frontend/Account.php
+@@ -725,6 +725,12 @@ public function savePasswordAction()
+         if ($form->isSubmitted() && $form->isValid()) {
+             $this->customerService->update($customer);
+ 
++            /*
++             * Formatting the date as 'Y-m-d H:i:s' is needed, since it is read
++             * directly from the DB in sAdmin::loginUser.
++             */
++            $this->get('session')->offsetSet('sUserPasswordChangeDate', $customer->getPasswordChangeDate()->format('Y-m-d H:i:s'));
++
+             $this->redirect(['controller' => 'account', 'action' => 'profile', 'success' => true, 'section' => 'password']);
+ 
+             return;
+diff --git a/engine/Shopware/Core/sAdmin.php b/engine/Shopware/Core/sAdmin.php
+index dfd4ad4171..124d3ba2cb 100644
+--- a/engine/Shopware/Core/sAdmin.php
++++ b/engine/Shopware/Core/sAdmin.php
+@@ -772,6 +772,7 @@ public function sLogin($ignoreAccountMode = false)
+             $sErrorMessages[] = $this->snippetManager->getNamespace('frontend/account/internalMessages')
+                 ->get('LoginFailure', 'Wrong email or password');
+             $this->session->offsetUnset('sUserMail');
++            $this->session->offsetUnset('sUserPasswordChangeDate');
+             $this->session->offsetUnset('sUserId');
+         }
+ 
+@@ -799,14 +800,14 @@ public function sLogin($ignoreAccountMode = false)
+ 
+         if ($ignoreAccountMode) {
+             $sql = '
+-                SELECT id, customergroup, password, encoder
++                SELECT id, customergroup, password, encoder, password_change_date
+                 FROM s_user WHERE email = ? AND active=1
+                 AND (lockeduntil < now() OR lockeduntil IS NULL) '
+                 . $addScopeSql
+                 . $preHashedSql;
+         } else {
+             $sql = '
+-                SELECT id, customergroup, password, encoder
++                SELECT id, customergroup, password, encoder, password_change_date
+                 FROM s_user
+                 WHERE email = ? AND active=1 AND accountmode != 1
+                 AND (lockeduntil < now() OR lockeduntil IS NULL) '
+@@ -872,11 +873,14 @@ public function sCheckUser()
+ 
+         $userId = $this->session->offsetGet('sUserId');
+         $userMail = $this->session->offsetGet('sUserMail');
++        $passwordChangeDate = $this->session->offsetGet('sUserPasswordChangeDate');
+ 
+         if (empty($userMail)
++            || empty($passwordChangeDate)
+             || empty($userId)
+         ) {
+             $this->session->offsetUnset('sUserMail');
++            $this->session->offsetUnset('sUserPasswordChangeDate');
+             $this->session->offsetUnset('sUserId');
+ 
+             return false;
+@@ -884,13 +888,14 @@ public function sCheckUser()
+ 
+         $sql = '
+             SELECT * FROM s_user
+-            WHERE email = ? AND id = ?
++            WHERE password_change_date = ? AND email = ? AND id = ?
+             AND UNIX_TIMESTAMP(lastlogin) >= (UNIX_TIMESTAMP(NOW())-?)
+         ';
+ 
+         $getUser = $this->db->fetchRow(
+             $sql,
+             [
++                $passwordChangeDate,
+                 $userMail,
+                 $userId,
+                 (int) ini_get('session.gc_maxlifetime'),
+@@ -928,6 +933,7 @@ public function sCheckUser()
+             return true;
+         }
+         $this->session->offsetUnset('sUserMail');
++        $this->session->offsetUnset('sUserPasswordChangeDate');
+         $this->session->offsetUnset('sUserId');
+         $this->eventManager->notify(
+             'Shopware_Modules_Admin_CheckUser_Failure',
+@@ -3246,6 +3252,7 @@ protected function loginUser($getUser, $email, $password, $isPreHashed, $encoder
+         }
+ 
+         $this->session->offsetSet('sUserMail', $email);
++        $this->session->offsetSet('sUserPasswordChangeDate', $getUser['password_change_date']);
+         $this->session->offsetSet('sUserId', $userId);
+         $this->session->offsetSet('sNotesQuantity', $this->moduleManager->Basket()->sCountNotes());
+ 
+@@ -3623,6 +3630,7 @@ private function failedLoginUser($addScopeSql, $email, $sErrorMessages, $passwor
+         );
+ 
+         $this->session->offsetUnset('sUserMail');
++        $this->session->offsetUnset('sUserPasswordChangeDate');
+         $this->session->offsetUnset('sUserId');
+ 
+         return $sErrorMessages;
+diff --git a/tests/Functional/Core/sAdminSGetUserDataTest.php b/tests/Functional/Core/sAdminSGetUserDataTest.php
+index ddaa2afb10..c46095b190 100644
+--- a/tests/Functional/Core/sAdminSGetUserDataTest.php
++++ b/tests/Functional/Core/sAdminSGetUserDataTest.php
+@@ -23,6 +23,8 @@
+  */
+ 
+ use PHPUnit\Framework\TestCase;
++use Shopware\Bundle\AccountBundle\Service\CustomerServiceInterface;
++use Shopware\Models\Customer\Customer;
+ use Shopware\Tests\Functional\Traits\CustomerLoginTrait;
+ use Shopware\Tests\Functional\Traits\DatabaseTransactionBehaviour;
+ 
+@@ -31,17 +33,25 @@ class sAdminSGetUserDataTest extends TestCase
+     use CustomerLoginTrait;
+     use DatabaseTransactionBehaviour;
+ 
+-    public function testSGetUserDataWithPreselectedShippingAddress(): void
++    public function setUp(): void
+     {
+-        $countryId = 21;
+         $sql = file_get_contents(__DIR__ . '/fixtures/user_address_change.sql');
+         static::assertIsString($sql);
++
+         Shopware()->Container()->get('dbal_connection')->exec($sql);
+ 
++        parent::setUp();
++    }
++
++    public function testSGetUserDataWithPreselectedShippingAddress(): void
++    {
++        $countryId = 21;
++
+         $this->loginCustomer(
+             'f375fe1b4ad9c6f2458844226831463f',
+             3,
+             'unit@test.com',
++            '2021-07-09 07:08:11'
+         );
+ 
+         $session = Shopware()->Container()->get('session');
+@@ -61,9 +71,6 @@ public function testSGetUserDataWithPreselectedShippingAddress(): void
+     public function testSGetUserDataWithAddressUserIdNotEqualsToUser(): void
+     {
+         $shippingAddress = 701;
+-        $sql = file_get_contents(__DIR__ . '/fixtures/user_address_change.sql');
+-        static::assertIsString($sql);
+-        Shopware()->Container()->get('dbal_connection')->exec($sql);
+ 
+         $sql = 'UPDATE s_user_addresses SET user_id = 4 WHERE id = 701';
+         Shopware()->Container()->get('dbal_connection')->exec($sql);
+@@ -72,6 +79,7 @@ public function testSGetUserDataWithAddressUserIdNotEqualsToUser(): void
+             'f375fe1b4ad9c6f2458844226831463f',
+             3,
+             'unit@test.com',
++            '2021-07-09 07:08:11'
+         );
+ 
+         $session = Shopware()->Container()->get('session');
+@@ -86,4 +94,44 @@ public function testSGetUserDataWithAddressUserIdNotEqualsToUser(): void
+ 
+         static::assertSame($shippingAddress, $result['shippingaddress']['id']);
+     }
++
++    public function testMultipleLoginsWithPasswordChange(): void
++    {
++        $customerId = 3;
++        $customerMail = 'unit@test.com';
++
++        $this->loginCustomer(
++            '2af1572ba5d04d6cbb916cce10f31d2b',
++            $customerId,
++            $customerMail,
++            '2021-07-09 07:08:11'
++        );
++
++        /** @var CustomerServiceInterface $customerService */
++        $customerService = Shopware()->Container()->get('shopware_account.customer_service');
++        $customerRepository = Shopware()->Container()->get('models')->getRepository(Customer::class);
++        $customer = $customerRepository->find($customerId);
++
++        static::assertInstanceOf(Customer::class, $customer);
++
++        $customer->setPassword('a1197019-546e-445a-8d48-c6813e3381ed');
++
++        $customerService->update($customer);
++
++        /*
++         * The password_change_date has been updated now, but the session used
++         * still has the old value of '2021-07-09 07:08:11', so sCheckUser
++         * should fail.
++         */
++        static::assertFalse(Shopware()->Modules()->Admin()->sCheckUser());
++
++        $this->loginCustomer(
++            '2af1572ba5d04d6cbb916cce10f31d2b',
++            $customerId,
++            $customerMail,
++            $customer->getPasswordChangeDate()->format('Y-m-d H:i:s')
++        );
++
++        static::assertTrue(Shopware()->Modules()->Admin()->sCheckUser());
++    }
+ }
+diff --git a/tests/Functional/Traits/CustomerLoginTrait.php b/tests/Functional/Traits/CustomerLoginTrait.php
+index 11f3815e7c..8e68a83295 100644
+--- a/tests/Functional/Traits/CustomerLoginTrait.php
++++ b/tests/Functional/Traits/CustomerLoginTrait.php
+@@ -36,6 +36,7 @@ public function loginCustomer(
+         string $sessionId = 'sessionId',
+         int $customerId = 1,
+         string $email = 'test@example.com',
++        ?string $passwordChangeDate = null,
+         int $countryId = 2,
+         int $areaId = 3,
+         string $customerGroupKey = 'EK',
+@@ -47,9 +48,21 @@ public function loginCustomer(
+             throw new RuntimeException('Cannot initialize session');
+         }
+ 
++        if ($passwordChangeDate === null) {
++            $result = Shopware()->Container()->get('dbal_connection')->fetchFirstColumn(
++                'SELECT `password_change_date` FROM `s_user` WHERE `id` = :customerId;',
++                [
++                    'customerId' => $customerId,
++                ]
++            );
++
++            $passwordChangeDate = array_pop($result);
++        }
++
+         $session->offsetSet('sessionId', $sessionId);
+         $session->offsetSet('sUserId', $customerId);
+         $session->offsetSet('sUserMail', $email);
++        $session->offsetSet('sUserPasswordChangeDate', $passwordChangeDate);
+         $session->offsetSet('sCountry', $countryId);
+         $session->offsetSet('sArea', $areaId);
+         $session->offsetSet('sUserGroup', $customerGroupKey);
+@@ -72,6 +85,7 @@ public function logOutCustomer(): void
+         $session->offsetUnset('sessionId');
+         $session->offsetUnset('sUserId');
+         $session->offsetUnset('sUserMail');
++        $session->offsetUnset('sUserPasswordChangeDate');
+         $session->offsetUnset('sUserGroup');
+         $session->offsetUnset('sCountry');
+         $session->offsetUnset('sArea');

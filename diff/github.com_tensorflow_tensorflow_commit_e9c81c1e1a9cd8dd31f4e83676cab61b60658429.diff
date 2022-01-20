@@ -1,0 +1,74 @@
+From 2b6e3c542908750c0c303ee8e4787eb209afbd9f Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Sat, 28 Aug 2021 17:14:02 +0000
+Subject: [PATCH 1/2] Fix tf.math.segment_max/min/mean/sun/prod crashes(aborts)
+ when segment_ids is large
+
+This PR fixes the issue raised in 46888 where
+tf.math.segment_max/min/mean/sun/prod crashes(aborts) when segment_ids is large.
+
+This PR fixes 46888.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ tensorflow/core/kernels/segment_reduction_ops_impl.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tensorflow/core/kernels/segment_reduction_ops_impl.h b/tensorflow/core/kernels/segment_reduction_ops_impl.h
+index 6ad7bdae331b4..0fb5087c51743 100644
+--- a/tensorflow/core/kernels/segment_reduction_ops_impl.h
++++ b/tensorflow/core/kernels/segment_reduction_ops_impl.h
+@@ -110,7 +110,7 @@ class SegmentReductionOp : public OpKernel {
+                 errors::InvalidArgument("Shape must be at least rank 1"));
+ 
+     TensorShape output_shape = input.shape();
+-    output_shape.set_dim(0, output_rows);
++    OP_REQUIRES_OK(context, output_shape.SetDimWithStatus(0, output_rows));
+ 
+     // Note that we do not initialize the output buffer with a default value, so
+     // we need to explicitly set missing indices to the default value.
+@@ -250,7 +250,7 @@ class SegmentReductionGPUOp : public AsyncOpKernel {
+ 
+     if (num_indices == 0) {
+       TensorShape output_shape = input.shape();
+-      output_shape.set_dim(0, 0);
++      OP_REQUIRES_OK_ASYNC(context, output_shape.SetDimWithStatus(0, 0), done);
+ 
+       Tensor* output = nullptr;
+       OP_REQUIRES_OK_ASYNC(
+
+From ab5a569b93ae1f7a3f3d1147fb347a2e7f65b5c3 Mon Sep 17 00:00:00 2001
+From: Yong Tang <yong.tang.github@outlook.com>
+Date: Sat, 28 Aug 2021 17:15:23 +0000
+Subject: [PATCH 2/2] Add test case for GitHub isseu 46888.
+
+Signed-off-by: Yong Tang <yong.tang.github@outlook.com>
+---
+ .../kernel_tests/segment_reduction_ops_test.py     | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/tensorflow/python/kernel_tests/segment_reduction_ops_test.py b/tensorflow/python/kernel_tests/segment_reduction_ops_test.py
+index 3ef7183f02d65..98652b11515a4 100644
+--- a/tensorflow/python/kernel_tests/segment_reduction_ops_test.py
++++ b/tensorflow/python/kernel_tests/segment_reduction_ops_test.py
+@@ -267,6 +267,20 @@ def testDataInvalid(self):
+               data=np.uint16(10), segment_ids=np.array([]).astype("int64"))
+           self.evaluate(s)
+ 
++  def testInvalidIds(self):
++    # Test case for GitHub issue 46888.
++    for op in [
++        math_ops.segment_max,
++        math_ops.segment_min,
++        math_ops.segment_mean,
++        math_ops.segment_sum,
++        math_ops.segment_prod,
++    ]:
++      with self.cached_session():
++        with self.assertRaises((ValueError, errors_impl.InternalError)):
++          s = op(data=np.ones((1, 10, 1)), segment_ids=[1676240524292489355])
++          self.evaluate(s)
++
+ 
+ class UnsortedSegmentTest(SegmentReductionHelper):
+ 

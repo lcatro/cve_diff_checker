@@ -1,0 +1,116 @@
+From 34eda6123d9b21c2c0b2d0c0e6f2fb38e6cf60d5 Mon Sep 17 00:00:00 2001
+From: Oscar Kilhed <oscar.kilhed@grafana.com>
+Date: Fri, 22 Oct 2021 16:14:24 +0200
+Subject: [PATCH 1/2] Sanitized nav bar links to remove angular interpolation
+
+---
+ packages/grafana-data/src/text/index.ts          |  3 ++-
+ packages/grafana-data/src/text/sanitize.ts       |  4 ++++
+ public/app/core/components/NavBar/NavBarItem.tsx | 11 ++++++-----
+ 3 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/packages/grafana-data/src/text/index.ts b/packages/grafana-data/src/text/index.ts
+index bece68920aced..be85edccaf999 100644
+--- a/packages/grafana-data/src/text/index.ts
++++ b/packages/grafana-data/src/text/index.ts
+@@ -1,11 +1,12 @@
+ export * from './string';
+ export * from './markdown';
+ export * from './text';
+-import { escapeHtml, hasAnsiCodes, sanitize, sanitizeUrl } from './sanitize';
++import { escapeHtml, hasAnsiCodes, sanitize, sanitizeUrl, sanitizeAngularInterpolation } from './sanitize';
+ 
+ export const textUtil = {
+   escapeHtml,
+   hasAnsiCodes,
+   sanitize,
+   sanitizeUrl,
++  sanitizeAngularInterpolation,
+ };
+diff --git a/packages/grafana-data/src/text/sanitize.ts b/packages/grafana-data/src/text/sanitize.ts
+index d32c4a961787c..6313d0db13885 100644
+--- a/packages/grafana-data/src/text/sanitize.ts
++++ b/packages/grafana-data/src/text/sanitize.ts
+@@ -38,3 +38,7 @@ export function hasAnsiCodes(input: string): boolean {
+ export function escapeHtml(str: string): string {
+   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+ }
++
++export function sanitizeAngularInterpolation(url: string): string {
++  return url.replace('{{', '%7B%7B').replace('}}', '%7D%7D');
++}
+diff --git a/public/app/core/components/NavBar/NavBarItem.tsx b/public/app/core/components/NavBar/NavBarItem.tsx
+index 134d67b2b6118..0d325a7c7a44a 100644
+--- a/public/app/core/components/NavBar/NavBarItem.tsx
++++ b/public/app/core/components/NavBar/NavBarItem.tsx
+@@ -1,6 +1,6 @@
+ import React, { ReactNode } from 'react';
+ import { css, cx } from '@emotion/css';
+-import { GrafanaTheme2, NavModelItem } from '@grafana/data';
++import { GrafanaTheme2, NavModelItem, textUtil } from '@grafana/data';
+ import { Link, useTheme2 } from '@grafana/ui';
+ import NavBarDropdown from './NavBarDropdown';
+ 
+@@ -34,13 +34,14 @@ const NavBarItem = ({
+       <span className={styles.icon}>{children}</span>
+     </button>
+   );
++  const sanitizedUrl = textUtil.sanitizeAngularInterpolation(url ?? '');
+ 
+   if (url) {
+     element =
+-      !target && url.startsWith('/') ? (
++      !target && sanitizedUrl.startsWith('/') ? (
+         <Link
+           className={styles.element}
+-          href={url}
++          href={sanitizedUrl}
+           target={target}
+           aria-label={label}
+           onClick={onClick}
+@@ -49,7 +50,7 @@ const NavBarItem = ({
+           <span className={styles.icon}>{children}</span>
+         </Link>
+       ) : (
+-        <a href={url} target={target} className={styles.element} onClick={onClick} aria-label={label}>
++        <a href={sanitizedUrl} target={target} className={styles.element} onClick={onClick} aria-label={label}>
+           <span className={styles.icon}>{children}</span>
+         </a>
+       );
+@@ -61,7 +62,7 @@ const NavBarItem = ({
+       <NavBarDropdown
+         headerTarget={target}
+         headerText={label}
+-        headerUrl={url}
++        headerUrl={sanitizedUrl}
+         items={menuItems}
+         onHeaderClick={onClick}
+         reverseDirection={reverseMenuDirection}
+
+From 0b440d53814f897717ba001092a511e51e8b8b10 Mon Sep 17 00:00:00 2001
+From: Oscar Kilhed <oscar.kilhed@grafana.com>
+Date: Fri, 22 Oct 2021 16:16:40 +0200
+Subject: [PATCH 2/2] Revert "Angular: Fix for paths with interpolation"
+
+This reverts commit 5c7224eb56801b22848470a50b50398bc06cc1e8.
+---
+ public/app/angular/AngularApp.ts | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/public/app/angular/AngularApp.ts b/public/app/angular/AngularApp.ts
+index 2f45a909196ab..ffa585766dcf7 100644
+--- a/public/app/angular/AngularApp.ts
++++ b/public/app/angular/AngularApp.ts
+@@ -103,12 +103,6 @@ export class AngularApp {
+   }
+ 
+   bootstrap() {
+-    // Do not initalize angular when the path contains an interpolation directive
+-    const { pathname } = window.location;
+-    if (pathname && (pathname.includes('%7B%7B') || pathname.includes('{{'))) {
+-      return;
+-    }
+-
+     const injector = angular.bootstrap(document, this.ngModuleDependencies);
+ 
+     monkeyPatchInjectorWithPreAssignedBindings(injector);

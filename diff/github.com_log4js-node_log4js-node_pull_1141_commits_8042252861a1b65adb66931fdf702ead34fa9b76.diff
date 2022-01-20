@@ -1,0 +1,103 @@
+From 8042252861a1b65adb66931fdf702ead34fa9b76 Mon Sep 17 00:00:00 2001
+From: peteriman <peteriman@mail.com>
+Date: Sun, 16 Jan 2022 22:09:32 +0800
+Subject: [PATCH] Changed default file modes from 0o644 to 0o600 for better
+ security
+
+---
+ docs/dateFile.md          | 2 +-
+ docs/file.md              | 2 +-
+ docs/fileSync.md          | 2 +-
+ lib/appenders/dateFile.js | 4 +++-
+ lib/appenders/file.js     | 3 +++
+ lib/appenders/fileSync.js | 2 +-
+ 6 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/docs/dateFile.md b/docs/dateFile.md
+index 8e4b53f8..cdca469c 100644
+--- a/docs/dateFile.md
++++ b/docs/dateFile.md
+@@ -11,7 +11,7 @@ This is a file appender that rolls log files based on a configurable time, rathe
+ 
+ Any other configuration parameters will be passed to the underlying [streamroller](https://github.com/nomiddlename/streamroller) implementation (see also node.js core file streams):
+ * `encoding` - `string` (default "utf-8")
+-* `mode`- `integer` (default 0o644 - [node.js file modes](https://nodejs.org/dist/latest-v12.x/docs/api/fs.html#fs_file_modes))
++* `mode`- `integer` (default 0o600 - [node.js file modes](https://nodejs.org/dist/latest-v12.x/docs/api/fs.html#fs_file_modes))
+ * `flags` - `string` (default 'a')
+ * `compress` - `boolean` (default false) - compress the backup files during rolling (backup files will have `.gz` extension)
+ * `alwaysIncludePattern` - `boolean` (default false) - include the pattern in the name of the current log file as well as the backups.
+diff --git a/docs/file.md b/docs/file.md
+index e4fee59a..213868c1 100644
+--- a/docs/file.md
++++ b/docs/file.md
+@@ -12,7 +12,7 @@ The file appender writes log events to a file. It supports an optional maximum f
+ 
+ Any other configuration parameters will be passed to the underlying [streamroller](https://github.com/nomiddlename/streamroller) implementation (see also node.js core file streams):
+ * `encoding` - `string` (default "utf-8")
+-* `mode`- `integer` (default 0o644 - [node.js file modes](https://nodejs.org/dist/latest-v12.x/docs/api/fs.html#fs_file_modes))
++* `mode`- `integer` (default 0o600 - [node.js file modes](https://nodejs.org/dist/latest-v12.x/docs/api/fs.html#fs_file_modes))
+ * `flags` - `string` (default 'a')
+ * `compress` - `boolean` (default false) - compress the backup files during rolling (backup files will have `.gz` extension)
+ * `keepFileExt` - `boolean` (default false) - preserve the file extension when rotating log files (`file.log` becomes `file.1.log` instead of `file.log.1`)
+diff --git a/docs/fileSync.md b/docs/fileSync.md
+index ee7ae146..380982d9 100644
+--- a/docs/fileSync.md
++++ b/docs/fileSync.md
+@@ -12,7 +12,7 @@ The sync file appender writes log events to a file, the only difference to the n
+ 
+ Any other configuration parameters will be passed to the underlying node.js core stream implementation:
+ * `encoding` - `string` (default "utf-8")
+-* `mode`- `integer` (default 0644)
++* `mode`- `integer` (default 0600)
+ * `flags` - `string` (default 'a')
+ 
+ ## Example
+diff --git a/lib/appenders/dateFile.js b/lib/appenders/dateFile.js
+index da50ead3..31b94f0c 100644
+--- a/lib/appenders/dateFile.js
++++ b/lib/appenders/dateFile.js
+@@ -49,7 +49,6 @@ function appender(
+ 
+ function configure(config, layouts) {
+   let layout = layouts.basicLayout;
+-
+   if (config.layout) {
+     layout = layouts.layout(config.layout.type, config.layout);
+   }
+@@ -58,6 +57,9 @@ function configure(config, layouts) {
+     config.alwaysIncludePattern = false;
+   }
+ 
++  // security default (instead of relying on streamroller default)
++  config.mode = config.mode || 0o600;
++
+   return appender(
+     config.filename,
+     config.pattern,
+diff --git a/lib/appenders/file.js b/lib/appenders/file.js
+index f14a716e..696e04ab 100644
+--- a/lib/appenders/file.js
++++ b/lib/appenders/file.js
+@@ -110,6 +110,9 @@ function configure(config, layouts) {
+     layout = layouts.layout(config.layout.type, config.layout);
+   }
+ 
++  // security default (instead of relying on streamroller default)
++  config.mode = config.mode || 0o600;
++
+   return fileAppender(
+     config.filename,
+     layout,
+diff --git a/lib/appenders/fileSync.js b/lib/appenders/fileSync.js
+index 237e273b..3b920eef 100755
+--- a/lib/appenders/fileSync.js
++++ b/lib/appenders/fileSync.js
+@@ -192,7 +192,7 @@ function configure(config, layouts) {
+   const options = {
+     flags: config.flags || 'a',
+     encoding: config.encoding || 'utf8',
+-    mode: config.mode || 0o644
++    mode: config.mode || 0o600
+   };
+ 
+   return fileAppender(

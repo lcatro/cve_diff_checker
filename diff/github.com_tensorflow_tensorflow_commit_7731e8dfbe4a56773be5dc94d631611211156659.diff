@@ -1,0 +1,33 @@
+From 7731e8dfbe4a56773be5dc94d631611211156659 Mon Sep 17 00:00:00 2001
+From: "A. Unique TensorFlower" <gardener@tensorflow.org>
+Date: Thu, 19 Aug 2021 11:25:32 -0700
+Subject: [PATCH] Don't constant-fold DT_RESOURCE constants.
+
+PiperOrigin-RevId: 391803952
+Change-Id: I0ea3ec31d3e7dfda0f03b4027a237f08d00a3091
+---
+ tensorflow/core/common_runtime/constant_folding.cc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tensorflow/core/common_runtime/constant_folding.cc b/tensorflow/core/common_runtime/constant_folding.cc
+index 8367e5ff6aff3..ca75dc9f19160 100644
+--- a/tensorflow/core/common_runtime/constant_folding.cc
++++ b/tensorflow/core/common_runtime/constant_folding.cc
+@@ -30,6 +30,7 @@ limitations under the License.
+ #include "tensorflow/core/framework/log_memory.h"
+ #include "tensorflow/core/framework/op_kernel.h"
+ #include "tensorflow/core/framework/types.h"
++#include "tensorflow/core/framework/types.pb.h"
+ #include "tensorflow/core/graph/algorithm.h"
+ #include "tensorflow/core/graph/node_builder.h"
+ #include "tensorflow/core/graph/subgraph.h"
+@@ -223,7 +224,8 @@ bool IsConstantFoldable(
+     std::unordered_map<const Node*, std::vector<Tensor>>*
+         shape_replacement_map) {
+   if (n->IsConstant()) {
+-    return true;
++    // Skip constant folding resources as they cannot be deep copied.
++    return n->output_type(0) != DT_RESOURCE;
+   }
+   if (MaybeReplaceShapeOp(n, shape_map, shape_replacement_map)) {
+     return true;
