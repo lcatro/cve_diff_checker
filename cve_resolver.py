@@ -80,7 +80,7 @@ def make_esixt_cve_diff_record(all_cve_list):
                 else:
                     result[cve].append(file_path)
 
-    cve_diff_map = os.path.join('diff','cve_diff_map')
+    cve_diff_map = os.path.join('diff','cve_diff_map.txt')
 
     file = open(cve_diff_map,'w')
     file.write(json.dumps(result,indent=2))
@@ -97,7 +97,11 @@ if __name__ == '__main__':
         if not cve_file.startswith('allitem'):
             continue
 
-        all_cve_list.append(os.path.join('cve_list',cve_file))
+        cve_file_full_path = os.path.join('cve_list',cve_file)
+
+        try_download(cve_file_full_path)
+
+        all_cve_list.append(cve_file_full_path)
 
     make_esixt_cve_diff_record(all_cve_list)
 
