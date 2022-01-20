@@ -1,0 +1,31 @@
+
+name: sync_data_and_search_new_patch
+
+on:
+  schedule:
+    - cron: * 23 * * *'
+  #  每天晚上11点从CVE官方同步一次数据就好了,这样的话date +%Y就不需要考虑跨年最后一天数据丢失的问题
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Download CVE Data
+      - run: |
+         export current_year=`date +%Y`
+         export current_mouth=`date +%m`
+         export current_day=`date +%d`
+         
+         mkdir -p cve_list
+         
+         export download_url="https://cve.mitre.org/data/downloads/allitems-cvrf-year-$current_year.xml"
+         wget -P cve_list $download_url
+         
+         git config --global user.email "lappland@happy.com"
+         git config --global user.name  "iLappland"
+         
+         git add .
+         git commit -m "Update CVE Data at $current_mouth/$current_day/$current_year"
+         git push
